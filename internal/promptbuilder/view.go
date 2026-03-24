@@ -49,6 +49,8 @@ func NewBubble(m *Model) *BubbleModel {
 func (b *BubbleModel) Init() tea.Cmd { return nil }
 
 func (b *BubbleModel) syncIndicesFromStep() {
+	b.pluginIndex = 0
+	b.modelIndex = 0
 	steps := b.inner.Steps()
 	if len(steps) == 0 {
 		return

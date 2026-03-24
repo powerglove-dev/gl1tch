@@ -97,6 +97,19 @@ func TestStepNavigationResetsActiveField(t *testing.T) {
 	}
 }
 
+func TestStepNavigationSyncsPluginIndex(t *testing.T) {
+	m := New(nil)
+	m.AddStep(pipeline.Step{ID: "s1", Plugin: "claude"})
+	m.AddStep(pipeline.Step{ID: "s2", Plugin: "gemini"})
+	b := NewBubble(m)
+	b.syncIndicesFromStep() // sync to s1 (claude = index 0)
+
+	b = pressKey(b, tea.KeyDown) // navigate to s2 (gemini = index 1)
+	if b.pluginIndex != 1 {
+		t.Fatalf("expected pluginIndex 1 (gemini) after navigating to s2, got %d", b.pluginIndex)
+	}
+}
+
 func TestTabNoOpWithNoSteps(t *testing.T) {
 	m := New(nil)
 	b := NewBubble(m)
