@@ -815,7 +815,7 @@ func (m pickerModel) View() string {
 
 	w := m.width
 	if w <= 0 {
-		w = 42
+		w = 96
 	}
 
 	headerStyle := lipgloss.NewStyle().

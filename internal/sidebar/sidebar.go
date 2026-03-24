@@ -210,7 +210,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "n":
 			if m.self != "" {
 				exec.Command("tmux", "display-popup", "-E",
-					"-w", "72", "-h", "28", m.self, "_picker").Run() //nolint:errcheck
+					"-w", "80%", "-h", "80%", m.self, "_picker").Run() //nolint:errcheck
 			}
 			m.windows = listWindows()
 			m.ensureSidebars()
