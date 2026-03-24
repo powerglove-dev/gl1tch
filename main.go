@@ -11,6 +11,7 @@ import (
 	"github.com/adam-stokes/orcai/internal/bootstrap"
 	"github.com/adam-stokes/orcai/internal/chordhelp"
 	"github.com/adam-stokes/orcai/internal/picker"
+	"github.com/adam-stokes/orcai/internal/promptbuilder"
 	"github.com/adam-stokes/orcai/internal/sidebar"
 	"github.com/adam-stokes/orcai/internal/welcome"
 )
@@ -26,6 +27,9 @@ func main() {
 			return
 		case "_picker":
 			picker.Run()
+			return
+		case "_promptbuilder":
+			promptbuilder.Run()
 			return
 		case "_help":
 			if len(os.Args) > 2 {
