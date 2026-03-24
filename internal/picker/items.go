@@ -2,6 +2,7 @@ package picker
 
 import (
 	"os"
+	"path/filepath"
 
 	"github.com/sahilm/fuzzy"
 
@@ -25,7 +26,12 @@ type PickerItem struct {
 }
 
 // Filter returns the string used for fuzzy matching.
-func (p PickerItem) Filter() string { return p.Name + " " + p.Description }
+func (p PickerItem) Filter() string {
+	if p.Description == "" {
+		return p.Name
+	}
+	return p.Name + " " + p.Description
+}
 
 // SetMatchIndexes stores which character positions were matched by the fuzzy algorithm.
 func (p *PickerItem) SetMatchIndexes(indexes []int) { p.matchIndexes = indexes }
@@ -67,7 +73,7 @@ func orcaiConfigDir() string {
 	if err != nil {
 		return ""
 	}
-	return home + "/.config/orcai"
+	return filepath.Join(home, ".config", "orcai")
 }
 
 // BuildPickerItems assembles all session-starter items in display group order:

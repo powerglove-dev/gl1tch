@@ -108,3 +108,15 @@ func TestPickerItem_FilterString(t *testing.T) {
 		t.Errorf("Filter() = %q, want %q", got, want)
 	}
 }
+
+func TestPickerItem_FilterString_EmptyDescription(t *testing.T) {
+	item := picker.PickerItem{Kind: "provider", Name: "Shell", Description: ""}
+	got := item.Filter()
+	if got != "Shell" {
+		t.Errorf("Filter() with empty desc = %q, want %q", got, "Shell")
+	}
+	// Must not end with a space
+	if len(got) > 0 && got[len(got)-1] == ' ' {
+		t.Errorf("Filter() must not end with trailing space, got %q", got)
+	}
+}
