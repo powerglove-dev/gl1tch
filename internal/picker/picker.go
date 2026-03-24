@@ -1026,7 +1026,11 @@ func launchFrom(p ProviderDef, modelID, basePath string) string {
 	worktreePath, repoRoot := GetOrCreateWorktreeFrom(basePath, name)
 	startDir := worktreePath
 	if startDir == "" {
-		startDir = repoRoot // not in git repo, or worktree creation failed
+		if repoRoot != "" {
+			startDir = repoRoot // worktree creation failed; use repo root
+		} else {
+			startDir = basePath // not in a git repo; use the chosen directory directly
+		}
 	}
 
 	// Copy .env from repo root into the fresh worktree so provider configs
