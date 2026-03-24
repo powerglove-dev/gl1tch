@@ -17,7 +17,7 @@ func Run() {
 	m := New(mgr)
 	m.SetName("new-pipeline")
 
-	bubble := NewBubble(m)
+	bubble := NewBubble(m, nil)
 	p := tea.NewProgram(bubble, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("prompt builder error: %v\n", err)

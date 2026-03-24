@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/adam-stokes/orcai/internal/picker"
 	"github.com/adam-stokes/orcai/internal/pipeline"
 )
 
@@ -23,20 +24,12 @@ var (
 	labelStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("33"))
 )
 
-var pluginList = []string{"claude", "gemini", "openspec", "openclaw"}
-
-var modelsByPlugin = map[string][]string{
-	"claude":   {"claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5-20251001"},
-	"gemini":   {"gemini-2.0-flash", "gemini-1.5-pro"},
-	"openspec": {},
-	"openclaw": {},
-}
-
 // BubbleModel wraps Model and implements tea.Model.
 type BubbleModel struct {
 	inner       *Model
 	width       int
 	height      int
+	providers   []picker.ProviderDef
 	activeField int // 0=Plugin 1=Model 2=Prompt
 	pluginIndex int
 	modelIndex  int
@@ -44,10 +37,10 @@ type BubbleModel struct {
 }
 
 // NewBubble creates a bubbletea-compatible model.
-func NewBubble(m *Model) *BubbleModel {
+func NewBubble(m *Model, providers []picker.ProviderDef) *BubbleModel {
 	ti := textinput.New()
 	ti.Placeholder = "enter prompt..."
-	return &BubbleModel{inner: m, promptInput: ti}
+	return &BubbleModel{inner: m, providers: providers, promptInput: ti}
 }
 
 func (b *BubbleModel) Init() tea.Cmd { return nil }
@@ -56,19 +49,18 @@ func (b *BubbleModel) syncIndicesFromStep() {
 	b.pluginIndex = 0
 	b.modelIndex = 0
 	steps := b.inner.Steps()
-	if len(steps) == 0 {
+	if len(steps) == 0 || len(b.providers) == 0 {
 		return
 	}
 	sel := steps[b.inner.SelectedIndex()]
-	for i, p := range pluginList {
-		if p == sel.Plugin {
+	for i, p := range b.providers {
+		if p.ID == sel.Plugin {
 			b.pluginIndex = i
 			break
 		}
 	}
-	models := modelsByPlugin[pluginList[b.pluginIndex]]
-	for i, mo := range models {
-		if mo == sel.Model {
+	for i, mo := range b.providers[b.pluginIndex].Models {
+		if !mo.Separator && mo.ID == sel.Model {
 			b.modelIndex = i
 			break
 		}
@@ -77,32 +69,33 @@ func (b *BubbleModel) syncIndicesFromStep() {
 
 func (b *BubbleModel) applyPlugin() {
 	steps := b.inner.Steps()
-	if len(steps) == 0 {
+	if len(steps) == 0 || len(b.providers) == 0 {
 		return
 	}
 	idx := b.inner.SelectedIndex()
 	s := steps[idx]
-	s.Plugin = pluginList[b.pluginIndex]
+	s.Plugin = b.providers[b.pluginIndex].ID
 	b.modelIndex = 0
-	models := modelsByPlugin[s.Plugin]
-	if len(models) > 0 {
-		s.Model = models[0]
-	} else {
-		s.Model = ""
+	s.Model = ""
+	for _, mo := range b.providers[b.pluginIndex].Models {
+		if !mo.Separator {
+			s.Model = mo.ID
+			break
+		}
 	}
 	b.inner.UpdateStep(idx, s)
 }
 
 func (b *BubbleModel) applyModel() {
 	steps := b.inner.Steps()
-	if len(steps) == 0 {
+	if len(steps) == 0 || len(b.providers) == 0 {
 		return
 	}
 	idx := b.inner.SelectedIndex()
 	s := steps[idx]
-	models := modelsByPlugin[pluginList[b.pluginIndex]]
-	if len(models) > 0 {
-		s.Model = models[b.modelIndex]
+	models := b.providers[b.pluginIndex].Models
+	if b.modelIndex < len(models) && !models[b.modelIndex].Separator {
+		s.Model = models[b.modelIndex].ID
 	}
 	b.inner.UpdateStep(idx, s)
 }
@@ -196,40 +189,54 @@ func (b *BubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			b.syncIndicesFromStep()
 
 		case key.Matches(msg, keys.Left):
-			if len(b.inner.Steps()) == 0 {
+			if len(b.inner.Steps()) == 0 || len(b.providers) == 0 {
 				break
 			}
 			switch b.activeField {
 			case 0:
-				b.pluginIndex = (b.pluginIndex - 1 + len(pluginList)) % len(pluginList)
+				b.pluginIndex = (b.pluginIndex - 1 + len(b.providers)) % len(b.providers)
 				b.applyPlugin()
 			case 1:
-				models := modelsByPlugin[pluginList[b.pluginIndex]]
-				if len(models) > 0 {
-					b.modelIndex = (b.modelIndex - 1 + len(models)) % len(models)
-					b.applyModel()
+				models := b.providers[b.pluginIndex].Models
+				if len(models) == 0 {
+					break
 				}
+				next := (b.modelIndex - 1 + len(models)) % len(models)
+				for models[next].Separator {
+					next = (next - 1 + len(models)) % len(models)
+				}
+				b.modelIndex = next
+				b.applyModel()
 			}
 
 		case key.Matches(msg, keys.Right):
-			if len(b.inner.Steps()) == 0 {
+			if len(b.inner.Steps()) == 0 || len(b.providers) == 0 {
 				break
 			}
 			switch b.activeField {
 			case 0:
-				b.pluginIndex = (b.pluginIndex + 1) % len(pluginList)
+				b.pluginIndex = (b.pluginIndex + 1) % len(b.providers)
 				b.applyPlugin()
 			case 1:
-				models := modelsByPlugin[pluginList[b.pluginIndex]]
-				if len(models) > 0 {
-					b.modelIndex = (b.modelIndex + 1) % len(models)
-					b.applyModel()
+				models := b.providers[b.pluginIndex].Models
+				if len(models) == 0 {
+					break
 				}
+				next := (b.modelIndex + 1) % len(models)
+				for models[next].Separator {
+					next = (next + 1) % len(models)
+				}
+				b.modelIndex = next
+				b.applyModel()
 			}
 
 		case key.Matches(msg, keys.AddStep):
 			id := fmt.Sprintf("step%d", len(b.inner.Steps())+1)
-			b.inner.AddStep(pipeline.Step{ID: id, Plugin: pluginList[0]})
+			plugin := ""
+			if len(b.providers) > 0 {
+				plugin = b.providers[0].ID
+			}
+			b.inner.AddStep(pipeline.Step{ID: id, Plugin: plugin})
 			b.inner.SelectStep(len(b.inner.Steps()) - 1)
 			b.activeField = 0
 			b.pluginIndex = 0
@@ -279,14 +286,22 @@ func (b *BubbleModel) View() string {
 		rightContent += strings.Repeat("─", rightW-2) + "\n"
 		rightContent += labelStyle.Render("ID:      ") + sel.ID + "\n"
 
-		pluginVal := pluginList[b.pluginIndex]
-		rightContent += b.renderSelector("Plugin:  ", pluginVal, 0)
-
-		modelVal := sel.Model
-		if modelVal == "" {
-			modelVal = "(none)"
+		pluginLabel := ""
+		if len(b.providers) > 0 && b.pluginIndex < len(b.providers) {
+			pluginLabel = b.providers[b.pluginIndex].Label
 		}
-		rightContent += b.renderSelector("Model:   ", modelVal, 1)
+		rightContent += b.renderSelector("Plugin:  ", pluginLabel, 0)
+
+		modelLabel := "(none)"
+		if len(b.providers) > 0 && b.pluginIndex < len(b.providers) {
+			models := b.providers[b.pluginIndex].Models
+			if b.modelIndex < len(models) && !models[b.modelIndex].Separator {
+				modelLabel = models[b.modelIndex].Label
+			} else if sel.Model != "" {
+				modelLabel = sel.Model
+			}
+		}
+		rightContent += b.renderSelector("Model:   ", modelLabel, 1)
 
 		if b.activeField == 2 {
 			rightContent += labelStyle.Render("Prompt:  ") + b.promptInput.View() + "\n"

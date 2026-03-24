@@ -39,7 +39,7 @@ var pipelineBuildCmd = &cobra.Command{
 		m.AddStep(pipeline.Step{ID: "step1", Plugin: "claude", Model: "claude-sonnet-4-6"})
 		m.AddStep(pipeline.Step{ID: "output", Type: "output"})
 
-		bubble := promptbuilder.NewBubble(m)
+		bubble := promptbuilder.NewBubble(m, nil)
 		p := tea.NewProgram(bubble, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("pipeline builder: %w", err)

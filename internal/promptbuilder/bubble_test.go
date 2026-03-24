@@ -5,8 +5,37 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/adam-stokes/orcai/internal/picker"
 	"github.com/adam-stokes/orcai/internal/pipeline"
 )
+
+// testProviders is a deterministic provider list used across all BubbleModel tests.
+// It mirrors the real picker.Providers structure so index arithmetic is predictable.
+var testProviders = []picker.ProviderDef{
+	{
+		ID: "claude", Label: "Claude",
+		Models: []picker.ModelOption{
+			{ID: "claude-sonnet-4-6", Label: "Sonnet 4.6"},
+			{ID: "claude-opus-4-6", Label: "Opus 4.6"},
+			{ID: "claude-haiku-4-5-20251001", Label: "Haiku 4.5"},
+		},
+	},
+	{
+		ID: "gemini", Label: "Gemini",
+		Models: []picker.ModelOption{
+			{ID: "gemini-2.0-flash", Label: "Flash 2.0"},
+			{ID: "gemini-1.5-pro", Label: "Pro 1.5"},
+		},
+	},
+	{
+		ID: "opencode", Label: "OpenCode",
+		Models: []picker.ModelOption{},
+	},
+	{
+		ID: "openclaw", Label: "OpenClaw",
+		Models: []picker.ModelOption{},
+	},
+}
 
 func pressKey(b *BubbleModel, kt tea.KeyType) *BubbleModel {
 	m, _ := b.Update(tea.KeyMsg{Type: kt})
@@ -16,7 +45,7 @@ func pressKey(b *BubbleModel, kt tea.KeyType) *BubbleModel {
 func TestTabCyclesActiveField(t *testing.T) {
 	m := New(nil)
 	m.AddStep(pipeline.Step{ID: "s1", Plugin: "claude"})
-	b := NewBubble(m)
+	b := NewBubble(m, testProviders)
 
 	if b.activeField != 0 {
 		t.Fatalf("expected activeField 0 initially, got %d", b.activeField)
@@ -38,7 +67,7 @@ func TestTabCyclesActiveField(t *testing.T) {
 func TestShiftTabCyclesBackward(t *testing.T) {
 	m := New(nil)
 	m.AddStep(pipeline.Step{ID: "s1", Plugin: "claude"})
-	b := NewBubble(m)
+	b := NewBubble(m, testProviders)
 
 	b = pressKey(b, tea.KeyShiftTab)
 	if b.activeField != 2 {
@@ -49,7 +78,7 @@ func TestShiftTabCyclesBackward(t *testing.T) {
 func TestRightCyclesPlugin(t *testing.T) {
 	m := New(nil)
 	m.AddStep(pipeline.Step{ID: "s1", Plugin: "claude"})
-	b := NewBubble(m)
+	b := NewBubble(m, testProviders)
 	// activeField 0 = Plugin
 	b = pressKey(b, tea.KeyRight)
 	got := m.Steps()[0].Plugin
@@ -61,22 +90,22 @@ func TestRightCyclesPlugin(t *testing.T) {
 func TestLeftCyclesPluginBackward(t *testing.T) {
 	m := New(nil)
 	m.AddStep(pipeline.Step{ID: "s1", Plugin: "claude"})
-	b := NewBubble(m)
+	b := NewBubble(m, testProviders)
 	b = pressKey(b, tea.KeyLeft)
 	got := m.Steps()[0].Plugin
-	if got != pluginList[len(pluginList)-1] {
-		t.Fatalf("expected %s after left from claude, got %s", pluginList[len(pluginList)-1], got)
+	if got != testProviders[len(testProviders)-1].ID {
+		t.Fatalf("expected %s after left from claude, got %s", testProviders[len(testProviders)-1].ID, got)
 	}
 }
 
 func TestRightCyclesModel(t *testing.T) {
 	m := New(nil)
 	m.AddStep(pipeline.Step{ID: "s1", Plugin: "claude", Model: "claude-sonnet-4-6"})
-	b := NewBubble(m)
+	b := NewBubble(m, testProviders)
 	b = pressKey(b, tea.KeyTab) // focus Model field (activeField=1)
 	b = pressKey(b, tea.KeyRight)
 	got := m.Steps()[0].Model
-	expected := modelsByPlugin["claude"][1]
+	expected := testProviders[0].Models[1].ID
 	if got != expected {
 		t.Fatalf("expected %s after right on model, got %s", expected, got)
 	}
@@ -86,7 +115,7 @@ func TestStepNavigationResetsActiveField(t *testing.T) {
 	m := New(nil)
 	m.AddStep(pipeline.Step{ID: "s1", Plugin: "claude"})
 	m.AddStep(pipeline.Step{ID: "s2", Plugin: "gemini"})
-	b := NewBubble(m)
+	b := NewBubble(m, testProviders)
 	b = pressKey(b, tea.KeyTab) // activeField = 1
 	b = pressKey(b, tea.KeyDown)
 	if b.activeField != 0 {
@@ -101,7 +130,7 @@ func TestStepNavigationSyncsPluginIndex(t *testing.T) {
 	m := New(nil)
 	m.AddStep(pipeline.Step{ID: "s1", Plugin: "claude"})
 	m.AddStep(pipeline.Step{ID: "s2", Plugin: "gemini"})
-	b := NewBubble(m)
+	b := NewBubble(m, testProviders)
 	b.syncIndicesFromStep() // sync to s1 (claude = index 0)
 
 	b = pressKey(b, tea.KeyDown) // navigate to s2 (gemini = index 1)
@@ -112,7 +141,7 @@ func TestStepNavigationSyncsPluginIndex(t *testing.T) {
 
 func TestTabNoOpWithNoSteps(t *testing.T) {
 	m := New(nil)
-	b := NewBubble(m)
+	b := NewBubble(m, testProviders)
 	b = pressKey(b, tea.KeyTab)
 	if b.activeField != 0 {
 		t.Fatalf("expected activeField 0 (no-op) when no steps, got %d", b.activeField)
@@ -122,7 +151,7 @@ func TestTabNoOpWithNoSteps(t *testing.T) {
 func TestPromptFieldUpdatesStep(t *testing.T) {
 	m := New(nil)
 	m.AddStep(pipeline.Step{ID: "s1", Plugin: "claude"})
-	b := NewBubble(m)
+	b := NewBubble(m, testProviders)
 
 	// Tab twice to reach Prompt field (0→1→2)
 	b = pressKey(b, tea.KeyTab)
@@ -146,7 +175,7 @@ func TestPromptFieldAllowsActionKeys(t *testing.T) {
 	// bindings before reaching the textinput when activeField==2.
 	m := New(nil)
 	m.AddStep(pipeline.Step{ID: "s1", Plugin: "claude"})
-	b := NewBubble(m)
+	b := NewBubble(m, testProviders)
 
 	b = pressKey(b, tea.KeyTab)
 	b = pressKey(b, tea.KeyTab)
