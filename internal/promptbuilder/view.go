@@ -122,6 +122,41 @@ func (b *BubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		b.width = msg.Width
 		b.height = msg.Height
 	case tea.KeyMsg:
+		// Prompt field (activeField==2): intercept only structural non-printable
+		// keys via msg.Type. Everything else — including action-bound runes like
+		// 's', 'r', 'q', 'k', 'j', '+' — must reach the textinput unchanged.
+		if b.activeField == 2 && len(b.inner.Steps()) > 0 {
+			switch msg.Type {
+			case tea.KeyEsc:
+				return b, tea.Quit
+			case tea.KeyTab:
+				b.activeField = (b.activeField + 1) % 3
+				b.promptInput.Blur()
+			case tea.KeyShiftTab:
+				b.activeField = (b.activeField + 2) % 3
+				b.promptInput.Blur()
+			case tea.KeyUp:
+				b.inner.SelectStep(b.inner.SelectedIndex() - 1)
+				b.activeField = 0
+				b.promptInput.Blur()
+				b.syncIndicesFromStep()
+			case tea.KeyDown:
+				b.inner.SelectStep(b.inner.SelectedIndex() + 1)
+				b.activeField = 0
+				b.promptInput.Blur()
+				b.syncIndicesFromStep()
+			default:
+				var cmd tea.Cmd
+				b.promptInput, cmd = b.promptInput.Update(msg)
+				idx := b.inner.SelectedIndex()
+				s := b.inner.Steps()[idx]
+				s.Prompt = b.promptInput.Value()
+				b.inner.UpdateStep(idx, s)
+				return b, cmd
+			}
+			return b, nil
+		}
+
 		switch {
 		case key.Matches(msg, keys.Quit):
 			return b, tea.Quit
@@ -207,17 +242,6 @@ func (b *BubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				os.MkdirAll(dir, 0o755) //nolint:errcheck
 				path := filepath.Join(dir, b.inner.Name()+".pipeline.yaml")
 				Save(b.inner, path) //nolint:errcheck
-			}
-
-		default:
-			if b.activeField == 2 && len(b.inner.Steps()) > 0 {
-				var cmd tea.Cmd
-				b.promptInput, cmd = b.promptInput.Update(msg)
-				idx := b.inner.SelectedIndex()
-				s := b.inner.Steps()[idx]
-				s.Prompt = b.promptInput.Value()
-				b.inner.UpdateStep(idx, s)
-				return b, cmd
 			}
 		}
 	}

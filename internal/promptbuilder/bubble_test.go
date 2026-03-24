@@ -131,12 +131,35 @@ func TestPromptFieldUpdatesStep(t *testing.T) {
 		t.Fatalf("expected activeField 2, got %d", b.activeField)
 	}
 
-	// Type "hello"
+	// Type "hello" — includes no action-bound characters
 	for _, r := range "hello" {
 		mm, _ := b.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 		b = mm.(*BubbleModel)
 	}
 	if m.Steps()[0].Prompt != "hello" {
 		t.Fatalf("expected Prompt 'hello', got %q", m.Steps()[0].Prompt)
+	}
+}
+
+func TestPromptFieldAllowsActionKeys(t *testing.T) {
+	// Regression: 's', 'r', 'q', 'k', 'j', '+' were intercepted as action
+	// bindings before reaching the textinput when activeField==2.
+	m := New(nil)
+	m.AddStep(pipeline.Step{ID: "s1", Plugin: "claude"})
+	b := NewBubble(m)
+
+	b = pressKey(b, tea.KeyTab)
+	b = pressKey(b, tea.KeyTab)
+
+	for _, r := range "save+rqkj" {
+		mm, _ := b.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		b = mm.(*BubbleModel)
+	}
+	if m.Steps()[0].Prompt != "save+rqkj" {
+		t.Fatalf("expected Prompt 'save+rqkj', got %q", m.Steps()[0].Prompt)
+	}
+	// activeField must still be 2 — 'k'/'j' must not have navigated steps
+	if b.activeField != 2 {
+		t.Fatalf("expected activeField 2, got %d", b.activeField)
 	}
 }
