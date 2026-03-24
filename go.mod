@@ -82,4 +82,5 @@ require (
 	golang.org/x/term v0.41.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260311181403-84a4fc48630c // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
