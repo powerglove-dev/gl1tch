@@ -34,7 +34,7 @@ func main() {
 				chordhelp.Run()
 			}
 			return
-		case "bridge", "git", "weather", "code", "new", "kill", "help":
+		case "bridge", "git", "weather", "code", "new", "kill", "help", "pipeline", "ollama", "_opsx", "completion":
 			cmd.Execute()
 			return
 		default:
