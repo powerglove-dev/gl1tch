@@ -28,6 +28,16 @@ func (m *Manager) Get(name string) (Plugin, bool) {
 	return p, ok
 }
 
+// LoadWrappersFromDir scans dir for sidecar YAML files and registers all resulting plugins.
+// Per-file errors are returned; they do not prevent other wrappers from being registered.
+func (m *Manager) LoadWrappersFromDir(dir string) []error {
+	plugins, errs := LoadWrappers(dir)
+	for _, p := range plugins {
+		m.Register(p)
+	}
+	return errs
+}
+
 // List returns all registered plugins in no guaranteed order.
 func (m *Manager) List() []Plugin {
 	m.mu.RLock()

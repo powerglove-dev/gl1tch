@@ -1,6 +1,8 @@
 package plugin_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/adam-stokes/orcai/internal/plugin"
@@ -42,5 +44,38 @@ func TestManager_Get(t *testing.T) {
 	_, ok = m.Get("missing")
 	if ok {
 		t.Error("expected not found for 'missing'")
+	}
+}
+
+func TestManager_LoadWrappersFromDir_Valid(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"alpha", "beta"} {
+		content := "name: " + name + "\ncommand: echo\n"
+		if err := os.WriteFile(filepath.Join(dir, name+".yaml"), []byte(content), 0o644); err != nil {
+			t.Fatalf("write sidecar: %v", err)
+		}
+	}
+
+	m := plugin.NewManager()
+	errs := m.LoadWrappersFromDir(dir)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	for _, name := range []string{"alpha", "beta"} {
+		if _, ok := m.Get(name); !ok {
+			t.Errorf("expected plugin %q to be registered", name)
+		}
+	}
+}
+
+func TestManager_LoadWrappersFromDir_EmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	m := plugin.NewManager()
+	errs := m.LoadWrappersFromDir(dir)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	if len(m.List()) != 0 {
+		t.Errorf("expected 0 plugins, got %d", len(m.List()))
 	}
 }
