@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -251,6 +252,46 @@ func expandPath(path string) string {
 	return path
 }
 
+// scanGitRepos walks home directory up to maxDepth levels looking for
+// directories that contain a ".git" entry. Returns absolute paths sorted
+// alphabetically. Fast because it prunes non-dir entries and respects maxDepth.
+func scanGitRepos(maxDepth int) []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	var repos []string
+	var walk func(dir string, depth int)
+	walk = func(dir string, depth int) {
+		if depth > maxDepth {
+			return
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			// skip hidden dirs
+			if strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			full := filepath.Join(dir, e.Name())
+			// check for .git
+			if _, err := os.Stat(filepath.Join(full, ".git")); err == nil {
+				repos = append(repos, full)
+				continue // don't recurse into a git repo
+			}
+			walk(full, depth+1)
+		}
+	}
+	walk(home, 1)
+	sort.Strings(repos)
+	return repos
+}
+
 // findGitRoot returns the top-level git directory containing path, or "".
 func findGitRoot(path string) string {
 	if path == "" {
@@ -401,7 +442,8 @@ const (
 	StateSearch       PickerState = iota // fuzzy list (initial state)
 	StateProvider                        // pick which CLI to run skill/agent with
 	StateModel                           // pick model for a provider
-	StateWorkdir                         // working directory input
+	StateWorkdirPick                     // pick from discovered git repos
+	StateWorkdir                         // manual path input (fallback)
 	StateWorkflow                        // fresh vs openspec choice
 	StateOpenSpecName                    // openspec feature name input
 )
@@ -436,6 +478,12 @@ type pickerModel struct {
 	selectedItem   *PickerItem
 	skillProviders []ProviderDef
 	spCursor       int
+
+	// ── git repo picker (StateWorkdirPick) ──
+	repoDirs      []string       // discovered git repos
+	repoCursor    int
+	repoFilter    textinput.Model // search filter
+	filteredRepos []string
 }
 
 func newPickerModel() pickerModel {
@@ -452,6 +500,10 @@ func newPickerModel() pickerModel {
 	si.CharLimit = 80
 	si.Focus()
 
+	rf := textinput.New()
+	rf.Placeholder = "filter repos…"
+	rf.CharLimit = 200
+
 	cwd, _ := os.Getwd()
 	home, _ := os.UserHomeDir()
 	provs := buildProviders()
@@ -459,7 +511,7 @@ func newPickerModel() pickerModel {
 	all := BuildPickerItems(sessions, provs, cwd, home)
 
 	_, openspecErr := exec.LookPath("openspec")
-	return pickerModel{
+	m := pickerModel{
 		providers:         provs,
 		sessions:          sessions,
 		workdirInput:      ti,
@@ -470,6 +522,8 @@ func newPickerModel() pickerModel {
 		filteredItems:     ApplyFuzzy("", all),
 		skillProviders:    provs,
 	}
+	m.repoFilter = rf
+	return m
 }
 
 func (m pickerModel) Init() tea.Cmd { return textinput.Blink }
@@ -531,11 +585,12 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Quit
 
 				case "pipeline":
-					m.workdirInput.SetValue("~/")
-m.workdirInput.CursorEnd()
-m.workdirErr = ""
-					m.workdirInput.Focus()
-					m.state = StateWorkdir
+					m.repoDirs = scanGitRepos(3)
+					m.filteredRepos = m.repoDirs
+					m.repoCursor = 0
+					m.repoFilter.SetValue("")
+					m.repoFilter.Focus()
+					m.state = StateWorkdirPick
 
 				case "skill", "agent":
 					m.spCursor = 0
@@ -553,11 +608,12 @@ m.workdirErr = ""
 						m.state = StateModel
 					} else {
 						m.selectedModelID = ""
-						m.workdirInput.SetValue("~/")
-m.workdirInput.CursorEnd()
-m.workdirErr = ""
-						m.workdirInput.Focus()
-						m.state = StateWorkdir
+						m.repoDirs = scanGitRepos(3)
+						m.filteredRepos = m.repoDirs
+						m.repoCursor = 0
+						m.repoFilter.SetValue("")
+						m.repoFilter.Focus()
+						m.state = StateWorkdirPick
 					}
 				}
 
@@ -596,12 +652,84 @@ m.workdirErr = ""
 				if len(m.skillProviders) > 0 {
 					m.selectedProvider = m.skillProviders[m.spCursor]
 					m.selectedModelID = ""
+					m.repoDirs = scanGitRepos(3)
+					m.filteredRepos = m.repoDirs
+					m.repoCursor = 0
+					m.repoFilter.SetValue("")
+					m.repoFilter.Focus()
+					m.state = StateWorkdirPick
+				}
+			}
+			return m, nil
+		}
+
+		if m.state == StateWorkdirPick {
+			switch msg.String() {
+			case "ctrl+c":
+				m.quit = true
+				return m, tea.Quit
+			case "esc":
+				// same back-navigation as StateWorkdir esc
+				if m.selectedItem != nil {
+					if m.selectedItem.Kind == "pipeline" {
+						m.selectedItem = nil
+						m.state = StateSearch
+						m.searchInput.Focus()
+					} else {
+						m.state = StateProvider
+					}
+				} else if len(selectableModels(m.selectedProvider)) > 0 {
+					m.state = StateModel
+				} else {
+					m.state = StateProvider
+				}
+				m.repoFilter.Blur()
+				return m, nil
+			case "j", "down":
+				if m.repoCursor < len(m.filteredRepos) { // +1 for custom option
+					m.repoCursor++
+				}
+			case "k", "up":
+				if m.repoCursor > 0 {
+					m.repoCursor--
+				}
+			case "enter":
+				if m.repoCursor < len(m.filteredRepos) {
+					// selected a repo
+					chosen := m.filteredRepos[m.repoCursor]
+					m.workdirInput.SetValue(chosen)
+					m.workdirErr = ""
+					m.repoFilter.Blur()
+					return m.confirmWorkdir()
+				} else {
+					// "Type custom path" selected
 					m.workdirInput.SetValue("~/")
-m.workdirInput.CursorEnd()
-m.workdirErr = ""
+					m.workdirInput.CursorEnd()
+					m.workdirErr = ""
 					m.workdirInput.Focus()
+					m.repoFilter.Blur()
 					m.state = StateWorkdir
 				}
+				return m, nil
+			default:
+				var cmd tea.Cmd
+				m.repoFilter, cmd = m.repoFilter.Update(msg)
+				// filter repos
+				q := strings.ToLower(m.repoFilter.Value())
+				if q == "" {
+					m.filteredRepos = m.repoDirs
+				} else {
+					m.filteredRepos = nil
+					for _, r := range m.repoDirs {
+						if strings.Contains(strings.ToLower(r), q) {
+							m.filteredRepos = append(m.filteredRepos, r)
+						}
+					}
+				}
+				if m.repoCursor >= len(m.filteredRepos)+1 {
+					m.repoCursor = len(m.filteredRepos)
+				}
+				return m, cmd
 			}
 			return m, nil
 		}
@@ -632,29 +760,7 @@ m.workdirErr = ""
 				m.workdirInput.Blur()
 				return m, nil
 			case "enter":
-				// Validate the directory exists before launching.
-				dir := expandPath(strings.TrimSpace(m.workdirInput.Value()))
-				if dir == "" {
-					dir, _ = os.UserHomeDir()
-				}
-				if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-					m.workdirErr = "not found: " + dir
-					return m, nil
-				}
-				m.workdirErr = ""
-				// Skills, agents, and pipelines bypass the OpenSpec workflow.
-				if m.selectedItem != nil {
-					m.doLaunch()
-					return m, tea.Quit
-				}
-				if !m.openspecAvailable {
-					m.doLaunch()
-					return m, tea.Quit
-				}
-				m.wfCursor = 0
-				m.openspecFeature = ""
-				m.state = StateWorkflow
-				return m, nil
+				return m.confirmWorkdir()
 			default:
 				var cmd tea.Cmd
 				m.workdirInput, cmd = m.workdirInput.Update(msg)
@@ -793,22 +899,24 @@ m.workdirErr = ""
 					// Provider with no models: go straight to workdir.
 					m.selectedProvider = *provider
 					m.selectedModelID = ""
-					m.workdirInput.SetValue("~/")
-m.workdirInput.CursorEnd()
-m.workdirErr = ""
-					m.workdirInput.Focus()
-					m.state = StateWorkdir
+					m.repoDirs = scanGitRepos(3)
+					m.filteredRepos = m.repoDirs
+					m.repoCursor = 0
+					m.repoFilter.SetValue("")
+					m.repoFilter.Focus()
+					m.state = StateWorkdirPick
 				}
 			} else {
 				// StateModel
 				// StateModel — m.selectedProvider is already set by the StateSearch enter handler.
 				modelID := selectableModels(m.selectedProvider)[m.mCursor].ID
 				m.selectedModelID = modelID
-				m.workdirInput.SetValue("~/")
-m.workdirInput.CursorEnd()
-m.workdirErr = ""
-				m.workdirInput.Focus()
-				m.state = StateWorkdir
+				m.repoDirs = scanGitRepos(3)
+				m.filteredRepos = m.repoDirs
+				m.repoCursor = 0
+				m.repoFilter.SetValue("")
+				m.repoFilter.Focus()
+				m.state = StateWorkdirPick
 			}
 		}
 	}
@@ -952,7 +1060,43 @@ func (m pickerModel) View() string {
 		}
 		rows = append(rows, footerStyle.Render("↑↓ nav  enter select  esc back"))
 
-	case StateWorkdir:
+	case StateWorkdirPick:
+		rows = append(rows, headerStyle.Render("ORCAI  Choose Project"))
+
+		filterStyle := lipgloss.NewStyle().Width(w).Padding(0, 2)
+		rows = append(rows, filterStyle.Render(m.repoFilter.View()))
+
+		selBg := lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(styles.Pink)
+		normal := lipgloss.NewStyle().Foreground(styles.Fg)
+		dim := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+		itemPad := lipgloss.NewStyle().Width(w).PaddingLeft(2)
+
+		home, _ := os.UserHomeDir()
+		for i, r := range m.filteredRepos {
+			display := r
+			if strings.HasPrefix(r, home) {
+				display = "~" + r[len(home):]
+			}
+			var line string
+			if i == m.repoCursor {
+				line = selBg.Render("\u258e " + display)
+			} else {
+				line = normal.Render("  " + display)
+			}
+			rows = append(rows, itemPad.Render(line))
+		}
+		// "Type custom path" option at the bottom
+		customLabel := "  Type custom path\u2026"
+		if m.repoCursor == len(m.filteredRepos) {
+			customLabel = selBg.Render("\u258e Type custom path\u2026")
+		} else {
+			customLabel = dim.Render(customLabel)
+		}
+		rows = append(rows, itemPad.Render(customLabel))
+
+		rows = append(rows, footerStyle.Render("enter select  esc back"))
+
+		case StateWorkdir:
 		rows = append(rows, headerStyle.Render("ORCAI  Working Directory"))
 
 		bodyStyle := lipgloss.NewStyle().Width(w).Padding(1, 2)
@@ -997,6 +1141,34 @@ func (m pickerModel) View() string {
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+// confirmWorkdir validates the workdir input and transitions to the next state.
+// It contains the shared logic used by both StateWorkdir and StateWorkdirPick enter handlers.
+func (m *pickerModel) confirmWorkdir() (tea.Model, tea.Cmd) {
+	dir := expandPath(strings.TrimSpace(m.workdirInput.Value()))
+	if dir == "" {
+		dir, _ = os.UserHomeDir()
+	}
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		m.workdirErr = "not found: " + dir
+		m.state = StateWorkdir
+		m.workdirInput.Focus()
+		return m, nil
+	}
+	m.workdirErr = ""
+	if m.selectedItem != nil {
+		m.doLaunch()
+		return m, tea.Quit
+	}
+	if !m.openspecAvailable {
+		m.doLaunch()
+		return m, tea.Quit
+	}
+	m.wfCursor = 0
+	m.openspecFeature = ""
+	m.state = StateWorkflow
+	return m, nil
 }
 
 // doLaunch performs the session launch from pickerModel state.

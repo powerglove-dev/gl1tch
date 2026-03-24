@@ -152,6 +152,7 @@ func TestPickerStates_AllDistinct(t *testing.T) {
 		picker.StateSearch,
 		picker.StateProvider,
 		picker.StateModel,
+		picker.StateWorkdirPick,
 		picker.StateWorkdir,
 		picker.StateWorkflow,
 		picker.StateOpenSpecName,
