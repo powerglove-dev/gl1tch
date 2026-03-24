@@ -4,26 +4,88 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
 	bridgepb "github.com/adam-stokes/orcai/proto/bridgepb"
+	pb "github.com/adam-stokes/orcai/proto/orcai/v1"
 )
 
 // BridgeProvider implements Provider by forwarding requests over gRPC
 // to a ProviderBridge adapter subprocess managed by bridge.Manager.
 type BridgeProvider struct {
-	mu        sync.Mutex
-	client    bridgepb.ProviderBridgeClient
-	name      string
-	cwd       string
-	sessionID string
-	model     string
+	mu         sync.Mutex
+	client     bridgepb.ProviderBridgeClient
+	name       string
+	cwd        string
+	sessionID  string
+	model      string
+	busClient  pb.EventBusClient
+	windowName string
+}
+
+// connectBus reads ~/.config/orcai/bus.addr and returns a connected EventBusClient.
+// Returns nil if the address file is missing or the connection fails.
+func connectBus() (pb.EventBusClient, *grpc.ClientConn) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, nil
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".config", "orcai", "bus.addr"))
+	if err != nil || len(strings.TrimSpace(string(data))) == 0 {
+		return nil, nil
+	}
+	addr := strings.TrimSpace(string(data))
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, nil
+	}
+	return pb.NewEventBusClient(conn), conn
+}
+
+// currentWindowName returns the tmux window name for the current pane, or "".
+func currentWindowName() string {
+	out, err := exec.Command("tmux", "display-message", "-p", "#{window_name}").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // NewBridgeProvider creates a BridgeProvider wrapping the given gRPC client.
+// It also attempts to connect to the event bus for telemetry publishing.
 func NewBridgeProvider(client bridgepb.ProviderBridgeClient, name, cwd string) *BridgeProvider {
-	return &BridgeProvider{client: client, name: name, cwd: cwd}
+	busClient, _ := connectBus()
+	return &BridgeProvider{
+		client:     client,
+		name:       name,
+		cwd:        cwd,
+		busClient:  busClient,
+		windowName: currentWindowName(),
+	}
+}
+
+// publishTelemetry marshals payload and publishes it to the orcai.telemetry bus topic.
+// It is a no-op if busClient is nil.
+func (p *BridgeProvider) publishTelemetry(payload TelemetryPayload) {
+	if p.busClient == nil {
+		return
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	p.busClient.Publish(context.Background(), &pb.Event{ //nolint:errcheck
+		Topic:   "orcai.telemetry",
+		Source:  "chatui",
+		Payload: data,
+	})
 }
 
 func (p *BridgeProvider) Name() string { return p.name }
@@ -73,6 +135,14 @@ func (p *BridgeProvider) Send(ctx context.Context, _ []message, text string) <-c
 			return
 		}
 
+		// Publish streaming-start telemetry event.
+		p.publishTelemetry(TelemetryPayload{
+			SessionID:  sid,
+			WindowName: p.windowName,
+			Provider:   p.name,
+			Status:     "streaming",
+		})
+
 		var done StreamDone
 		for {
 			resp, err := stream.Recv()
@@ -113,6 +183,17 @@ func (p *BridgeProvider) Send(ctx context.Context, _ []message, text string) <-c
 				p.mu.Lock()
 				p.sessionID = d.SessionId
 				p.mu.Unlock()
+				// Publish done telemetry with cost estimate.
+				cost := CostEstimate(d.Model, int(d.InputTokens), int(d.OutputTokens))
+				p.publishTelemetry(TelemetryPayload{
+					SessionID:    d.SessionId,
+					WindowName:   p.windowName,
+					Provider:     p.name,
+					Status:       "done",
+					InputTokens:  int(d.InputTokens),
+					OutputTokens: int(d.OutputTokens),
+					CostUSD:      cost,
+				})
 
 			case *bridgepb.SendResponse_Waiting:
 				// Adapter subprocess needs user input. Signal the caller to

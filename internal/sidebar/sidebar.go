@@ -1,6 +1,8 @@
 package sidebar
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +12,10 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
+	pb "github.com/adam-stokes/orcai/proto/orcai/v1"
 )
 
 // Window represents a tmux window (excluding window 0).
@@ -56,107 +62,162 @@ func listWindows() []Window {
 	return ParseWindows(string(out))
 }
 
+// SessionTelemetry holds live telemetry for one session window.
+type SessionTelemetry struct {
+	WindowName   string
+	Provider     string
+	Status       string // "streaming" | "done" | "error"
+	InputTokens  int
+	OutputTokens int
+	CostUSD      float64
+}
+
+// TelemetryMsg carries a parsed telemetry event from the bus.
+type TelemetryMsg struct {
+	SessionID    string
+	WindowName   string
+	Provider     string
+	Status       string
+	InputTokens  int
+	OutputTokens int
+	CostUSD      float64
+}
+
 type tickMsg time.Time
 
 func tickCmd() tea.Cmd {
-	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
+	return tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
-// windowPaneCount returns how many panes window idx has, or 2 on error (safe default).
-func windowPaneCount(windowIdx int) int {
-	out, err := exec.Command("tmux", "list-panes", "-t",
-		fmt.Sprintf("orcai:%d", windowIdx), "-F", "x").Output()
-	if err != nil {
-		return 2
-	}
-	s := strings.TrimSpace(string(out))
-	if s == "" {
-		return 0
-	}
-	return strings.Count(s, "\n") + 1
-}
-
-// currentWindowIndex returns the tmux window index this process is running in.
-func currentWindowIndex() int {
-	out, err := exec.Command("tmux", "display-message", "-p", "#{window_index}").Output()
-	if err != nil {
-		return -1
-	}
-	idx, _ := strconv.Atoi(strings.TrimSpace(string(out)))
-	return idx
-}
-
-// Model is the bubbletea sidebar model.
+// Model is the bubbletea agent context panel model.
 type Model struct {
-	windows []Window
-	cursor  int
-	width   int
-	height  int
-	self    string // path to orcai binary, used to spawn sidebars in new windows
-	manager bool   // only window 0 sidebar spawns sidebars in other windows
+	windows  []Window
+	cursor   int
+	width    int
+	height   int
+	sessions map[string]SessionTelemetry // keyed by session_id
+	busConn  *grpc.ClientConn
 }
 
 // NewWithWindows creates a Model with a fixed window list — used in tests.
 func NewWithWindows(windows []Window) Model {
-	return Model{windows: windows}
+	return Model{windows: windows, sessions: make(map[string]SessionTelemetry)}
 }
 
 // Cursor returns the current cursor position — used in tests.
 func (m Model) Cursor() int { return m.cursor }
 
-// New creates the sidebar model by querying tmux.
-func New() Model {
-	self, _ := os.Executable()
-	if resolved, err := filepath.EvalSymlinks(self); err == nil {
-		self = resolved
+// busAddrPath returns the path to the bus address file.
+func busAddrPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
 	}
-	return Model{
-		windows: listWindows(),
-		self:    self,
-		manager: currentWindowIndex() == 0,
-	}
+	return filepath.Join(home, ".config", "orcai", "bus.addr"), nil
 }
 
-// spawnSidebar creates a sidebar pane in the given tmux window index.
-func (m Model) spawnSidebar(windowIdx int) {
-	if m.self == "" {
-		return
+// readBusAddr reads the bus address with up to 3 seconds of retry.
+func readBusAddr() string {
+	path, err := busAddrPath()
+	if err != nil {
+		return ""
 	}
-	exec.Command("tmux", "split-window",
-		"-d", "-h", "-b", "-f", "-l", "25%",
-		"-t", fmt.Sprintf("orcai:%d", windowIdx),
-		m.self, "_sidebar").Run() //nolint:errcheck
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil && len(data) > 0 {
+			return strings.TrimSpace(string(data))
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return ""
 }
 
-// ensureSidebars spawns a sidebar in any window that only has one pane.
-func (m Model) ensureSidebars() {
-	for _, w := range m.windows {
-		if windowPaneCount(w.Index) == 1 {
-			m.spawnSidebar(w.Index)
+// subscribeCmd connects to the bus and returns a tea.Cmd that emits TelemetryMsg values.
+func subscribeCmd(conn *grpc.ClientConn) tea.Cmd {
+	return func() tea.Msg {
+		client := pb.NewEventBusClient(conn)
+		stream, err := client.Subscribe(context.Background(), &pb.SubscribeRequest{
+			Topics: []string{"orcai.telemetry"},
+		})
+		if err != nil {
+			return nil
+		}
+		evt, err := stream.Recv()
+		if err != nil {
+			return nil
+		}
+		var payload struct {
+			SessionID    string  `json:"session_id"`
+			WindowName   string  `json:"window_name"`
+			Provider     string  `json:"provider"`
+			Status       string  `json:"status"`
+			InputTokens  int     `json:"input_tokens"`
+			OutputTokens int     `json:"output_tokens"`
+			CostUSD      float64 `json:"cost_usd"`
+		}
+		if err := json.Unmarshal([]byte(evt.Payload), &payload); err != nil {
+			return nil
+		}
+		return TelemetryMsg{
+			SessionID:    payload.SessionID,
+			WindowName:   payload.WindowName,
+			Provider:     payload.Provider,
+			Status:       payload.Status,
+			InputTokens:  payload.InputTokens,
+			OutputTokens: payload.OutputTokens,
+			CostUSD:      payload.CostUSD,
 		}
 	}
 }
 
-func (m Model) Init() tea.Cmd {
-	if !m.manager {
-		return nil
+// New creates the sidebar model and connects to the event bus if available.
+func New() Model {
+	m := Model{
+		windows:  listWindows(),
+		sessions: make(map[string]SessionTelemetry),
 	}
-	return tickCmd()
+	if addr := readBusAddr(); addr != "" {
+		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err == nil {
+			m.busConn = conn
+		}
+	}
+	return m
+}
+
+func (m Model) Init() tea.Cmd {
+	cmds := []tea.Cmd{tickCmd()}
+	if m.busConn != nil {
+		cmds = append(cmds, subscribeCmd(m.busConn))
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tickMsg:
-		if m.manager {
-			m.windows = listWindows()
-			m.ensureSidebars()
+	case TelemetryMsg:
+		m.sessions[msg.SessionID] = SessionTelemetry{
+			WindowName:   msg.WindowName,
+			Provider:     msg.Provider,
+			Status:       msg.Status,
+			InputTokens:  msg.InputTokens,
+			OutputTokens: msg.OutputTokens,
+			CostUSD:      msg.CostUSD,
 		}
+		var next tea.Cmd
+		if m.busConn != nil {
+			next = subscribeCmd(m.busConn)
+		}
+		return m, next
+
+	case tickMsg:
+		m.windows = listWindows()
 		return m, tickCmd()
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		// Self-resize: maintain 25% of the total window width on every resize.
 		if pane := os.Getenv("TMUX_PANE"); pane != "" {
 			out, err := exec.Command("tmux", "display-message", "-p", "#{window_width}").Output()
 			if err == nil {
@@ -172,10 +233,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// ── Normal bindings ──────────────────────────────────────────────────
 		switch msg.String() {
 		case "ctrl+c":
-			exec.Command("tmux", "kill-session", "-t", "orcai").Run() //nolint:errcheck
+			if m.busConn != nil {
+				m.busConn.Close() //nolint:errcheck
+			}
 			return m, tea.Quit
 
 		case "j", "down":
@@ -192,8 +254,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.windows) > 0 {
 				w := m.windows[m.cursor]
 				target := fmt.Sprintf("orcai:%d", w.Index)
-				exec.Command("tmux", "select-window", "-t", target).Run()          //nolint:errcheck
-				exec.Command("tmux", "select-pane", "-t", target+".1").Run()       //nolint:errcheck
+				exec.Command("tmux", "select-window", "-t", target).Run()    //nolint:errcheck
+				exec.Command("tmux", "select-pane", "-t", target+".1").Run() //nolint:errcheck
 			}
 
 		case "x":
@@ -206,52 +268,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cursor = len(m.windows) - 1
 				}
 			}
-
-		case "n":
-			if m.self != "" {
-				exec.Command("tmux", "display-popup", "-E",
-					"-w", "120", "-h", "40", m.self, "_picker").Run() //nolint:errcheck
-			}
-			m.windows = listWindows()
-			m.ensureSidebars()
-			if m.cursor >= len(m.windows) && m.cursor > 0 {
-				m.cursor = len(m.windows) - 1
-			}
-
-		case "p":
-			if m.self != "" {
-				exec.Command("tmux", "new-window", "-t", "orcai",
-					"-n", "prompt-builder", m.self, "_promptbuilder").Run() //nolint:errcheck
-			}
 		}
 	}
 
 	return m, nil
 }
 
-// ANSI colour constants (Dracula palette + teal accent, 256-colour).
+// ANSI colour constants (Dracula palette, 256-colour).
 const (
-	aTeal  = "\x1b[38;5;87m"   // bright teal — banner lines & connectors
-	aDimT  = "\x1b[38;5;66m"   // dim teal — dots row & dividers
-	aPink  = "\x1b[38;5;212m"  // pink — block chars & active name
-	aBold  = "\x1b[1;38;5;212m" // bold pink — ORCAI logo text
-	aBlue  = "\x1b[38;5;61m"   // muted blue — inactive names & footer
-	aSelBg = "\x1b[48;5;236m"  // dark selection background
-	aReset = "\x1b[0m"
+	aTeal   = "\x1b[38;5;87m"
+	aDimT   = "\x1b[38;5;66m"
+	aPink   = "\x1b[38;5;212m"
+	aBold   = "\x1b[1;38;5;212m"
+	aBlue   = "\x1b[38;5;61m"
+	aGreen  = "\x1b[38;5;84m"
+	aYellow = "\x1b[38;5;228m"
+	aSelBg  = "\x1b[48;5;236m"
+	aReset  = "\x1b[0m"
 )
 
-// buildSidebarView renders the sidebar using an open BBS-style layout:
-//
-//	  ▪                      ▪   ← dim teal dots above T-junctions
-//	══╢  ░▒▓ ORCAI ▓▒░  ╟══     ← teal banner with pink logo
-//	──────────────────────────   ← dim divider
-//	▎ session-name               ← active: pink on dark bg
-//	  session-name               ← inactive: muted blue
-//	──────────────────────────   ← dim divider
-//	n new  x kill  ↑↓ nav        ← footer
-func buildSidebarView(width int, windows []Window, cursor int) string {
-	if width < 10 {
-		width = 22
+func (m Model) View() string {
+	w := m.width
+	if w <= 0 {
+		w = 28
 	}
 
 	pad := func(n int) string {
@@ -272,14 +311,12 @@ func buildSidebarView(width int, windows []Window, cursor int) string {
 	}
 
 	// ── Banner ────────────────────────────────────────────────────────────────
-	// Center section between T-junctions: "╢ ░▒▓ ORCAI ▓▒░ ╟" = 18 visible chars.
 	const centerLen = 18
-	sideLen := max((width-centerLen)/2, 0)
-	rightLen := max(width-centerLen-sideLen, 0)
+	sideLen := max((w-centerLen)/2, 0)
+	rightLen := max(w-centerLen-sideLen, 0)
 
-	// Dots row: ▪ above each T-junction.
 	var dotsRow strings.Builder
-	for i := 0; i < width; i++ {
+	for i := 0; i < w; i++ {
 		switch i {
 		case sideLen, sideLen + centerLen - 1:
 			dotsRow.WriteString(aDimT + "▪" + aReset)
@@ -292,44 +329,59 @@ func buildSidebarView(width int, windows []Window, cursor int) string {
 		" " + aPink + "░▒▓ " + aBold + "ORCAI" + aReset + aPink + " ▓▒░" + aReset +
 		aTeal + " ╟" + strings.Repeat("═", rightLen) + aReset
 
-	divider := aDimT + strings.Repeat("─", width) + aReset
+	divider := aDimT + strings.Repeat("─", w) + aReset
 
 	rows := []string{dotsRow.String(), bannerRow, divider}
 
-	// ── Session list ──────────────────────────────────────────────────────────
-	if len(windows) == 0 {
+	// ── Session list with telemetry overlay ───────────────────────────────────
+	byName := make(map[string]SessionTelemetry)
+	for _, st := range m.sessions {
+		byName[st.WindowName] = st
+	}
+
+	if len(m.windows) == 0 {
 		rows = append(rows, aBlue+"  no sessions yet"+aReset)
 	} else {
-		maxName := max(width-3, 1) // reserve 2 for "▎ " / "  " prefix + 1 spare
-		for i, w := range windows {
-			name := truncate(w.Name, maxName)
+		maxName := max(w-3, 1)
+		for i, win := range m.windows {
+			name := truncate(win.Name, maxName)
 			nameLen := len([]rune(name))
-			trailing := max(width-2-nameLen, 0)
-			var line string
-			if i == cursor {
-				// Extend selection background to full width.
-				line = aSelBg + aPink + "▎ " + name + pad(trailing) + aReset
+			trailing := max(w-2-nameLen, 0)
+
+			var nameLine string
+			if i == m.cursor {
+				nameLine = aSelBg + aPink + "▎ " + name + pad(trailing) + aReset
 			} else {
-				line = aBlue + "  " + name + aReset
+				nameLine = aBlue + "  " + name + aReset
 			}
-			rows = append(rows, line)
+			rows = append(rows, nameLine)
+
+			if st, ok := byName[win.Name]; ok {
+				statusIcon := aGreen + "●" + aReset
+				statusLabel := "running"
+				if st.Status == "done" {
+					statusIcon = aDimT + "○" + aReset
+					statusLabel = "idle   "
+				}
+				var telLine string
+				if st.InputTokens > 0 {
+					telLine = fmt.Sprintf("  %s %s %dk↑ %d↓ $%.3f",
+						statusIcon, statusLabel,
+						st.InputTokens/1000, st.OutputTokens, st.CostUSD)
+				} else {
+					telLine = fmt.Sprintf("  %s %s", statusIcon, statusLabel)
+				}
+				rows = append(rows, aYellow+telLine+aReset)
+			} else {
+				rows = append(rows, aDimT+"  no data"+aReset)
+			}
 		}
 	}
 
 	// ── Footer ────────────────────────────────────────────────────────────────
-	const footerText = "n new  p build  x kill  ↑↓ nav"
-	rows = append(rows, divider, aBlue+footerText+aReset)
+	rows = append(rows, divider, aBlue+"enter focus  x kill  ↑↓ nav"+aReset)
 
 	return strings.Join(rows, "\n")
-}
-
-// View renders the vertical tab manager as a full ANSI box.
-func (m Model) View() string {
-	w := m.width
-	if w <= 0 {
-		w = 22
-	}
-	return buildSidebarView(w, m.windows, m.cursor)
 }
 
 // Run starts the sidebar as a bubbletea program.
@@ -337,5 +389,57 @@ func Run() {
 	p := tea.NewProgram(New(), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("sidebar error: %v\n", err)
+	}
+}
+
+// ── Sidebar toggle ────────────────────────────────────────────────────────────
+
+func sidebarVisiblePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "orcai", ".sidebar-visible"), nil
+}
+
+func isSidebarVisible() bool {
+	path, err := sidebarVisiblePath()
+	if err != nil {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(data)) == "true"
+}
+
+func setSidebarVisible(visible bool) {
+	path, err := sidebarVisiblePath()
+	if err != nil {
+		return
+	}
+	val := "false"
+	if visible {
+		val = "true"
+	}
+	os.WriteFile(path, []byte(val), 0o644) //nolint:errcheck
+}
+
+// RunToggle shows or hides the sidebar pane based on the current marker file state.
+func RunToggle() {
+	self, _ := os.Executable()
+	if resolved, err := filepath.EvalSymlinks(self); err == nil {
+		self = resolved
+	}
+
+	if isSidebarVisible() {
+		exec.Command("tmux", "kill-pane", "-t", ".0").Run() //nolint:errcheck
+		setSidebarVisible(false)
+	} else {
+		exec.Command("tmux", "split-window",
+			"-d", "-h", "-b", "-f", "-l", "25%",
+			"-t", "orcai:0", self, "_sidebar").Run() //nolint:errcheck
+		setSidebarVisible(true)
 	}
 }

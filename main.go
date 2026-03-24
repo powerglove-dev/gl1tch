@@ -25,6 +25,9 @@ func main() {
 		case "_sidebar":
 			sidebar.Run()
 			return
+		case "_sidebar-toggle":
+			sidebar.RunToggle()
+			return
 		case "_picker":
 			picker.Run()
 			return

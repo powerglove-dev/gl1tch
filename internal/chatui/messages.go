@@ -56,6 +56,18 @@ type StreamWaiting struct {
 	InputCh chan<- string
 }
 
+// TelemetryPayload is published to the "orcai.telemetry" bus topic on stream
+// start ("streaming") and stream end ("done").
+type TelemetryPayload struct {
+	SessionID    string  `json:"session_id"`
+	WindowName   string  `json:"window_name"`
+	Provider     string  `json:"provider"`
+	Status       string  `json:"status"` // "streaming" | "done"
+	InputTokens  int     `json:"input_tokens"`
+	OutputTokens int     `json:"output_tokens"`
+	CostUSD      float64 `json:"cost_usd"`
+}
+
 // StreamEvent is the union type for all streaming events sent on a provider channel.
 type StreamEvent struct {
 	Chunk   *StreamChunk

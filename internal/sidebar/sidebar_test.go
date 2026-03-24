@@ -98,13 +98,14 @@ func TestViewContainsWindowName(t *testing.T) {
 }
 
 func TestViewContainsHeader(t *testing.T) {
-	// The header is now ANSI art loaded via ansiart.Load; NewWithWindows leaves
-	// headerArt empty so the art slot is blank in tests.  Verify that View()
-	// still renders without panicking and that the footer is present.
 	m := sidebar.NewWithWindows([]sidebar.Window{})
 	view := m.View()
-	if !strings.Contains(view, "n new") {
-		t.Errorf("View() does not contain footer hint 'n new':\n%s", view)
+	// Footer should show nav hints but NOT new-session/prompt-builder (moved to status bar).
+	if !strings.Contains(view, "enter focus") {
+		t.Errorf("View() does not contain footer hint 'enter focus':\n%s", view)
+	}
+	if strings.Contains(view, "n new") {
+		t.Errorf("View() still contains removed 'n new' footer hint:\n%s", view)
 	}
 }
 

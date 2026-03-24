@@ -23,25 +23,24 @@ const (
 )
 
 func buildTmuxConf(self string) string {
-	tick := "`"
-	// Base tmux settings (no backticks, safe as raw literal).
+	// Base tmux settings.
 	base := `set -g status-position bottom
 set -g status-style "fg=#bd93f9,bg=#282a36"
 set -g window-status-format ""
 set -g window-status-current-format ""
 set -g status-left "#[fg=#bd93f9,bold] ORCAI #[default]"
 set -g status-left-length 20
-set -g status-right "#[fg=#6272a4] %H:%M "
-set -g status-right-length 15
+set -g status-right "#[fg=#6272a4] ^; n new  ^; p build   %H:%M "
+set -g status-right-length 40
 set -g mouse on
 set -g default-terminal "screen-256color"
 set -g base-index 0
 set -g pane-border-style "fg=#44475a"
 set -g pane-active-border-style "fg=#bd93f9"
 `
-	// ` enters the orcai-chord key table.
-	// Press ` again to open the help popup; press a chord key to act directly.
-	leaderBinding := "bind-key -n " + tick + " switch-client -T orcai-chord\n"
+	// ctrl+; enters the orcai-chord key table.
+	// Press ctrl+; again to open the help popup; press a chord key to act directly.
+	leaderBinding := "bind-key -n C-\\; switch-client -T orcai-chord\n"
 
 	// Chord bindings inside the orcai-chord key table.
 	chords := "bind-key -T orcai-chord q     { switch-client -T root ; display-popup -E -w 44 -h 18 \"" + self + " _help quit\" }\n" +
@@ -50,14 +49,13 @@ set -g pane-active-border-style "fg=#bd93f9"
 		"bind-key -T orcai-chord n     { switch-client -T root ; display-popup -E -w 120 -h 40 \"" + self + " _picker\" }\n" +
 		"bind-key -T orcai-chord o     { switch-client -T root ; display-popup -E -w 68 -h 24 \"" + self + " ollama\" }\n" +
 		"bind-key -T orcai-chord s     { switch-client -T root ; display-popup -E -w 44 -h 6 \"" + self + " _opsx\" }\n" +
+		"bind-key -T orcai-chord p     { switch-client -T root ; new-window -t orcai -n prompt-builder \"" + self + " _promptbuilder\" }\n" +
+		"bind-key -T orcai-chord t     { switch-client -T root ; run-shell \"" + self + " _sidebar-toggle\" }\n" +
 		"bind-key -T orcai-chord Escape switch-client -T root\n" +
-		// Pressing ` again while in chord table shows help immediately.
-		"bind-key -T orcai-chord " + tick + "     { switch-client -T root ; display-popup -E -w 44 -h 18 \"" + self + " _help\" }\n"
+		// Pressing ctrl+; again while in chord table shows help immediately.
+		"bind-key -T orcai-chord C-\\; { switch-client -T root ; display-popup -E -w 44 -h 18 \"" + self + " _help\" }\n"
 
-	// Escape in any pane refocuses the sidebar (pane .0).
-	escBinding := "bind-key -n Escape select-pane -t .0\n"
-
-	return base + leaderBinding + chords + escBinding
+	return base + leaderBinding + chords
 }
 
 // reloadMarkerPath returns the path to the reload marker file.
@@ -162,6 +160,11 @@ func Run() error {
 	}
 	defer busSrv.Stop()
 
+	// Persist bus address so sidebar and other out-of-process components can connect.
+	if err := os.WriteFile(filepath.Join(cfgDir, "bus.addr"), []byte(busAddr), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "orcai: warning: could not write bus.addr: %v\n", err)
+	}
+
 	plugins, err := discovery.Discover(cfgDir)
 	if err != nil {
 		return fmt.Errorf("discovering plugins: %w", err)
@@ -185,13 +188,7 @@ func Run() error {
 		return fmt.Errorf("creating session: %w", err)
 	}
 	run("source-file", confPath) //nolint:errcheck
-	// Create sidebar: -d=don't activate, -hbf=horizontal+left+full-height.
-	// The sidebar process self-resizes its pane via TMUX_PANE on WindowSizeMsg.
-	if err := run("-f", confPath, "split-window",
-		"-d", "-h", "-b", "-f", "-t", SessionName+":0", "-l", "25%",
-		self, "_sidebar"); err != nil {
-		return fmt.Errorf("creating sidebar pane: %w", err)
-	}
+	// Sidebar is hidden by default; use ctrl+; t to toggle it.
 
 	cmd := exec.Command("tmux", "-f", confPath, "attach-session", "-t", SessionName)
 	cmd.Stdin = os.Stdin

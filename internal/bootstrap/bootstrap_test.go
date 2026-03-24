@@ -31,6 +31,40 @@ func TestWriteTmuxConf(t *testing.T) {
 	}
 }
 
+func TestBuildTmuxConf_Keybindings(t *testing.T) {
+	dir := t.TempDir()
+	_, err := bootstrap.WriteTmuxConf(dir, "/fake/orcai")
+	if err != nil {
+		t.Fatalf("WriteTmuxConf: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "tmux.conf"))
+	if err != nil {
+		t.Fatalf("read tmux.conf: %v", err)
+	}
+	conf := string(data)
+
+	// ctrl+; leader must be present.
+	if !strings.Contains(conf, "C-\\;") {
+		t.Error("tmux.conf missing C-\\; leader binding")
+	}
+	// Backtick leader must be absent.
+	if strings.Contains(conf, "bind-key -n `") {
+		t.Error("tmux.conf still contains backtick leader binding")
+	}
+	// Global ESC binding must be absent.
+	if strings.Contains(conf, "bind-key -n Escape select-pane") {
+		t.Error("tmux.conf still contains global ESC intercept")
+	}
+	// Status bar must contain chord hints.
+	if !strings.Contains(conf, "^; n new") {
+		t.Error("tmux.conf status-right missing '^; n new' hint")
+	}
+	// Sidebar toggle chord must be present.
+	if !strings.Contains(conf, "_sidebar-toggle") {
+		t.Error("tmux.conf missing sidebar toggle chord binding")
+	}
+}
+
 func TestSessionExists_NoSuchSession(t *testing.T) {
 	if !bootstrap.HasTmux() {
 		t.Skip("tmux not in PATH")
