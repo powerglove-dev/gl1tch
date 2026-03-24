@@ -47,7 +47,7 @@ set -g pane-active-border-style "fg=#bd93f9"
 	chords := "bind-key -T orcai-chord q     { switch-client -T root ; display-popup -E -w 44 -h 18 \"" + self + " _help quit\" }\n" +
 		"bind-key -T orcai-chord d     { switch-client -T root ; display-popup -E -w 44 -h 18 \"" + self + " _help detach\" }\n" +
 		"bind-key -T orcai-chord r     { switch-client -T root ; display-popup -E -w 44 -h 18 \"" + self + " _help reload\" }\n" +
-		"bind-key -T orcai-chord n     { switch-client -T root ; display-popup -E -w 42 -h 20 \"" + self + " _picker\" }\n" +
+		"bind-key -T orcai-chord n     { switch-client -T root ; display-popup -E -w 120 -h 40 \"" + self + " _picker\" }\n" +
 		"bind-key -T orcai-chord o     { switch-client -T root ; display-popup -E -w 68 -h 24 \"" + self + " ollama\" }\n" +
 		"bind-key -T orcai-chord s     { switch-client -T root ; display-popup -E -w 44 -h 6 \"" + self + " _opsx\" }\n" +
 		"bind-key -T orcai-chord Escape switch-client -T root\n" +
