@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -39,11 +40,14 @@ type BubbleModel struct {
 	activeField int // 0=Plugin 1=Model 2=Prompt
 	pluginIndex int
 	modelIndex  int
+	promptInput textinput.Model
 }
 
 // NewBubble creates a bubbletea-compatible model.
 func NewBubble(m *Model) *BubbleModel {
-	return &BubbleModel{inner: m}
+	ti := textinput.New()
+	ti.Placeholder = "enter prompt..."
+	return &BubbleModel{inner: m, promptInput: ti}
 }
 
 func (b *BubbleModel) Init() tea.Cmd { return nil }
@@ -116,21 +120,35 @@ func (b *BubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.Tab):
 			if len(b.inner.Steps()) > 0 {
 				b.activeField = (b.activeField + 1) % 3
+				if b.activeField == 2 {
+					b.promptInput.SetValue(b.inner.Steps()[b.inner.SelectedIndex()].Prompt)
+					b.promptInput.Focus()
+				} else {
+					b.promptInput.Blur()
+				}
 			}
 
 		case key.Matches(msg, keys.ShiftTab):
 			if len(b.inner.Steps()) > 0 {
 				b.activeField = (b.activeField + 2) % 3
+				if b.activeField == 2 {
+					b.promptInput.SetValue(b.inner.Steps()[b.inner.SelectedIndex()].Prompt)
+					b.promptInput.Focus()
+				} else {
+					b.promptInput.Blur()
+				}
 			}
 
 		case key.Matches(msg, keys.Up):
 			b.inner.SelectStep(b.inner.SelectedIndex() - 1)
 			b.activeField = 0
+			b.promptInput.Blur()
 			b.syncIndicesFromStep()
 
 		case key.Matches(msg, keys.Down):
 			b.inner.SelectStep(b.inner.SelectedIndex() + 1)
 			b.activeField = 0
+			b.promptInput.Blur()
 			b.syncIndicesFromStep()
 
 		case key.Matches(msg, keys.Left):
@@ -180,6 +198,17 @@ func (b *BubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				os.MkdirAll(dir, 0o755) //nolint:errcheck
 				path := filepath.Join(dir, b.inner.Name()+".pipeline.yaml")
 				Save(b.inner, path) //nolint:errcheck
+			}
+
+		default:
+			if b.activeField == 2 && len(b.inner.Steps()) > 0 {
+				var cmd tea.Cmd
+				b.promptInput, cmd = b.promptInput.Update(msg)
+				idx := b.inner.SelectedIndex()
+				s := b.inner.Steps()[idx]
+				s.Prompt = b.promptInput.Value()
+				b.inner.UpdateStep(idx, s)
+				return b, cmd
 			}
 		}
 	}

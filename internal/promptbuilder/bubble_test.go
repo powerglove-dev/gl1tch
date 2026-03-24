@@ -118,3 +118,25 @@ func TestTabNoOpWithNoSteps(t *testing.T) {
 		t.Fatalf("expected activeField 0 (no-op) when no steps, got %d", b.activeField)
 	}
 }
+
+func TestPromptFieldUpdatesStep(t *testing.T) {
+	m := New(nil)
+	m.AddStep(pipeline.Step{ID: "s1", Plugin: "claude"})
+	b := NewBubble(m)
+
+	// Tab twice to reach Prompt field (0→1→2)
+	b = pressKey(b, tea.KeyTab)
+	b = pressKey(b, tea.KeyTab)
+	if b.activeField != 2 {
+		t.Fatalf("expected activeField 2, got %d", b.activeField)
+	}
+
+	// Type "hello"
+	for _, r := range "hello" {
+		mm, _ := b.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		b = mm.(*BubbleModel)
+	}
+	if m.Steps()[0].Prompt != "hello" {
+		t.Fatalf("expected Prompt 'hello', got %q", m.Steps()[0].Prompt)
+	}
+}
