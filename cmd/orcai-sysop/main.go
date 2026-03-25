@@ -1,11 +1,19 @@
+// Binary orcai-sysop is the ABS sysop panel widget.
+//
+// Run without arguments to open the interactive sysop monitor.
+// Run with "toggle" to show/hide the panel as a tmux split-pane.
 package main
 
 import (
-	"fmt"
 	"os"
+
+	"github.com/adam-stokes/orcai/internal/sidebar"
 )
 
 func main() {
-	fmt.Fprintln(os.Stdout, "orcai-sysop: not yet implemented")
-	os.Exit(0)
+	if len(os.Args) > 1 && os.Args[1] == "toggle" {
+		sidebar.RunToggle()
+		return
+	}
+	sidebar.Run()
 }

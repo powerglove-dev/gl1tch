@@ -20,7 +20,18 @@ const (
 	configSubdir = ".config/orcai"
 )
 
+// resolveCompanion returns the path to a companion binary (e.g. orcai-picker).
+// Checks PATH first, then falls back to the same directory as self.
+func resolveCompanion(self, name string) string {
+	if bin, err := exec.LookPath(name); err == nil {
+		return bin
+	}
+	return filepath.Join(filepath.Dir(self), name)
+}
+
 func buildTmuxConf(self string) string {
+	picker := resolveCompanion(self, "orcai-picker")
+	sysop := resolveCompanion(self, "orcai-sysop")
 	// Base tmux settings.
 	base := `set -g status-position bottom
 set -g status-style "fg=#bd93f9,bg=#282a36"
@@ -44,11 +55,11 @@ set -g pane-active-border-style "fg=#bd93f9"
 	chords := "bind-key -T orcai-chord q     { switch-client -T root ; display-popup -E -w 44 -h 18 \"" + self + " _help quit\" }\n" +
 		"bind-key -T orcai-chord d     { switch-client -T root ; display-popup -E -w 44 -h 18 \"" + self + " _help detach\" }\n" +
 		"bind-key -T orcai-chord r     { switch-client -T root ; display-popup -E -w 44 -h 18 \"" + self + " _help reload\" }\n" +
-		"bind-key -T orcai-chord n     { switch-client -T root ; display-popup -E -w 120 -h 40 \"" + self + " _picker\" }\n" +
+		"bind-key -T orcai-chord n     { switch-client -T root ; display-popup -E -w 120 -h 40 \"" + picker + "\" }\n" +
 		"bind-key -T orcai-chord o     { switch-client -T root ; display-popup -E -w 68 -h 24 \"" + self + " ollama\" }\n" +
 		"bind-key -T orcai-chord s     { switch-client -T root ; display-popup -E -w 44 -h 6 \"" + self + " _opsx\" }\n" +
 		"bind-key -T orcai-chord p     { switch-client -T root ; new-window -t orcai -n prompt-builder \"" + self + " _promptbuilder\" }\n" +
-		"bind-key -T orcai-chord t     { switch-client -T root ; run-shell \"" + self + " _sidebar-toggle\" }\n" +
+		"bind-key -T orcai-chord t     { switch-client -T root ; run-shell \"" + sysop + " toggle\" }\n" +
 		"bind-key -T orcai-chord Escape switch-client -T root\n" +
 		// Pressing ctrl+space again while in chord table shows help immediately.
 		"bind-key -T orcai-chord C-Space { switch-client -T root ; display-popup -E -w 44 -h 18 \"" + self + " _help\" }\n"

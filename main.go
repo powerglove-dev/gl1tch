@@ -11,9 +11,7 @@ import (
 	"github.com/adam-stokes/orcai/cmd"
 	"github.com/adam-stokes/orcai/internal/bootstrap"
 	"github.com/adam-stokes/orcai/internal/chordhelp"
-	"github.com/adam-stokes/orcai/internal/picker"
 	"github.com/adam-stokes/orcai/internal/promptbuilder"
-	"github.com/adam-stokes/orcai/internal/sidebar"
 )
 
 func main() {
@@ -35,15 +33,6 @@ func main() {
 				fmt.Fprintf(os.Stderr, "orcai-welcome: %v\n", err)
 				os.Exit(1)
 			}
-			return
-		case "_sidebar":
-			sidebar.Run()
-			return
-		case "_sidebar-toggle":
-			sidebar.RunToggle()
-			return
-		case "_picker":
-			picker.Run()
 			return
 		case "_promptbuilder":
 			promptbuilder.Run()

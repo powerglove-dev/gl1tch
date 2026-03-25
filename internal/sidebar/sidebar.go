@@ -433,12 +433,22 @@ func setPanelVisible(visible bool) {
 	os.WriteFile(path, []byte(val), 0o644) //nolint:errcheck
 }
 
-// RunToggle shows or hides the sysop panel in the current tmux window.
-func RunToggle() {
+// resolveSysopBin returns the path to the orcai-sysop binary.
+// It checks PATH first, then falls back to the same directory as the caller.
+func resolveSysopBin() string {
+	if bin, err := exec.LookPath("orcai-sysop"); err == nil {
+		return bin
+	}
 	self, _ := os.Executable()
 	if resolved, err := filepath.EvalSymlinks(self); err == nil {
 		self = resolved
 	}
+	return filepath.Join(filepath.Dir(self), "orcai-sysop")
+}
+
+// RunToggle shows or hides the sysop panel in the current tmux window.
+func RunToggle() {
+	bin := resolveSysopBin()
 
 	if isPanelVisible() {
 		exec.Command("tmux", "kill-pane", "-t", ".0").Run() //nolint:errcheck
@@ -446,7 +456,7 @@ func RunToggle() {
 	} else {
 		exec.Command("tmux", "split-window",
 			"-d", "-h", "-b", "-l", "30%",
-			self, "_sidebar").Run() //nolint:errcheck
+			bin).Run() //nolint:errcheck
 		setPanelVisible(true)
 	}
 }
