@@ -1,0 +1,198 @@
+---
+import BBS from '../layouts/BBS.astro';
+
+const tier1GoCode = `// sdk/plugin/plugin.go
+type Plugin interface {
+    Name()        string
+    Description() string
+    Execute(ctx context.Context,
+            input Input) (Output, error)
+}`;
+
+const tier2Yaml = `name: ripgrep
+description: Fast file search
+command: rg
+args: ["--json"]
+input_schema: |
+  {"type":"string",
+   "description":"Search pattern"}
+output_schema: |
+  {"type":"array",
+   "description":"Match results"}`;
+
+const jqYaml = `name: jq
+description: JSON processor
+command: jq
+args: ["-r", "."]
+input_schema: >
+  {"type":"string"}
+output_schema: >
+  {"type":"string"}`;
+
+const ripgrepYaml = `name: ripgrep
+description: Fast file search
+command: rg
+args: ["--json", "--color=never"]
+input_schema: >
+  {"type":"string"}
+output_schema: >
+  {"type":"array"}`;
+
+const pandocYaml = `name: pandoc
+description: Document converter
+command: pandoc
+args: ["-f", "markdown", "-t", "html"]
+input_schema: >
+  {"type":"string"}
+output_schema: >
+  {"type":"string"}`;
+
+const fdYaml = `name: fd
+description: Fast find alternative
+command: fd
+args: ["--color=never", "-t", "f"]
+input_schema: >
+  {"type":"string"}
+output_schema: >
+  {"type":"array"}`;
+
+const pipelineYaml = `name: code-review-pipeline
+description: Search, analyze, and summarize code issues
+
+steps:
+  - id: search
+    plugin: ripgrep
+    input: "TODO|FIXME|HACK"
+    args: ["--json", "./src"]
+
+  - id: format
+    plugin: jq
+    input: "{{ steps.search.output }}"
+    args: ["-r", ".[].data.text"]
+
+  - id: analyze
+    plugin: claude
+    prompt: |
+      Review these code comments and identify the most critical issues:
+      {{ steps.format.output }}
+    model: claude-opus-4-5
+    max_tokens: 1000
+
+output: "{{ steps.analyze.output }}"`;
+---
+<BBS title="Plugins" activePage="plugins">
+  <main class="content content-padded" style="position:relative;z-index:1">
+
+    <h2 class="section-header">// Plugin System //</h2>
+
+    <!-- Architecture diagram -->
+    <div class="plugin-diagram" aria-label="Plugin architecture diagram">
+<span class="fg-comment">  ┌──────────┐         ┌──────────┐</span>
+<span class="fg-comment">  </span><span class="fg-fg">│</span><span class="fg-cyan">  MY TOOL </span><span class="fg-fg">│</span><span class="fg-purple">──gRPC──▶</span><span class="fg-fg">│</span><span class="fg-pink">  ORCAI   </span><span class="fg-fg">│</span>
+<span class="fg-comment">  └──────────┘         └──────────┘</span>
+<span class="fg-comment">     Tier 2               Host</span>
+<span class="fg-comment">  </span><span class="fg-yellow">(sidecar.yaml)</span><span class="fg-comment">       (pipeline)</span>
+<span class="fg-comment">
+  ┌──────────┐         ┌──────────┐
+  </span><span class="fg-fg">│</span><span class="fg-green"> GO PLUGIN</span><span class="fg-fg">│</span><span class="fg-purple">─native─▶</span><span class="fg-fg">│</span><span class="fg-pink">  ORCAI   </span><span class="fg-fg">│</span>
+<span class="fg-comment">  └──────────┘         └──────────┘
+     Tier 1               Host
+  </span><span class="fg-yellow">(Go interface)</span><span class="fg-comment">       (pipeline)</span>
+    </div>
+
+    <p style="color:var(--fg);font-size:13px;line-height:2;max-width:680px;margin-bottom:20px">
+      orcai plugins let you extend the pipeline with any tool. <span class="fg-purple">Tier 1</span> plugins are native Go — fast, typed, compile-time safe.
+      <span class="fg-cyan">Tier 2</span> plugins are sidecar YAML wrappers — wrap <em>any</em> CLI binary without writing a single line of Go.
+    </p>
+
+    <!-- Two-column tier layout -->
+    <div class="plugin-grid">
+
+      <!-- Tier 1 -->
+      <div class="plugin-tier tier1">
+        <h3>TIER 1 &mdash; NATIVE GO</h3>
+        <p>
+          Implement the <span class="fg-purple">Plugin</span> interface in Go.
+          Full type safety, zero overhead, access to internal orcai APIs.
+          Best for core tools, formatters, and anything performance-critical.
+        </p>
+        <br />
+        <pre class="code-block" style="font-size:12px" set:text={tier1GoCode} />
+        <br />
+        <p style="font-size:12px;color:var(--comment)">
+          Register with <span class="fg-green">plugin.Register()</span> in your plugin's init() function.
+          orcai discovers all registered plugins at startup.
+        </p>
+      </div>
+
+      <!-- Tier 2 -->
+      <div class="plugin-tier tier2">
+        <h3>TIER 2 &mdash; SIDECAR YAML</h3>
+        <p>
+          Drop a YAML file in <span class="fg-cyan">~/.config/orcai/plugins/</span>.
+          orcai's CliAdapter wraps the binary automatically — no code required.
+          Perfect for ripgrep, jq, ffmpeg, pandoc, your own shell scripts.
+        </p>
+        <br />
+        <pre class="code-block yaml-block" style="font-size:12px" set:text={tier2Yaml} />
+        <br />
+        <p style="font-size:12px;color:var(--comment)">
+          orcai shells out to the binary, passes stdin, captures stdout/stderr,
+          and exposes the result as a typed pipeline node.
+        </p>
+      </div>
+
+    </div>
+
+    <!-- More examples -->
+    <h2 class="section-header" style="margin-top:48px">// Example Plugins //</h2>
+
+    <p style="color:var(--comment);font-size:12px;margin-bottom:16px">Sidecar YAML examples — drop these in ~/.config/orcai/plugins/</p>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+
+      <div>
+        <div style="color:var(--yellow);font-size:12px;margin-bottom:4px">jq.yaml</div>
+        <pre class="code-block yaml-block" set:text={jqYaml} />
+      </div>
+
+      <div>
+        <div style="color:var(--yellow);font-size:12px;margin-bottom:4px">ripgrep.yaml</div>
+        <pre class="code-block yaml-block" set:text={ripgrepYaml} />
+      </div>
+
+      <div>
+        <div style="color:var(--yellow);font-size:12px;margin-bottom:4px">pandoc.yaml</div>
+        <pre class="code-block yaml-block" set:text={pandocYaml} />
+      </div>
+
+      <div>
+        <div style="color:var(--yellow);font-size:12px;margin-bottom:4px">fd.yaml</div>
+        <pre class="code-block yaml-block" set:text={fdYaml} />
+      </div>
+
+    </div>
+
+    <!-- Pipeline YAML -->
+    <h2 class="section-header" style="margin-top:48px">// Pipeline Example //</h2>
+
+    <p style="color:var(--comment);font-size:12px;margin-bottom:16px">Wire plugins together in a YAML pipeline</p>
+
+    <pre class="code-block yaml-block" set:text={pipelineYaml} />
+
+    <!-- Plugin development guide -->
+    <div style="margin-top:32px;padding:16px;border:1px solid var(--selbg);background:rgba(30,31,41,0.5)">
+      <span class="fg-purple" style="font-family:'VT323',monospace;font-size:18px;letter-spacing:1px">&#x25BA; DEVELOP A PLUGIN</span>
+      <br /><br />
+      <span style="font-size:13px;color:var(--fg);line-height:1.9">
+        Full plugin development documentation and the Go SDK are in the
+        <a href="https://github.com/orcai/orcai/tree/main/sdk" style="color:var(--cyan)">sdk/</a>
+        directory. The <a href="https://github.com/orcai/orcai/tree/main/sdk/plugin" style="color:var(--cyan)">sdk/plugin</a>
+        package contains the Plugin interface, Input/Output types, and helper utilities.
+      </span>
+      <br /><br />
+      <pre class="code-block bash-block">go get github.com/orcai/orcai/sdk/plugin</pre>
+    </div>
+
+  </main>
+</BBS>
