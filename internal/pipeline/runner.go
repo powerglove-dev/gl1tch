@@ -10,9 +10,19 @@ import (
 
 // Run executes a pipeline against the given plugin manager.
 // userInput is the initial value injected for the first input step.
+// publisher receives lifecycle events; pass NoopPublisher{} when not needed.
 // Returns the final output string.
-func Run(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput string) (string, error) {
-	vars := make(map[string]string)
+func Run(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput string, publisher EventPublisher) (string, error) {
+	if publisher == nil {
+		publisher = NoopPublisher{}
+	}
+
+	ec := NewExecutionContext()
+
+	// Seed pipeline-level vars into context under "param".
+	for k, v := range p.Vars {
+		ec.Set("param."+k, v)
+	}
 
 	// Index steps by ID for branch lookups.
 	byID := make(map[string]*Step, len(p.Steps))
@@ -25,8 +35,9 @@ func Run(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput string
 	visited := make(map[string]bool)
 	queue := append([]string(nil), order...)
 
-	// lastOutput tracks the most recent output, seeded by userInput so that
-	// the first plugin step receives user input when no explicit prompt is set.
+	// lastOutput tracks the most recent step output for use as defaultInput
+	// in the next plugin step. Seeded with userInput so the first plugin step
+	// receives it if it has no explicit prompt/input.
 	lastOutput := userInput
 	var lastPluginOutput string
 
@@ -46,46 +57,27 @@ func Run(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput string
 
 		switch step.Type {
 		case "input":
-			vars[step.ID+".out"] = userInput
+			ec.Set(step.ID+".out", userInput)
 			lastOutput = userInput
 
 		case "output":
-			// Return whatever the last plugin step produced.
 			return lastPluginOutput, nil
 
 		default:
-			// Plugin step.
-			pl, ok := mgr.Get(step.Plugin)
-			if !ok {
-				return "", fmt.Errorf("pipeline: plugin %q not found", step.Plugin)
-			}
-
-			raw := step.Prompt + step.Input
-			if raw == "" {
-				// No explicit prompt/input: pass the most recent output as the input.
-				raw = lastOutput
-			}
-			promptOrInput := Interpolate(raw, vars)
-			stepVars := make(map[string]string, len(vars)+1)
-			for k, v := range vars {
-				stepVars[k] = v
-			}
-			stepVars["model"] = step.Model
-
-			var buf bytes.Buffer
-			if err := pl.Execute(ctx, promptOrInput, stepVars, &buf); err != nil {
+			output, err := executeStep(ctx, step, ec, mgr, lastOutput)
+			if err != nil {
 				return "", fmt.Errorf("pipeline: step %q: %w", step.ID, err)
 			}
-			output := buf.String()
-			vars[step.ID+".out"] = output
+			ec.Set(step.ID+".out", output)
 			lastPluginOutput = output
 			lastOutput = output
 
 			// Evaluate branch condition if present.
 			if step.Condition.If != "" {
-				if EvalCondition(step.Condition.If, output) {
+				condVars := ec.Snapshot()
+				condVars["_output"] = output
+				if EvalCondition(step.Condition.If, condVars) {
 					if step.Condition.Then != "" {
-						// Jump: prepend branch target, skip remaining queue.
 						queue = append([]string{step.Condition.Then}, filterOut(queue, step.Condition.Else)...)
 					}
 				} else {
@@ -98,6 +90,38 @@ func Run(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput string
 	}
 
 	return lastPluginOutput, nil
+}
+
+// executeStep runs a single plugin step and returns its string output.
+// defaultInput is used when the step has no explicit prompt or input.
+func executeStep(ctx context.Context, step *Step, ec *ExecutionContext, mgr *plugin.Manager, defaultInput string) (string, error) {
+	// Resolve plugin name: prefer Executor, fall back to Plugin.
+	pluginName := step.Executor
+	if pluginName == "" {
+		pluginName = step.Plugin
+	}
+
+	pl, ok := mgr.Get(pluginName)
+	if !ok {
+		return "", fmt.Errorf("plugin %q not found", pluginName)
+	}
+
+	snap := ec.Snapshot()
+
+	raw := step.Prompt + step.Input
+	if raw == "" {
+		raw = defaultInput
+	}
+	promptOrInput := Interpolate(raw, snap)
+
+	stepVars := ec.FlatStrings()
+	stepVars["model"] = step.Model
+
+	var buf bytes.Buffer
+	if err := pl.Execute(ctx, promptOrInput, stepVars, &buf); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 // filterOut removes a single value from a slice.

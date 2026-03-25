@@ -77,10 +77,12 @@ var pipelineRunCmd = &cobra.Command{
 		runProviders := picker.BuildProviders()
 		mgr := plugin.NewManager()
 		for _, prov := range runProviders {
-			mgr.Register(plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", prov.ID))
+			if err := mgr.Register(plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", prov.ID)); err != nil {
+				fmt.Fprintf(os.Stderr, "pipeline: register provider %q: %v\n", prov.ID, err)
+			}
 		}
 
-		result, err := pipeline.Run(cmd.Context(), p, mgr, "")
+		result, err := pipeline.Run(cmd.Context(), p, mgr, "", pipeline.NoopPublisher{})
 		if err != nil {
 			return err
 		}

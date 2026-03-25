@@ -15,6 +15,7 @@ proto:
 		--go_out=$(PROTO_OUT) --go_opt=paths=source_relative \
 		--go-grpc_out=$(PROTO_OUT) --go-grpc_opt=paths=source_relative \
 		-I proto/orcai/v1 \
+		-I /opt/homebrew/include \
 		proto/orcai/v1/plugin.proto \
 		proto/orcai/v1/bus.proto
 

@@ -1,6 +1,9 @@
 package plugin
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+)
 
 // Manager holds the registry of all active plugins.
 type Manager struct {
@@ -13,11 +16,15 @@ func NewManager() *Manager {
 	return &Manager{plugins: make(map[string]Plugin)}
 }
 
-// Register adds a plugin. Silently replaces any existing plugin with the same name.
-func (m *Manager) Register(p Plugin) {
+// Register adds a plugin. Returns an error if a plugin with the same name is already registered.
+func (m *Manager) Register(p Plugin) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if _, exists := m.plugins[p.Name()]; exists {
+		return fmt.Errorf("plugin %q already registered", p.Name())
+	}
 	m.plugins[p.Name()] = p
+	return nil
 }
 
 // Get returns a plugin by name.
@@ -29,11 +36,14 @@ func (m *Manager) Get(name string) (Plugin, bool) {
 }
 
 // LoadWrappersFromDir scans dir for sidecar YAML files and registers all resulting plugins.
-// Per-file errors are returned; they do not prevent other wrappers from being registered.
+// Per-file errors (parse failures and duplicate names) are returned; they do not prevent other
+// wrappers from being registered.
 func (m *Manager) LoadWrappersFromDir(dir string) []error {
 	plugins, errs := LoadWrappers(dir)
 	for _, p := range plugins {
-		m.Register(p)
+		if err := m.Register(p); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	return errs
 }

@@ -7,6 +7,11 @@ import (
 
 // Plugin is the universal interface all orcai plugins implement,
 // regardless of whether they are native go-plugins (Tier 1) or CLI wrappers (Tier 2).
+//
+// Execute parameters:
+//   - input: the primary data payload / stdin for this invocation (prompt text or raw content)
+//   - vars: string metadata passed as environment/template variables — not structured data;
+//     for typed structured data use ExecuteRequest.Args (see proto/orcai/v1/plugin.proto)
 type Plugin interface {
 	Name() string
 	Description() string

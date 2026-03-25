@@ -18,7 +18,9 @@ func TestManager_Empty(t *testing.T) {
 func TestManager_Register(t *testing.T) {
 	m := plugin.NewManager()
 	p := &plugin.StubPlugin{PluginName: "test"}
-	m.Register(p)
+	if err := m.Register(p); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
 	plugins := m.List()
 	if len(plugins) != 1 {
 		t.Fatalf("expected 1 plugin, got %d", len(plugins))
@@ -30,8 +32,12 @@ func TestManager_Register(t *testing.T) {
 
 func TestManager_Get(t *testing.T) {
 	m := plugin.NewManager()
-	m.Register(&plugin.StubPlugin{PluginName: "alpha"})
-	m.Register(&plugin.StubPlugin{PluginName: "beta"})
+	if err := m.Register(&plugin.StubPlugin{PluginName: "alpha"}); err != nil {
+		t.Fatalf("Register alpha: %v", err)
+	}
+	if err := m.Register(&plugin.StubPlugin{PluginName: "beta"}); err != nil {
+		t.Fatalf("Register beta: %v", err)
+	}
 
 	p, ok := m.Get("alpha")
 	if !ok {
@@ -65,6 +71,21 @@ func TestManager_LoadWrappersFromDir_Valid(t *testing.T) {
 		if _, ok := m.Get(name); !ok {
 			t.Errorf("expected plugin %q to be registered", name)
 		}
+	}
+}
+
+func TestManager_Register_Duplicate(t *testing.T) {
+	m := plugin.NewManager()
+	if err := m.Register(&plugin.StubPlugin{PluginName: "dup"}); err != nil {
+		t.Fatalf("first Register: %v", err)
+	}
+	err := m.Register(&plugin.StubPlugin{PluginName: "dup"})
+	if err == nil {
+		t.Fatal("expected error on duplicate registration, got nil")
+	}
+	// First registration must still be intact.
+	if _, ok := m.Get("dup"); !ok {
+		t.Error("original plugin should still be registered after duplicate attempt")
 	}
 }
 

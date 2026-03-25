@@ -9,6 +9,7 @@ package orcaiv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	structpb "google.golang.org/protobuf/types/known/structpb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -257,10 +258,12 @@ func (x *StatusResponse) GetMessage() string {
 	return ""
 }
 
+// ExecuteRequest is a single invocation: send one request, receive a stream of chunks.
+// args holds the primary input text under "input" and any additional metadata;
+// structured types are supported via google.protobuf.Struct.
 type ExecuteRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Input         string                 `protobuf:"bytes,1,opt,name=input,proto3" json:"input,omitempty"`
-	Vars          map[string]string      `protobuf:"bytes,2,rep,name=vars,proto3" json:"vars,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Args          *structpb.Struct       `protobuf:"bytes,1,opt,name=args,proto3" json:"args,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -295,25 +298,26 @@ func (*ExecuteRequest) Descriptor() ([]byte, []int) {
 	return file_plugin_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *ExecuteRequest) GetInput() string {
+func (x *ExecuteRequest) GetArgs() *structpb.Struct {
 	if x != nil {
-		return x.Input
-	}
-	return ""
-}
-
-func (x *ExecuteRequest) GetVars() map[string]string {
-	if x != nil {
-		return x.Vars
+		return x.Args
 	}
 	return nil
 }
 
+// ExecuteResponse is one chunk of a streaming execution.
+// When done is true the stream is complete. error is only set on the final message
+// if the execution failed; a clean completion has done=true and error="".
+// payload is either a streaming text chunk or a structured output map.
 type ExecuteResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Chunk         string                 `protobuf:"bytes,1,opt,name=chunk,proto3" json:"chunk,omitempty"`
-	Done          bool                   `protobuf:"varint,2,opt,name=done,proto3" json:"done,omitempty"`
-	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Payload:
+	//
+	//	*ExecuteResponse_Chunk
+	//	*ExecuteResponse_Output
+	Payload       isExecuteResponse_Payload `protobuf_oneof:"payload"`
+	Done          bool                      `protobuf:"varint,2,opt,name=done,proto3" json:"done,omitempty"`
+	Error         string                    `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -348,11 +352,29 @@ func (*ExecuteResponse) Descriptor() ([]byte, []int) {
 	return file_plugin_proto_rawDescGZIP(), []int{6}
 }
 
+func (x *ExecuteResponse) GetPayload() isExecuteResponse_Payload {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
 func (x *ExecuteResponse) GetChunk() string {
 	if x != nil {
-		return x.Chunk
+		if x, ok := x.Payload.(*ExecuteResponse_Chunk); ok {
+			return x.Chunk
+		}
 	}
 	return ""
+}
+
+func (x *ExecuteResponse) GetOutput() *structpb.Struct {
+	if x != nil {
+		if x, ok := x.Payload.(*ExecuteResponse_Output); ok {
+			return x.Output
+		}
+	}
+	return nil
 }
 
 func (x *ExecuteResponse) GetDone() bool {
@@ -368,6 +390,22 @@ func (x *ExecuteResponse) GetError() string {
 	}
 	return ""
 }
+
+type isExecuteResponse_Payload interface {
+	isExecuteResponse_Payload()
+}
+
+type ExecuteResponse_Chunk struct {
+	Chunk string `protobuf:"bytes,1,opt,name=chunk,proto3,oneof"`
+}
+
+type ExecuteResponse_Output struct {
+	Output *structpb.Struct `protobuf:"bytes,4,opt,name=output,proto3,oneof"`
+}
+
+func (*ExecuteResponse_Chunk) isExecuteResponse_Payload() {}
+
+func (*ExecuteResponse_Output) isExecuteResponse_Payload() {}
 
 type Capability struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -477,7 +515,7 @@ var File_plugin_proto protoreflect.FileDescriptor
 
 const file_plugin_proto_rawDesc = "" +
 	"\n" +
-	"\fplugin.proto\x12\borcai.v1\"\a\n" +
+	"\fplugin.proto\x12\borcai.v1\x1a\x1cgoogle/protobuf/struct.proto\"\a\n" +
 	"\x05Empty\"\x80\x01\n" +
 	"\n" +
 	"PluginInfo\x12\x12\n" +
@@ -491,17 +529,15 @@ const file_plugin_proto_rawDesc = "" +
 	"\rStartResponse\"@\n" +
 	"\x0eStatusResponse\x12\x14\n" +
 	"\x05state\x18\x01 \x01(\tR\x05state\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\x97\x01\n" +
-	"\x0eExecuteRequest\x12\x14\n" +
-	"\x05input\x18\x01 \x01(\tR\x05input\x126\n" +
-	"\x04vars\x18\x02 \x03(\v2\".orcai.v1.ExecuteRequest.VarsEntryR\x04vars\x1a7\n" +
-	"\tVarsEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"Q\n" +
-	"\x0fExecuteResponse\x12\x14\n" +
-	"\x05chunk\x18\x01 \x01(\tR\x05chunk\x12\x12\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"=\n" +
+	"\x0eExecuteRequest\x12+\n" +
+	"\x04args\x18\x01 \x01(\v2\x17.google.protobuf.StructR\x04args\"\x91\x01\n" +
+	"\x0fExecuteResponse\x12\x16\n" +
+	"\x05chunk\x18\x01 \x01(\tH\x00R\x05chunk\x121\n" +
+	"\x06output\x18\x04 \x01(\v2\x17.google.protobuf.StructH\x00R\x06output\x12\x12\n" +
 	"\x04done\x18\x02 \x01(\bR\x04done\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"h\n" +
+	"\x05error\x18\x03 \x01(\tR\x05errorB\t\n" +
+	"\apayload\"h\n" +
 	"\n" +
 	"Capability\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
@@ -529,7 +565,7 @@ func file_plugin_proto_rawDescGZIP() []byte {
 	return file_plugin_proto_rawDescData
 }
 
-var file_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_plugin_proto_goTypes = []any{
 	(*Empty)(nil),           // 0: orcai.v1.Empty
 	(*PluginInfo)(nil),      // 1: orcai.v1.PluginInfo
@@ -540,28 +576,29 @@ var file_plugin_proto_goTypes = []any{
 	(*ExecuteResponse)(nil), // 6: orcai.v1.ExecuteResponse
 	(*Capability)(nil),      // 7: orcai.v1.Capability
 	(*CapabilityList)(nil),  // 8: orcai.v1.CapabilityList
-	nil,                     // 9: orcai.v1.ExecuteRequest.VarsEntry
+	(*structpb.Struct)(nil), // 9: google.protobuf.Struct
 }
 var file_plugin_proto_depIdxs = []int32{
-	9, // 0: orcai.v1.ExecuteRequest.vars:type_name -> orcai.v1.ExecuteRequest.VarsEntry
-	7, // 1: orcai.v1.CapabilityList.items:type_name -> orcai.v1.Capability
-	0, // 2: orcai.v1.OrcaiPlugin.GetInfo:input_type -> orcai.v1.Empty
-	2, // 3: orcai.v1.OrcaiPlugin.Start:input_type -> orcai.v1.StartRequest
-	0, // 4: orcai.v1.OrcaiPlugin.Stop:input_type -> orcai.v1.Empty
-	0, // 5: orcai.v1.OrcaiPlugin.GetStatus:input_type -> orcai.v1.Empty
-	5, // 6: orcai.v1.OrcaiPlugin.Execute:input_type -> orcai.v1.ExecuteRequest
-	0, // 7: orcai.v1.OrcaiPlugin.Capabilities:input_type -> orcai.v1.Empty
-	1, // 8: orcai.v1.OrcaiPlugin.GetInfo:output_type -> orcai.v1.PluginInfo
-	3, // 9: orcai.v1.OrcaiPlugin.Start:output_type -> orcai.v1.StartResponse
-	0, // 10: orcai.v1.OrcaiPlugin.Stop:output_type -> orcai.v1.Empty
-	4, // 11: orcai.v1.OrcaiPlugin.GetStatus:output_type -> orcai.v1.StatusResponse
-	6, // 12: orcai.v1.OrcaiPlugin.Execute:output_type -> orcai.v1.ExecuteResponse
-	8, // 13: orcai.v1.OrcaiPlugin.Capabilities:output_type -> orcai.v1.CapabilityList
-	8, // [8:14] is the sub-list for method output_type
-	2, // [2:8] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	9, // 0: orcai.v1.ExecuteRequest.args:type_name -> google.protobuf.Struct
+	9, // 1: orcai.v1.ExecuteResponse.output:type_name -> google.protobuf.Struct
+	7, // 2: orcai.v1.CapabilityList.items:type_name -> orcai.v1.Capability
+	0, // 3: orcai.v1.OrcaiPlugin.GetInfo:input_type -> orcai.v1.Empty
+	2, // 4: orcai.v1.OrcaiPlugin.Start:input_type -> orcai.v1.StartRequest
+	0, // 5: orcai.v1.OrcaiPlugin.Stop:input_type -> orcai.v1.Empty
+	0, // 6: orcai.v1.OrcaiPlugin.GetStatus:input_type -> orcai.v1.Empty
+	5, // 7: orcai.v1.OrcaiPlugin.Execute:input_type -> orcai.v1.ExecuteRequest
+	0, // 8: orcai.v1.OrcaiPlugin.Capabilities:input_type -> orcai.v1.Empty
+	1, // 9: orcai.v1.OrcaiPlugin.GetInfo:output_type -> orcai.v1.PluginInfo
+	3, // 10: orcai.v1.OrcaiPlugin.Start:output_type -> orcai.v1.StartResponse
+	0, // 11: orcai.v1.OrcaiPlugin.Stop:output_type -> orcai.v1.Empty
+	4, // 12: orcai.v1.OrcaiPlugin.GetStatus:output_type -> orcai.v1.StatusResponse
+	6, // 13: orcai.v1.OrcaiPlugin.Execute:output_type -> orcai.v1.ExecuteResponse
+	8, // 14: orcai.v1.OrcaiPlugin.Capabilities:output_type -> orcai.v1.CapabilityList
+	9, // [9:15] is the sub-list for method output_type
+	3, // [3:9] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_plugin_proto_init() }
@@ -569,13 +606,17 @@ func file_plugin_proto_init() {
 	if File_plugin_proto != nil {
 		return
 	}
+	file_plugin_proto_msgTypes[6].OneofWrappers = []any{
+		(*ExecuteResponse_Chunk)(nil),
+		(*ExecuteResponse_Output)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_plugin_proto_rawDesc), len(file_plugin_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

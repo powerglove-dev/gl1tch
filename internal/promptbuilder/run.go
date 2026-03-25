@@ -14,7 +14,9 @@ func Run() {
 
 	mgr := plugin.NewManager()
 	for _, p := range providers {
-		mgr.Register(plugin.NewCliAdapter(p.ID, p.Label+" CLI adapter", p.ID))
+		if err := mgr.Register(plugin.NewCliAdapter(p.ID, p.Label+" CLI adapter", p.ID)); err != nil {
+			fmt.Printf("prompt builder: register plugin %q: %v\n", p.ID, err)
+		}
 	}
 
 	m := New(mgr)

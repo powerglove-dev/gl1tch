@@ -32,15 +32,17 @@ func TestRunner_LinearPipeline(t *testing.T) {
 	}
 
 	mgr := plugin.NewManager()
-	mgr.Register(&plugin.StubPlugin{
+	if err := mgr.Register(&plugin.StubPlugin{
 		PluginName: "echo",
 		ExecuteFn: func(_ context.Context, input string, _ map[string]string, w io.Writer) error {
 			_, err := w.Write([]byte("echoed: " + input))
 			return err
 		},
-	})
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
 
-	result, err := pipeline.Run(context.Background(), p, mgr, "hello world")
+	result, err := pipeline.Run(context.Background(), p, mgr, "hello world", pipeline.NoopPublisher{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -70,11 +72,17 @@ func TestRunner_ConditionalBranch_Then(t *testing.T) {
 	}
 
 	mgr := plugin.NewManager()
-	mgr.Register(makeWritePlugin("classifier", "golang rocks"))
-	mgr.Register(makeWritePlugin("go-handler", "handled by go"))
-	mgr.Register(makeWritePlugin("other-handler", "handled by other"))
+	for _, p := range []plugin.Plugin{
+		makeWritePlugin("classifier", "golang rocks"),
+		makeWritePlugin("go-handler", "handled by go"),
+		makeWritePlugin("other-handler", "handled by other"),
+	} {
+		if err := mgr.Register(p); err != nil {
+			t.Fatalf("Register: %v", err)
+		}
+	}
 
-	result, err := pipeline.Run(context.Background(), p, mgr, "golang rocks")
+	result, err := pipeline.Run(context.Background(), p, mgr, "golang rocks", pipeline.NoopPublisher{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -104,11 +112,17 @@ func TestRunner_ConditionalBranch_Else(t *testing.T) {
 	}
 
 	mgr := plugin.NewManager()
-	mgr.Register(makeWritePlugin("classifier", "golang rocks"))
-	mgr.Register(makeWritePlugin("py-handler", "python handler"))
-	mgr.Register(makeWritePlugin("default-handler", "default handler"))
+	for _, p := range []plugin.Plugin{
+		makeWritePlugin("classifier", "golang rocks"),
+		makeWritePlugin("py-handler", "python handler"),
+		makeWritePlugin("default-handler", "default handler"),
+	} {
+		if err := mgr.Register(p); err != nil {
+			t.Fatalf("Register: %v", err)
+		}
+	}
 
-	result, err := pipeline.Run(context.Background(), p, mgr, "golang rocks")
+	result, err := pipeline.Run(context.Background(), p, mgr, "golang rocks", pipeline.NoopPublisher{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -129,16 +143,18 @@ func TestRunner_TemplateInterpolation(t *testing.T) {
 
 	mgr := plugin.NewManager()
 	var capturedInput string
-	mgr.Register(&plugin.StubPlugin{
+	if err := mgr.Register(&plugin.StubPlugin{
 		PluginName: "upper",
 		ExecuteFn: func(_ context.Context, input string, _ map[string]string, w io.Writer) error {
 			capturedInput = input
 			_, err := w.Write([]byte("done"))
 			return err
 		},
-	})
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
 
-	_, err := pipeline.Run(context.Background(), p, mgr, "hello")
+	_, err := pipeline.Run(context.Background(), p, mgr, "hello", pipeline.NoopPublisher{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -156,8 +172,8 @@ func TestRunner_MissingPlugin(t *testing.T) {
 			{ID: "out", Type: "output"},
 		},
 	}
-	mgr := plugin.NewManager()
-	_, err := pipeline.Run(context.Background(), p, mgr, "hello")
+	mgr := plugin.NewManager() // empty — no plugins registered intentionally
+	_, err := pipeline.Run(context.Background(), p, mgr, "hello", pipeline.NoopPublisher{})
 	if err == nil {
 		t.Error("expected error for missing plugin")
 	}

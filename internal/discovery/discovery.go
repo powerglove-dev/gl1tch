@@ -26,6 +26,9 @@ type Plugin struct {
 }
 
 // knownCLITools is the built-in registry of AI CLI tools orcai auto-detects.
+// Plugin name is derived directly from the Name field (usually matching the binary name).
+// For multi-word commands like "gh copilot", Name is the logical alias ("copilot") and
+// Args holds the subcommand so the name stays unique and predictable.
 var knownCLITools = []Plugin{
 	{Name: "claude",   Command: "claude"},
 	{Name: "opencode", Command: "opencode"},

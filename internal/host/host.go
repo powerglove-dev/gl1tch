@@ -53,6 +53,9 @@ func New(busAddr string) *Host {
 
 // Load starts a plugin and connects to it. CLI wrappers are registered without
 // launching a process (the sidebar/tmux layer handles launching them).
+//
+// Plugin process lifecycle (start/stop) is managed here. Per-step execution
+// lifecycle (init/execute/cleanup) is managed by the pipeline runner — do not conflate.
 func (h *Host) Load(p discovery.Plugin) error {
 	if p.Type == discovery.TypeCLIWrapper {
 		h.loaded = append(h.loaded, &LoadedPlugin{Plugin: p})

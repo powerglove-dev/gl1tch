@@ -68,6 +68,8 @@ func (c *CliAdapter) Capabilities() []Capability { return c.caps }
 func (c *CliAdapter) Close() error               { return nil }
 
 // Execute spawns the subprocess, writes input to stdin, and streams stdout to w.
+// vars is accepted for interface compatibility but is not passed to the subprocess;
+// use sidecar YAML args for fixed flags.
 func (c *CliAdapter) Execute(ctx context.Context, input string, _ map[string]string, w io.Writer) error {
 	cmd := exec.CommandContext(ctx, c.cmd, c.args...)
 	cmd.Stdin = strings.NewReader(input)

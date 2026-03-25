@@ -2,6 +2,8 @@ syntax = "proto3";
 package orcai.v1;
 option go_package = "github.com/adam-stokes/orcai/proto/orcai/v1;orcaiv1";
 
+import "google/protobuf/struct.proto";
+
 message Empty {}
 
 message PluginInfo {
@@ -23,17 +25,21 @@ message StatusResponse {
 }
 
 // ExecuteRequest is a single invocation: send one request, receive a stream of chunks.
-// vars holds template variables available for interpolation within the plugin.
+// args holds the primary input text under "input" and any additional metadata;
+// structured types are supported via google.protobuf.Struct.
 message ExecuteRequest {
-  string input             = 1;
-  map<string, string> vars = 2;
+  google.protobuf.Struct args = 1;
 }
 
 // ExecuteResponse is one chunk of a streaming execution.
 // When done is true the stream is complete. error is only set on the final message
 // if the execution failed; a clean completion has done=true and error="".
+// payload is either a streaming text chunk or a structured output map.
 message ExecuteResponse {
-  string chunk = 1;
+  oneof payload {
+    string chunk                = 1;
+    google.protobuf.Struct output = 4;
+  }
   bool   done  = 2;
   string error = 3;
 }

@@ -67,7 +67,7 @@ func TestLoad_MissingName(t *testing.T) {
 }
 
 func TestInterpolate_Simple(t *testing.T) {
-	vars := map[string]string{"step1.out": "golang plugins"}
+	vars := map[string]any{"step1.out": "golang plugins"}
 	result := pipeline.Interpolate("Summarize: {{step1.out}}", vars)
 	if result != "Summarize: golang plugins" {
 		t.Errorf("got %q", result)
@@ -75,7 +75,7 @@ func TestInterpolate_Simple(t *testing.T) {
 }
 
 func TestInterpolate_Multiple(t *testing.T) {
-	vars := map[string]string{"a.out": "foo", "b.out": "bar"}
+	vars := map[string]any{"a.out": "foo", "b.out": "bar"}
 	result := pipeline.Interpolate("{{a.out}} and {{b.out}}", vars)
 	if result != "foo and bar" {
 		t.Errorf("got %q", result)
@@ -83,10 +83,18 @@ func TestInterpolate_Multiple(t *testing.T) {
 }
 
 func TestInterpolate_Missing(t *testing.T) {
-	vars := map[string]string{}
+	vars := map[string]any{}
 	result := pipeline.Interpolate("hello {{missing.out}}", vars)
 	// Missing vars are left as-is.
 	if result != "hello {{missing.out}}" {
+		t.Errorf("got %q", result)
+	}
+}
+
+func TestInterpolate_NonStringValue(t *testing.T) {
+	vars := map[string]any{"count": 42}
+	result := pipeline.Interpolate("count={{count}}", vars)
+	if result != "count=42" {
 		t.Errorf("got %q", result)
 	}
 }
