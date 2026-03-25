@@ -155,32 +155,33 @@ func TestRegistry_ActiveDefaultNotNil(t *testing.T) {
 }
 
 func TestRegistry_SetActive_PersistsAndRestores(t *testing.T) {
-	// Use a temp config dir so we don't pollute the real config.
-	cfgDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", cfgDir) // honoured by os.UserConfigDir on Linux
-	// macOS uses $HOME/Library/Application Support; override via HOME trick
-	// won't work cleanly, so we test the write + restore path by calling
-	// SetActive then NewRegistry again within the same temp config dir.
+	// Override HOME so os.UserConfigDir() resolves into our temp dir on both
+	// macOS ($HOME/Library/Application Support) and Linux ($HOME/.config).
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "") // clear so Linux falls back to $HOME/.config
 
-	reg, err := themes.NewRegistry("")
+	reg1, err := themes.NewRegistry("")
 	if err != nil {
 		t.Fatalf("NewRegistry() error: %v", err)
 	}
-	// Confirm abs is available.
-	if _, ok := reg.Get("abs"); !ok {
-		t.Skip("abs theme not available; skipping SetActive test")
+	if _, ok := reg1.Get("abs"); !ok {
+		t.Skip("abs theme not in bundled set; skipping persistence test")
 	}
 
-	if err := reg.SetActive("abs"); err != nil {
+	if err := reg1.SetActive("abs"); err != nil {
 		t.Fatalf("SetActive(%q) error: %v", "abs", err)
 	}
-	if reg.Active() == nil || reg.Active().Name != "abs" {
-		t.Errorf("Active() after SetActive: got %v, want abs", reg.Active())
-	}
 
-	// Verify the active theme is non-nil and correct.
-	if reg.Active().Name != "abs" {
-		t.Errorf("restored active theme = %q, want %q", reg.Active().Name, "abs")
+	// Create a second registry in the same HOME — it should restore "abs".
+	reg2, err := themes.NewRegistry("")
+	if err != nil {
+		t.Fatalf("second NewRegistry() error: %v", err)
+	}
+	if reg2.Active() == nil {
+		t.Fatal("second registry Active() is nil")
+	}
+	if reg2.Active().Name != "abs" {
+		t.Errorf("persisted active theme restored as %q, want %q", reg2.Active().Name, "abs")
 	}
 }
 
