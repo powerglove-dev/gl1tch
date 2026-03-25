@@ -1,0 +1,653 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+
+:root {
+  --bg: #282a36;
+  --fg: #f8f8f2;
+  --purple: #bd93f9;
+  --pink: #ff79c6;
+  --cyan: #8be9fd;
+  --green: #50fa7b;
+  --yellow: #f1fa8c;
+  --red: #ff5555;
+  --comment: #6272a4;
+  --selbg: #44475a;
+  --darkbg: #1e1f29;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* CRT scanlines overlay */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Vignette overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 60%, rgba(0, 0, 0, 0.4) 100%);
+  pointer-events: none;
+  z-index: 9998;
+}
+
+/* ─── TYPOGRAPHY ─────────────────────────────────────────── */
+
+h1, h2, h3 {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+a {
+  color: var(--cyan);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--pink);
+  text-decoration: underline;
+}
+
+/* ─── ANSI COLOR HELPERS ─────────────────────────────────── */
+
+.fg-purple  { color: var(--purple); }
+.fg-pink    { color: var(--pink); }
+.fg-cyan    { color: var(--cyan); }
+.fg-green   { color: var(--green); }
+.fg-yellow  { color: var(--yellow); }
+.fg-red     { color: var(--red); }
+.fg-comment { color: var(--comment); }
+.fg-fg      { color: var(--fg); }
+.bold       { font-weight: bold; }
+
+.blink {
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* ─── HEX BACKGROUND CANVAS ─────────────────────────────── */
+
+#hexbg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* ─── NAV BAR ─────────────────────────────────────────────── */
+
+.bbs-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  background: var(--darkbg);
+  border-bottom: 1px solid var(--purple);
+  padding: 0;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--purple);
+  font-size: 13px;
+  user-select: none;
+}
+
+.bbs-nav-inner {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 5px 16px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.bbs-nav-border {
+  display: block;
+  color: var(--purple);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  padding: 0 16px;
+  opacity: 0.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+  line-height: 1.2;
+}
+
+.bbs-nav a {
+  color: var(--purple);
+  text-decoration: none;
+  padding: 0 10px;
+  transition: color 0.1s;
+}
+
+.bbs-nav a:hover {
+  color: var(--cyan);
+  text-decoration: none;
+}
+
+.bbs-nav a.active {
+  color: var(--cyan);
+}
+
+.bbs-nav .nav-brand {
+  color: var(--pink);
+  font-weight: bold;
+  padding-right: 4px;
+}
+
+.bbs-nav .sep {
+  color: var(--comment);
+  padding: 0 2px;
+}
+
+/* ─── LAYOUT ─────────────────────────────────────────────── */
+
+.hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding-top: 50px;
+  padding-bottom: 40px;
+  position: relative;
+  z-index: 1;
+}
+
+.content {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 20px 24px;
+  position: relative;
+  z-index: 1;
+}
+
+.content-padded {
+  padding-top: 70px;
+}
+
+/* ─── ANSI LOGO ───────────────────────────────────────────── */
+
+.ansi-logo {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  line-height: 1.2;
+  font-size: clamp(7px, 1.1vw, 15px);
+  text-align: left;
+  display: inline-block;
+  text-shadow: 0 0 12px rgba(189, 147, 249, 0.35);
+  margin-bottom: 8px;
+}
+
+/* ─── TYPEWRITER ─────────────────────────────────────────── */
+
+.typewriter-wrap {
+  min-height: 2em;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: clamp(13px, 1.5vw, 17px);
+  color: var(--fg);
+  margin: 12px 0 4px;
+  text-align: center;
+}
+
+.cursor {
+  display: inline-block;
+  color: var(--cyan);
+  animation: blink 0.8s step-end infinite;
+  font-weight: bold;
+}
+
+/* ─── SYSTEM INFO BOX ─────────────────────────────────────── */
+
+.sysinfo-box {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  margin-top: 28px;
+  white-space: pre;
+  display: inline-block;
+  text-align: left;
+}
+
+.sysinfo-box .box-title {
+  color: var(--purple);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 16px;
+  letter-spacing: 1px;
+}
+
+.sysinfo-box .box-border {
+  color: var(--purple);
+}
+
+.sysinfo-box .box-label {
+  color: var(--comment);
+}
+
+.sysinfo-box .box-value {
+  color: var(--fg);
+}
+
+.sysinfo-box .key-hint {
+  color: var(--yellow);
+}
+
+.sysinfo-box .key-action {
+  color: var(--fg);
+}
+
+.sysinfo-box .key-action a {
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.sysinfo-box .key-action a:hover {
+  color: var(--cyan);
+}
+
+/* ─── FEATURES GRID ─────────────────────────────────────── */
+
+.features {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  max-width: 900px;
+  margin: 48px auto 32px;
+  padding: 0 20px;
+}
+
+.feature-card {
+  border: 1px solid var(--purple);
+  padding: 18px 16px 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  background: rgba(30, 31, 41, 0.6);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.feature-card:hover {
+  border-color: var(--cyan);
+  box-shadow: 0 0 12px rgba(139, 233, 253, 0.1);
+}
+
+.feature-card:nth-child(2) {
+  border-color: var(--cyan);
+}
+
+.feature-card:nth-child(3) {
+  border-color: var(--green);
+}
+
+.feature-card h3 {
+  color: var(--purple);
+  font-size: 14px;
+  margin-bottom: 10px;
+  letter-spacing: 1px;
+}
+
+.feature-card:nth-child(2) h3 {
+  color: var(--cyan);
+}
+
+.feature-card:nth-child(3) h3 {
+  color: var(--green);
+}
+
+.feature-card p {
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+/* ─── ASCII BOXES ─────────────────────────────────────────── */
+
+.ascii-box {
+  border: 1px solid var(--purple);
+  padding: 16px 20px;
+  font-family: 'JetBrains Mono', monospace;
+  white-space: pre;
+  background: rgba(30, 31, 41, 0.5);
+}
+
+.ascii-box-cyan  { border-color: var(--cyan); }
+.ascii-box-green { border-color: var(--green); }
+.ascii-box-pink  { border-color: var(--pink); }
+.ascii-box-yellow { border-color: var(--yellow); }
+
+/* ─── CODE BLOCKS ────────────────────────────────────────── */
+
+pre.code-block {
+  background: var(--darkbg);
+  border-left: 3px solid var(--cyan);
+  padding: 14px 16px;
+  padding-right: 60px;
+  overflow-x: auto;
+  font-size: 13px;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  line-height: 1.65;
+  position: relative;
+  margin: 12px 0;
+  white-space: pre;
+}
+
+pre.code-block.yaml-block {
+  border-left-color: var(--yellow);
+}
+
+pre.code-block.bash-block {
+  border-left-color: var(--green);
+}
+
+.copy-btn {
+  position: absolute;
+  top: 7px;
+  right: 10px;
+  background: none;
+  border: none;
+  color: var(--yellow);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  transition: color 0.1s;
+  z-index: 2;
+}
+
+.copy-btn:hover {
+  color: var(--cyan);
+}
+
+/* ─── TERMINAL SESSION CONTENT ────────────────────────────── */
+
+.term-session {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.8;
+  max-width: 800px;
+}
+
+.term-section-header {
+  color: var(--purple);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 20px;
+  letter-spacing: 2px;
+  margin-top: 28px;
+  margin-bottom: 4px;
+}
+
+.term-divider {
+  color: var(--selbg);
+  margin-bottom: 10px;
+}
+
+.term-cmd {
+  color: var(--green);
+  display: block;
+}
+
+.term-cmd::before {
+  content: '$ ';
+  color: var(--comment);
+}
+
+.term-output {
+  color: var(--fg);
+  padding-left: 2ch;
+  display: block;
+}
+
+.term-comment {
+  color: var(--comment);
+  display: block;
+  padding-left: 2ch;
+}
+
+.term-check-ok {
+  color: var(--green);
+}
+
+.term-check-no {
+  color: var(--comment);
+}
+
+.term-prompt-label {
+  color: var(--purple);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 18px;
+  display: block;
+  margin-top: 20px;
+}
+
+/* ─── SECTION HEADERS ────────────────────────────────────── */
+
+h2.section-header {
+  color: var(--purple);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 28px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--selbg);
+  padding-bottom: 4px;
+  margin: 40px 0 20px;
+}
+
+/* ─── FOOTER ─────────────────────────────────────────────── */
+
+.bbs-footer {
+  text-align: center;
+  color: var(--comment);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 28px 20px 24px;
+  border-top: 1px solid var(--selbg);
+  margin-top: 60px;
+  position: relative;
+  z-index: 1;
+}
+
+.bbs-footer a {
+  color: var(--comment);
+}
+
+.bbs-footer a:hover {
+  color: var(--purple);
+}
+
+/* ─── PLUGIN DIAGRAM ─────────────────────────────────────── */
+
+.plugin-diagram {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--fg);
+  text-align: center;
+  padding: 24px;
+  background: var(--darkbg);
+  border: 1px solid var(--selbg);
+  margin: 24px 0;
+}
+
+.plugin-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-top: 24px;
+}
+
+.plugin-tier {
+  border: 1px solid var(--purple);
+  padding: 18px 16px;
+  background: rgba(30, 31, 41, 0.5);
+}
+
+.plugin-tier.tier2 {
+  border-color: var(--cyan);
+}
+
+.plugin-tier h3 {
+  color: var(--purple);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 20px;
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+}
+
+.plugin-tier.tier2 h3 {
+  color: var(--cyan);
+}
+
+.plugin-tier p {
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+/* ─── HERO SUBTITLE ──────────────────────────────────────── */
+
+.hero-subtitle {
+  color: var(--comment);
+  font-size: 12px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-bottom: 20px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 16px;
+}
+
+/* ─── RESPONSIVE ─────────────────────────────────────────── */
+
+@media (max-width: 700px) {
+  .features {
+    grid-template-columns: 1fr;
+  }
+
+  .plugin-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ansi-logo {
+    font-size: clamp(5px, 2.2vw, 9px);
+  }
+
+  .sysinfo-box {
+    font-size: 11px;
+  }
+
+  .bbs-nav-border {
+    display: none;
+  }
+
+  .bbs-nav a {
+    padding: 0 6px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .ansi-logo {
+    font-size: 5px;
+  }
+}
+
+/* ─── HIGHLIGHT / SELECTION ──────────────────────────────── */
+
+::selection {
+  background: var(--selbg);
+  color: var(--fg);
+}
+
+/* ─── SCROLLBAR (webkit) ─────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--darkbg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--selbg);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--comment);
+}
+
+/* ─── GLOW PULSE ON LOGO ─────────────────────────────────── */
+
+@keyframes logoPulse {
+  0%, 100% { text-shadow: 0 0 8px rgba(189, 147, 249, 0.3); }
+  50%       { text-shadow: 0 0 18px rgba(189, 147, 249, 0.55), 0 0 32px rgba(139, 233, 253, 0.15); }
+}
+
+.ansi-logo {
+  animation: logoPulse 4s ease-in-out infinite;
+}
+
+/* ─── SETUP GUIDE BOX ────────────────────────────────────── */
+
+.setup-header {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--purple);
+  white-space: pre;
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.req-item {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  padding-left: 2ch;
+  line-height: 1.9;
+}
+
+/* ─── NODE STATUS LINE ───────────────────────────────────── */
+
+.node-status {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--comment);
+  text-align: right;
+  padding: 4px 16px;
+  border-top: 1px solid var(--selbg);
+  letter-spacing: 1px;
+}
+
+.node-status .online {
+  color: var(--green);
+}
