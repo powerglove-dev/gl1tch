@@ -59,6 +59,9 @@ func TestBuildTmuxConf_Keybindings(t *testing.T) {
 	if !strings.Contains(conf, "^spc n new") {
 		t.Error("tmux.conf status-right missing '^spc n new' hint")
 	}
+	if !strings.Contains(conf, "^spc t panel") {
+		t.Error("tmux.conf status-right missing '^spc t panel' hint")
+	}
 	// Sidebar toggle chord must be present.
 	if !strings.Contains(conf, "_sidebar-toggle") {
 		t.Error("tmux.conf missing sidebar toggle chord binding")

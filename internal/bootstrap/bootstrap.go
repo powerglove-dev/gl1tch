@@ -30,8 +30,8 @@ set -g window-status-format ""
 set -g window-status-current-format ""
 set -g status-left "#[fg=#bd93f9,bold] ORCAI #[default]"
 set -g status-left-length 20
-set -g status-right "#[fg=#6272a4] ^spc n new  ^spc p build   %H:%M "
-set -g status-right-length 44
+set -g status-right "#[fg=#6272a4] ^spc n new  ^spc t panel  ^spc p build   %H:%M "
+set -g status-right-length 56
 set -g mouse on
 set -g default-terminal "screen-256color"
 set -g base-index 0
