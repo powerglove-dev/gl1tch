@@ -55,17 +55,17 @@
 
 ## 7. Theme Integration Cleanup
 
-- [ ] 7.1 Move ANSI art assets from `internal/ansiart/` into the ABS theme bundle (`internal/assets/themes/abs/`)
-- [ ] 7.2 Update all references to `internal/ansiart/` to use the theme registry
-- [ ] 7.3 Remove `internal/ansiart/` package after references are cleared
+- [x] 7.1 Move ANSI art assets from `internal/ansiart/` into the ABS theme bundle (`internal/assets/themes/abs/`)
+- [x] 7.2 Update all references to `internal/ansiart/` to use the theme registry
+- [x] 7.3 Remove `internal/ansiart/` package after references are cleared
 
 ## 8. Config Directory Layout
 
-- [ ] 8.1 Update bootstrap (`internal/bootstrap/`) to create `~/.config/orcai/providers/`, `~/.config/orcai/widgets/`, and `~/.config/orcai/themes/` on first run
-- [ ] 8.2 Add active theme storage to orcai config struct and persistence
+- [x] 8.1 Update bootstrap (`internal/bootstrap/`) to create `~/.config/orcai/providers/`, `~/.config/orcai/widgets/`, and `~/.config/orcai/themes/` on first run
+- [x] 8.2 Add active theme storage to orcai config struct and persistence
 
 ## 9. Documentation
 
-- [ ] 9.1 Write `docs/plugins/providers.md` — contributor guide for writing a provider profile YAML
-- [ ] 9.2 Write `docs/plugins/widgets.md` — contributor guide for the widget manifest and bus protocol
-- [ ] 9.3 Write `docs/plugins/themes.md` — contributor guide for theme bundle format and asset files
+- [x] 9.1 Write `docs/plugins/providers.md` — contributor guide for writing a provider profile YAML
+- [x] 9.2 Write `docs/plugins/widgets.md` — contributor guide for the widget manifest and bus protocol
+- [x] 9.3 Write `docs/plugins/themes.md` — contributor guide for theme bundle format and asset files

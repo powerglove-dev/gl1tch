@@ -141,6 +141,13 @@ func Run() error {
 		return fmt.Errorf("writing config: %w", err)
 	}
 
+	// Ensure plugin subdirectories exist on first run.
+	for _, sub := range []string{"providers", "widgets", "themes"} {
+		if err := os.MkdirAll(filepath.Join(cfgDir, sub), 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "orcai: warning: could not create %s dir: %v\n", sub, err)
+		}
+	}
+
 	// Fast path: session already running (e.g. after detach) — just reattach.
 	if SessionExists(SessionName) {
 		cmd := exec.Command("tmux", "-f", confPath, "attach-session", "-t", SessionName)
