@@ -52,7 +52,6 @@ func NewRegistry(userDir string) (*Registry, error) {
 	}
 	// Merge user themes — user wins on collision.
 	for _, u := range user {
-		u := u // capture
 		if idx, exists := r.indexByName(u.Name); exists {
 			r.bundles[idx] = u
 		} else {
