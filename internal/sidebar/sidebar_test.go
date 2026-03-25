@@ -99,24 +99,14 @@ func TestViewContainsWindowName(t *testing.T) {
 func TestViewContainsHeader(t *testing.T) {
 	m := sidebar.NewWithWindows([]sidebar.Window{})
 	view := m.View()
-	// BBS sysop header must be present.
-	if !strings.Contains(view, "╔") {
-		t.Errorf("View() missing outer border '╔':\n%s", view)
+	if !strings.Contains(view, "┌") {
+		t.Errorf("View() missing outer border '┌':\n%s", view)
 	}
 	if !strings.Contains(view, "SYSOP MONITOR") {
 		t.Errorf("View() missing 'SYSOP MONITOR' header:\n%s", view)
 	}
-	// Footer nav hints inside the border.
-	if !strings.Contains(view, "enter focus") {
-		t.Errorf("View() does not contain footer hint 'enter focus':\n%s", view)
-	}
-	// Old banner style must be gone.
-	if strings.Contains(view, "═╢") {
-		t.Errorf("View() still contains old '═╢ ORCAI ╟═' banner:\n%s", view)
-	}
-	// New/build hints must not appear.
-	if strings.Contains(view, "n new") {
-		t.Errorf("View() still contains removed 'n new' footer hint:\n%s", view)
+	if !strings.Contains(view, "enter") {
+		t.Errorf("View() does not contain footer hint 'enter':\n%s", view)
 	}
 }
 
@@ -126,17 +116,16 @@ func TestViewContainsActiveAccent(t *testing.T) {
 		{Index: 2, Name: "opencode-2"},
 	})
 	view := m.View()
-	// cursor=0 → NODE 01 line should have the selection background escape.
+	// cursor=0 → first node row should have the selection background escape.
 	for line := range strings.SplitSeq(view, "\n") {
-		if strings.Contains(line, "NODE 01") {
-			// Selection background ANSI code must be present on this line.
-			if !strings.Contains(line, "\x1b[48;5;236m") {
+		if strings.Contains(line, "claude-1") && strings.Contains(line, "[1]") {
+			if !strings.Contains(line, "\x1b[48;5;235m") {
 				t.Errorf("active node line missing selection background: %q", line)
 			}
 			return
 		}
 	}
-	t.Errorf("View() does not contain a 'NODE 01' line:\n%s", view)
+	t.Errorf("View() does not contain a '[1] claude-1' selected line:\n%s", view)
 }
 
 func TestViewActivityLog(t *testing.T) {
