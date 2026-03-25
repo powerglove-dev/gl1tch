@@ -272,28 +272,10 @@ func boxTop(w int, title string) string {
 		return aBC + "┌" + strings.Repeat("─", w-2) + "┐" + aReset
 	}
 	label := " " + title + " "
-	dashes := w - 2 - len(label)
-	if dashes < 0 {
-		dashes = 0
-	}
+	dashes := max(w-2-len(label), 0)
 	left := dashes / 2
 	right := dashes - left
 	return aBC + "┌" + strings.Repeat("─", left) + aBrC + label + aBC + strings.Repeat("─", right) + "┐" + aReset
-}
-
-// boxMid renders a horizontal rule inside a box (├─┤), with optional title.
-func boxMid(w int, title string) string {
-	if title == "" {
-		return aBC + "├" + strings.Repeat("─", w-2) + "┤" + aReset
-	}
-	label := " " + title + " "
-	dashes := w - 2 - len(label)
-	if dashes < 0 {
-		dashes = 0
-	}
-	left := dashes / 2
-	right := dashes - left
-	return aBC + "├" + strings.Repeat("─", left) + aBrC + label + aBC + strings.Repeat("─", right) + "┤" + aReset
 }
 
 // boxBot renders the bottom edge of a box.
@@ -305,16 +287,8 @@ func boxBot(w int) string {
 // content is an ANSI string; contentVis is its visible length.
 func boxRow(content string, contentVis, w int) string {
 	inner := w - 2
-	pad := inner - contentVis
-	if pad < 0 {
-		pad = 0
-	}
+	pad := max(inner-contentVis, 0)
 	return aBC + "│" + aReset + content + strings.Repeat(" ", pad) + aBC + "│" + aReset
-}
-
-// boxEmpty renders a blank content row inside a box of width w.
-func boxEmpty(w int) string {
-	return aBC + "│" + strings.Repeat(" ", w-2) + "│" + aReset
 }
 
 // sideBySide merges three equal-height column slices into one slice,
@@ -374,18 +348,12 @@ func (m Model) buildNodesColumn(w int) []string {
 		}
 
 		keyLabel := fmt.Sprintf("[%d]", i+1)
-		maxName := inner - len(keyLabel) - 2 - len(badge)
-		if maxName < 1 {
-			maxName = 1
-		}
+		maxName := max(inner-len(keyLabel)-2-len(badge), 1)
 		name := win.Name
 		if len(name) > maxName {
 			name = name[:maxName-1] + "…"
 		}
-		dotCount := inner - len(keyLabel) - 1 - len(name) - 1 - len(badge)
-		if dotCount < 1 {
-			dotCount = 1
-		}
+		dotCount := max(inner-len(keyLabel)-1-len(name)-1-len(badge), 1)
 
 		contentVis := len(keyLabel) + 1 + len(name) + dotCount + len(badge)
 
@@ -420,10 +388,7 @@ func (m Model) buildDetailsColumn(w int) []string {
 	st, hasTel := m.sessionForWindow(win.Name)
 
 	field := func(label, value string) string {
-		dots := 12 - len(label)
-		if dots < 1 {
-			dots = 1
-		}
+		dots := max(12-len(label), 1)
 		line := "  " + aBrC + label + " " + aDim + strings.Repeat(".", dots) + " " + aBC + value + aReset
 		return boxRow(line, 2+len(label)+1+dots+1+len(value), w)
 	}
@@ -496,10 +461,7 @@ func (m Model) View() string {
 	// ── Title bar ─────────────────────────────────────────────────────────────
 	title := "ABS · SYSOP MONITOR"
 	titleVis := len(title)
-	pad := (w - 2 - titleVis) / 2
-	if pad < 0 {
-		pad = 0
-	}
+	pad := max((w-2-titleVis)/2, 0)
 	centred := strings.Repeat(" ", pad) + aBrC + title + aReset
 	lines = append(lines,
 		boxTop(w, ""),
