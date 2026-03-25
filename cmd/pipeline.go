@@ -39,7 +39,7 @@ var pipelineBuildCmd = &cobra.Command{
 		m := promptbuilder.New(mgr)
 		m.SetName("new-pipeline")
 		m.AddStep(pipeline.Step{ID: "input", Type: "input", Prompt: "Enter your prompt:"})
-		m.AddStep(pipeline.Step{ID: "step1", Plugin: "claude", Model: "claude-sonnet-4-6"})
+		m.AddStep(pipeline.Step{ID: "step1", Executor: "claude", Model: "claude-sonnet-4-6"})
 		m.AddStep(pipeline.Step{ID: "output", Type: "output"})
 
 		bubble := promptbuilder.NewBubble(m, providers)

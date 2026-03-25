@@ -34,7 +34,7 @@ func main() {
 				os.Exit(1)
 			}
 			return
-		case "_promptbuilder":
+		case "_promptbuilder", "pipeline-builder":
 			promptbuilder.Run()
 			return
 		case "_help":

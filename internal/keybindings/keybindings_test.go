@@ -90,6 +90,10 @@ func TestActionMap_WindowActions(t *testing.T) {
 		{"select-pane-right", []string{"select-pane", "-R"}},
 		{"select-pane-up", []string{"select-pane", "-U"}},
 		{"select-pane-down", []string{"select-pane", "-D"}},
+		{"resize-pane-left", []string{"resize-pane", "-L", "5"}},
+		{"resize-pane-right", []string{"resize-pane", "-R", "5"}},
+		{"resize-pane-up", []string{"resize-pane", "-U", "5"}},
+		{"resize-pane-down", []string{"resize-pane", "-D", "5"}},
 	}
 	for _, tc := range cases {
 		args, ok := actionMap[tc.action]

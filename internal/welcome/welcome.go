@@ -148,6 +148,7 @@ func buildHelp(width int, p palette) string {
 		p.blue + "    " + p.pink + "x" + p.dim + "  kill pane   " + p.pink + "X" + p.dim + "  kill window" + p.reset,
 		p.blue + "    " + p.pink + "|" + p.dim + "  split right   " + p.pink + "-" + p.dim + "  split down" + p.reset,
 		p.blue + "    " + p.pink + "←→↑↓" + p.dim + "  navigate panes" + p.reset,
+		p.blue + "    " + p.pink + "M-h/l/k/j" + p.dim + "  resize pane" + p.reset,
 		"",
 		col,
 		"",
@@ -234,7 +235,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "t":
 			return m, tmuxExec("split-window", "-h", "-l", "40%", m.self+" sysop")
 		case "p":
-			return m, tmuxExec("new-window", "-n", "prompt-builder", m.self+" _promptbuilder")
+			return m, tmuxExec("new-window", "-n", "pipeline-builder", m.self+" pipeline-builder")
 		case "d":
 			return m, tmuxExec("detach-client")
 		case "c":
@@ -247,6 +248,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tmuxExec("split-window", "-h")
 		case "-":
 			return m, tmuxExec("split-window", "-v")
+		case "alt+h":
+			return m, tmuxExec("resize-pane", "-L", "5")
+		case "alt+l":
+			return m, tmuxExec("resize-pane", "-R", "5")
+		case "alt+k":
+			return m, tmuxExec("resize-pane", "-U", "5")
+		case "alt+j":
+			return m, tmuxExec("resize-pane", "-D", "5")
 		}
 	}
 	return m, nil

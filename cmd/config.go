@@ -28,6 +28,7 @@ var configInitCmd = &cobra.Command{
 
 const defaultLayoutYAML = `# orcai layout configuration
 # Panes are created at session attach time. Remove this file to disable layout init.
+# Available widgets: welcome, sysop, pipeline-builder
 panes:
   - name: welcome
     widget: welcome
@@ -48,6 +49,15 @@ bindings:
     action: open-sysop
   - key: "M-w"
     action: open-welcome
+  # Pane resizing (5 cells per keypress; vim-style keys work reliably on macOS)
+  - key: "M-h"
+    action: resize-pane-left
+  - key: "M-l"
+    action: resize-pane-right
+  - key: "M-k"
+    action: resize-pane-up
+  - key: "M-j"
+    action: resize-pane-down
 `
 
 func runConfigInit(cmd *cobra.Command, args []string) error {

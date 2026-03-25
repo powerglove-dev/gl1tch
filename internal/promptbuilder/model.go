@@ -5,6 +5,14 @@ import (
 	"github.com/adam-stokes/orcai/internal/plugin"
 )
 
+// argsRow is one key/value pair in the args editor.
+type argsRow struct {
+	key   string
+	value string
+	// editingKey is true when the inline editor is focused on the key half.
+	editingKey bool
+}
+
 // Model is the state for the prompt builder TUI.
 type Model struct {
 	name          string

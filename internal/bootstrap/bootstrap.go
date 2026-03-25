@@ -63,7 +63,7 @@ set -g pane-active-border-style "fg=#bd93f9"
 		"bind-key -T orcai-chord n     { switch-client -T root ; display-popup -E -w 120 -h 40 \"" + picker + "\" }\n" +
 		"bind-key -T orcai-chord o     { switch-client -T root ; display-popup -E -w 68 -h 24 \"" + self + " ollama\" }\n" +
 		"bind-key -T orcai-chord s     { switch-client -T root ; display-popup -E -w 44 -h 6 \"" + self + " _opsx\" }\n" +
-		"bind-key -T orcai-chord p     { switch-client -T root ; new-window -t orcai -n prompt-builder \"" + self + " _promptbuilder\" }\n" +
+		"bind-key -T orcai-chord p     { switch-client -T root ; new-window -t orcai -n pipeline-builder \"" + self + " pipeline-builder\" }\n" +
 		"bind-key -T orcai-chord t     { switch-client -T root ; split-window -h -l 40% \"" + sysop + "\" }\n" +
 		// Window management
 		"bind-key -T orcai-chord c     { switch-client -T root ; new-window }\n" +

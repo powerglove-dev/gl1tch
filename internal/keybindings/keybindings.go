@@ -19,7 +19,7 @@ var actionMap = map[string][]string{
 	"launch-session-picker": {"display-popup", "-E", "-w", "120", "-h", "40", "orcai-picker"},
 	"open-sysop":            {"display-popup", "-E", "-w", "120", "-h", "40", "orcai-sysop"},
 	"open-welcome":          {"new-window", "orcai-welcome"},
-	"open-prompt-builder":   {"display-popup", "-E", "-w", "120", "-h", "40", "orcai", "_promptbuilder"},
+	"open-prompt-builder":   {"display-popup", "-E", "-w", "120", "-h", "40", "orcai", "pipeline-builder"},
 	// Window management
 	"new-window":  {"new-window"},
 	"prev-window": {"previous-window"},
@@ -34,6 +34,11 @@ var actionMap = map[string][]string{
 	"select-pane-right": {"select-pane", "-R"},
 	"select-pane-up":    {"select-pane", "-U"},
 	"select-pane-down":  {"select-pane", "-D"},
+	// Pane resizing
+	"resize-pane-left":  {"resize-pane", "-L", "5"},
+	"resize-pane-right": {"resize-pane", "-R", "5"},
+	"resize-pane-up":    {"resize-pane", "-U", "5"},
+	"resize-pane-down":  {"resize-pane", "-D", "5"},
 }
 
 // Binding pairs a tmux key with an orcai action name.
