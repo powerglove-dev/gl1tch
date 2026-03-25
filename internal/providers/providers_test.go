@@ -343,6 +343,17 @@ session:
 	}
 }
 
+func TestLoadUser_MalformedYAML(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "bad.yaml"), []byte(": invalid: yaml: ["), 0644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	_, err := providers.LoadUser(dir)
+	if err == nil {
+		t.Fatal("LoadUser() expected error for malformed YAML, got nil")
+	}
+}
+
 // TestAiderEnvPassThrough checks that the aider profile carries an empty-string
 // ANTHROPIC_API_KEY env value (pass-through convention).
 func TestAiderEnvPassThrough(t *testing.T) {
