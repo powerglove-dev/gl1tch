@@ -1,0 +1,37 @@
+---
+import BBS from '../../layouts/BBS.astro';
+import { getCollection, render } from 'astro:content';
+
+export async function getStaticPaths() {
+  const plugins = await getCollection('registry');
+  return plugins.map(p => ({ params: { id: p.id } }));
+}
+
+const { id } = Astro.params;
+const plugins = await getCollection('registry');
+const entry = plugins.find(p => p.id === id);
+if (!entry) return Astro.redirect('/orcai/registry');
+const { Content } = await render(entry);
+---
+<BBS title={entry.data.name} activePage="registry">
+  <div class="content content-padded" style="position:relative;z-index:1">
+    <p class="fg-comment" style="font-size:12px;margin-bottom:16px">
+      <a href="/orcai/registry">&larr; Registry</a>
+    </p>
+    <h2 class="section-header">// {entry.data.name} //</h2>
+    <p style="font-size:13px;margin-bottom:20px;color:var(--fg)">{entry.data.description}</p>
+    <table style="font-size:12px;border-collapse:collapse;margin-bottom:24px">
+      <tr><td class="fg-comment" style="padding-right:24px;padding-bottom:4px">TIER</td><td class="fg-purple">{entry.data.tier}</td></tr>
+      {entry.data.command && <tr><td class="fg-comment" style="padding-right:24px;padding-bottom:4px">COMMAND</td><td class="fg-green">{entry.data.command}</td></tr>}
+      {entry.data.repo && <tr><td class="fg-comment" style="padding-right:24px;padding-bottom:4px">REPO</td><td><a href={entry.data.repo} target="_blank" rel="noopener">{entry.data.repo}</a></td></tr>}
+    </table>
+    <div class="plugin-content">
+      <Content />
+    </div>
+  </div>
+</BBS>
+
+<style>
+.plugin-content { font-size: 13px; line-height: 1.8; color: var(--fg); }
+.plugin-content pre { background: var(--darkbg); border-left: 3px solid var(--green); padding: 12px 16px; overflow-x: auto; margin: 16px 0; }
+</style>

@@ -1,0 +1,41 @@
+---
+import BBS from '../../layouts/BBS.astro';
+import { getCollection } from 'astro:content';
+
+const plugins = await getCollection('registry');
+plugins.sort((a, b) => a.data.name.localeCompare(b.data.name));
+---
+<BBS title="Plugin Registry" activePage="registry">
+  <div class="content content-padded" style="position:relative;z-index:1">
+    <h2 class="section-header">// Plugin Registry //</h2>
+    <p class="fg-comment" style="font-size:12px;margin-bottom:24px">
+      Community plugins for orcai. <a href="https://github.com/adam-stokes/orcai/issues/new?template=plugin-submission.md">Submit yours &rarr;</a>
+    </p>
+    <div class="registry-grid">
+      {plugins.map((plugin) => (
+        <a href={`/orcai/registry/${plugin.id}`} class="registry-card">
+          <div class="registry-card-header">
+            <span class="fg-purple">{plugin.data.name}</span>
+            <span class={`tier-badge tier-${plugin.data.tier}`}>TIER {plugin.data.tier}</span>
+          </div>
+          <p>{plugin.data.description}</p>
+          <div class="registry-caps">
+            {plugin.data.capabilities.map((cap: string) => <span class="cap-tag">{cap}</span>)}
+          </div>
+        </a>
+      ))}
+    </div>
+  </div>
+</BBS>
+
+<style>
+.registry-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.registry-card { border: 1px solid var(--selbg); padding: 14px 16px; text-decoration: none; color: var(--fg); font-size: 12px; line-height: 1.7; display: block; transition: border-color 0.15s; }
+.registry-card:hover { border-color: var(--cyan); }
+.registry-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.tier-badge { font-size: 10px; letter-spacing: 1px; padding: 1px 6px; border: 1px solid; }
+.tier-1 { color: var(--purple); border-color: var(--purple); }
+.tier-2 { color: var(--comment); border-color: var(--comment); }
+.registry-caps { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+.cap-tag { font-size: 10px; color: var(--comment); border: 1px solid var(--selbg); padding: 0 5px; }
+</style>
