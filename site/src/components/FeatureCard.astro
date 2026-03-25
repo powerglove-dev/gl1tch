@@ -1,0 +1,11 @@
+---
+interface Props {
+  title: string;
+  borderColor?: string;
+}
+const { title, borderColor = 'var(--purple)' } = Astro.props;
+---
+<div class="feature-card" style={`border-color: ${borderColor}`}>
+  <h3>┌─ {title} ─┐</h3>
+  <slot />
+</div>

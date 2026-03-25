@@ -1,0 +1,89 @@
+---
+---
+<div class="sysinfo-box" role="complementary" aria-label="System information">
+  <table class="sysinfo-table">
+    <thead>
+      <tr>
+        <th colspan="2" class="sysinfo-title">SYSTEM: ORCAI v0.1.0</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="box-label">NODE:</td>
+        <td class="box-value"><a href="https://github.com/adam-stokes/orcai" target="_blank" rel="noopener">github.com/adam-stokes/orcai</a></td>
+      </tr>
+      <tr>
+        <td class="box-label">OS:</td>
+        <td class="box-value">Linux · macOS · tmux required</td>
+      </tr>
+      <tr>
+        <td class="box-label">LANG:</td>
+        <td class="box-value">Go 1.21+</td>
+      </tr>
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="2" class="sysinfo-hint"><span class="key-hint">[ENTER]</span> <a href="/orcai/getting-started">Getting Started</a></td>
+      </tr>
+      <tr>
+        <td colspan="2" class="sysinfo-hint"><span class="key-hint">[P]</span>     <a href="/orcai/plugins">Plugin Gallery</a></td>
+      </tr>
+      <tr>
+        <td colspan="2" class="sysinfo-hint"><span class="key-hint">[G]</span>     <a href="https://github.com/adam-stokes/orcai" target="_blank" rel="noopener">GitHub</a></td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+
+<style>
+.sysinfo-table {
+  border: 1px solid var(--purple);
+  border-collapse: collapse;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  min-width: 380px;
+  color: var(--fg);
+}
+.sysinfo-table th,
+.sysinfo-table td {
+  padding: 4px 10px;
+}
+.sysinfo-title {
+  color: var(--cyan);
+  text-align: left;
+  font-weight: normal;
+  border-bottom: 1px solid var(--purple);
+  padding: 6px 10px;
+}
+.box-label {
+  color: var(--comment);
+  white-space: nowrap;
+  vertical-align: top;
+}
+.box-value {
+  color: var(--fg);
+}
+.box-value a {
+  color: var(--cyan);
+  text-decoration: none;
+}
+.box-value a:hover {
+  text-decoration: underline;
+}
+tfoot tr:first-child td {
+  border-top: 1px solid var(--selbg);
+}
+.sysinfo-hint {
+  color: var(--fg);
+}
+.sysinfo-hint a {
+  color: var(--fg);
+  text-decoration: none;
+}
+.sysinfo-hint a:hover {
+  color: var(--cyan);
+}
+.key-hint {
+  color: var(--yellow);
+}
+</style>
