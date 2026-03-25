@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────
-   ORCAI BBS  —  bbs.js
+   ORCAI ABS  —  bbs.js
    Hex dump canvas · Typewriter · Keyboard nav · Copy buttons
    ANSI logo color cycling
    ───────────────────────────────────────────────────────────── */
@@ -138,22 +138,22 @@ function colorLogo() {
   logo.appendChild(fragment);
 }
 
-// ── Keyboard navigation (index.html only) ────────────────────
+// ── Keyboard navigation (index page only) ────────────────────
 function initKeyboardNav() {
   document.addEventListener('keydown', function(e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
     switch (e.key) {
       case 'Enter':
-        window.location.href = 'getting-started.html';
+        window.location.href = '/orcai/getting-started';
         break;
       case 'p':
       case 'P':
-        window.location.href = 'plugins.html';
+        window.location.href = '/orcai/plugins';
         break;
       case 'g':
       case 'G':
-        window.open('https://github.com/orcai', '_blank');
+        window.open('https://github.com/adam-stokes/orcai', '_blank');
         break;
       case 'Escape':
         document.body.style.transition = 'opacity 0.4s';
@@ -253,14 +253,14 @@ document.addEventListener('DOMContentLoaded', function() {
   var tw = document.getElementById('typewriter');
   if (tw) {
     typewriter(tw, [
-      'AI workspace for hackers',
-      'tmux \u00b7 plugins \u00b7 pipelines \u00b7 ANSI art',
-      'run your agents at scale',
-      'ctrl+; to open the chord menu',
+      'AI in your terminal, not your browser',
+      'tmux-native \u00b7 YAML pipelines \u00b7 any CLI as a plugin',
+      'Claude \u00b7 Ollama \u00b7 Copilot \u00b7 local models',
+      'Ctrl+; to open the chord menu',
     ]);
   }
 
-  if (document.body.dataset.page === 'index') {
+  if (document.querySelector('[data-page="index"]')) {
     initKeyboardNav();
   }
 

@@ -20,22 +20,26 @@ import AnsiLogo from '../components/AnsiLogo.astro';
   </section>
 
   <section id="about" class="content" style="position:relative;z-index:1">
-    <h2 class="section-header">// What Is ORCAI //</h2>
+    <h2 class="section-header">// orcai //</h2>
     <p style="color:var(--fg);font-size:13px;line-height:2;max-width:680px;margin-bottom:8px">
-      <span class="fg-purple">orcai</span> is a Go <span class="fg-cyan">BubbleTea</span> TUI
-      that turns your terminal into an AI command center. Manage tmux sessions from an ABS-style
-      sidebar, wire up any CLI tool as a plugin via gRPC or sidecar YAML, and run multi-step AI
-      agent pipelines across Claude, Ollama, GitHub Copilot — all from one dark, dense, beautiful interface.
+      Most AI tools want you in a browser. <span class="fg-purple">orcai</span> runs in your terminal,
+      inside <span class="fg-cyan">tmux</span>, next to your editor and shell. Launch it, get a session.
+      Point any CLI tool at it with a 10-line YAML file. Chain Claude, Ollama, or local models into
+      YAML pipelines where each step knows its input and output types. When you close the terminal,
+      it's gone — no Electron process lingering, no tab to find.
     </p>
     <div class="features">
       <FeatureCard title="TMUX SESSIONS" borderColor="var(--purple)">
-        <p>Manage AI agent workspaces from an ABS-style sidebar TUI. Spawn, switch, and kill tmux sessions without leaving your workflow.</p>
+        <p>orcai tracks your AI workspaces as tmux sessions in a sidebar. Spawn one per task,
+        switch mid-pipeline, kill what you're done with. Everything lives in the terminal you already have open.</p>
       </FeatureCard>
       <FeatureCard title="PLUGIN SYSTEM" borderColor="var(--cyan)">
-        <p>gRPC plugins + sidecar YAML. Any CLI tool becomes a pipeline node. Tier 1 native Go. Tier 2 wrappers for everything else.</p>
+        <p>Write a YAML file that points at any CLI tool — <code>rg</code>, <code>jq</code>, <code>ffmpeg</code>,
+        your own scripts — and it's a pipeline node. Need something more complex? Implement the gRPC interface in Go.</p>
       </FeatureCard>
       <FeatureCard title="AGENT PIPELINES" borderColor="var(--green)">
-        <p>YAML pipelines run Claude, Ollama, and Copilot at scale. Chain tools with typed inputs and outputs.</p>
+        <p>YAML pipelines connect AI providers to plugins in sequence. Each step has typed input and output schemas,
+        so you can chain a Claude prompt into a <code>jq</code> filter into a file write without any glue code.</p>
       </FeatureCard>
     </div>
   </section>
