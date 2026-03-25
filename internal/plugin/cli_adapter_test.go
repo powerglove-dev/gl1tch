@@ -121,3 +121,29 @@ func TestCliAdapter_Capabilities_NoSidecar(t *testing.T) {
 		t.Errorf("expected nil capabilities for non-sidecar adapter, got %v", a.Capabilities())
 	}
 }
+
+func TestCliAdapter_Execute_VarsAsEnv(t *testing.T) {
+	// Use `sh -c 'echo $ORCAI_MY_KEY'` to verify the env var is set on the subprocess.
+	a := plugin.NewCliAdapter("sh-tool", "shell", "sh", "-c", "echo $ORCAI_MY_KEY")
+	var buf bytes.Buffer
+	err := a.Execute(context.Background(), "", map[string]string{"my_key": "hello-from-var"}, &buf)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(buf.String(), "hello-from-var") {
+		t.Errorf("expected ORCAI_MY_KEY in subprocess output, got %q", buf.String())
+	}
+}
+
+func TestCliAdapter_Execute_FilterViaEnv(t *testing.T) {
+	// Simulate the jq-sidecar pattern: sh -c 'jq "$ORCAI_FILTER"' with JSON on stdin.
+	a := plugin.NewCliAdapter("jq-sidecar", "jq via env", "sh", "-c", `jq "$ORCAI_FILTER"`)
+	var buf bytes.Buffer
+	err := a.Execute(context.Background(), `{"name":"orcai"}`, map[string]string{"filter": ".name"}, &buf)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(buf.String(), "orcai") {
+		t.Errorf("expected jq output to contain 'orcai', got %q", buf.String())
+	}
+}

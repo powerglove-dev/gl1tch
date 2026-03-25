@@ -1,7 +1,6 @@
 package picker
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -46,7 +45,6 @@ var Providers = []ProviderDef{
 			{ID: "claude-haiku-4-5-20251001", Label: "Haiku 4.5"},
 		},
 	},
-	{ID: "opencode", Label: "OpenCode"},
 	{ID: "copilot", Label: "GitHub Copilot"},
 	{ID: "ollama", Label: "Ollama"},
 	{ID: "shell", Label: "Shell"},
@@ -77,58 +75,13 @@ func queryOllamaModels() []string {
 	return names
 }
 
-// ensureContextWindows ensures each Ollama model has a -ctx32k variant with
-// num_ctx=32768. Returns the list of context-extended model names, falling back
-// to the original name if creation fails. Creation is instant (metadata only).
-func ensureContextWindows(models []string) []string {
-	const numCtx = 32768
-	const suffix = "-ctx32k"
-
-	existing := make(map[string]bool, len(models))
-	for _, m := range models {
-		existing[m] = true
-	}
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	result := make([]string, 0, len(models))
-
-	for _, m := range models {
-		// Split name and tag: "qwen3.5:latest" → name="qwen3.5", tag="latest"
-		name, tag := m, "latest"
-		if idx := strings.LastIndex(m, ":"); idx >= 0 {
-			name, tag = m[:idx], m[idx+1:]
-		}
-		ctxModel := name + suffix + ":" + tag
-
-		if !existing[ctxModel] {
-			modelfile := fmt.Sprintf("FROM %s\nPARAMETER num_ctx %d", m, numCtx)
-			body, _ := json.Marshal(map[string]string{
-				"model":     ctxModel,
-				"modelfile": modelfile,
-			})
-			// Drain the streaming response; creation is near-instant for metadata changes.
-			if resp, err := client.Post("http://localhost:11434/api/create",
-				"application/json", bytes.NewReader(body)); err == nil {
-				resp.Body.Close()
-				existing[ctxModel] = true
-			}
-		}
-
-		if existing[ctxModel] {
-			result = append(result, ctxModel)
-		} else {
-			result = append(result, m) // creation failed — use original
-		}
-	}
-	return result
-}
 
 // buildProviders returns a filtered, runtime-enriched provider list driven by
 // the plugin Manager/discovery layer:
 //   - only includes providers found via discovery (native plugins + CLI wrappers)
 //   - falls back to PATH check for ollama (not in bundled registry)
 //   - shell is always included
-//   - injects discovered Ollama models into the ollama and opencode providers
+//   - injects discovered Ollama models into the ollama provider
 //   - appends any native plugins not in the static Providers list
 func buildProviders() []ProviderDef {
 	ollamaModels := queryOllamaModels()
@@ -152,13 +105,6 @@ func buildProviders() []ProviderDef {
 		}
 	}
 
-	// For opencode, create ctx32k variants so agentic tasks have enough context.
-	var opencodeModels []string
-	if len(ollamaModels) > 0 && discovered["opencode"] {
-		opencodeModels = ensureContextWindows(ollamaModels)
-		ensureOpencodeOllamaConfig(opencodeModels)
-	}
-
 	var out []ProviderDef
 	for _, p := range Providers {
 		switch {
@@ -169,7 +115,7 @@ func buildProviders() []ProviderDef {
 				continue
 			}
 		}
-		p = injectOllamaModels(p, ollamaModels, opencodeModels)
+		p = injectOllamaModels(p, ollamaModels)
 		out = append(out, p)
 	}
 
@@ -190,8 +136,7 @@ func buildProviders() []ProviderDef {
 // BuildProviders returns the runtime-filtered, model-enriched provider list,
 // excluding the shell provider (not relevant for pipeline steps).
 // Behaviour is identical to the session picker: filters by installed CLI,
-// injects Ollama models into ollama/opencode, creates ctx32k variants,
-// and writes the opencode config when applicable.
+// injects Ollama models into the ollama provider, and creates ctx32k variants.
 func BuildProviders() []ProviderDef {
 	all := buildProviders()
 	out := make([]ProviderDef, 0, len(all))
@@ -216,86 +161,16 @@ func PipelineLaunchArgs(providerID string) []string {
 	return pipelineLaunchArgs[providerID]
 }
 
-// ensureOpencodeOllamaConfig writes (or merges) the ollama provider block into
-// ~/.config/opencode/opencode.json so opencode can reach local Ollama models.
-// The model ID format opencode expects is "ollama/<model-name>".
-func ensureOpencodeOllamaConfig(ollamaModels []string) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
+// injectOllamaModels appends Ollama model entries to the ollama provider.
+func injectOllamaModels(p ProviderDef, ollamaModels []string) ProviderDef {
+	if p.ID != "ollama" || len(ollamaModels) == 0 {
+		return p
 	}
-	cfgPath := filepath.Join(home, ".config", "opencode", "opencode.json")
-
-	// Read existing config or start fresh.
-	var cfg map[string]interface{}
-	if data, err := os.ReadFile(cfgPath); err == nil {
-		json.Unmarshal(data, &cfg) //nolint:errcheck
-	}
-	if cfg == nil {
-		cfg = map[string]interface{}{}
-	}
-
-	// Build the models map: { "qwen3.5:latest": { "name": "qwen3.5:latest" } }
-	models := make(map[string]interface{}, len(ollamaModels))
+	models := make([]ModelOption, 0, len(ollamaModels))
 	for _, m := range ollamaModels {
-		models[m] = map[string]interface{}{"name": m}
+		models = append(models, ModelOption{ID: m, Label: m})
 	}
-
-	// Merge provider block — preserve any other providers already configured.
-	providers, _ := cfg["provider"].(map[string]interface{})
-	if providers == nil {
-		providers = map[string]interface{}{}
-	}
-	providers["ollama"] = map[string]interface{}{
-		"npm":  "@ai-sdk/openai-compatible",
-		"name": "Ollama (local)",
-		"options": map[string]interface{}{
-			"baseURL": "http://localhost:11434/v1",
-		},
-		"models": models,
-	}
-	cfg["$schema"] = "https://opencode.ai/config.json"
-	cfg["provider"] = providers
-
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return
-	}
-	os.MkdirAll(filepath.Dir(cfgPath), 0o755)    //nolint:errcheck
-	os.WriteFile(cfgPath, data, 0o644)            //nolint:errcheck
-}
-
-// injectOllamaModels appends Ollama model entries to providers that support them.
-// ollamaModels are the raw model names (used for standalone ollama).
-// opencodeModels are the ctx32k variants (used for opencode — may be nil).
-func injectOllamaModels(p ProviderDef, ollamaModels, opencodeModels []string) ProviderDef {
-	switch p.ID {
-	case "ollama":
-		if len(ollamaModels) == 0 {
-			return p
-		}
-		models := make([]ModelOption, 0, len(ollamaModels))
-		for _, m := range ollamaModels {
-			models = append(models, ModelOption{ID: m, Label: m})
-		}
-		p.Models = models
-
-	case "opencode":
-		if len(opencodeModels) == 0 {
-			return p
-		}
-		models := make([]ModelOption, len(p.Models))
-		copy(models, p.Models)
-		if len(models) > 0 {
-			models = append(models, ModelOption{Separator: true, Label: "── Ollama ──"})
-		}
-		for _, m := range opencodeModels {
-			// Strip the -ctx32k suffix for the display label.
-			label := strings.Replace(m, "-ctx32k", "", 1)
-			models = append(models, ModelOption{ID: "ollama/" + m, Label: label})
-		}
-		p.Models = models
-	}
+	p.Models = models
 	return p
 }
 

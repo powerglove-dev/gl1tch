@@ -78,8 +78,11 @@ func (c *CliAdapter) Close() error               { return nil }
 func (c *CliAdapter) Category() string { return c.category }
 
 // Execute spawns the subprocess, writes input to stdin, and streams stdout to w.
-// If vars contains a non-empty "model" key, "--model <value>" is appended to the
-// command arguments so AI provider CLIs receive the correct model at execution time.
+// All entries in vars are passed as ORCAI_<KEY>=<value> environment variables so
+// that any sidecar binary or shell command can read them without special-casing.
+// Additionally, if vars contains a non-empty "model" key, "--model <value>" is
+// appended to the command arguments for backwards compatibility with AI provider
+// CLIs (e.g. claude, opencode) that accept the model as a flag.
 func (c *CliAdapter) Execute(ctx context.Context, input string, vars map[string]string, w io.Writer) error {
 	args := c.args
 	if model := vars["model"]; model != "" {
@@ -89,5 +92,14 @@ func (c *CliAdapter) Execute(ctx context.Context, input string, vars map[string]
 	cmd.Stdin = strings.NewReader(input)
 	cmd.Stdout = w
 	cmd.Stderr = w
+
+	// Inherit the current environment then overlay ORCAI_* vars.
+	env := os.Environ()
+	for k, v := range vars {
+		key := "ORCAI_" + strings.ToUpper(k)
+		env = append(env, key+"="+v)
+	}
+	cmd.Env = env
+
 	return cmd.Run()
 }
