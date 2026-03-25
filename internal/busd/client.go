@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"sync"
+	"time"
 )
 
 // registrationFrame is the JSON frame a widget sends on connect.
@@ -75,15 +76,22 @@ func (c *client) matches(topic string) bool {
 	return false
 }
 
+// sendDeadline is the maximum time allowed for a single write to a widget client.
+// Slow clients that cannot drain their socket buffer within this window are pruned.
+const sendDeadline = 5 * time.Millisecond
+
 // send writes a pre-encoded newline-terminated frame to the client.
-// Returns an error if the write fails (caller should prune the client).
+// A short write deadline ensures Publish never blocks on a slow client.
+// Returns an error if the write fails or times out (caller should prune the client).
 func (c *client) send(frame []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
 		return net.ErrClosed
 	}
+	c.conn.SetWriteDeadline(time.Now().Add(sendDeadline)) //nolint:errcheck
 	_, err := c.conn.Write(frame)
+	c.conn.SetWriteDeadline(time.Time{}) //nolint:errcheck — reset deadline
 	return err
 }
 
