@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/adam-stokes/orcai/internal/bus"
+	"github.com/adam-stokes/orcai/internal/busd"
 	"github.com/adam-stokes/orcai/internal/discovery"
 	"github.com/adam-stokes/orcai/internal/host"
 )
@@ -152,7 +153,16 @@ func Run() error {
 		return checkReload()
 	}
 
-	// New session: start the event bus and load plugins.
+	// New session: start the Unix socket event bus daemon BEFORE any widget
+	// binaries are launched so they can connect on startup.
+	busdSrv := busd.New()
+	if err := busdSrv.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "orcai: warning: could not start busd: %v\n", err)
+	} else {
+		defer busdSrv.Stop()
+	}
+
+	// Start the legacy gRPC event bus and load plugins.
 	busSrv := bus.New()
 	busAddr, err := busSrv.Listen("127.0.0.1:0")
 	if err != nil {
