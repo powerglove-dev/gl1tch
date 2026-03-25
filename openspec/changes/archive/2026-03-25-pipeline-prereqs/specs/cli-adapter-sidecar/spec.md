@@ -1,4 +1,4 @@
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Sidecar YAML schema
 A sidecar file at `~/.config/orcai/wrappers/<name>.yaml` SHALL declare the CLI tool's name, description, command, optional args, and optional input/output schemas. All fields except `command` SHALL be optional. The sidecar MUST include a comment block documenting the calling convention: `input` is passed as stdin to the subprocess; `vars` entries are passed as environment variables prefixed with `ORCAI_`.
@@ -51,18 +51,3 @@ The `plugin.Plugin` interface documentation SHALL state: `input` is the primary 
 #### Scenario: CLIAdapter passes vars as env
 - **WHEN** `CLIAdapter.Execute` is called with `vars = {"model": "sonnet"}`
 - **THEN** the subprocess environment contains `ORCAI_MODEL=sonnet`
-
-### Requirement: Override binary takes precedence over sidecar of same name
-When the widget dispatch layer resolves a widget name, it SHALL check for an `orcai-<name>` binary on PATH before consulting sidecar declarations. If an override binary is found, the sidecar with the same name SHALL NOT be launched. Sidecars whose names have no corresponding override binary are unaffected.
-
-#### Scenario: Override binary shadows same-named sidecar
-- **WHEN** a sidecar named `weather` exists in `~/.config/orcai/widgets/weather/widget.yaml` and `orcai-weather` is found on PATH
-- **THEN** dispatch executes `orcai-weather` and does not launch the sidecar binary declared in the manifest
-
-#### Scenario: Sidecar launched when no override binary present
-- **WHEN** a sidecar named `weather` exists and no `orcai-weather` binary is found on PATH
-- **THEN** dispatch launches the sidecar binary declared in the manifest as normal
-
-#### Scenario: Override applies to both core and third-party sidecars
-- **WHEN** `orcai-picker` is found on PATH and `picker` is registered as a core subcommand (not a sidecar)
-- **THEN** dispatch executes `orcai-picker`, not `orcai picker`
