@@ -19,6 +19,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/adam-stokes/orcai/internal/busd"
 )
 
 // ── Bus protocol ───────────────────────────────────────────────────────────────
@@ -189,8 +190,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.palette = paletteForTheme(msg.ThemeName)
 	case tea.KeyMsg:
 		if msg.String() == "enter" && m.self != "" {
-			exec.Command("tmux", "display-popup", "-E",
-				"-w", "120", "-h", "40", m.self, "_picker").Run() //nolint:errcheck
+			self := m.self
+			return m, tea.Batch(
+				func() tea.Msg {
+					exec.Command("tmux", "display-popup", "-E",
+						"-w", "120", "-h", "40", self, "_picker").Run() //nolint:errcheck
+					return nil
+				},
+				tea.Quit,
+			)
 		}
 		return m, tea.Quit
 	}
@@ -207,22 +215,10 @@ func (m model) View() string {
 
 // ── Bus connection ─────────────────────────────────────────────────────────────
 
-// socketPath returns the busd Unix socket path, mirroring busd.SocketPath().
-func socketPath() (string, error) {
-	if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" {
-		return filepath.Join(xdg, "orcai", "bus.sock"), nil
-	}
-	cache, err := os.UserCacheDir()
-	if err != nil {
-		return "", fmt.Errorf("cannot determine socket path: %w", err)
-	}
-	return filepath.Join(cache, "orcai", "bus.sock"), nil
-}
-
 // connectBus dials the busd socket and sends the registration frame. Returns
 // the connection, or nil if the daemon is not running (non-fatal).
 func connectBus() net.Conn {
-	sockPath, err := socketPath()
+	sockPath, err := busd.SocketPath()
 	if err != nil {
 		return nil
 	}
@@ -277,19 +273,12 @@ func main() {
 
 	// Start bus event reader goroutine (only if we have a connection).
 	if conn != nil {
-		go func() {
-			readBusEvents(conn, p)
-			conn.Close()
-		}()
+		go readBusEvents(conn, p)
+		defer conn.Close()
 	}
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "orcai-welcome: %v\n", err)
-	}
-
-	// Close bus connection on exit.
-	if conn != nil {
-		conn.Close()
 	}
 
 	execShell()
@@ -302,6 +291,6 @@ func execShell() {
 	}
 	if err := syscall.Exec(shell, []string{shell}, os.Environ()); err != nil {
 		fmt.Fprintf(os.Stderr, "orcai-welcome: exec shell: %v\n", err)
-		os.Exit(0)
+		os.Exit(1)
 	}
 }

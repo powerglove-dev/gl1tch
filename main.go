@@ -33,6 +33,7 @@ func main() {
 			wCmd.Stderr = os.Stderr
 			if err := wCmd.Run(); err != nil {
 				fmt.Fprintf(os.Stderr, "orcai-welcome: %v\n", err)
+				os.Exit(1)
 			}
 			return
 		case "_sidebar":
