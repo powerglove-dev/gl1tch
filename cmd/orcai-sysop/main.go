@@ -1,19 +1,19 @@
-// Binary orcai-sysop is the ABS sysop panel widget.
+// Binary orcai-sysop is the ABBS Switchboard widget.
 //
-// Run without arguments to open the interactive sysop monitor.
-// Run with "toggle" to show/hide the panel as a tmux split-pane.
+// Run without arguments to open the full-screen Switchboard.
+// Run with "toggle" to show/hide the Switchboard as a tmux popup.
 package main
 
 import (
 	"os"
 
-	"github.com/adam-stokes/orcai/internal/sidebar"
+	"github.com/adam-stokes/orcai/internal/switchboard"
 )
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "toggle" {
-		sidebar.RunToggle()
+		switchboard.RunToggle()
 		return
 	}
-	sidebar.Run()
+	switchboard.Run()
 }

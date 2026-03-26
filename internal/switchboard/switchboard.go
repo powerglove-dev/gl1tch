@@ -1,0 +1,1163 @@
+// Package switchboard implements the ORCAI Switchboard — a full-screen BubbleTea
+// TUI that merges the sysop panel and welcome dashboard into a single control
+// surface with a Pipeline Launcher, Agent Runner, and Activity Feed.
+package switchboard
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/adam-stokes/orcai/internal/picker"
+	"github.com/adam-stokes/orcai/internal/pipeline"
+	"github.com/adam-stokes/orcai/internal/plugin"
+)
+
+// ── ANSI palette — Dracula BBS aesthetic ─────────────────────────────────────
+
+const (
+	aBlu   = "\x1b[34m"  // blue
+	aPur   = "\x1b[35m"  // purple
+	aCyn   = "\x1b[36m"  // cyan (unused but defined per spec)
+	aBrC   = "\x1b[96m"  // bright cyan
+	aPnk   = "\x1b[95m"  // pink
+	aGrn   = "\x1b[32m"  // green
+	aRed   = "\x1b[31m"  // red
+	aDim   = "\x1b[2m"   // dim
+	aBld   = "\x1b[1m"   // bold
+	aWht   = "\x1b[97m"  // white
+	aSelBg = "\x1b[44m"  // blue bg (selection)
+	aRst   = "\x1b[0m"   // reset
+	aBC    = "\x1b[36m"  // cyan borders (alias)
+	aBlu2  = "\x1b[34m"  // blue alias (unused var prevention)
+)
+
+// suppress unused-const warnings at compile time
+var _ = aBlu
+var _ = aCyn
+var _ = aBlu2
+
+// ── Feed types ────────────────────────────────────────────────────────────────
+
+// FeedStatus is the lifecycle state of an activity feed entry.
+type FeedStatus int
+
+const (
+	FeedRunning FeedStatus = iota
+	FeedDone
+	FeedFailed
+)
+
+type feedEntry struct {
+	id     string
+	title  string
+	status FeedStatus
+	ts     time.Time
+	lines  []string
+}
+
+// ── Section types ─────────────────────────────────────────────────────────────
+
+type launcherSection struct {
+	pipelines []string
+	selected  int
+	focused   bool
+}
+
+type agentSection struct {
+	formStep         int // 0=provider, 1=model, 2=prompt
+	providers        []picker.ProviderDef
+	selectedProvider int
+	selectedModel    int
+	prompt           textinput.Model
+	focused          bool
+}
+
+type jobHandle struct {
+	id     string
+	cancel context.CancelFunc
+}
+
+// ── Tea messages ──────────────────────────────────────────────────────────────
+
+// FeedLineMsg is a tea.Msg carrying one line of output from a running job.
+// Exported so test packages can assert on it.
+type FeedLineMsg struct {
+	ID   string
+	Line string
+}
+
+type jobDoneMsg struct {
+	id string
+}
+
+type jobFailedMsg struct {
+	id  string
+	err error
+}
+
+type tickMsg time.Time
+
+// ── Window / telemetry types (preserved from sidebar for backwards compat) ────
+
+// Window represents a tmux window (excluding window 0).
+type Window struct {
+	Index  int
+	Name   string
+	Active bool
+}
+
+// ParseWindows parses output of:
+//
+//	tmux list-windows -t orcai -F "#{window_index} #{window_name} #{window_active}"
+//
+// Skips window 0 (the ORCAI home window).
+func ParseWindows(output string) []Window {
+	var windows []Window
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 3 {
+			continue
+		}
+		idx, err := strconv.Atoi(parts[0])
+		if err != nil || idx == 0 {
+			continue
+		}
+		windows = append(windows, Window{
+			Index:  idx,
+			Name:   parts[1],
+			Active: parts[2] == "1",
+		})
+	}
+	return windows
+}
+
+// TelemetryMsg carries a parsed telemetry event from the bus.
+type TelemetryMsg struct {
+	SessionID    string
+	WindowName   string
+	Provider     string
+	Status       string
+	InputTokens  int
+	OutputTokens int
+	CostUSD      float64
+}
+
+// ── Model ─────────────────────────────────────────────────────────────────────
+
+// Model is the BubbleTea model for the Switchboard.
+type Model struct {
+	width        int
+	height       int
+	feed         []feedEntry // ring buffer, cap 200
+	launcher     launcherSection
+	agent        agentSection
+	activeJob    *jobHandle
+	feedSelected int // index into feed for expanded view
+	confirmQuit  bool
+}
+
+// New creates a new Switchboard Model, discovering pipelines and providers.
+func New() Model {
+	ti := textinput.New()
+	ti.Placeholder = "Enter prompt…"
+	ti.CharLimit = 4096
+
+	return Model{
+		launcher: launcherSection{
+			pipelines: ScanPipelines(pipelinesDir()),
+			focused:   true,
+		},
+		agent: agentSection{
+			providers: picker.BuildProviders(),
+			prompt:    ti,
+		},
+	}
+}
+
+// NewWithWindows is kept for backward-compat with sidebar-based callers.
+// It ignores the window list and calls New().
+func NewWithWindows(_ []Window) Model { return New() }
+
+// NewWithPipelines creates a Model with a fixed pipeline list — used in tests.
+func NewWithPipelines(pipelines []string) Model {
+	m := New()
+	m.launcher.pipelines = pipelines
+	m.launcher.selected = 0
+	m.launcher.focused = true
+	return m
+}
+
+// NewWithTestProviders creates a Model with synthetic providers for testing.
+func NewWithTestProviders() Model {
+	m := New()
+	m.agent.providers = []picker.ProviderDef{
+		{
+			ID:    "test-provider",
+			Label: "Test Provider",
+			Models: []picker.ModelOption{
+				{ID: "model-a", Label: "Model A"},
+				{ID: "model-b", Label: "Model B"},
+			},
+		},
+	}
+	return m
+}
+
+// Cursor returns the launcher cursor position — used in tests.
+func (m Model) Cursor() int { return m.launcher.selected }
+
+// AgentFormStep returns the current agent form step — used in tests.
+func (m Model) AgentFormStep() int { return m.agent.formStep }
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+// Init starts the tick command.
+func (m Model) Init() tea.Cmd { return tickCmd() }
+
+func tickCmd() tea.Cmd {
+	return tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+// ── Pipeline helpers ──────────────────────────────────────────────────────────
+
+func pipelinesDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "orcai", "pipelines")
+}
+
+// ScanPipelines lists *.pipeline.yaml basenames (without extension) from dir.
+// Exported so tests can call it directly.
+// Returns an empty slice if dir is missing or empty.
+func ScanPipelines(dir string) []string {
+	if dir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		n := e.Name()
+		if strings.HasSuffix(n, ".pipeline.yaml") {
+			names = append(names, strings.TrimSuffix(n, ".pipeline.yaml"))
+		}
+	}
+	return names
+}
+
+// ── ChanPublisher ─────────────────────────────────────────────────────────────
+
+// ChanPublisher implements pipeline.EventPublisher and forwards events as
+// FeedLineMsg values through a channel consumed by the BubbleTea update loop.
+// Exported so tests can construct and verify it.
+type ChanPublisher struct {
+	id string
+	ch chan<- tea.Msg
+}
+
+// NewChanPublisher creates a ChanPublisher for the given feed entry id and channel.
+func NewChanPublisher(id string, ch chan<- tea.Msg) *ChanPublisher {
+	return &ChanPublisher{id: id, ch: ch}
+}
+
+// Publish converts a pipeline lifecycle event to a FeedLineMsg and sends it.
+func (p *ChanPublisher) Publish(_ context.Context, topic string, payload []byte) error {
+	line := fmt.Sprintf("[%s] %s", topic, strings.TrimSpace(string(payload)))
+	select {
+	case p.ch <- FeedLineMsg{ID: p.id, Line: line}:
+	default:
+	}
+	return nil
+}
+
+// lineWriter is an io.Writer that buffers lines and sends FeedLineMsg per line.
+type lineWriter struct {
+	id  string
+	ch  chan<- tea.Msg
+	buf bytes.Buffer
+}
+
+func (w *lineWriter) Write(p []byte) (int, error) {
+	n, err := w.buf.Write(p)
+	for {
+		data := w.buf.Bytes()
+		idx := bytes.IndexByte(data, '\n')
+		if idx < 0 {
+			break
+		}
+		line := string(data[:idx])
+		w.buf.Next(idx + 1)
+		if line != "" {
+			select {
+			case w.ch <- FeedLineMsg{ID: w.id, Line: line}:
+			default:
+			}
+		}
+	}
+	return n, err
+}
+
+func (w *lineWriter) flush() {
+	if remaining := strings.TrimSpace(w.buf.String()); remaining != "" {
+		select {
+		case w.ch <- FeedLineMsg{ID: w.id, Line: remaining}:
+		default:
+		}
+	}
+}
+
+var _ io.Writer = (*lineWriter)(nil)
+
+// ── Update ────────────────────────────────────────────────────────────────────
+
+// Update handles tea.Msg values.
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		if pane := os.Getenv("TMUX_PANE"); pane != "" {
+			out, err := exec.Command("tmux", "display-message", "-p", "#{window_width}").Output()
+			if err == nil {
+				if total, err2 := strconv.Atoi(strings.TrimSpace(string(out))); err2 == nil && total > 0 {
+					target := total * 3 / 10
+					if target > 0 && m.width != target {
+						exec.Command("tmux", "resize-pane", "-t", pane, "-x", strconv.Itoa(target)).Run() //nolint:errcheck
+					}
+				}
+			}
+		}
+		leftW := m.leftColWidth()
+		m.agent.prompt.Width = max(leftW-4, 10)
+		return m, nil
+
+	case tickMsg:
+		return m, tickCmd()
+
+	case TelemetryMsg:
+		line := fmt.Sprintf("telemetry: window=%s provider=%s status=%s", msg.WindowName, msg.Provider, msg.Status)
+		entry := feedEntry{
+			id:     "tel-" + msg.SessionID,
+			title:  "tmux/" + msg.WindowName,
+			status: FeedDone,
+			ts:     time.Now(),
+			lines:  []string{line},
+		}
+		m.feed = append([]feedEntry{entry}, m.feed...)
+		if len(m.feed) > 200 {
+			m.feed = m.feed[:200]
+		}
+		return m, nil
+
+	case FeedLineMsg:
+		m = m.appendFeedLine(msg.ID, msg.Line)
+		return m, nil
+
+	case jobDoneMsg:
+		m = m.setFeedStatus(msg.id, FeedDone)
+		m.activeJob = nil
+		return m, nil
+
+	case jobFailedMsg:
+		m = m.setFeedStatus(msg.id, FeedFailed)
+		if msg.err != nil {
+			m = m.appendFeedLine(msg.id, "error: "+msg.err.Error())
+		}
+		m.activeJob = nil
+		return m, nil
+
+	case tea.KeyMsg:
+		return m.handleKey(msg)
+	}
+
+	return m, nil
+}
+
+func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	key := msg.String()
+
+	// Confirm quit when a job is running.
+	if m.confirmQuit {
+		switch key {
+		case "y", "Y", "enter":
+			if m.activeJob != nil {
+				m.activeJob.cancel()
+			}
+			return m, tea.Quit
+		default:
+			m.confirmQuit = false
+			return m, nil
+		}
+	}
+
+	switch key {
+	case "ctrl+c":
+		if m.activeJob != nil {
+			m.confirmQuit = true
+			return m, nil
+		}
+		return m, tea.Quit
+
+	case "q":
+		if m.activeJob != nil {
+			m.confirmQuit = true
+			return m, nil
+		}
+		return m, tea.Quit
+
+	case "tab":
+		if m.agent.focused {
+			if m.agent.formStep < 2 {
+				m = m.agentAdvanceStep()
+			} else {
+				// Wrap back to launcher.
+				m.agent.focused = false
+				m.launcher.focused = true
+				m.agent.formStep = 0
+				m.agent.prompt.Blur()
+			}
+		} else if m.launcher.focused {
+			m.launcher.focused = false
+			m.agent.focused = true
+		}
+		return m, nil
+
+	case "a":
+		m.launcher.focused = false
+		m.agent.focused = true
+		return m, nil
+
+	case "r":
+		m.launcher.pipelines = ScanPipelines(pipelinesDir())
+		if m.launcher.selected >= len(m.launcher.pipelines) && m.launcher.selected > 0 {
+			m.launcher.selected = max(len(m.launcher.pipelines)-1, 0)
+		}
+		m.agent.providers = picker.BuildProviders()
+		m.agent.selectedProvider = 0
+		m.agent.selectedModel = 0
+		return m, nil
+
+	case "j", "down":
+		return m.handleDown(), nil
+
+	case "k", "up":
+		return m.handleUp(), nil
+
+	case "left":
+		if m.agent.focused && m.agent.formStep > 0 {
+			m.agent.formStep--
+			// If going back to step 1 but provider has no models, skip to 0.
+			if m.agent.formStep == 1 {
+				prov := m.currentProvider()
+				if prov != nil && len(nonSepModels(prov.Models)) == 0 {
+					m.agent.formStep = 0
+				}
+			}
+		}
+		return m, nil
+
+	case "esc":
+		if m.agent.focused {
+			if m.agent.formStep > 0 {
+				m.agent.formStep--
+			} else {
+				m.agent.focused = false
+				m.launcher.focused = true
+			}
+		}
+		return m, nil
+
+	case "right":
+		if m.agent.focused && m.agent.formStep < 2 {
+			m = m.agentAdvanceStep()
+		}
+		return m, nil
+
+	case "enter":
+		return m.handleEnter()
+	}
+
+	// Forward key events to textinput when at prompt step.
+	if m.agent.focused && m.agent.formStep == 2 {
+		var cmd tea.Cmd
+		m.agent.prompt, cmd = m.agent.prompt.Update(msg)
+		return m, cmd
+	}
+
+	return m, nil
+}
+
+func (m Model) handleDown() Model {
+	if m.launcher.focused {
+		if m.launcher.selected < len(m.launcher.pipelines)-1 {
+			m.launcher.selected++
+		}
+		return m
+	}
+	if m.agent.focused {
+		switch m.agent.formStep {
+		case 0:
+			if m.agent.selectedProvider < len(m.agent.providers)-1 {
+				m.agent.selectedProvider++
+			}
+		case 1:
+			prov := m.currentProvider()
+			if prov != nil {
+				models := nonSepModels(prov.Models)
+				if m.agent.selectedModel < len(models)-1 {
+					m.agent.selectedModel++
+				}
+			}
+		}
+	}
+	return m
+}
+
+func (m Model) handleUp() Model {
+	if m.launcher.focused {
+		if m.launcher.selected > 0 {
+			m.launcher.selected--
+		}
+		return m
+	}
+	if m.agent.focused {
+		switch m.agent.formStep {
+		case 0:
+			if m.agent.selectedProvider > 0 {
+				m.agent.selectedProvider--
+			}
+		case 1:
+			if m.agent.selectedModel > 0 {
+				m.agent.selectedModel--
+			}
+		}
+	}
+	return m
+}
+
+func (m Model) agentAdvanceStep() Model {
+	if m.agent.formStep == 0 {
+		prov := m.currentProvider()
+		if prov == nil || len(nonSepModels(prov.Models)) == 0 {
+			m.agent.formStep = 2
+			m.agent.prompt.Focus()
+		} else {
+			m.agent.formStep = 1
+		}
+	} else if m.agent.formStep == 1 {
+		m.agent.formStep = 2
+		m.agent.prompt.Focus()
+	}
+	return m
+}
+
+func (m Model) handleEnter() (Model, tea.Cmd) {
+	// Launcher: launch selected pipeline.
+	if m.launcher.focused && m.activeJob == nil {
+		if len(m.launcher.pipelines) == 0 {
+			return m, nil
+		}
+		name := m.launcher.pipelines[m.launcher.selected]
+		yamlPath := filepath.Join(pipelinesDir(), name+".pipeline.yaml")
+
+		feedID := fmt.Sprintf("pipe-%d", time.Now().UnixNano())
+		entry := feedEntry{
+			id:     feedID,
+			title:  "pipeline: " + name,
+			status: FeedRunning,
+			ts:     time.Now(),
+		}
+		m.feed = append([]feedEntry{entry}, m.feed...)
+		if len(m.feed) > 200 {
+			m.feed = m.feed[:200]
+		}
+		m.feedSelected = 0
+
+		ch := make(chan tea.Msg, 256)
+		ctx, cancel := context.WithCancel(context.Background())
+		_ = ctx
+		m.activeJob = &jobHandle{id: feedID, cancel: cancel}
+
+		cmd := launchPipelineCmdCh(yamlPath, feedID, ch, cancel)
+		drain := drainChan(ch)
+		return m, tea.Batch(cmd, drain)
+	}
+
+	// Agent section: advance form or submit.
+	if m.agent.focused {
+		if m.agent.formStep < 2 {
+			m = m.agentAdvanceStep()
+			return m, nil
+		}
+		// Step 2: submit.
+		if m.activeJob != nil {
+			return m, nil
+		}
+		input := strings.TrimSpace(m.agent.prompt.Value())
+		if input == "" {
+			return m, nil
+		}
+		prov := m.currentProvider()
+		if prov == nil {
+			return m, nil
+		}
+
+		var modelID string
+		models := nonSepModels(prov.Models)
+		if len(models) > 0 && m.agent.selectedModel < len(models) {
+			modelID = models[m.agent.selectedModel].ID
+		}
+
+		title := "agent: " + prov.ID
+		if modelID != "" {
+			title += "/" + modelID
+		}
+
+		feedID := fmt.Sprintf("agent-%d", time.Now().UnixNano())
+		entry := feedEntry{
+			id:     feedID,
+			title:  title,
+			status: FeedRunning,
+			ts:     time.Now(),
+		}
+		m.feed = append([]feedEntry{entry}, m.feed...)
+		if len(m.feed) > 200 {
+			m.feed = m.feed[:200]
+		}
+		m.feedSelected = 0
+
+		provArgs := picker.PipelineLaunchArgs(prov.ID)
+		adapter := plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", prov.ID, provArgs...)
+		vars := map[string]string{}
+		if modelID != "" {
+			vars["model"] = modelID
+		}
+
+		ch := make(chan tea.Msg, 256)
+		_, cancel := context.WithCancel(context.Background())
+		m.activeJob = &jobHandle{id: feedID, cancel: cancel}
+
+		cmd := runAgentCmdCh(adapter, input, vars, feedID, ch, cancel)
+		drain := drainChan(ch)
+
+		// Reset form after submission.
+		m.agent.prompt.SetValue("")
+		m.agent.formStep = 0
+		m.agent.prompt.Blur()
+
+		return m, tea.Batch(cmd, drain)
+	}
+
+	return m, nil
+}
+
+// launchPipelineCmdCh starts pipeline.Run in a goroutine, streaming output to ch.
+func launchPipelineCmdCh(yamlPath, feedID string, ch chan tea.Msg, cancel context.CancelFunc) tea.Cmd {
+	return func() tea.Msg {
+		defer cancel()
+
+		f, err := os.Open(yamlPath)
+		if err != nil {
+			ch <- jobFailedMsg{id: feedID, err: err}
+			return nil
+		}
+		defer f.Close()
+
+		p, err := pipeline.Load(f)
+		if err != nil {
+			ch <- jobFailedMsg{id: feedID, err: err}
+			return nil
+		}
+
+		mgr := plugin.NewManager()
+		providers := picker.BuildProviders()
+		for _, prov := range providers {
+			args := picker.PipelineLaunchArgs(prov.ID)
+			_ = mgr.Register(plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", prov.ID, args...))
+		}
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			wrappersDir := filepath.Join(home, ".config", "orcai", "wrappers")
+			mgr.LoadWrappersFromDir(wrappersDir) //nolint:errcheck
+		}
+
+		pub := &ChanPublisher{id: feedID, ch: ch}
+		_, runErr := pipeline.Run(context.Background(), p, mgr, "", pub)
+		if runErr != nil {
+			ch <- jobFailedMsg{id: feedID, err: runErr}
+		} else {
+			ch <- jobDoneMsg{id: feedID}
+		}
+		return nil
+	}
+}
+
+// runAgentCmdCh starts CliAdapter.Execute in a goroutine, streaming output to ch.
+func runAgentCmdCh(adapter *plugin.CliAdapter, input string, vars map[string]string, feedID string, ch chan tea.Msg, cancel context.CancelFunc) tea.Cmd {
+	return func() tea.Msg {
+		defer cancel()
+		w := &lineWriter{id: feedID, ch: ch}
+		err := adapter.Execute(context.Background(), input, vars, w)
+		w.flush()
+		if err != nil {
+			ch <- jobFailedMsg{id: feedID, err: err}
+		} else {
+			ch <- jobDoneMsg{id: feedID}
+		}
+		return nil
+	}
+}
+
+// drainChan returns a tea.Cmd that blocks until a message arrives on ch.
+func drainChan(ch chan tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return msg
+	}
+}
+
+// ── Feed helpers ──────────────────────────────────────────────────────────────
+
+func (m Model) appendFeedLine(id, line string) Model {
+	for i := range m.feed {
+		if m.feed[i].id == id {
+			m.feed[i].lines = append(m.feed[i].lines, line)
+			return m
+		}
+	}
+	return m
+}
+
+func (m Model) setFeedStatus(id string, status FeedStatus) Model {
+	for i := range m.feed {
+		if m.feed[i].id == id {
+			m.feed[i].status = status
+			return m
+		}
+	}
+	return m
+}
+
+func (m Model) currentProvider() *picker.ProviderDef {
+	if len(m.agent.providers) == 0 {
+		return nil
+	}
+	if m.agent.selectedProvider >= len(m.agent.providers) {
+		return &m.agent.providers[0]
+	}
+	return &m.agent.providers[m.agent.selectedProvider]
+}
+
+// nonSepModels filters separator entries from a model list.
+func nonSepModels(models []picker.ModelOption) []picker.ModelOption {
+	var out []picker.ModelOption
+	for _, mo := range models {
+		if !mo.Separator {
+			out = append(out, mo)
+		}
+	}
+	return out
+}
+
+// ── View ──────────────────────────────────────────────────────────────────────
+
+// View renders the full-screen switchboard layout.
+func (m Model) View() string {
+	w := m.width
+	if w <= 0 {
+		w = 120
+	}
+	h := m.height
+	if h <= 0 {
+		h = 40
+	}
+
+	leftW := m.leftColWidth()
+	feedW := max(w-leftW-1, 20)
+	contentH := max(h-1, 5) // reserve one line for bottom bar
+
+	left := m.viewLeftColumn(contentH, leftW)
+	feed := m.viewActivityFeed(contentH, feedW)
+
+	leftLines := strings.Split(left, "\n")
+	feedLines := strings.Split(feed, "\n")
+	totalRows := max(len(leftLines), len(feedLines))
+
+	var rows []string
+	for i := range totalRows {
+		l := ""
+		if i < len(leftLines) {
+			l = leftLines[i]
+		}
+		f := ""
+		if i < len(feedLines) {
+			f = feedLines[i]
+		}
+		rows = append(rows, padToVis(l, leftW)+" "+f)
+	}
+
+	body := strings.Join(rows, "\n")
+
+	if m.confirmQuit {
+		return body + "\n" + aPnk + aBld + " Job is running. Quit anyway? (y/N) " + aRst
+	}
+
+	return body + "\n" + m.viewBottomBar(w)
+}
+
+func (m Model) leftColWidth() int {
+	w := m.width
+	if w <= 0 {
+		w = 120
+	}
+	lw := w * 30 / 100
+	if lw < 28 {
+		lw = 28
+	}
+	return lw
+}
+
+// viewLeftColumn renders the left column: banner + launcher + agent sections.
+func (m Model) viewLeftColumn(height, width int) string {
+	var lines []string
+
+	banner := m.buildBanner(width)
+	lines = append(lines, strings.Split(banner, "\n")...)
+	lines = append(lines, "")
+
+	lines = append(lines, m.buildLauncherSection(width)...)
+	lines = append(lines, "")
+
+	lines = append(lines, m.buildAgentSection(width)...)
+
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// buildBanner renders the ORCAI BBS header banner.
+func (m Model) buildBanner(w int) string {
+	if w < 10 {
+		w = 28
+	}
+	inner := w - 2
+	top := aPur + "╔" + strings.Repeat("═", inner) + "╗" + aRst
+
+	const logoPrefixLen = 16
+	logoPad := max(inner-logoPrefixLen, 0)
+	logoLine := aPur + "║" + aPnk + " ░▒▓ " + aBld + "ORCAI" + aRst + aPnk + " ▓▒░" +
+		strings.Repeat(" ", logoPad) + aPur + "║" + aRst
+
+	const subtitleLen = 18
+	subPad := max(inner-subtitleLen, 0)
+	subLine := aPur + "║" + aBrC + "  ABBS Switchboard  " +
+		strings.Repeat(" ", subPad) + aPur + "║" + aRst
+
+	bot := aPur + "╚" + strings.Repeat("═", inner) + "╝" + aRst
+	return strings.Join([]string{top, logoLine, subLine, bot}, "\n")
+}
+
+// buildLauncherSection renders the Pipeline Launcher box.
+func (m Model) buildLauncherSection(w int) []string {
+	borderColor := aBC
+	if m.launcher.focused {
+		borderColor = aBrC
+	}
+
+	header := "PIPELINES"
+	if m.activeJob != nil {
+		header += " [running]"
+	}
+	rows := []string{boxTop(w, header, borderColor)}
+
+	if len(m.launcher.pipelines) == 0 {
+		rows = append(rows, boxRow(aDim+"  no pipelines saved"+aRst, 20, w))
+	} else {
+		for i, name := range m.launcher.pipelines {
+			maxNameLen := max(w-4, 1)
+			displayName := name
+			if len(displayName) > maxNameLen {
+				displayName = displayName[:maxNameLen-1] + "…"
+			}
+			contentVis := 2 + len(displayName)
+			if i == m.launcher.selected && m.launcher.focused {
+				content := aSelBg + aWht + "  " + displayName + aRst
+				rows = append(rows, aBC+"│"+content+strings.Repeat(" ", max(w-2-contentVis, 0))+aBC+"│"+aRst)
+			} else {
+				content := aBrC + "  " + aBC + displayName + aRst
+				rows = append(rows, boxRow(content, contentVis, w))
+			}
+		}
+	}
+
+	rows = append(rows, boxBot(w))
+	return rows
+}
+
+// buildAgentSection renders the Agent Runner inline form.
+func (m Model) buildAgentSection(w int) []string {
+	borderColor := aBC
+	if m.agent.focused {
+		borderColor = aBrC
+	}
+
+	rows := []string{boxTop(w, "AGENT RUNNER", borderColor)}
+
+	if len(m.agent.providers) == 0 {
+		rows = append(rows, boxRow(aDim+"  no providers available"+aRst, 23, w))
+		rows = append(rows, boxBot(w))
+		return rows
+	}
+
+	switch m.agent.formStep {
+	case 0:
+		rows = append(rows, boxRow(aBrC+"  Provider:"+aRst, 11, w))
+		for i, prov := range m.agent.providers {
+			label := prov.Label
+			if label == "" {
+				label = prov.ID
+			}
+			maxLen := max(w-4, 1)
+			if len(label) > maxLen {
+				label = label[:maxLen-1] + "…"
+			}
+			contentVis := 4 + len(label)
+			if i == m.agent.selectedProvider && m.agent.focused {
+				content := aSelBg + aWht + "  ▸ " + label + aRst
+				rows = append(rows, aBC+"│"+content+strings.Repeat(" ", max(w-2-contentVis, 0))+aBC+"│"+aRst)
+			} else {
+				content := aBrC + "    " + aBC + label + aRst
+				rows = append(rows, boxRow(content, contentVis, w))
+			}
+		}
+
+	case 1:
+		prov := m.currentProvider()
+		var models []picker.ModelOption
+		if prov != nil {
+			models = nonSepModels(prov.Models)
+		}
+		rows = append(rows, boxRow(aBrC+"  Model:"+aRst, 8, w))
+		if len(models) == 0 {
+			rows = append(rows, boxRow(aDim+"  no models"+aRst, 11, w))
+		} else {
+			for i, mo := range models {
+				label := mo.Label
+				if label == "" {
+					label = mo.ID
+				}
+				maxLen := max(w-4, 1)
+				if len(label) > maxLen {
+					label = label[:maxLen-1] + "…"
+				}
+				contentVis := 4 + len(label)
+				if i == m.agent.selectedModel && m.agent.focused {
+					content := aSelBg + aWht + "  ▸ " + label + aRst
+					rows = append(rows, aBC+"│"+content+strings.Repeat(" ", max(w-2-contentVis, 0))+aBC+"│"+aRst)
+				} else {
+					content := aBrC + "    " + aBC + label + aRst
+					rows = append(rows, boxRow(content, contentVis, w))
+				}
+			}
+		}
+
+	case 2:
+		rows = append(rows, boxRow(aBrC+"  Prompt:"+aRst, 9, w))
+		promptView := m.agent.prompt.View()
+		promptLine := "  " + promptView
+		rows = append(rows, boxRow(promptLine, visLen(promptLine), w))
+	}
+
+	rows = append(rows, boxBot(w))
+	return rows
+}
+
+// viewActivityFeed renders the center activity feed.
+func (m Model) viewActivityFeed(height, width int) string {
+	var lines []string
+
+	lines = append(lines, boxTop(width, "ACTIVITY FEED", aBrC))
+
+	if len(m.feed) == 0 {
+		lines = append(lines, boxRow(aDim+"  no activity yet"+aRst, 17, width))
+	} else {
+		for i, entry := range m.feed {
+			badge, badgeColor := statusBadge(entry.status)
+			ts := entry.ts.Format("15:04:05")
+			// title line
+			titleLine := fmt.Sprintf("  %s%s%s %s%s%s  %s",
+				badgeColor, badge, aRst,
+				aDim, ts, aRst,
+				aBrC+entry.title+aRst)
+			titleVis := 2 + len(badge) + 1 + len(ts) + 2 + len(entry.title)
+			lines = append(lines, boxRow(titleLine, titleVis, width))
+
+			if i == m.feedSelected {
+				for _, outLine := range entry.lines {
+					maxLen := max(width-4, 1)
+					if len(outLine) > maxLen {
+						outLine = outLine[:maxLen-1] + "…"
+					}
+					content := aDim + "    " + outLine + aRst
+					lines = append(lines, boxRow(content, 4+len(outLine), width))
+				}
+				if len(entry.lines) == 0 {
+					lines = append(lines, boxRow(aDim+"    (no output yet)"+aRst, 18, width))
+				}
+			}
+		}
+	}
+
+	lines = append(lines, boxBot(width))
+
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// viewBottomBar renders the one-line keybinding hint strip.
+func (m Model) viewBottomBar(width int) string {
+	hint := func(key, desc string) string {
+		return aBrC + key + aDim + " " + desc + aRst
+	}
+	sep := aDim + " · " + aRst
+	parts := []string{
+		hint("enter", "launch"),
+		hint("tab", "focus"),
+		hint("a", "agent"),
+		hint("r", "refresh"),
+		hint("↑↓", "nav"),
+		hint("q", "quit"),
+	}
+	bar := "  " + strings.Join(parts, sep)
+	if visLen(bar) < width {
+		bar += strings.Repeat(" ", width-visLen(bar))
+	}
+	return bar + aRst
+}
+
+// ── Box drawing helpers ────────────────────────────────────────────────────────
+
+func boxTop(w int, title, borderColor string) string {
+	if title == "" {
+		return borderColor + "┌" + strings.Repeat("─", max(w-2, 0)) + "┐" + aRst
+	}
+	label := " " + title + " "
+	dashes := max(w-2-len(label), 0)
+	left := dashes / 2
+	right := dashes - left
+	return borderColor + "┌" + strings.Repeat("─", left) + aBrC + label + borderColor + strings.Repeat("─", right) + "┐" + aRst
+}
+
+func boxBot(w int) string {
+	return aBC + "└" + strings.Repeat("─", max(w-2, 0)) + "┘" + aRst
+}
+
+func boxRow(content string, contentVis, w int) string {
+	inner := w - 2
+	pad := max(inner-contentVis, 0)
+	return aBC + "│" + aRst + content + strings.Repeat(" ", pad) + aBC + "│" + aRst
+}
+
+func statusBadge(s FeedStatus) (string, string) {
+	switch s {
+	case FeedRunning:
+		return "▶ running", aPnk
+	case FeedDone:
+		return "✓ done", aGrn
+	case FeedFailed:
+		return "✗ failed", aRed
+	default:
+		return "? unknown", aDim
+	}
+}
+
+// visLen returns the number of visible (non-ANSI-escape) runes in s.
+func visLen(s string) int {
+	n, esc := 0, false
+	for _, r := range s {
+		if r == '\x1b' {
+			esc = true
+			continue
+		}
+		if esc {
+			if r == 'm' {
+				esc = false
+			}
+			continue
+		}
+		n++
+	}
+	return n
+}
+
+// padToVis right-pads s with spaces until its visible length equals w.
+func padToVis(s string, w int) string {
+	vl := visLen(s)
+	if vl >= w {
+		return s
+	}
+	return s + strings.Repeat(" ", w-vl)
+}
+
+// ── Run ───────────────────────────────────────────────────────────────────────
+
+// Run starts the Switchboard as a full-screen BubbleTea program.
+func Run() {
+	p := tea.NewProgram(New(), tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		fmt.Printf("switchboard error: %v\n", err)
+	}
+}
+
+// RunToggle opens the switchboard as a tmux popup.
+func RunToggle() {
+	bin := resolveSwitchboardBin()
+	exec.Command("tmux", "display-popup", "-E", "-w", "120", "-h", "40", bin).Run() //nolint:errcheck
+}
+
+func resolveSwitchboardBin() string {
+	if bin, err := exec.LookPath("orcai-sysop"); err == nil {
+		return bin
+	}
+	self, _ := os.Executable()
+	if resolved, err := filepath.EvalSymlinks(self); err == nil {
+		self = resolved
+	}
+	return filepath.Join(filepath.Dir(self), "orcai-sysop")
+}

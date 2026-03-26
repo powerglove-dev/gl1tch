@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/adam-stokes/orcai/internal/sidebar"
+	"github.com/adam-stokes/orcai/internal/switchboard"
 	"github.com/spf13/cobra"
 )
 
@@ -12,9 +12,9 @@ func init() {
 
 var sysopCmd = &cobra.Command{
 	Use:   "sysop",
-	Short: "Open the ABS sysop panel",
+	Short: "Open the ABBS Switchboard",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		sidebar.Run()
+		switchboard.Run()
 		return nil
 	},
 }

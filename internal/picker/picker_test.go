@@ -13,7 +13,7 @@ func TestProviders_NotEmpty(t *testing.T) {
 }
 
 func TestProviders_ContainsExpected(t *testing.T) {
-	want := []string{"claude", "opencode", "copilot", "ollama", "shell"}
+	want := []string{"claude", "copilot", "ollama", "shell"}
 	have := make(map[string]bool, len(picker.Providers))
 	for _, p := range picker.Providers {
 		have[p.ID] = true
