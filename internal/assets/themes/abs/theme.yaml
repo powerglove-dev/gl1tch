@@ -15,3 +15,14 @@ statusbar:
   bg: palette.bg
   fg: palette.accent
 splash: splash.ans
+headers:
+  pipelines: headers/pipelines.ans
+  agent_runner: headers/agent_runner.ans
+  signal_board: headers/signal_board.ans
+  activity_feed: headers/activity_feed.ans
+  modal: headers/modal.ans
+modal:
+  bg: palette.bg
+  border: palette.accent
+  title_bg: palette.accent
+  title_fg: palette.bg

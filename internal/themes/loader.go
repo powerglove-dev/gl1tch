@@ -31,7 +31,8 @@ func LoadUser(dir string) ([]Bundle, error) {
 		if !e.IsDir() {
 			continue
 		}
-		yamlPath := filepath.Join(dir, e.Name(), "theme.yaml")
+		bundleDir := filepath.Join(dir, e.Name())
+		yamlPath := filepath.Join(bundleDir, "theme.yaml")
 		data, err := os.ReadFile(yamlPath)
 		if err != nil {
 			// Skip directories that don't contain a theme.yaml.
@@ -40,6 +41,14 @@ func LoadUser(dir string) ([]Bundle, error) {
 		var b Bundle
 		if err := yaml.Unmarshal(data, &b); err != nil {
 			return nil, err
+		}
+		// Populate HeaderBytes from .ans files relative to the bundle directory.
+		b.HeaderBytes = make(map[string][]byte)
+		for key, relPath := range b.Headers {
+			absPath := filepath.Join(bundleDir, relPath)
+			if raw, err := os.ReadFile(absPath); err == nil {
+				b.HeaderBytes[key] = raw
+			}
 		}
 		bundles = append(bundles, b)
 	}
@@ -58,7 +67,8 @@ func loadFromFS(fsys fs.FS, root string) ([]Bundle, error) {
 		if !e.IsDir() {
 			continue
 		}
-		yamlPath := root + "/" + e.Name() + "/theme.yaml"
+		bundleDir := root + "/" + e.Name()
+		yamlPath := bundleDir + "/theme.yaml"
 		data, err := fs.ReadFile(fsys, yamlPath)
 		if err != nil {
 			// Skip directories without a theme.yaml.
@@ -67,6 +77,14 @@ func loadFromFS(fsys fs.FS, root string) ([]Bundle, error) {
 		var b Bundle
 		if err := yaml.Unmarshal(data, &b); err != nil {
 			return nil, err
+		}
+		// Populate HeaderBytes from .ans files embedded in the FS.
+		b.HeaderBytes = make(map[string][]byte)
+		for key, relPath := range b.Headers {
+			ansPath := bundleDir + "/" + relPath
+			if raw, err := fs.ReadFile(fsys, ansPath); err == nil {
+				b.HeaderBytes[key] = raw
+			}
 		}
 		bundles = append(bundles, b)
 	}

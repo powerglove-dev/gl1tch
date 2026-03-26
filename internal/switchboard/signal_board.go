@@ -40,7 +40,8 @@ func (m Model) buildSignalBoard(height, width int) []string {
 		borderColor = aBrC
 	}
 
-	header := fmt.Sprintf("SIGNAL BOARD [%s]", filter)
+	sbTitle := RenderHeader(m.activeBundle(), "signal_board", width)
+	header := fmt.Sprintf("%s [%s]", sbTitle, filter)
 	var lines []string
 	lines = append(lines, boxTop(width, header, borderColor))
 

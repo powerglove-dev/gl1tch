@@ -20,14 +20,30 @@ package themes
 // Payload is the new theme name as a plain UTF-8 string.
 const TopicThemeChanged = "theme.changed"
 
+// Modal configures the modal overlay appearance.
+// BG, Border, TitleBG, and TitleFG may contain palette references like "palette.accent";
+// use [Bundle.ResolveRef] to expand them to hex color values before rendering.
+type Modal struct {
+	BG      string `yaml:"bg"`
+	Border  string `yaml:"border"`
+	TitleBG string `yaml:"title_bg"`
+	TitleFG string `yaml:"title_fg"`
+}
+
 // Bundle is a complete theme bundle loaded from a theme.yaml manifest.
 type Bundle struct {
-	Name        string    `yaml:"name"`
-	DisplayName string    `yaml:"display_name"`
-	Palette     Palette   `yaml:"palette"`
-	Borders     Borders   `yaml:"borders"`
-	StatusBar   StatusBar `yaml:"statusbar"`
-	Splash      string    `yaml:"splash"` // relative path to .ans file within bundle
+	Name        string            `yaml:"name"`
+	DisplayName string            `yaml:"display_name"`
+	Palette     Palette           `yaml:"palette"`
+	Borders     Borders           `yaml:"borders"`
+	StatusBar   StatusBar         `yaml:"statusbar"`
+	Splash      string            `yaml:"splash"`  // relative path to .ans file within bundle
+	Headers     map[string]string `yaml:"headers"` // panel key → relative .ans path
+	Modal       Modal             `yaml:"modal"`
+
+	// HeaderBytes is populated by the loader after YAML unmarshal — not from YAML.
+	// Keys match Headers; values are raw .ans file contents.
+	HeaderBytes map[string][]byte `yaml:"-"`
 }
 
 // Palette holds the seven canonical color slots for a theme.

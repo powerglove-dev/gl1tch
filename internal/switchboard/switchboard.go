@@ -27,6 +27,7 @@ import (
 	"github.com/adam-stokes/orcai/internal/pipeline"
 	"github.com/adam-stokes/orcai/internal/plugin"
 	"github.com/adam-stokes/orcai/internal/styles"
+	"github.com/adam-stokes/orcai/internal/themes"
 )
 
 // ── ANSI palette — Dracula BBS aesthetic ─────────────────────────────────────
@@ -163,6 +164,9 @@ type jobFailedMsg struct {
 
 type tickMsg time.Time
 
+// themeChangedMsg is sent when the active theme changes.
+type themeChangedMsg struct{}
+
 // ── Window / telemetry types (preserved from sidebar for backwards compat) ────
 
 // Window represents a tmux window (excluding window 0).
@@ -232,6 +236,9 @@ type Model struct {
 	pendingDeletePipeline string
 	agentModalOpen        bool
 	agentModalFocus       int // 0=provider, 1=model, 2=prompt (within modal)
+	registry              *themes.Registry
+	themePickerOpen       bool
+	themePickerCursor     int
 }
 
 // New creates a new Switchboard Model, discovering pipelines and providers.
@@ -243,7 +250,7 @@ func New() Model {
 	ta.SetWidth(80)
 	ta.SetHeight(4)
 
-	return Model{
+	m := Model{
 		launcher: launcherSection{
 			pipelines: ScanPipelines(pipelinesDir()),
 			focused:   true,
@@ -255,6 +262,14 @@ func New() Model {
 		signalBoard: SignalBoard{activeFilter: "all"},
 		activeJobs:  make(map[string]*jobHandle),
 	}
+
+	// Initialize theme registry from user themes dir.
+	userThemesDir := filepath.Join(os.Getenv("HOME"), ".config", "orcai", "themes")
+	if reg, err := themes.NewRegistry(userThemesDir); err == nil {
+		m.registry = reg
+	}
+
+	return m
 }
 
 // NewWithWindows is kept for backward-compat with sidebar-based callers.
@@ -295,6 +310,9 @@ func (m Model) AgentFormStep() int { return 0 }
 
 // AgentModalOpen returns whether the agent modal overlay is open — used in tests.
 func (m Model) AgentModalOpen() bool { return m.agentModalOpen }
+
+// ThemePickerOpen returns whether the theme picker overlay is open — used in tests.
+func (m Model) ThemePickerOpen() bool { return m.themePickerOpen }
 
 // FeedScrollOffset returns the current feed scroll offset — used in tests.
 func (m Model) FeedScrollOffset() int { return m.feedScrollOffset }
@@ -384,6 +402,34 @@ func (m Model) AddFeedEntryWithTmux(id, title string, status FeedStatus, tmuxWin
 	}
 	m.feed = append([]feedEntry{entry}, m.feed...)
 	return m
+}
+
+// ── Theme helpers ─────────────────────────────────────────────────────────────
+
+// activeBundle returns the currently active theme bundle, or nil if no registry.
+func (m Model) activeBundle() *themes.Bundle {
+	if m.registry == nil {
+		return nil
+	}
+	return m.registry.Active()
+}
+
+// ansiPalette returns an ANSI escape sequence palette derived from the active bundle.
+// Falls back to Dracula hardcoded defaults when no bundle is active.
+func (m Model) ansiPalette() styles.ANSIPalette {
+	b := m.activeBundle()
+	if b == nil {
+		return styles.ANSIPalette{
+			Accent:  "\x1b[35m",
+			Dim:     "\x1b[2m",
+			Success: "\x1b[32m",
+			Error:   "\x1b[31m",
+			FG:      "\x1b[97m",
+			BG:      "\x1b[40m",
+			Border:  "\x1b[36m",
+		}
+	}
+	return styles.BundleANSI(b)
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -634,6 +680,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	key := msg.String()
 
+	// Theme picker — capture all keys when open.
+	if m.themePickerOpen {
+		return m.handleThemePicker(msg)
+	}
+
 	// Confirm quit when a job is running.
 	if m.confirmQuit {
 		switch key {
@@ -744,6 +795,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.agent.providers = picker.BuildProviders()
 		m.agent.selectedProvider = 0
 		m.agent.selectedModel = 0
+		return m, nil
+
+	case "T":
+		if !m.agentModalOpen && !m.confirmDelete && !m.confirmQuit {
+			m.themePickerOpen = true
+			m.themePickerCursor = 0
+		}
 		return m, nil
 
 	case "pgdown":
@@ -1435,6 +1493,14 @@ func (m Model) View() string {
 		return overlayCenter(base, m.viewDeleteModalBox(w), w, h)
 	}
 
+	// Theme picker overlay.
+	if m.themePickerOpen && m.registry != nil {
+		base := body + "\n" + m.viewBottomBar(w)
+		bundles := m.registry.All()
+		content := viewThemePicker(bundles, m.themePickerCursor, m.registry.Active(), w)
+		return overlayCenter(base, content, w, h)
+	}
+
 	return body + "\n" + m.viewBottomBar(w)
 }
 
@@ -1452,9 +1518,28 @@ func (m Model) viewQuitModalBox(w int) string {
 	}
 	outerW := innerW + 2
 
+	// Resolve modal colors from active bundle.
+	borderColor := styles.Pink
+	titleBG := styles.Pink
+	titleFG := styles.Bg
+	if b := m.activeBundle(); b != nil {
+		border := b.ResolveRef(b.Modal.Border)
+		tBG := b.ResolveRef(b.Modal.TitleBG)
+		tFG := b.ResolveRef(b.Modal.TitleFG)
+		if border != "" {
+			borderColor = lipgloss.Color(border)
+		}
+		if tBG != "" {
+			titleBG = lipgloss.Color(tBG)
+		}
+		if tFG != "" {
+			titleFG = lipgloss.Color(tFG)
+		}
+	}
+
 	headerStyle := lipgloss.NewStyle().
-		Background(styles.Pink).
-		Foreground(styles.Bg).
+		Background(titleBG).
+		Foreground(titleFG).
 		Bold(true).
 		Width(innerW).
 		Padding(0, 1)
@@ -1475,7 +1560,7 @@ func (m Model) viewQuitModalBox(w int) string {
 
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Pink).
+		BorderForeground(borderColor).
 		Width(outerW).
 		Render(strings.Join(rows, "\n"))
 }
@@ -1542,13 +1627,23 @@ func (m Model) viewAgentModalBox(w int) string {
 		modalW = w
 	}
 
+	// Resolve modal border color from active bundle.
+	modalBorderColor := aPur
+	if b := m.activeBundle(); b != nil {
+		border := b.ResolveRef(b.Modal.Border)
+		if border != "" {
+			r, g, bv := hexToRGBFromStyles(border)
+			modalBorderColor = fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, bv)
+		}
+	}
+
 	hint := func(key, desc string) string {
 		return aBrC + key + aDim + " " + desc + aRst
 	}
 	sep := aDim + " · " + aRst
 
 	var rows []string
-	rows = append(rows, boxTop(modalW, "AGENT", aPur))
+	rows = append(rows, boxTop(modalW, "AGENT", modalBorderColor))
 
 	// ── PROVIDER section ──────────────────────────────────────────────────────
 	provHeader := "  " + sectionLabel("PROVIDER", m.agentModalFocus == 0)
@@ -1736,7 +1831,7 @@ func (m Model) buildLauncherSection(w int) []string {
 		borderColor = aBrC
 	}
 
-	header := "PIPELINES"
+	header := RenderHeader(m.activeBundle(), "pipelines", m.width)
 	if n := len(m.activeJobs); n > 0 {
 		header += fmt.Sprintf(" [%d running]", n)
 	}
@@ -1774,7 +1869,7 @@ func (m Model) buildAgentSection(w int) []string {
 		borderColor = aBrC
 	}
 
-	rows := []string{boxTop(w, "AGENT RUNNER", borderColor)}
+	rows := []string{boxTop(w, RenderHeader(m.activeBundle(), "agent_runner", m.width), borderColor)}
 
 	if len(m.agent.providers) == 0 {
 		rows = append(rows, boxRow(aDim+"  no providers available"+aRst, w))
@@ -1923,7 +2018,7 @@ func (m Model) viewActivityFeed(height, width int) string {
 	// Compute scroll indicators.
 	hasAbove := offset > 0
 	hasBelow := end < total
-	feedTitle := "ACTIVITY FEED"
+	feedTitle := RenderHeader(m.activeBundle(), "activity_feed", m.width)
 	switch {
 	case hasAbove && hasBelow:
 		feedTitle += " ↕"
@@ -2153,6 +2248,20 @@ func ansiFrom(s string, n int) string {
 		i += size
 	}
 	return ""
+}
+
+// hexToRGBFromStyles parses "#rrggbb" → uint8 r, g, b.
+// This is a local helper; see styles.BundleANSI for the exported version.
+func hexToRGBFromStyles(hex string) (uint8, uint8, uint8) {
+	hex = strings.TrimPrefix(hex, "#")
+	if len(hex) != 6 {
+		return 189, 147, 249 // Dracula purple fallback
+	}
+	parse := func(s string) uint8 {
+		v, _ := strconv.ParseUint(s, 16, 8)
+		return uint8(v)
+	}
+	return parse(hex[0:2]), parse(hex[2:4]), parse(hex[4:6])
 }
 
 // ── Run ───────────────────────────────────────────────────────────────────────
