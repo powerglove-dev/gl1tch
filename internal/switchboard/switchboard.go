@@ -38,6 +38,7 @@ const (
 	aBrC   = "\x1b[96m"  // bright cyan
 	aPnk   = "\x1b[95m"  // pink
 	aGrn   = "\x1b[32m"  // green
+	aYlw   = "\x1b[33m"  // yellow
 	aRed   = "\x1b[31m"  // red
 	aDim   = "\x1b[2m"   // dim
 	aBld   = "\x1b[1m"   // bold
@@ -1850,6 +1851,27 @@ func (m Model) viewActivityFeed(height, width int) string {
 				aDim, ts, aRst,
 				aBrC+entry.title+aRst)
 			appendRow(&allLines, titleLine)
+
+			// Render per-step status badges if this entry has steps.
+			if len(entry.steps) > 0 {
+				var badges []string
+				for _, step := range entry.steps {
+					var col string
+					switch step.status {
+					case "running":
+						col = aYlw
+					case "done":
+						col = aGrn
+					case "failed":
+						col = aRed
+					default: // "pending" or unknown
+						col = aDim
+					}
+					badges = append(badges, col+"["+step.status+"]"+aRst+" "+step.id)
+				}
+				badgeLine := "  " + strings.Join(badges, "  ")
+				appendRow(&allLines, badgeLine)
+			}
 
 			// Cap output lines per entry: show the last feedLinesPerEntry lines only.
 			const feedLinesPerEntry = 10
