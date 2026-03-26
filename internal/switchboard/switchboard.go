@@ -368,7 +368,7 @@ func (w *lineWriter) Write(p []byte) (int, error) {
 		if idx < 0 {
 			break
 		}
-		line := string(data[:idx])
+		line := strings.TrimRight(string(data[:idx]), "\r")
 		w.buf.Next(idx + 1)
 		if line != "" {
 			select {
@@ -1390,6 +1390,8 @@ func (m Model) buildAgentSection(w int) []string {
 			} else {
 				bodyRows = append(bodyRows, boxRow(aBrC+"  Prompt: (ctrl+s to submit)"+aRst, 27, w))
 				for _, pLine := range strings.Split(m.agent.prompt.View(), "\n") {
+					// textarea may use \r\n; strip \r to avoid cursor-reset corruption.
+					pLine = strings.TrimRight(pLine, "\r")
 					padded := "  " + pLine
 					bodyRows = append(bodyRows, boxRow(padded, visLen(padded), w))
 				}
@@ -1583,21 +1585,25 @@ func statusBadge(s FeedStatus) (string, string) {
 	}
 }
 
-// visLen returns the number of visible (non-ANSI-escape) runes in s.
-// Handles CSI sequences (\x1b[...X where X is any letter) and OSC sequences.
+// visLen returns the number of visible terminal columns in s.
+// Handles CSI sequences (\x1b[...X), skips all control characters.
 func visLen(s string) int {
 	n := 0
-	esc := false // inside \x1b[... sequence
+	esc := false
 	for _, r := range s {
 		if r == '\x1b' {
 			esc = true
 			continue
 		}
 		if esc {
-			// End on any ASCII letter (A-Z, a-z) that terminates a CSI sequence.
+			// CSI/ESC sequences end on any ASCII letter.
 			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
 				esc = false
 			}
+			continue
+		}
+		// Skip control characters (CR, LF, tab, etc.) — not visible columns.
+		if r < 0x20 || r == 0x7f {
 			continue
 		}
 		n++
