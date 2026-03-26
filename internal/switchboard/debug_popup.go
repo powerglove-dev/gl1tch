@@ -7,8 +7,9 @@ import (
 )
 
 // buildDebugPopup renders an 80%-wide centered overlay box showing the captured
-// content of the tmux window for the given jobID.
-func buildDebugPopup(termH, termW int, jobID string) string {
+// content of the tmux window for the given job. tmuxWindow is the fully-qualified
+// target "session:orcai-<feedID>" stored in jobHandle.
+func buildDebugPopup(termH, termW int, tmuxWindow string) string {
 	popW := termW * 80 / 100
 	if popW < 40 {
 		popW = 40
@@ -18,17 +19,24 @@ func buildDebugPopup(termH, termW int, jobID string) string {
 		popH = 10
 	}
 
-	// Capture the tmux pane for the job's window.
-	windowName := "orcai-" + jobID
-	out, err := exec.Command("tmux", "capture-pane", "-t", windowName, "-p").Output()
+	// Capture the tmux pane output for the job's window.
 	var content string
-	if err != nil {
-		content = "  window closed or not available"
+	if tmuxWindow == "" {
+		content = "  no tmux window associated with this job"
 	} else {
-		content = string(out)
+		out, err := exec.Command("tmux", "capture-pane", "-t", tmuxWindow, "-p", "-e").Output()
+		if err != nil {
+			content = "  window closed or not available"
+		} else {
+			content = string(out)
+		}
 	}
 
-	return renderPopupBox(popH, popW, "DEBUG: "+windowName, content)
+	title := tmuxWindow
+	if title == "" {
+		title = "DEBUG"
+	}
+	return renderPopupBox(popH, popW, title, content)
 }
 
 // renderPopupBox draws a bordered box of height h and width w, with the given
@@ -116,16 +124,18 @@ func currentTmuxSession() string {
 	return ""
 }
 
-// createJobWindow creates a detached tmux window named "orcai-<feedID>" and
-// attempts to hide it from the status bar (requires tmux >= 3.2).
-// Returns the window name. If tmux is not available, returns an empty string.
+// createJobWindow creates a detached tmux window named "orcai-<feedID>" in the
+// current session. Returns the fully-qualified target "session:window" so
+// subsequent tmux commands can address it unambiguously.
+// Returns an empty string if tmux is not available.
 func createJobWindow(feedID string) string {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		return ""
 	}
+	session := currentTmuxSession()
 	windowName := "orcai-" + feedID
-	exec.Command("tmux", "new-window", "-d", "-n", windowName).Run() //nolint:errcheck
-	// hide-from-statusbar requires tmux >= 3.2; ignore error gracefully.
-	exec.Command("tmux", "set-window-option", "-t", windowName, "hide-from-statusbar", "on").Run() //nolint:errcheck
-	return windowName
+	// Create the window detached in the current session.
+	target := session + ":" + windowName
+	exec.Command("tmux", "new-window", "-d", "-t", session, "-n", windowName).Run() //nolint:errcheck
+	return target
 }

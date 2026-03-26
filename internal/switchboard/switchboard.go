@@ -62,11 +62,12 @@ const (
 const agentInnerHeight = 8
 
 type feedEntry struct {
-	id     string
-	title  string
-	status FeedStatus
-	ts     time.Time
-	lines  []string
+	id         string
+	title      string
+	status     FeedStatus
+	ts         time.Time
+	lines      []string
+	tmuxWindow string // fully-qualified target "session:orcai-<feedID>", empty if no window
 }
 
 // ── Section types ─────────────────────────────────────────────────────────────
@@ -430,11 +431,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case FeedLineMsg:
 		m = m.appendFeedLine(msg.ID, msg.Line)
-		// Echo line to the job's tmux window if set.
-		if m.activeJob != nil && m.activeJob.tmuxWindow != "" && m.activeJob.id == msg.ID {
-			escaped := strings.ReplaceAll(msg.Line, "'", "'\\''")
-			exec.Command("tmux", "send-keys", "-t", m.activeJob.tmuxWindow, escaped, "").Run() //nolint:errcheck
-		}
 		if m.activeJob != nil {
 			return m, drainChan(m.activeJob.ch)
 		}
@@ -502,7 +498,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case "esc", "q":
 			m.debugPopupOpen = false
 		case "enter":
-			exec.Command("tmux", "select-window", "-t", "orcai-"+m.debugPopupJobID).Run() //nolint:errcheck
+			// debugPopupJobID is the fully-qualified "session:orcai-<feedID>" target.
+			exec.Command("tmux", "select-window", "-t", m.debugPopupJobID).Run() //nolint:errcheck
 			m.debugPopupOpen = false
 		}
 		return m, nil
@@ -612,6 +609,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "a":
 		m.launcher.focused = false
 		m.agent.focused = true
+		return m, nil
+
+	case "s":
+		m.launcher.focused = false
+		m.agent.focused = false
+		m.feedFocused = false
+		m.signalBoardFocused = true
 		return m, nil
 
 	case "r":
@@ -771,7 +775,7 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 		filtered := m.filteredFeed()
 		if len(filtered) > 0 && m.signalBoard.selectedIdx < len(filtered) {
 			m.debugPopupOpen = true
-			m.debugPopupJobID = filtered[m.signalBoard.selectedIdx].id
+			m.debugPopupJobID = filtered[m.signalBoard.selectedIdx].tmuxWindow
 		}
 		return m, nil
 	}
@@ -799,6 +803,8 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 		m.feedScrollOffset = 0
 
 		windowName := createJobWindow(feedID)
+		entry.tmuxWindow = windowName
+		m.feed[0] = entry
 
 		ch := make(chan tea.Msg, 256)
 		_, cancel := context.WithCancel(context.Background())
@@ -854,6 +860,8 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 		m.feedScrollOffset = 0
 
 		windowName := createJobWindow(feedID)
+		entry.tmuxWindow = windowName
+		m.feed[0] = entry
 
 		provArgs := picker.PipelineLaunchArgs(prov.ID)
 		binary := prov.Command
@@ -1076,9 +1084,10 @@ func (m Model) View() string {
 	contentH := max(h-1, 5) // reserve one line for bottom bar
 
 	// Signal board: fixed height above the feed.
-	sbHeight := min(len(m.feed)+2, 8)
-	if sbHeight < 2 {
-		sbHeight = 2
+	// Minimum 5 rows so the box is always visible (top+3body+bottom).
+	sbHeight := min(len(m.feed)+4, 8)
+	if sbHeight < 5 {
+		sbHeight = 5
 	}
 	feedH := max(contentH-sbHeight, 3)
 
@@ -1479,6 +1488,7 @@ func (m Model) viewBottomBar(width int) string {
 			hint("ctrl+s", "submit"),
 			hint("tab", "focus"),
 			hint("a", "agent"),
+			hint("s", "signals"),
 			hint("r", "refresh"),
 			hint("↑↓", "nav"),
 			hint("q", "quit"),

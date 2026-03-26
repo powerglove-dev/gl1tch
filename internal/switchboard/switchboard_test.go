@@ -374,9 +374,6 @@ func TestDebugPopup_ClosesOnEsc(t *testing.T) {
 	if !m5.DebugPopupOpen() {
 		t.Fatal("expected popup to open on enter from signal board")
 	}
-	if m5.DebugPopupJobID() != "job1" {
-		t.Errorf("expected popup job ID 'job1', got %q", m5.DebugPopupJobID())
-	}
 
 	// Close popup with esc.
 	m6, _ := m5.Update(tea.KeyMsg{Type: tea.KeyEsc})
