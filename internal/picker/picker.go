@@ -89,7 +89,7 @@ func buildProviders() []ProviderDef {
 	// Discover available plugins (native gRPC plugins + CLI wrappers; skip pipelines).
 	// discovery.Discover uses providers.Registry which checks binary existence via PATH.
 	discovered := make(map[string]bool)
-	var nativeExtras []string // native plugins not in the static Providers list
+	var extras []string // plugins not in the static Providers list
 
 	if configDir := orcaiConfigDir(); configDir != "" {
 		if plugins, err := discovery.Discover(configDir); err == nil {
@@ -98,8 +98,8 @@ func buildProviders() []ProviderDef {
 					continue
 				}
 				discovered[p.Name] = true
-				if p.Type == discovery.TypeNative {
-					nativeExtras = append(nativeExtras, p.Name)
+				if p.Type == discovery.TypeNative || p.Type == discovery.TypeCLIWrapper {
+					extras = append(extras, p.Name)
 				}
 			}
 		}
@@ -119,14 +119,19 @@ func buildProviders() []ProviderDef {
 		out = append(out, p)
 	}
 
-	// Append native gRPC plugins that are not in the static Providers list.
+	// Append discovered plugins that are not in the static Providers list.
 	staticIDs := make(map[string]bool, len(Providers))
 	for _, p := range Providers {
 		staticIDs[p.ID] = true
 	}
-	for _, name := range nativeExtras {
+	for _, name := range extras {
 		if !staticIDs[name] {
-			out = append(out, ProviderDef{ID: name, Label: name})
+			p := ProviderDef{ID: name, Label: name}
+			// opencode delegates to ollama — expose the same local models.
+			if name == "opencode" {
+				p = injectOllamaModels(p, ollamaModels)
+			}
+			out = append(out, p)
 		}
 	}
 

@@ -86,6 +86,7 @@ type agentSection struct {
 type jobHandle struct {
 	id     string
 	cancel context.CancelFunc
+	ch     chan tea.Msg
 }
 
 // ── Tea messages ──────────────────────────────────────────────────────────────
@@ -338,17 +339,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		if pane := os.Getenv("TMUX_PANE"); pane != "" {
-			out, err := exec.Command("tmux", "display-message", "-p", "#{window_width}").Output()
-			if err == nil {
-				if total, err2 := strconv.Atoi(strings.TrimSpace(string(out))); err2 == nil && total > 0 {
-					target := total * 3 / 10
-					if target > 0 && m.width != target {
-						exec.Command("tmux", "resize-pane", "-t", pane, "-x", strconv.Itoa(target)).Run() //nolint:errcheck
-					}
-				}
-			}
-		}
 		leftW := m.leftColWidth()
 		m.agent.prompt.Width = max(leftW-4, 10)
 		return m, nil
@@ -373,14 +363,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case FeedLineMsg:
 		m = m.appendFeedLine(msg.ID, msg.Line)
+		if m.activeJob != nil {
+			return m, drainChan(m.activeJob.ch)
+		}
 		return m, nil
 
 	case jobDoneMsg:
+		// Drain any remaining lines buffered in the channel before marking done.
+		if m.activeJob != nil {
+		drainDone:
+			for {
+				select {
+				case buffered, ok := <-m.activeJob.ch:
+					if !ok {
+						break drainDone
+					}
+					if fl, ok2 := buffered.(FeedLineMsg); ok2 {
+						m = m.appendFeedLine(fl.ID, fl.Line)
+					}
+				default:
+					break drainDone
+				}
+			}
+		}
 		m = m.setFeedStatus(msg.id, FeedDone)
 		m.activeJob = nil
 		return m, nil
 
 	case jobFailedMsg:
+		if m.activeJob != nil {
+		drainFailed:
+			for {
+				select {
+				case buffered, ok := <-m.activeJob.ch:
+					if !ok {
+						break drainFailed
+					}
+					if fl, ok2 := buffered.(FeedLineMsg); ok2 {
+						m = m.appendFeedLine(fl.ID, fl.Line)
+					}
+				default:
+					break drainFailed
+				}
+			}
+		}
 		m = m.setFeedStatus(msg.id, FeedFailed)
 		if msg.err != nil {
 			m = m.appendFeedLine(msg.id, "error: "+msg.err.Error())
@@ -596,9 +622,8 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 		m.feedSelected = 0
 
 		ch := make(chan tea.Msg, 256)
-		ctx, cancel := context.WithCancel(context.Background())
-		_ = ctx
-		m.activeJob = &jobHandle{id: feedID, cancel: cancel}
+		_, cancel := context.WithCancel(context.Background())
+		m.activeJob = &jobHandle{id: feedID, cancel: cancel, ch: ch}
 
 		cmd := launchPipelineCmdCh(yamlPath, feedID, ch, cancel)
 		drain := drainChan(ch)
@@ -657,7 +682,7 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 
 		ch := make(chan tea.Msg, 256)
 		_, cancel := context.WithCancel(context.Background())
-		m.activeJob = &jobHandle{id: feedID, cancel: cancel}
+		m.activeJob = &jobHandle{id: feedID, cancel: cancel, ch: ch}
 
 		cmd := runAgentCmdCh(adapter, input, vars, feedID, ch, cancel)
 		drain := drainChan(ch)
@@ -873,7 +898,7 @@ func (m Model) buildBanner(w int) string {
 	inner := w - 2
 	top := aPur + "╔" + strings.Repeat("═", inner) + "╗" + aRst
 
-	const logoPrefixLen = 16
+	const logoPrefixLen = 14
 	logoPad := max(inner-logoPrefixLen, 0)
 	logoLine := aPur + "║" + aPnk + " ░▒▓ " + aBld + "ORCAI" + aRst + aPnk + " ▓▒░" +
 		strings.Repeat(" ", logoPad) + aPur + "║" + aRst
@@ -941,7 +966,6 @@ func (m Model) buildAgentSection(w int) []string {
 
 	switch m.agent.formStep {
 	case 0:
-		rows = append(rows, boxRow(aBrC+"  Provider:"+aRst, 11, w))
 		for i, prov := range m.agent.providers {
 			label := prov.Label
 			if label == "" {
