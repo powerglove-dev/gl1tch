@@ -1,6 +1,8 @@
 package picker
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,6 +19,8 @@ import (
 
 	"github.com/adam-stokes/orcai/internal/discovery"
 	"github.com/adam-stokes/orcai/internal/opsx"
+	"github.com/adam-stokes/orcai/internal/plugin"
+	"github.com/adam-stokes/orcai/internal/providers"
 	"github.com/adam-stokes/orcai/internal/styles"
 )
 
@@ -29,23 +33,15 @@ type ModelOption struct {
 
 // ProviderDef describes one AI provider and its available models.
 type ProviderDef struct {
-	ID     string
-	Label  string
-	Models []ModelOption
+	ID      string
+	Label   string
+	Models  []ModelOption
+	Command string // actual binary path/name to invoke
 }
 
-// Providers is the canonical ordered list. Models for ollama are discovered at
-// runtime; this list is used as the base before availability filtering.
+// Providers is the base list of built-in providers. All AI providers are
+// discovered at runtime via sidecar YAML files in ~/.config/orcai/wrappers/.
 var Providers = []ProviderDef{
-	{
-		ID: "claude", Label: "Claude",
-		Models: []ModelOption{
-			{ID: "claude-opus-4-6", Label: "Opus 4.6"},
-			{ID: "claude-sonnet-4-6", Label: "Sonnet 4.6"},
-			{ID: "claude-haiku-4-5-20251001", Label: "Haiku 4.5"},
-		},
-	},
-	{ID: "copilot", Label: "GitHub Copilot"},
 	{ID: "ollama", Label: "Ollama"},
 	{ID: "shell", Label: "Shell"},
 }
@@ -76,22 +72,101 @@ func queryOllamaModels() []string {
 }
 
 
+// sidecarMeta holds both model options and kind metadata for a sidecar plugin.
+type sidecarMeta struct {
+	Models  []ModelOption
+	Kind    string
+	Command string
+}
+
+// loadSidecarMeta scans configDir/wrappers/ and returns a map from plugin
+// name to sidecarMeta, capturing both models and kind from each sidecar YAML.
+func loadSidecarMeta(configDir string) map[string]sidecarMeta {
+	result := make(map[string]sidecarMeta)
+	if configDir == "" {
+		return result
+	}
+	wrappersDir := filepath.Join(configDir, "wrappers")
+	entries, err := os.ReadDir(wrappersDir)
+	if err != nil {
+		return result
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+			continue
+		}
+		adapter, err := plugin.NewCliAdapterFromSidecar(filepath.Join(wrappersDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		models := make([]ModelOption, 0, len(adapter.Models()))
+		for _, m := range adapter.Models() {
+			models = append(models, ModelOption{ID: m.ID, Label: m.Label})
+		}
+		cmd := adapter.Command()
+		// If no models declared in sidecar, try --list-models autodetect.
+		if len(models) == 0 && cmd != "" {
+			models = autodetectModels(cmd)
+		}
+		result[adapter.Name()] = sidecarMeta{Models: models, Kind: adapter.Kind(), Command: cmd}
+	}
+	return result
+}
+
+// autodetectModels runs `<cmd> --list-models` with a 2-second timeout and
+// parses stdout as JSON: [{"id":"...","label":"..."}].
+// Returns nil (not an error) on any failure so startup is never blocked.
+func autodetectModels(cmd string) []ModelOption {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, cmd, "--list-models").Output()
+	if err != nil {
+		return nil
+	}
+	out = bytes.TrimSpace(out)
+	if len(out) == 0 {
+		return nil
+	}
+	var raw []struct {
+		ID    string `json:"id"`
+		Label string `json:"label"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil
+	}
+	models := make([]ModelOption, 0, len(raw))
+	for _, r := range raw {
+		lbl := r.Label
+		if lbl == "" {
+			lbl = r.ID
+		}
+		models = append(models, ModelOption{ID: r.ID, Label: lbl})
+	}
+	return models
+}
+
 // buildProviders returns a filtered, runtime-enriched provider list driven by
 // the plugin Manager/discovery layer:
 //   - only includes providers found via discovery (native plugins + CLI wrappers)
-//   - falls back to PATH check for ollama (not in bundled registry)
 //   - shell is always included
-//   - injects discovered Ollama models into the ollama provider
-//   - appends any native plugins not in the static Providers list
+//   - reads model metadata from ~/.config/orcai/wrappers/<name>.yaml sidecars
+//   - falls back to runtime Ollama query if the ollama sidecar declares no models
+//   - appends any discovered plugins not in the static Providers list
 func buildProviders() []ProviderDef {
+	configDir := orcaiConfigDir()
 	ollamaModels := queryOllamaModels()
+	sidecarData := loadSidecarMeta(configDir)
 
 	// Discover available plugins (native gRPC plugins + CLI wrappers; skip pipelines).
-	// discovery.Discover uses providers.Registry which checks binary existence via PATH.
 	discovered := make(map[string]bool)
-	var extras []string // plugins not in the static Providers list
+	type extraEntry struct {
+		name        string
+		sidecarPath string
+		command     string
+	}
+	var extras []extraEntry
 
-	if configDir := orcaiConfigDir(); configDir != "" {
+	if configDir != "" {
 		if plugins, err := discovery.Discover(configDir); err == nil {
 			for _, p := range plugins {
 				if p.Type == discovery.TypePipeline {
@@ -99,7 +174,7 @@ func buildProviders() []ProviderDef {
 				}
 				discovered[p.Name] = true
 				if p.Type == discovery.TypeNative || p.Type == discovery.TypeCLIWrapper {
-					extras = append(extras, p.Name)
+					extras = append(extras, extraEntry{name: p.Name, sidecarPath: p.SidecarPath, command: p.Command})
 				}
 			}
 		}
@@ -107,16 +182,37 @@ func buildProviders() []ProviderDef {
 
 	var out []ProviderDef
 	for _, p := range Providers {
-		switch {
-		case p.ID == "shell":
-			// shell is always available — no binary to check
+		switch p.ID {
+		case "shell":
+			// always available — no binary to check
+		case "ollama":
+			if !discovered[p.ID] {
+				continue
+			}
+			// Prefer sidecar-declared models; fall back to runtime query.
+			if models := sidecarData[p.ID].Models; len(models) > 0 {
+				p.Models = models
+			} else {
+				p = injectOllamaModels(p, ollamaModels)
+			}
+			if cmd := sidecarData[p.ID].Command; cmd != "" {
+				p.Command = cmd
+			}
 		default:
 			if !discovered[p.ID] {
 				continue
 			}
+			if cmd := sidecarData[p.ID].Command; cmd != "" {
+				p.Command = cmd
+			}
 		}
-		p = injectOllamaModels(p, ollamaModels)
 		out = append(out, p)
+	}
+
+	// Load providers registry for display names and fallback model metadata.
+	var reg *providers.Registry
+	if configDir != "" {
+		reg, _ = providers.NewRegistry(filepath.Join(configDir, "providers"))
 	}
 
 	// Append discovered plugins that are not in the static Providers list.
@@ -124,15 +220,44 @@ func buildProviders() []ProviderDef {
 	for _, p := range Providers {
 		staticIDs[p.ID] = true
 	}
-	for _, name := range extras {
-		if !staticIDs[name] {
-			p := ProviderDef{ID: name, Label: name}
-			// opencode delegates to ollama — expose the same local models.
-			if name == "opencode" {
-				p = injectOllamaModels(p, ollamaModels)
-			}
-			out = append(out, p)
+	for _, e := range extras {
+		if staticIDs[e.name] {
+			continue
 		}
+		meta := sidecarData[e.name]
+		// Only include agent-kind plugins in the agent runner provider list.
+		if meta.Kind != "" && meta.Kind != "agent" {
+			continue
+		}
+		models := meta.Models
+		label := e.name
+		if reg != nil {
+			if profile, ok := reg.Get(e.name); ok {
+				if profile.DisplayName != "" {
+					label = profile.DisplayName
+				}
+				// Use bundled profile models when no sidecar models are declared.
+				if len(models) == 0 {
+					for _, m := range profile.Models {
+						lbl := m.Display
+						if lbl == "" {
+							lbl = m.ID
+						}
+						models = append(models, ModelOption{ID: m.ID, Label: lbl})
+					}
+				}
+			}
+		}
+		cmd := e.command
+		if cmd == "" {
+			cmd = meta.Command
+		}
+		out = append(out, ProviderDef{
+			ID:      e.name,
+			Label:   label,
+			Models:  models,
+			Command: cmd,
+		})
 	}
 
 	return out
@@ -154,10 +279,9 @@ func BuildProviders() []ProviderDef {
 }
 
 // pipelineLaunchArgs maps provider IDs to the extra CLI flags needed to invoke
-// them in non-interactive (pipeline) mode.
-var pipelineLaunchArgs = map[string][]string{
-	"claude": {"--print"},
-}
+// them in non-interactive (pipeline) mode. AI provider plugins handle their own
+// non-interactive flags internally (e.g. orcai-claude passes --print to claude).
+var pipelineLaunchArgs = map[string][]string{}
 
 // PipelineLaunchArgs returns the fixed CLI args to prepend when a provider is
 // invoked as a non-interactive pipeline executor (e.g. --print for claude).

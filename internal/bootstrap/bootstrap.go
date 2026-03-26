@@ -44,7 +44,7 @@ set -g window-status-format "#[fg=#6272a4] #I:#W "
 set -g window-status-current-format "#[fg=#f8f8f2,bold] #I:#W "
 set -g status-left "#[fg=#bd93f9,bold] ORCAI #[default]"
 set -g status-left-length 20
-set -g status-right "#[fg=#6272a4] ^spc n new  ^spc c win  ^spc x kill  ^spc t panel   %H:%M "
+set -g status-right "#[fg=#6272a4] ^spc n new  ^spc c win  ^spc x kill  ^spc t switchboard   %H:%M "
 set -g status-right-length 80
 set -g mouse on
 set -g default-terminal "screen-256color"
@@ -234,18 +234,14 @@ func Run() error {
 		return c.Run()
 	}
 
-	// Create session with a shell as the main pane.
-	if err := run("-f", confPath, "new-session", "-d", "-s", SessionName, "-n", "ORCAI"); err != nil {
+	// Create session running the switchboard directly in the ORCAI window.
+	sysop := resolveCompanion(self, "orcai-sysop", "sysop")
+	if err := run("-f", confPath, "new-session", "-d", "-s", SessionName, "-n", "ORCAI", sysop); err != nil {
 		return fmt.Errorf("creating session: %w", err)
 	}
 	run("source-file", confPath) //nolint:errcheck
 	// Only apply keybindings on fresh session; layout.yaml is for re-attach customisation.
 	applyKeybindings(cfgDir)
-
-	// Open the switchboard as a full-screen popup on startup.
-	// The shell remains in the background; ^spc t reopens the switchboard at any time.
-	sysop := resolveCompanion(self, "orcai-sysop", "sysop")
-	run("display-popup", "-E", "-w", "100%", "-h", "100%", sysop) //nolint:errcheck
 
 	cmd := exec.Command("tmux", "-f", confPath, "attach-session", "-t", SessionName)
 	cmd.Stdin = os.Stdin

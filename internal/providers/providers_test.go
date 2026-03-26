@@ -9,11 +9,12 @@ import (
 )
 
 // bundledNames is the expected set of names shipped with the binary.
-var bundledNames = []string{"claude", "gemini", "opencode", "aider", "goose", "copilot"}
+// copilot is intentionally absent — it is provided via the github-copilot sidecar plugin.
+var bundledNames = []string{"claude", "gemini", "opencode", "aider", "goose"}
 
 // ── LoadBundled ──────────────────────────────────────────────────────────────
 
-func TestLoadBundled_ReturnsAllSixProfiles(t *testing.T) {
+func TestLoadBundled_ReturnsAllFiveProfiles(t *testing.T) {
 	profiles, err := providers.LoadBundled()
 	if err != nil {
 		t.Fatalf("LoadBundled() unexpected error: %v", err)

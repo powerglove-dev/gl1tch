@@ -62,8 +62,8 @@ func TestBuildTmuxConf_Keybindings(t *testing.T) {
 	if !strings.Contains(conf, "^spc c win") {
 		t.Error("tmux.conf status-right missing '^spc c win' hint")
 	}
-	if !strings.Contains(conf, "^spc t panel") {
-		t.Error("tmux.conf status-right missing '^spc t panel' hint")
+	if !strings.Contains(conf, "^spc t switchboard") {
+		t.Error("tmux.conf status-right missing '^spc t switchboard' hint")
 	}
 	// Sysop toggle chord must be present (either override binary or subcommand).
 	if !strings.Contains(conf, "sysop") {

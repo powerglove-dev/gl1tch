@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/adam-stokes/orcai/internal/picker"
@@ -79,7 +79,7 @@ type agentSection struct {
 	providers        []picker.ProviderDef
 	selectedProvider int
 	selectedModel    int
-	prompt           textinput.Model
+	prompt           textarea.Model
 	focused          bool
 }
 
@@ -173,9 +173,12 @@ type Model struct {
 
 // New creates a new Switchboard Model, discovering pipelines and providers.
 func New() Model {
-	ti := textinput.New()
-	ti.Placeholder = "Enter prompt…"
-	ti.CharLimit = 4096
+	ta := textarea.New()
+	ta.Placeholder = "Enter prompt… (ctrl+s to submit)"
+	ta.CharLimit = 4096
+	ta.ShowLineNumbers = false
+	ta.SetWidth(80)
+	ta.SetHeight(4)
 
 	return Model{
 		launcher: launcherSection{
@@ -184,7 +187,7 @@ func New() Model {
 		},
 		agent: agentSection{
 			providers: picker.BuildProviders(),
-			prompt:    ti,
+			prompt:    ta,
 		},
 	}
 }
@@ -340,7 +343,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		leftW := m.leftColWidth()
-		m.agent.prompt.Width = max(leftW-4, 10)
+		m.agent.prompt.SetWidth(max(leftW-4, 10))
 		return m, nil
 
 	case tickMsg:
@@ -438,6 +441,47 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 	}
 
+	// When at the prompt step, forward keys to textarea first,
+	// except for submit (ctrl+s) and navigation (esc, ctrl+c, tab, q).
+	if m.agent.focused && m.agent.formStep == 2 {
+		switch key {
+		case "ctrl+s":
+			return m.handleEnter()
+		case "esc":
+			m.agent.prompt.Blur()
+			m.agent.formStep = 1
+			// If going back to step 1 but no models, go to step 0.
+			prov := m.currentProvider()
+			if prov == nil || len(nonSepModels(prov.Models)) == 0 {
+				m.agent.formStep = 0
+			}
+			return m, nil
+		case "ctrl+c":
+			if m.activeJob != nil {
+				m.confirmQuit = true
+				return m, nil
+			}
+			return m, tea.Quit
+		case "tab":
+			// Wrap back to launcher.
+			m.agent.focused = false
+			m.launcher.focused = true
+			m.agent.formStep = 0
+			m.agent.prompt.Blur()
+			return m, nil
+		case "q":
+			if m.activeJob != nil {
+				m.confirmQuit = true
+				return m, nil
+			}
+			return m, tea.Quit
+		default:
+			var cmd tea.Cmd
+			m.agent.prompt, cmd = m.agent.prompt.Update(msg)
+			return m, cmd
+		}
+	}
+
 	switch key {
 	case "ctrl+c":
 		if m.activeJob != nil {
@@ -523,13 +567,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "enter":
 		return m.handleEnter()
-	}
-
-	// Forward key events to textinput when at prompt step.
-	if m.agent.focused && m.agent.formStep == 2 {
-		var cmd tea.Cmd
-		m.agent.prompt, cmd = m.agent.prompt.Update(msg)
-		return m, cmd
 	}
 
 	return m, nil
@@ -674,7 +711,11 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 		m.feedSelected = 0
 
 		provArgs := picker.PipelineLaunchArgs(prov.ID)
-		adapter := plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", prov.ID, provArgs...)
+		binary := prov.Command
+		if binary == "" {
+			binary = prov.ID
+		}
+		adapter := plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", binary, provArgs...)
 		vars := map[string]string{}
 		if modelID != "" {
 			vars["model"] = modelID
@@ -1066,10 +1107,11 @@ func (m Model) buildAgentSection(w int) []string {
 			crumbVis += 3 // " > "
 		}
 		rows = append(rows, boxRow(crumb, crumbVis, w))
-		rows = append(rows, boxRow(aBrC+"  Prompt:"+aRst, 9, w))
-		promptView := m.agent.prompt.View()
-		promptLine := "  " + promptView
-		rows = append(rows, boxRow(promptLine, visLen(promptLine), w))
+		rows = append(rows, boxRow(aBrC+"  Prompt: (ctrl+s to submit)"+aRst, 27, w))
+		for _, pLine := range strings.Split(m.agent.prompt.View(), "\n") {
+			padded := "  " + pLine
+			rows = append(rows, boxRow(padded, visLen(padded), w))
+		}
 	}
 
 	rows = append(rows, boxBot(w))
@@ -1127,6 +1169,7 @@ func (m Model) viewBottomBar(width int) string {
 	sep := aDim + " · " + aRst
 	parts := []string{
 		hint("enter", "launch"),
+		hint("ctrl+s", "submit"),
 		hint("tab", "focus"),
 		hint("a", "agent"),
 		hint("r", "refresh"),

@@ -13,7 +13,7 @@ func TestProviders_NotEmpty(t *testing.T) {
 }
 
 func TestProviders_ContainsExpected(t *testing.T) {
-	want := []string{"claude", "copilot", "ollama", "shell"}
+	want := []string{"ollama", "shell"}
 	have := make(map[string]bool, len(picker.Providers))
 	for _, p := range picker.Providers {
 		have[p.ID] = true
@@ -33,18 +33,21 @@ func TestProviders_NoAider(t *testing.T) {
 	}
 }
 
-func TestProviders_ClaudeHasModels(t *testing.T) {
+func TestProviders_NoClaude(t *testing.T) {
 	for _, p := range picker.Providers {
 		if p.ID == "claude" {
-			if len(p.Models) == 0 {
-				t.Error("claude provider has no models")
-			}
-			return
+			t.Error("claude must not be in the static Providers list; use a sidecar YAML")
 		}
 	}
-	t.Error("claude not found in Providers")
 }
 
+func TestProviders_NoCopilot(t *testing.T) {
+	for _, p := range picker.Providers {
+		if p.ID == "copilot" {
+			t.Error("copilot must not be in the static Providers list; use a sidecar YAML")
+		}
+	}
+}
 
 func TestProviders_ShellHasNoModels(t *testing.T) {
 	for _, p := range picker.Providers {
@@ -69,23 +72,6 @@ func TestProviders_OllamaBaseHasNoModels(t *testing.T) {
 		}
 	}
 	t.Error("ollama not found in Providers")
-}
-
-func TestProviders_GeminiNoSeparatorSelectableModels(t *testing.T) {
-	for _, p := range picker.Providers {
-		if p.ID == "gemini" {
-			sel := 0
-			for _, m := range p.Models {
-				if !m.Separator {
-					sel++
-				}
-			}
-			if sel == 0 {
-				t.Error("gemini should have selectable (non-separator) models")
-			}
-			return
-		}
-	}
 }
 
 func TestGetOrCreateWorktreeFrom_EmptyPathReturnsEmpty(t *testing.T) {

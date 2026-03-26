@@ -11,17 +11,27 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// SidecarModel is a single model entry declared in a sidecar YAML.
+type SidecarModel struct {
+	ID    string `yaml:"id"`
+	Label string `yaml:"label"`
+}
+
 // SidecarSchema is the structure of a ~/.config/orcai/wrappers/<name>.yaml file.
 type SidecarSchema struct {
-	Name         string   `yaml:"name"`
-	Description  string   `yaml:"description"`
-	Command      string   `yaml:"command"`
-	Args         []string `yaml:"args"`
-	InputSchema  string   `yaml:"input_schema"`
-	OutputSchema string   `yaml:"output_schema"`
+	Name         string         `yaml:"name"`
+	Description  string         `yaml:"description"`
+	Command      string         `yaml:"command"`
+	Args         []string       `yaml:"args"`
+	Models       []SidecarModel `yaml:"models"`
+	InputSchema  string         `yaml:"input_schema"`
+	OutputSchema string         `yaml:"output_schema"`
 	// Category is an optional hierarchical prefix (e.g. "providers.claude").
 	// When set, the adapter is also registered under "category.name" in the Manager.
 	Category string `yaml:"category"`
+	// Kind categorises the plugin. Valid values: "agent" (default), "tool".
+	// Plugins without a kind field default to "agent" for backwards compatibility.
+	Kind string `yaml:"kind"`
 }
 
 // CliAdapter wraps an arbitrary CLI tool as a Tier 2 Plugin.
@@ -32,8 +42,10 @@ type CliAdapter struct {
 	desc     string
 	cmd      string
 	args     []string
+	models   []SidecarModel
 	caps     []Capability
 	category string // optional; set from sidecar YAML
+	kind     string // "agent" or "tool"; defaults to "agent"
 }
 
 // NewCliAdapter creates a Tier 2 plugin that wraps cmd.
@@ -59,13 +71,23 @@ func NewCliAdapterFromSidecar(path string) (*CliAdapter, error) {
 	caps := []Capability{
 		{Name: schema.Name, InputSchema: schema.InputSchema, OutputSchema: schema.OutputSchema},
 	}
+	models := schema.Models
+	if models == nil {
+		models = []SidecarModel{}
+	}
+	kind := schema.Kind
+	if kind == "" {
+		kind = "agent"
+	}
 	return &CliAdapter{
 		name:     schema.Name,
 		desc:     schema.Description,
 		cmd:      schema.Command,
 		args:     schema.Args,
+		models:   models,
 		caps:     caps,
 		category: schema.Category,
+		kind:     kind,
 	}, nil
 }
 
@@ -73,9 +95,16 @@ func (c *CliAdapter) Name() string              { return c.name }
 func (c *CliAdapter) Description() string        { return c.desc }
 func (c *CliAdapter) Capabilities() []Capability { return c.caps }
 func (c *CliAdapter) Close() error               { return nil }
+func (c *CliAdapter) Command() string            { return c.cmd }
 
 // Category returns the optional hierarchical category prefix. Empty if not set.
 func (c *CliAdapter) Category() string { return c.category }
+
+// Kind returns the plugin kind ("agent" or "tool"). Never empty; defaults to "agent".
+func (c *CliAdapter) Kind() string { return c.kind }
+
+// Models returns the models declared in the sidecar YAML. Never nil.
+func (c *CliAdapter) Models() []SidecarModel { return c.models }
 
 // Execute spawns the subprocess, writes input to stdin, and streams stdout to w.
 // All entries in vars are passed as ORCAI_<KEY>=<value> environment variables so

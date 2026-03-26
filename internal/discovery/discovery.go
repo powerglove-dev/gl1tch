@@ -2,8 +2,11 @@ package discovery
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/adam-stokes/orcai/internal/providers"
 )
@@ -24,6 +27,9 @@ type Plugin struct {
 	Args         []string
 	Type         PluginType
 	PipelineFile string
+	// SidecarPath is the path to the sidecar YAML for TypeCLIWrapper plugins
+	// discovered from the wrappers directory. Empty for other types.
+	SidecarPath string
 }
 
 // Discover returns all available plugins: Tier 1 (native, from configDir/plugins/),
@@ -49,21 +55,80 @@ func Discover(configDir string) ([]Plugin, error) {
 		knownNames[p.Name] = true
 	}
 
+	// Scan wrappers dir for sidecar-declared CLI plugins; check command in PATH.
+	// These take priority over providers.Registry entries of the same name.
+	wrappers, err := scanWrappers(filepath.Join(configDir, "wrappers"), knownNames)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range wrappers {
+		knownNames[w.Name] = true
+	}
+
 	reg, err := providers.NewRegistry(filepath.Join(configDir, "providers"))
 	if err != nil {
 		return nil, err
 	}
 
 	plugins := append(native, pipelines...)
+	plugins = append(plugins, wrappers...)
 	for _, profile := range reg.Available() {
 		if knownNames[profile.Name] {
-			continue // native plugin or pipeline takes priority
+			continue // native plugin, pipeline, or sidecar wrapper takes priority
 		}
 		plugins = append(plugins, Plugin{
 			Name:    profile.Name,
 			Command: profile.Binary,
 			Args:    profile.Session.LaunchArgs,
 			Type:    TypeCLIWrapper,
+		})
+	}
+	return plugins, nil
+}
+
+// sidecarHeader holds just the fields needed to determine name and command.
+type sidecarHeader struct {
+	Name    string `yaml:"name"`
+	Command string `yaml:"command"`
+}
+
+// scanWrappers reads YAML files from dir, checks that each command is in PATH,
+// and returns Plugin entries (TypeCLIWrapper) for those that are available.
+// Names already in knownNames are skipped to let higher-priority types shadow them.
+func scanWrappers(dir string, knownNames map[string]bool) ([]Plugin, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var plugins []Plugin
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var hdr sidecarHeader
+		if err := yaml.Unmarshal(data, &hdr); err != nil || hdr.Name == "" || hdr.Command == "" {
+			continue
+		}
+		if knownNames[hdr.Name] {
+			continue
+		}
+		if _, err := exec.LookPath(hdr.Command); err != nil {
+			continue // command not installed
+		}
+		plugins = append(plugins, Plugin{
+			Name:        hdr.Name,
+			Command:     hdr.Command,
+			Type:        TypeCLIWrapper,
+			SidecarPath: path,
 		})
 	}
 	return plugins, nil
