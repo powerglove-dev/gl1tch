@@ -63,7 +63,7 @@ func TestStepStatusMsg_UpdatesExistingStep(t *testing.T) {
 	m.feed = append([]feedEntry{entry}, m.feed...)
 
 	// Send a StepStatusMsg to update the step.
-	m2, _ := m.Update(StepStatusMsg{ID: "job1", StepID: "fetch", Status: "running"})
+	m2, _ := m.Update(StepStatusMsg{FeedID: "job1", StepID: "fetch", Status: "running"})
 	updated := m2.(Model)
 
 	// Verify the step status was updated.
@@ -91,7 +91,7 @@ func TestStepStatusMsg_AppendsNewStep(t *testing.T) {
 	m.feed = append([]feedEntry{entry}, m.feed...)
 
 	// Send a StepStatusMsg for a step not yet in the list.
-	m2, _ := m.Update(StepStatusMsg{ID: "job2", StepID: "process", Status: "done"})
+	m2, _ := m.Update(StepStatusMsg{FeedID: "job2", StepID: "process", Status: "done"})
 	updated := m2.(Model)
 
 	if len(updated.feed) == 0 {

@@ -125,7 +125,7 @@ type FeedLineMsg struct {
 
 // StepStatusMsg carries a step lifecycle update from the log-watcher to the model.
 type StepStatusMsg struct {
-	ID     string // feed entry ID
+	FeedID string // feed entry ID
 	StepID string
 	Status string
 }
@@ -550,7 +550,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case StepStatusMsg:
 		for i := range m.feed {
-			if m.feed[i].id == msg.ID {
+			if m.feed[i].id == msg.FeedID {
 				found := false
 				for j := range m.feed[i].steps {
 					if m.feed[i].steps[j].id == msg.StepID {
@@ -565,7 +565,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
-		if jh, ok := m.activeJobs[msg.ID]; ok {
+		if jh, ok := m.activeJobs[msg.FeedID]; ok {
 			return m, drainChan(jh.ch)
 		}
 		return m, nil
