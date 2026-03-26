@@ -93,6 +93,7 @@ type jobHandle struct {
 	cancel     context.CancelFunc
 	ch         chan tea.Msg
 	tmuxWindow string
+	logFile    string // /tmp/orcai-<feedID>.log — tailed in the tmux window
 }
 
 // ── Tea messages ──────────────────────────────────────────────────────────────
@@ -431,6 +432,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case FeedLineMsg:
 		m = m.appendFeedLine(msg.ID, msg.Line)
+		// Append stripped line to the job's log file so the debug popup tail shows it.
+		if m.activeJob != nil && m.activeJob.logFile != "" {
+			line := stripANSI(msg.Line)
+			appendToFile(m.activeJob.logFile, line+"\n")
+		}
 		if m.activeJob != nil {
 			return m, drainChan(m.activeJob.ch)
 		}
@@ -802,13 +808,13 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 		m.feedSelected = 0
 		m.feedScrollOffset = 0
 
-		windowName := createJobWindow(feedID)
+		windowName, logFile := createJobWindow(feedID)
 		entry.tmuxWindow = windowName
 		m.feed[0] = entry
 
 		ch := make(chan tea.Msg, 256)
 		_, cancel := context.WithCancel(context.Background())
-		m.activeJob = &jobHandle{id: feedID, cancel: cancel, ch: ch, tmuxWindow: windowName}
+		m.activeJob = &jobHandle{id: feedID, cancel: cancel, ch: ch, tmuxWindow: windowName, logFile: logFile}
 
 		cmd := launchPipelineCmdCh(yamlPath, feedID, ch, cancel)
 		drain := drainChan(ch)
@@ -859,7 +865,7 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 		m.feedSelected = 0
 		m.feedScrollOffset = 0
 
-		windowName := createJobWindow(feedID)
+		windowName, logFile := createJobWindow(feedID)
 		entry.tmuxWindow = windowName
 		m.feed[0] = entry
 
@@ -876,7 +882,7 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 
 		ch := make(chan tea.Msg, 256)
 		_, cancel := context.WithCancel(context.Background())
-		m.activeJob = &jobHandle{id: feedID, cancel: cancel, ch: ch, tmuxWindow: windowName}
+		m.activeJob = &jobHandle{id: feedID, cancel: cancel, ch: ch, tmuxWindow: windowName, logFile: logFile}
 
 		cmd := runAgentCmdCh(adapter, input, vars, feedID, ch, cancel)
 		drain := drainChan(ch)
@@ -1089,14 +1095,21 @@ func (m Model) View() string {
 	if sbHeight < 5 {
 		sbHeight = 5
 	}
+	// Clamp sbHeight so feedH is at least 3.
+	if sbHeight > contentH-3 {
+		sbHeight = max(contentH-3, 5)
+	}
 	feedH := max(contentH-sbHeight, 3)
 
 	left := m.viewLeftColumn(contentH, leftW)
 	sb := m.buildSignalBoard(sbHeight, feedW)
 	feed := m.viewActivityFeed(feedH, feedW)
 
-	// Right column: signal board lines followed by feed lines.
+	// Right column: signal board lines followed by feed lines, clipped to contentH.
 	rightLines := append(sb, strings.Split(feed, "\n")...)
+	if len(rightLines) > contentH {
+		rightLines = rightLines[:contentH]
+	}
 
 	leftLines := strings.Split(left, "\n")
 	totalRows := max(len(leftLines), len(rightLines))
@@ -1407,7 +1420,19 @@ func (m Model) viewActivityFeed(height, width int) string {
 			titleVis := 2 + len(badge) + 1 + len(ts) + 2 + len(entry.title)
 			allLines = append(allLines, boxRow(titleLine, titleVis, width))
 
-			for _, outLine := range entry.lines {
+			// Cap output lines per entry: show the last feedLinesPerEntry lines only.
+			const feedLinesPerEntry = 10
+			entryLines := entry.lines
+			skipped := 0
+			if len(entryLines) > feedLinesPerEntry {
+				skipped = len(entryLines) - feedLinesPerEntry
+				entryLines = entryLines[skipped:]
+			}
+			if skipped > 0 {
+				skipMsg := fmt.Sprintf("    … %d earlier lines (scroll up to see)", skipped)
+				allLines = append(allLines, boxRow(aDim+skipMsg+aRst, len(skipMsg), width))
+			}
+			for _, outLine := range entryLines {
 				maxLen := max(width-4, 1)
 				if len(outLine) > maxLen {
 					outLine = outLine[:maxLen-1] + "…"

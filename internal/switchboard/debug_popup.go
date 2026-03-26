@@ -3,6 +3,7 @@ package switchboard
 import (
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -125,17 +126,47 @@ func currentTmuxSession() string {
 }
 
 // createJobWindow creates a detached tmux window named "orcai-<feedID>" in the
-// current session. Returns the fully-qualified target "session:window" so
-// subsequent tmux commands can address it unambiguously.
-// Returns an empty string if tmux is not available.
-func createJobWindow(feedID string) string {
+// current session. It starts `tail -f <logFile>` in the window so captured
+// pane output reflects live agent output written to logFile.
+// Returns (target, logFile). Both are empty strings if tmux is unavailable.
+func createJobWindow(feedID string) (target, logFile string) {
 	if _, err := exec.LookPath("tmux"); err != nil {
-		return ""
+		return "", ""
 	}
 	session := currentTmuxSession()
+	if session == "" {
+		return "", ""
+	}
 	windowName := "orcai-" + feedID
-	// Create the window detached in the current session.
-	target := session + ":" + windowName
+	logFile = os.TempDir() + "/orcai-" + feedID + ".log"
+	target = session + ":" + windowName
+
+	// Create an empty log file so tail -f doesn't fail immediately.
+	f, err := os.Create(logFile)
+	if err == nil {
+		f.Close()
+	}
+
+	// Create the window and start tailing the log file.
 	exec.Command("tmux", "new-window", "-d", "-t", session, "-n", windowName).Run() //nolint:errcheck
-	return target
+	exec.Command("tmux", "send-keys", "-t", target,
+		"tail -f "+logFile+" 2>/dev/null", "Enter").Run() //nolint:errcheck
+	return target, logFile
+}
+
+var ansiEscRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+// stripANSI removes ANSI escape sequences from s.
+func stripANSI(s string) string {
+	return ansiEscRe.ReplaceAllString(s, "")
+}
+
+// appendToFile appends data to the named file, creating it if needed.
+func appendToFile(path, data string) {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.WriteString(data) //nolint:errcheck
 }
