@@ -257,6 +257,40 @@ func TestBundle_ResolveRef(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// HeaderBytes loading
+// ---------------------------------------------------------------------------
+
+func TestLoadBundled_ABSHeaderBytesPresent(t *testing.T) {
+	bundles, err := themes.LoadBundled()
+	if err != nil {
+		t.Fatalf("LoadBundled() error: %v", err)
+	}
+	var abs *themes.Bundle
+	for i := range bundles {
+		if bundles[i].Name == "abs" {
+			abs = &bundles[i]
+			break
+		}
+	}
+	if abs == nil {
+		t.Fatal("ABS theme not found in bundled themes")
+	}
+	if abs.HeaderBytes == nil {
+		t.Fatal("ABS bundle HeaderBytes is nil")
+	}
+	for _, key := range []string{"pipelines", "agent_runner", "signal_board", "activity_feed"} {
+		data, ok := abs.HeaderBytes[key]
+		if !ok {
+			t.Errorf("HeaderBytes[%q] not present", key)
+			continue
+		}
+		if len(data) == 0 {
+			t.Errorf("HeaderBytes[%q] is empty", key)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Bus event constant
 // ---------------------------------------------------------------------------
 
