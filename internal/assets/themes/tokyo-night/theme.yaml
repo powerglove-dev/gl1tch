@@ -1,0 +1,38 @@
+name: tokyo-night
+display_name: "Tokyo Night"
+palette:
+  bg:      "#1a1b26"
+  fg:      "#c0caf5"
+  accent:  "#7aa2f7"
+  dim:     "#565f89"
+  border:  "#292e42"
+  error:   "#f7768e"
+  success: "#9ece6a"
+borders:
+  style: light
+statusbar:
+  format: " {session} · {provider} · {model} "
+  bg: palette.bg
+  fg: palette.accent
+header_style:
+  panels:
+    pipelines:
+      accent: "#7aa2f7"
+      text:   "#1a1b26"
+    agent_runner:
+      accent: "#7aa2f7"
+      text:   "#1a1b26"
+    signal_board:
+      accent: "#7aa2f7"
+      text:   "#1a1b26"
+    activity_feed:
+      accent: "#7aa2f7"
+      text:   "#1a1b26"
+    modal:
+      accent: "#7aa2f7"
+      text:   "#1a1b26"
+modal:
+  bg:       palette.bg
+  border:   palette.accent
+  title_bg: palette.accent
+  title_fg: palette.bg

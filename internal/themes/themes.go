@@ -30,20 +30,46 @@ type Modal struct {
 	TitleFG string `yaml:"title_fg"`
 }
 
+// PanelHeaderStyle configures the colors used when dynamically generating a
+// panel header at the correct panel width. Both fields accept palette
+// references (e.g. "palette.accent") or literal hex colors ("#rrggbb").
+type PanelHeaderStyle struct {
+	Accent string `yaml:"accent"` // border/bar color
+	Text   string `yaml:"text"`   // title text color
+}
+
+// HeaderStyle configures the dynamic panel header generator.
+// TopChar/BotChar/BorderChar default to "▄"/"▀"/"█" when empty.
+// Panels maps each panel key to its color pair.
+type HeaderStyle struct {
+	TopChar    string                      `yaml:"top_char"`
+	BotChar    string                      `yaml:"bot_char"`
+	BorderChar string                      `yaml:"border_char"`
+	Panels     map[string]PanelHeaderStyle `yaml:"panels"`
+}
+
 // Bundle is a complete theme bundle loaded from a theme.yaml manifest.
 type Bundle struct {
-	Name        string            `yaml:"name"`
-	DisplayName string            `yaml:"display_name"`
-	Palette     Palette           `yaml:"palette"`
-	Borders     Borders           `yaml:"borders"`
-	StatusBar   StatusBar         `yaml:"statusbar"`
-	Splash      string            `yaml:"splash"`  // relative path to .ans file within bundle
-	Headers     map[string]string `yaml:"headers"` // panel key → relative .ans path
-	Modal       Modal             `yaml:"modal"`
+	Name        string      `yaml:"name"`
+	DisplayName string      `yaml:"display_name"`
+	Palette     Palette     `yaml:"palette"`
+	Borders     Borders     `yaml:"borders"`
+	StatusBar   StatusBar   `yaml:"statusbar"`
+	Splash      string      `yaml:"splash"` // relative path to .ans file within bundle
+	Modal       Modal       `yaml:"modal"`
+
+	// HeaderStyle drives dynamic header generation at the exact panel width.
+	// Used by DynamicHeader() when no fixed-width .ans sprite fits the panel.
+	HeaderStyle HeaderStyle `yaml:"header_style"`
+
+	// Headers maps panel key → ordered list of relative .ans paths, widest first.
+	// SpriteLines selects the first entry whose visible width fits the panel.
+	// Optional: omit to rely entirely on HeaderStyle dynamic generation.
+	Headers     map[string][]string `yaml:"headers"`
 
 	// HeaderBytes is populated by the loader after YAML unmarshal — not from YAML.
-	// Keys match Headers; values are raw .ans file contents.
-	HeaderBytes map[string][]byte `yaml:"-"`
+	// Keys match Headers; each inner slice mirrors the order of Headers[key].
+	HeaderBytes map[string][][]byte `yaml:"-"`
 }
 
 // Palette holds the seven canonical color slots for a theme.

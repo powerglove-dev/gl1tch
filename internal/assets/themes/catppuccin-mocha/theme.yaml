@@ -1,0 +1,38 @@
+name: catppuccin-mocha
+display_name: "Catppuccin Mocha"
+palette:
+  bg:      "#1e1e2e"
+  fg:      "#cdd6f4"
+  accent:  "#cba6f7"
+  dim:     "#6c7086"
+  border:  "#313244"
+  error:   "#f38ba8"
+  success: "#a6e3a1"
+borders:
+  style: light
+statusbar:
+  format: " {session} · {provider} · {model} "
+  bg: palette.bg
+  fg: palette.accent
+header_style:
+  panels:
+    pipelines:
+      accent: "#cba6f7"
+      text:   "#1e1e2e"
+    agent_runner:
+      accent: "#cba6f7"
+      text:   "#1e1e2e"
+    signal_board:
+      accent: "#cba6f7"
+      text:   "#1e1e2e"
+    activity_feed:
+      accent: "#cba6f7"
+      text:   "#1e1e2e"
+    modal:
+      accent: "#cba6f7"
+      text:   "#1e1e2e"
+modal:
+  bg:       palette.bg
+  border:   palette.accent
+  title_bg: palette.accent
+  title_fg: palette.bg

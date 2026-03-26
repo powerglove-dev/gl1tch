@@ -1,0 +1,40 @@
+name: dracula
+display_name: "Dracula"
+palette:
+  bg:      "#282a36"
+  fg:      "#f8f8f2"
+  accent:  "#ff79c6"
+  dim:     "#6272a4"
+  border:  "#44475a"
+  error:   "#ff5555"
+  success: "#50fa7b"
+borders:
+  style: light
+statusbar:
+  format: " {session} · {provider} · {model} "
+  bg: palette.bg
+  fg: palette.accent
+
+header_style:
+  panels:
+    pipelines:
+      accent: "#ff79c6"
+      text:   "#282a36"
+    agent_runner:
+      accent: "#ff79c6"
+      text:   "#282a36"
+    signal_board:
+      accent: "#ff79c6"
+      text:   "#282a36"
+    activity_feed:
+      accent: "#ff79c6"
+      text:   "#282a36"
+    modal:
+      accent: "#ff79c6"
+      text:   "#282a36"
+
+modal:
+  bg:       palette.bg
+  border:   palette.accent
+  title_bg: palette.accent
+  title_fg: palette.bg

@@ -1,0 +1,42 @@
+name: borland
+display_name: "Borland Classic"
+palette:
+  bg:      "#0000aa"
+  fg:      "#ffffff"
+  accent:  "#ffff55"
+  dim:     "#aaaaaa"
+  border:  "#aaaaaa"
+  error:   "#ff5555"
+  success: "#55ff55"
+borders:
+  style: heavy
+statusbar:
+  format: " {session} · {provider} · {model} "
+  bg:     "#aaaaaa"
+  fg:     "#0000aa"
+
+header_style:
+  top_char:    "▀"
+  bot_char:    "▄"
+  panels:
+    pipelines:
+      accent: "#ffff55"
+      text:   "#0000aa"
+    agent_runner:
+      accent: "#ffff55"
+      text:   "#0000aa"
+    signal_board:
+      accent: "#ffff55"
+      text:   "#0000aa"
+    activity_feed:
+      accent: "#ffff55"
+      text:   "#0000aa"
+    modal:
+      accent: "#ffff55"
+      text:   "#0000aa"
+
+modal:
+  bg:       palette.bg
+  border:   palette.accent
+  title_bg: palette.accent
+  title_fg: palette.bg

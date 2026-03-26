@@ -39,13 +39,16 @@ func (m Model) buildSignalBoard(height, width int) []string {
 	if m.signalBoardFocused {
 		borderColor = aBrC
 	}
+	pal := m.ansiPalette()
 
 	var lines []string
-	if sprite := SpriteLines(m.activeBundle(), "signal_board", width); sprite != nil {
+	if sprite := PanelHeader(m.activeBundle(), "signal_board", width); sprite != nil {
 		lines = append(lines, sprite...)
+		filterLine := fmt.Sprintf("  filter: %s%s%s", pal.Accent, filter, aRst)
+		lines = append(lines, boxRow(filterLine, width, borderColor))
 	} else {
 		header := fmt.Sprintf("%s [%s]", RenderHeader("signal_board"), filter)
-		lines = append(lines, boxTop(width, header, borderColor))
+		lines = append(lines, boxTop(width, header, borderColor, pal.Accent))
 	}
 
 	filtered := m.filteredFeed()
@@ -57,7 +60,7 @@ func (m Model) buildSignalBoard(height, width int) []string {
 	}
 
 	if len(filtered) == 0 {
-		lines = append(lines, boxRow(aDim+"  no jobs"+aRst, width))
+		lines = append(lines, boxRow(pal.Dim+"  no jobs"+aRst, width, borderColor))
 	} else {
 		shown := filtered
 		if len(shown) > bodyH {
@@ -70,26 +73,26 @@ func (m Model) buildSignalBoard(height, width int) []string {
 			switch entry.status {
 			case FeedRunning:
 				if m.signalBoard.blinkOn {
-					led = aBrC + "●" + aRst
+					led = pal.Accent + "●" + aRst
 				} else {
-					led = aDim + "●" + aRst
+					led = pal.Dim + "●" + aRst
 				}
 			case FeedDone:
-				led = aGrn + "●" + aRst
+				led = pal.Success + "●" + aRst
 			case FeedFailed:
-				led = aRed + "●" + aRst
+				led = pal.Error + "●" + aRst
 			default:
-				led = aDim + "●" + aRst
+				led = pal.Dim + "●" + aRst
 			}
 
 			statusLabel := ""
 			switch entry.status {
 			case FeedRunning:
-				statusLabel = aBrC + "running" + aRst
+				statusLabel = pal.Accent + "running" + aRst
 			case FeedDone:
-				statusLabel = aGrn + "done" + aRst
+				statusLabel = pal.Success + "done" + aRst
 			case FeedFailed:
-				statusLabel = aRed + "failed" + aRst
+				statusLabel = pal.Error + "failed" + aRst
 			}
 
 			title := entry.title
@@ -106,19 +109,19 @@ func (m Model) buildSignalBoard(height, width int) []string {
 				// Highlight selected row.
 				inner := width - 2
 				pad := max(inner-rowVis, 0)
-				selRow := aBC + "│" + aSelBg + aWht + rowContent + strings.Repeat(" ", pad) + aRst + aBC + "│" + aRst
+				selRow := borderColor + "│" + aSelBg + aWht + rowContent + strings.Repeat(" ", pad) + aRst + borderColor + "│" + aRst
 				lines = append(lines, selRow)
 			} else {
-				lines = append(lines, boxRow(rowContent, width))
+				lines = append(lines, boxRow(rowContent, width, borderColor))
 			}
 		}
 	}
 
 	// Pad to fill height.
 	for len(lines) < height-1 {
-		lines = append(lines, boxRow("", width))
+		lines = append(lines, boxRow("", width, borderColor))
 	}
-	lines = append(lines, boxBot(width))
+	lines = append(lines, boxBot(width, borderColor))
 
 	// Clip to exact height.
 	if len(lines) > height {

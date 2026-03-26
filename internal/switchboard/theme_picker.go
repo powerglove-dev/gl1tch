@@ -10,21 +10,70 @@ import (
 	"github.com/adam-stokes/orcai/internal/themes"
 )
 
-// viewThemePicker renders the theme picker overlay.
+// viewThemePicker renders the theme picker overlay using a lipgloss modal style.
 func viewThemePicker(bundles []themes.Bundle, cursor int, activeBundle *themes.Bundle, w int) string {
-	var sb strings.Builder
+	// Resolve modal colors from active bundle (same pattern as viewQuitModalBox).
+	borderColor := lipgloss.Color("#bd93f9") // Dracula purple fallback
+	titleBG := lipgloss.Color("#bd93f9")
+	titleFG := lipgloss.Color("#282a36")
+	selBG := lipgloss.Color("#44475a")
+	selFG := lipgloss.Color("#f8f8f2")
+	helpFG := lipgloss.Color("#6272a4")
 
-	// Title bar
-	title := lipgloss.NewStyle().
+	if activeBundle != nil {
+		if border := activeBundle.ResolveRef(activeBundle.Modal.Border); border != "" {
+			borderColor = lipgloss.Color(border)
+		}
+		if tBG := activeBundle.ResolveRef(activeBundle.Modal.TitleBG); tBG != "" {
+			titleBG = lipgloss.Color(tBG)
+		}
+		if tFG := activeBundle.ResolveRef(activeBundle.Modal.TitleFG); tFG != "" {
+			titleFG = lipgloss.Color(tFG)
+		}
+		if dim := activeBundle.Palette.Dim; dim != "" {
+			selBG = lipgloss.Color(dim)
+		}
+		if fg := activeBundle.Palette.FG; fg != "" {
+			selFG = lipgloss.Color(fg)
+		}
+		if dim := activeBundle.Palette.Dim; dim != "" {
+			helpFG = lipgloss.Color(dim)
+		}
+	}
+
+	// innerW = content width; rows use Padding(0,1) adding 2, then border adds 2 more.
+	innerW := 56
+	if innerW+4 > w {
+		innerW = max(w-4, 20)
+	}
+
+	headerStyle := lipgloss.NewStyle().
+		Background(titleBG).
+		Foreground(titleFG).
 		Bold(true).
-		Foreground(lipgloss.Color("#282a36")).
-		Background(lipgloss.Color("#bd93f9")).
-		Padding(0, 1).
-		Render("  SELECT THEME  ")
-	sb.WriteString(title + "\n\n")
+		Width(innerW).
+		Padding(0, 1)
+
+	rowStyle := lipgloss.NewStyle().
+		Width(innerW).
+		Padding(0, 1)
+
+	selStyle := lipgloss.NewStyle().
+		Background(selBG).
+		Foreground(selFG).
+		Width(innerW).
+		Padding(0, 1)
+
+	helpStyle := lipgloss.NewStyle().
+		Foreground(helpFG).
+		Width(innerW).
+		Padding(0, 1)
+
+	var rows []string
+	rows = append(rows, headerStyle.Render("SELECT THEME"))
 
 	for i, b := range bundles {
-		// Swatch row: seven colored █ blocks
+		// Swatch: seven colored █ blocks.
 		pal := b.Palette
 		swatch := fmt.Sprintf("%s█\x1b[0m%s█\x1b[0m%s█\x1b[0m%s█\x1b[0m%s█\x1b[0m%s█\x1b[0m%s█\x1b[0m",
 			fgSeq(pal.BG), fgSeq(pal.FG), fgSeq(pal.Accent),
@@ -36,21 +85,21 @@ func viewThemePicker(bundles []themes.Bundle, cursor int, activeBundle *themes.B
 			name += " \u2713"
 		}
 
-		row := fmt.Sprintf(" %s  %s", swatch, name)
+		content := swatch + "  " + name
 		if i == cursor {
-			row = lipgloss.NewStyle().
-				Background(lipgloss.Color("#44475a")).
-				Foreground(lipgloss.Color("#f8f8f2")).
-				Render(row)
+			rows = append(rows, selStyle.Render(content))
+		} else {
+			rows = append(rows, rowStyle.Render(content))
 		}
-		sb.WriteString(row + "\n")
 	}
 
-	sb.WriteString("\n")
-	help := lipgloss.NewStyle().Foreground(lipgloss.Color("#6272a4")).Render("j/k navigate \u00b7 enter apply \u00b7 esc cancel")
-	sb.WriteString(" " + help)
+	rows = append(rows, helpStyle.Render("j/k navigate \u00b7 enter apply \u00b7 esc cancel"))
 
-	return sb.String()
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Width(innerW + 2).
+		Render(strings.Join(rows, "\n"))
 }
 
 // fgSeq converts a hex color to an ANSI 24-bit foreground escape.

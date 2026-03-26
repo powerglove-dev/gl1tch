@@ -42,7 +42,7 @@ set -g window-status-format ""
 set -g window-status-current-format ""
 set -g status-left "#[fg=#bd93f9,bold] ORCAI #[default]"
 set -g status-left-length 20
-set -g status-right "#[fg=#6272a4] ^spc t switchboard  ^spc j jump  ^spc c win  ^spc q   %H:%M "
+set -g status-right "#[fg=#6272a4] ^spc t switchboard  ^spc m themes  ^spc j jump  ^spc c win  ^spc q   %H:%M "
 set -g status-right-length 100
 set -g mouse on
 set -g default-terminal "screen-256color"
@@ -61,6 +61,7 @@ set -g pane-active-border-style "fg=#bd93f9"
 		"bind-key -T orcai-chord o     { switch-client -T root ; display-popup -E -w 68 -h 24 \"" + self + " ollama\" }\n" +
 		"bind-key -T orcai-chord s     { switch-client -T root ; display-popup -E -w 44 -h 6 \"" + self + " _opsx\" }\n" +
 		"bind-key -T orcai-chord t     select-window -t orcai:0\n" +
+		"bind-key -T orcai-chord m     { switch-client -T root ; select-window -t orcai:0 ; send-keys -t orcai:0 T }\n" +
 		"bind-key -T orcai-chord j     { switch-client -T root ; display-popup -E -w 70 -h 24 \"" + self + " _jump\" }\n" +
 		// Window management
 		"bind-key -T orcai-chord c     { switch-client -T root ; new-window }\n" +

@@ -260,7 +260,7 @@ func TestBundle_ResolveRef(t *testing.T) {
 // HeaderBytes loading
 // ---------------------------------------------------------------------------
 
-func TestLoadBundled_ABSHeaderBytesPresent(t *testing.T) {
+func TestLoadBundled_ABSHeaderStylePresent(t *testing.T) {
 	bundles, err := themes.LoadBundled()
 	if err != nil {
 		t.Fatalf("LoadBundled() error: %v", err)
@@ -275,17 +275,18 @@ func TestLoadBundled_ABSHeaderBytesPresent(t *testing.T) {
 	if abs == nil {
 		t.Fatal("ABS theme not found in bundled themes")
 	}
-	if abs.HeaderBytes == nil {
-		t.Fatal("ABS bundle HeaderBytes is nil")
-	}
+	// ABS uses DynamicHeader via HeaderStyle; verify all four panel keys are configured.
 	for _, key := range []string{"pipelines", "agent_runner", "signal_board", "activity_feed"} {
-		data, ok := abs.HeaderBytes[key]
+		ps, ok := abs.HeaderStyle.Panels[key]
 		if !ok {
-			t.Errorf("HeaderBytes[%q] not present", key)
+			t.Errorf("HeaderStyle.Panels[%q] not present", key)
 			continue
 		}
-		if len(data) == 0 {
-			t.Errorf("HeaderBytes[%q] is empty", key)
+		if ps.Accent == "" {
+			t.Errorf("HeaderStyle.Panels[%q].Accent is empty", key)
+		}
+		if ps.Text == "" {
+			t.Errorf("HeaderStyle.Panels[%q].Text is empty", key)
 		}
 	}
 }

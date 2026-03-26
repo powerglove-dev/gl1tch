@@ -15,12 +15,36 @@ statusbar:
   bg: palette.bg
   fg: palette.accent
 splash: splash.ans
-headers:
-  pipelines: headers/pipelines.ans
-  agent_runner: headers/agent_runner.ans
-  signal_board: headers/signal_board.ans
-  activity_feed: headers/activity_feed.ans
-  modal: headers/modal.ans
+
+# Dynamic header generation — always fills the exact panel width.
+# top_char/bot_char default to ▄/▀; border_char defaults to │ (matches boxRow).
+# accent: bar color, text: title text color. Both accept palette refs or hex.
+header_style:
+  panels:
+    pipelines:
+      accent: "#bd93f9"
+      text:   "#282a36"
+    agent_runner:
+      accent: "#bd93f9"
+      text:   "#282a36"
+    signal_board:
+      accent: "#bd93f9"
+      text:   "#282a36"
+    activity_feed:
+      accent: "#bd93f9"
+      text:   "#282a36"
+    modal:
+      accent: "#bd93f9"
+      text:   "#282a36"
+
+# Optional fixed-width .ans sprite overrides (advanced customization).
+# List variants widest-first; SpriteLines uses the first that fits the panel.
+# These override DynamicHeader only when a sprite exactly matches the panel width.
+# Leave empty or omit to always use DynamicHeader.
+# headers:
+#   pipelines:
+#     - headers/full/pipelines.ans
+
 modal:
   bg: palette.bg
   border: palette.accent

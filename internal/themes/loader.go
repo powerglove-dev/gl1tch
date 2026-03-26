@@ -43,11 +43,17 @@ func LoadUser(dir string) ([]Bundle, error) {
 			return nil, err
 		}
 		// Populate HeaderBytes from .ans files relative to the bundle directory.
-		b.HeaderBytes = make(map[string][]byte)
-		for key, relPath := range b.Headers {
-			absPath := filepath.Join(bundleDir, relPath)
-			if raw, err := os.ReadFile(absPath); err == nil {
-				b.HeaderBytes[key] = raw
+		b.HeaderBytes = make(map[string][][]byte)
+		for key, paths := range b.Headers {
+			var variants [][]byte
+			for _, relPath := range paths {
+				absPath := filepath.Join(bundleDir, relPath)
+				if raw, err := os.ReadFile(absPath); err == nil {
+					variants = append(variants, raw)
+				}
+			}
+			if len(variants) > 0 {
+				b.HeaderBytes[key] = variants
 			}
 		}
 		bundles = append(bundles, b)
@@ -79,11 +85,17 @@ func loadFromFS(fsys fs.FS, root string) ([]Bundle, error) {
 			return nil, err
 		}
 		// Populate HeaderBytes from .ans files embedded in the FS.
-		b.HeaderBytes = make(map[string][]byte)
-		for key, relPath := range b.Headers {
-			ansPath := bundleDir + "/" + relPath
-			if raw, err := fs.ReadFile(fsys, ansPath); err == nil {
-				b.HeaderBytes[key] = raw
+		b.HeaderBytes = make(map[string][][]byte)
+		for key, paths := range b.Headers {
+			var variants [][]byte
+			for _, relPath := range paths {
+				ansPath := bundleDir + "/" + relPath
+				if raw, err := fs.ReadFile(fsys, ansPath); err == nil {
+					variants = append(variants, raw)
+				}
+			}
+			if len(variants) > 0 {
+				b.HeaderBytes[key] = variants
 			}
 		}
 		bundles = append(bundles, b)

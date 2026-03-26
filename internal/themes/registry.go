@@ -63,8 +63,10 @@ func NewRegistry(userDir string) (*Registry, error) {
 		r.byName[r.bundles[i].Name] = &r.bundles[i]
 	}
 
-	// Default active: first bundled theme.
-	if len(r.bundles) > 0 {
+	// Default active: prefer "nord", fall back to first available.
+	if b, ok := r.byName["nord"]; ok {
+		r.active = b
+	} else if len(r.bundles) > 0 {
 		r.active = &r.bundles[0]
 	}
 

@@ -14,7 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/adam-stokes/orcai/internal/styles"
+	"github.com/adam-stokes/orcai/internal/themes"
 )
 
 // window is a single tmux window entry.
@@ -22,6 +22,64 @@ type window struct {
 	index string // tmux window index (string for display)
 	name  string // window name
 	id    string // window ID (@N)
+}
+
+type jumpPalette struct {
+	titleBG lipgloss.Color
+	titleFG lipgloss.Color
+	fg      lipgloss.Color
+	accent  lipgloss.Color
+	selBG   lipgloss.Color
+	selFG   lipgloss.Color
+	dim     lipgloss.Color
+}
+
+func loadPalette() jumpPalette {
+	p := jumpPalette{
+		titleBG: lipgloss.Color("#bd93f9"),
+		titleFG: lipgloss.Color("#282a36"),
+		fg:      lipgloss.Color("#f8f8f2"),
+		accent:  lipgloss.Color("#8be9fd"),
+		selBG:   lipgloss.Color("#44475a"),
+		selFG:   lipgloss.Color("#f8f8f2"),
+		dim:     lipgloss.Color("#6272a4"),
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	userThemesDir := filepath.Join(home, ".config", "orcai", "themes")
+	reg, err := themes.NewRegistry(userThemesDir)
+	if err != nil {
+		return p
+	}
+	b := reg.Active()
+	if b == nil {
+		return p
+	}
+	if v := b.ResolveRef(b.Modal.Border); v != "" {
+		p.titleBG = lipgloss.Color(v)
+	}
+	if v := b.ResolveRef(b.Modal.TitleBG); v != "" {
+		p.titleBG = lipgloss.Color(v)
+	}
+	if v := b.ResolveRef(b.Modal.TitleFG); v != "" {
+		p.titleFG = lipgloss.Color(v)
+	}
+	if v := b.Palette.FG; v != "" {
+		p.fg = lipgloss.Color(v)
+		p.selFG = lipgloss.Color(v)
+	}
+	if v := b.Palette.Accent; v != "" {
+		p.accent = lipgloss.Color(v)
+	}
+	if v := b.Palette.Border; v != "" {
+		p.selBG = lipgloss.Color(v)
+	}
+	if v := b.Palette.Dim; v != "" {
+		p.dim = lipgloss.Color(v)
+	}
+	return p
 }
 
 type model struct {
@@ -32,18 +90,20 @@ type model struct {
 	width    int
 	height   int
 	err      string
+	pal      jumpPalette
 }
 
 func newModel() model {
+	pal := loadPalette()
 	ti := textinput.New()
 	ti.Placeholder = "search windows..."
 	ti.Focus()
-	ti.PromptStyle = lipgloss.NewStyle().Foreground(styles.Cyan)
-	ti.TextStyle = lipgloss.NewStyle().Foreground(styles.Fg)
-	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(styles.Comment)
+	ti.PromptStyle = lipgloss.NewStyle().Foreground(pal.accent)
+	ti.TextStyle = lipgloss.NewStyle().Foreground(pal.fg)
+	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(pal.dim)
 	ti.Prompt = "> "
 
-	m := model{input: ti}
+	m := model{input: ti, pal: pal}
 	m.windows = listWindows()
 	m.filtered = m.windows
 	return m
@@ -162,8 +222,8 @@ func (m model) View() string {
 	}
 
 	headerStyle := lipgloss.NewStyle().
-		Background(styles.Purple).
-		Foreground(styles.Bg).
+		Background(m.pal.titleBG).
+		Foreground(m.pal.titleFG).
 		Bold(true).
 		Width(w).
 		Padding(0, 1)
@@ -174,21 +234,21 @@ func (m model) View() string {
 		Render(m.input.View())
 
 	sectionStyle := lipgloss.NewStyle().
-		Foreground(styles.Cyan).
+		Foreground(m.pal.accent).
 		Width(w).
 		Padding(0, 1)
 
 	selectedStyle := lipgloss.NewStyle().
-		Background(styles.SelBg).
-		Foreground(styles.Pink).
+		Background(m.pal.selBG).
+		Foreground(m.pal.accent).
 		Width(w)
 
 	normalStyle := lipgloss.NewStyle().
-		Foreground(styles.Fg).
+		Foreground(m.pal.fg).
 		Width(w).
 		Padding(0, 2)
 
-	dimStyle := lipgloss.NewStyle().Foreground(styles.Comment)
+	dimStyle := lipgloss.NewStyle().Foreground(m.pal.dim)
 
 	rows := []string{
 		headerStyle.Render("ORCAI  Jump to Window"),
@@ -199,7 +259,7 @@ func (m model) View() string {
 		rows = append(rows,
 			sectionStyle.Render("— active jobs —"),
 			lipgloss.NewStyle().
-				Foreground(styles.Comment).
+				Foreground(m.pal.dim).
 				Width(w).
 				Padding(0, 2).
 				Render("no windows found"),
@@ -217,7 +277,7 @@ func (m model) View() string {
 	}
 
 	hintRow := lipgloss.NewStyle().
-		Foreground(styles.Comment).
+		Foreground(m.pal.dim).
 		Width(w).
 		Padding(0, 1).
 		Render(fmt.Sprintf("%s nav  %s select  %s cancel",

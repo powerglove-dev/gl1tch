@@ -131,6 +131,7 @@ type ANSIPalette struct {
 	FG      string
 	BG      string
 	Border  string
+	SelBG   string
 }
 
 // BundleANSI builds an ANSIPalette from a themes.Bundle.
@@ -139,6 +140,10 @@ func BundleANSI(b *themes.Bundle) ANSIPalette {
 	toFG := func(hex string) string {
 		r, g, bv := hexToRGB(hex)
 		return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, bv)
+	}
+	toBG := func(hex string) string {
+		r, g, bv := hexToRGB(hex)
+		return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", r, g, bv)
 	}
 	p := b.Palette
 	return ANSIPalette{
@@ -149,6 +154,7 @@ func BundleANSI(b *themes.Bundle) ANSIPalette {
 		FG:      toFG(p.FG),
 		BG:      toFG(p.BG),
 		Border:  toFG(p.Border),
+		SelBG:   toBG(p.Border),
 	}
 }
 

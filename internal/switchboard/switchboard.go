@@ -427,9 +427,61 @@ func (m Model) ansiPalette() styles.ANSIPalette {
 			FG:      "\x1b[97m",
 			BG:      "\x1b[40m",
 			Border:  "\x1b[36m",
+			SelBG:   "\x1b[44m",
 		}
 	}
 	return styles.BundleANSI(b)
+}
+
+// modalColors holds resolved lipgloss colors for modal overlays.
+type modalColors struct {
+	border  lipgloss.Color
+	titleBG lipgloss.Color
+	titleFG lipgloss.Color
+	fg      lipgloss.Color
+	accent  lipgloss.Color
+	dim     lipgloss.Color
+	error   lipgloss.Color
+}
+
+// resolveModalColors derives modal colors from the active bundle with Dracula fallbacks.
+func (m Model) resolveModalColors() modalColors {
+	c := modalColors{
+		border:  lipgloss.Color("#bd93f9"),
+		titleBG: lipgloss.Color("#bd93f9"),
+		titleFG: lipgloss.Color("#282a36"),
+		fg:      lipgloss.Color("#f8f8f2"),
+		accent:  lipgloss.Color("#8be9fd"),
+		dim:     lipgloss.Color("#6272a4"),
+		error:   lipgloss.Color("#ff5555"),
+	}
+	b := m.activeBundle()
+	if b == nil {
+		return c
+	}
+	if v := b.ResolveRef(b.Modal.Border); v != "" {
+		c.border = lipgloss.Color(v)
+		c.titleBG = lipgloss.Color(v)
+	}
+	if v := b.ResolveRef(b.Modal.TitleBG); v != "" {
+		c.titleBG = lipgloss.Color(v)
+	}
+	if v := b.ResolveRef(b.Modal.TitleFG); v != "" {
+		c.titleFG = lipgloss.Color(v)
+	}
+	if v := b.Palette.FG; v != "" {
+		c.fg = lipgloss.Color(v)
+	}
+	if v := b.Palette.Accent; v != "" {
+		c.accent = lipgloss.Color(v)
+	}
+	if v := b.Palette.Dim; v != "" {
+		c.dim = lipgloss.Color(v)
+	}
+	if v := b.Palette.Error; v != "" {
+		c.error = lipgloss.Color(v)
+	}
+	return c
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -1518,28 +1570,11 @@ func (m Model) viewQuitModalBox(w int) string {
 	}
 	outerW := innerW + 2
 
-	// Resolve modal colors from active bundle.
-	borderColor := styles.Pink
-	titleBG := styles.Pink
-	titleFG := styles.Bg
-	if b := m.activeBundle(); b != nil {
-		border := b.ResolveRef(b.Modal.Border)
-		tBG := b.ResolveRef(b.Modal.TitleBG)
-		tFG := b.ResolveRef(b.Modal.TitleFG)
-		if border != "" {
-			borderColor = lipgloss.Color(border)
-		}
-		if tBG != "" {
-			titleBG = lipgloss.Color(tBG)
-		}
-		if tFG != "" {
-			titleFG = lipgloss.Color(tFG)
-		}
-	}
+	mc := m.resolveModalColors()
 
 	headerStyle := lipgloss.NewStyle().
-		Background(titleBG).
-		Foreground(titleFG).
+		Background(mc.titleBG).
+		Foreground(mc.titleFG).
 		Bold(true).
 		Width(innerW).
 		Padding(0, 1)
@@ -1550,17 +1585,17 @@ func (m Model) viewQuitModalBox(w int) string {
 
 	rows := []string{
 		headerStyle.Render("ORCAI  Quit?"),
-		rowStyle(styles.Fg).Render(fmt.Sprintf("%d %s still running.", jobs, jobWord)),
+		rowStyle(mc.fg).Render(fmt.Sprintf("%d %s still running.", jobs, jobWord)),
 		"",
-		rowStyle(styles.Fg).Render(
-			lipgloss.NewStyle().Foreground(styles.Cyan).Render("[y]") + "es   " +
-				lipgloss.NewStyle().Foreground(styles.Comment).Render("[n]") + "o / esc",
+		rowStyle(mc.fg).Render(
+			lipgloss.NewStyle().Foreground(mc.accent).Render("[y]") + "es   " +
+				lipgloss.NewStyle().Foreground(mc.dim).Render("[n]") + "o / esc",
 		),
 	}
 
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
+		BorderForeground(mc.border).
 		Width(outerW).
 		Render(strings.Join(rows, "\n"))
 }
@@ -1589,31 +1624,33 @@ func (m Model) viewDeleteModalBox(w int) string {
 	}
 	outerW := innerW + 2 // +2 for Padding(0,1) on each row
 
+	mc := m.resolveModalColors()
+
 	rowStyle := func(fg lipgloss.Color) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(fg).Width(innerW).Padding(0, 1)
 	}
 
 	headerStyle := lipgloss.NewStyle().
-		Background(styles.Purple).
-		Foreground(styles.Bg).
+		Background(mc.titleBG).
+		Foreground(mc.titleFG).
 		Bold(true).
 		Width(innerW).
 		Padding(0, 1)
 
 	rows := []string{
 		headerStyle.Render("ORCAI  Delete Pipeline"),
-		rowStyle(styles.Pink).Bold(true).Render(name),
-		rowStyle(styles.Comment).Render(displayPath),
+		rowStyle(mc.accent).Bold(true).Render(name),
+		rowStyle(mc.dim).Render(displayPath),
 		"",
-		rowStyle(styles.Fg).Render(
-			lipgloss.NewStyle().Foreground(styles.Cyan).Render("[y]") + "es   " +
-				lipgloss.NewStyle().Foreground(styles.Comment).Render("[n]") + "o / esc",
+		rowStyle(mc.fg).Render(
+			lipgloss.NewStyle().Foreground(mc.accent).Render("[y]") + "es   " +
+				lipgloss.NewStyle().Foreground(mc.dim).Render("[n]") + "o / esc",
 		),
 	}
 
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Purple).
+		BorderForeground(mc.border).
 		Width(outerW).
 		Render(strings.Join(rows, "\n"))
 }
@@ -1627,29 +1664,35 @@ func (m Model) viewAgentModalBox(w int) string {
 		modalW = w
 	}
 
-	// Resolve modal border color from active bundle.
+	pal := m.ansiPalette()
 	modalBorderColor := aPur
 	if b := m.activeBundle(); b != nil {
-		border := b.ResolveRef(b.Modal.Border)
-		if border != "" {
+		if border := b.ResolveRef(b.Modal.Border); border != "" {
 			r, g, bv := hexToRGBFromStyles(border)
 			modalBorderColor = fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, bv)
 		}
 	}
 
 	hint := func(key, desc string) string {
-		return aBrC + key + aDim + " " + desc + aRst
+		return pal.Accent + key + pal.Dim + " " + desc + aRst
 	}
-	sep := aDim + " · " + aRst
+	sep := pal.Dim + " · " + aRst
+
+	sectionLabel := func(title string, active bool) string {
+		if active {
+			return pal.Accent + aBld + title + aRst
+		}
+		return pal.Dim + title + aRst
+	}
 
 	var rows []string
-	rows = append(rows, boxTop(modalW, "AGENT", modalBorderColor))
+	rows = append(rows, boxTop(modalW, "AGENT", modalBorderColor, modalBorderColor))
 
 	// ── PROVIDER section ──────────────────────────────────────────────────────
 	provHeader := "  " + sectionLabel("PROVIDER", m.agentModalFocus == 0)
-	rows = append(rows, boxRow(provHeader, modalW))
+	rows = append(rows, boxRow(provHeader, modalW, modalBorderColor))
 	if len(m.agent.providers) == 0 {
-		rows = append(rows, boxRow(aDim+"  no providers"+aRst, modalW))
+		rows = append(rows, boxRow(pal.Dim+"  no providers"+aRst, modalW, modalBorderColor))
 	} else {
 		const provWindow = 4
 		offset := m.agent.agentScrollOffset
@@ -1671,30 +1714,30 @@ func (m Model) viewAgentModalBox(w int) string {
 			}
 			contentVis := 4 + len(label)
 			if i == m.agent.selectedProvider {
-				sel := aBrC
+				sel := pal.Accent
 				if m.agentModalFocus == 0 {
-					sel = aSelBg + aWht
+					sel = pal.SelBG + aWht
 				}
 				content := sel + "  > " + label + aRst
-				rows = append(rows, aBC+"│"+content+strings.Repeat(" ", max(modalW-2-contentVis, 0))+aBC+"│"+aRst)
+				rows = append(rows, modalBorderColor+"│"+content+strings.Repeat(" ", max(modalW-2-contentVis, 0))+modalBorderColor+"│"+aRst)
 			} else {
-				content := aDim + "    " + aBC + label + aRst
-				rows = append(rows, boxRow(content, modalW))
+				content := pal.Dim + "    " + pal.Accent + label + aRst
+				rows = append(rows, boxRow(content, modalW, modalBorderColor))
 			}
 		}
 	}
 
 	// ── MODEL section ─────────────────────────────────────────────────────────
-	rows = append(rows, boxRow("", modalW))
+	rows = append(rows, boxRow("", modalW, modalBorderColor))
 	modelHeader := "  " + sectionLabel("MODEL", m.agentModalFocus == 1)
-	rows = append(rows, boxRow(modelHeader, modalW))
+	rows = append(rows, boxRow(modelHeader, modalW, modalBorderColor))
 	prov := m.currentProvider()
 	if prov == nil {
-		rows = append(rows, boxRow(aDim+"  select a provider first"+aRst, modalW))
+		rows = append(rows, boxRow(pal.Dim+"  select a provider first"+aRst, modalW, modalBorderColor))
 	} else {
 		models := nonSepModels(prov.Models)
 		if len(models) == 0 {
-			rows = append(rows, boxRow(aDim+"  no models"+aRst, modalW))
+			rows = append(rows, boxRow(pal.Dim+"  no models"+aRst, modalW, modalBorderColor))
 		} else {
 			const modelWindow = 4
 			offset := m.agent.agentModelScrollOffset
@@ -1716,45 +1759,45 @@ func (m Model) viewAgentModalBox(w int) string {
 				}
 				contentVis := 4 + len(label)
 				if i == m.agent.selectedModel {
-					sel := aBrC
+					sel := pal.Accent
 					if m.agentModalFocus == 1 {
-						sel = aSelBg + aWht
+						sel = pal.SelBG + aWht
 					}
 					content := sel + "  > " + label + aRst
-					rows = append(rows, aBC+"│"+content+strings.Repeat(" ", max(modalW-2-contentVis, 0))+aBC+"│"+aRst)
+					rows = append(rows, modalBorderColor+"│"+content+strings.Repeat(" ", max(modalW-2-contentVis, 0))+modalBorderColor+"│"+aRst)
 				} else {
-					content := aDim + "    " + aBC + label + aRst
-					rows = append(rows, boxRow(content, modalW))
+					content := pal.Dim + "    " + pal.Accent + label + aRst
+					rows = append(rows, boxRow(content, modalW, modalBorderColor))
 				}
 			}
 		}
 	}
 
 	// ── PROMPT section ────────────────────────────────────────────────────────
-	rows = append(rows, boxRow("", modalW))
+	rows = append(rows, boxRow("", modalW, modalBorderColor))
 	promptHeader := "  " + sectionLabel("PROMPT", m.agentModalFocus == 2)
-	rows = append(rows, boxRow(promptHeader, modalW))
+	rows = append(rows, boxRow(promptHeader, modalW, modalBorderColor))
 	if len(m.activeJobs) > 0 {
-		warn := aPnk + fmt.Sprintf("  ⚠ %d job(s) running", len(m.activeJobs)) + aRst
-		rows = append(rows, boxRow(warn, modalW))
+		warn := pal.Error + fmt.Sprintf("  ⚠ %d job(s) running", len(m.activeJobs)) + aRst
+		rows = append(rows, boxRow(warn, modalW, modalBorderColor))
 	}
 	promptInnerW := max(modalW-6, 10)
 	m.agent.prompt.SetWidth(promptInnerW)
 	for _, pLine := range strings.Split(m.agent.prompt.View(), "\n") {
 		pLine = strings.TrimRight(pLine, "\r")
 		padded := "  " + pLine
-		rows = append(rows, boxRow(padded, modalW))
+		rows = append(rows, boxRow(padded, modalW, modalBorderColor))
 	}
 
 	// ── Hint bar ──────────────────────────────────────────────────────────────
-	rows = append(rows, boxRow("", modalW))
+	rows = append(rows, boxRow("", modalW, modalBorderColor))
 	hintStr := "  " + strings.Join([]string{
 		hint("tab", "focus"),
 		hint("ctrl+s", "submit"),
 		hint("esc", "close"),
 	}, sep)
-	rows = append(rows, boxRow(hintStr, modalW))
-	rows = append(rows, boxBot(modalW))
+	rows = append(rows, boxRow(hintStr, modalW, modalBorderColor))
+	rows = append(rows, boxBot(modalW, modalBorderColor))
 
 	return strings.Join(rows, "\n")
 }
@@ -1802,48 +1845,44 @@ func (m Model) viewLeftColumn(height, width int) string {
 	return strings.Join(lines, "\n")
 }
 
-// buildBanner renders the ORCAI BBS header banner.
+// buildBanner renders the ORCAI BBS header banner as a single line.
 func (m Model) buildBanner(w int) string {
-	if w < 10 {
-		w = 28
-	}
-	inner := w - 2
-	top := aPur + "╔" + strings.Repeat("═", inner) + "╗" + aRst
+	pal := m.ansiPalette()
+	rst := aRst
 
-	const logoPrefixLen = 14
-	logoPad := max(inner-logoPrefixLen, 0)
-	logoLine := aPur + "║" + aPnk + " ░▒▓ " + aBld + "ORCAI" + aRst + aPnk + " ▓▒░" +
-		strings.Repeat(" ", logoPad) + aPur + "║" + aRst
+	// Single line: logo + separator + subtitle
+	logo := pal.Accent + aBld + " ░▒▓ ORCAI ▓▒░" + rst
+	sep := pal.Border + "  │  " + rst
+	sub := pal.FG + "ABBS Switchboard" + rst
 
-	const subtitleLen = 20
-	subPad := max(inner-subtitleLen, 0)
-	subLine := aPur + "║" + aBrC + "  ABBS Switchboard  " +
-		strings.Repeat(" ", subPad) + aPur + "║" + aRst
-
-	bot := aPur + "╚" + strings.Repeat("═", inner) + "╝" + aRst
-	return strings.Join([]string{top, logoLine, subLine, bot}, "\n")
+	return logo + sep + sub
 }
 
 // buildLauncherSection renders the Pipeline Launcher box.
 func (m Model) buildLauncherSection(w int) []string {
-	borderColor := aBC
+	pal := m.ansiPalette()
+	borderColor := pal.Border
 	if m.launcher.focused {
-		borderColor = aBrC
+		borderColor = pal.Accent
 	}
 
 	var rows []string
-	if sprite := SpriteLines(m.activeBundle(), "pipelines", w); sprite != nil {
+	if sprite := PanelHeader(m.activeBundle(), "pipelines", w); sprite != nil {
 		rows = append(rows, sprite...)
+		if n := len(m.activeJobs); n > 0 {
+			countLine := fmt.Sprintf("  %s%d running%s", pal.Accent, n, aRst)
+			rows = append(rows, boxRow(countLine, w, borderColor))
+		}
 	} else {
 		header := RenderHeader("pipelines")
 		if n := len(m.activeJobs); n > 0 {
 			header += fmt.Sprintf(" [%d running]", n)
 		}
-		rows = append(rows, boxTop(w, header, borderColor))
+		rows = append(rows, boxTop(w, header, borderColor, pal.Accent))
 	}
 
 	if len(m.launcher.pipelines) == 0 {
-		rows = append(rows, boxRow(aDim+"  no pipelines saved"+aRst, w))
+		rows = append(rows, boxRow(pal.Dim+"  no pipelines saved"+aRst, w, borderColor))
 	} else {
 		for i, name := range m.launcher.pipelines {
 			maxNameLen := max(w-4, 1)
@@ -1853,36 +1892,37 @@ func (m Model) buildLauncherSection(w int) []string {
 			}
 			contentVis := 2 + len(displayName)
 			if i == m.launcher.selected && m.launcher.focused {
-				content := aSelBg + aWht + "  " + displayName + aRst
-				rows = append(rows, aBC+"│"+content+strings.Repeat(" ", max(w-2-contentVis, 0))+aBC+"│"+aRst)
+				content := pal.SelBG + aWht + "  " + displayName + aRst
+				rows = append(rows, borderColor+"│"+content+strings.Repeat(" ", max(w-2-contentVis, 0))+borderColor+"│"+aRst)
 			} else {
-				content := aBrC + "  " + aBC + displayName + aRst
-				rows = append(rows, boxRow(content, w))
+				content := pal.Accent + "  " + pal.Accent + displayName + aRst
+				rows = append(rows, boxRow(content, w, borderColor))
 			}
 		}
 	}
 
-	rows = append(rows, boxBot(w))
+	rows = append(rows, boxBot(w, borderColor))
 	return rows
 }
 
 // buildAgentSection renders a compact Agent Runner box showing the provider list.
 // The full form (model selection + prompt) lives in the modal overlay.
 func (m Model) buildAgentSection(w int) []string {
-	borderColor := aBC
+	pal := m.ansiPalette()
+	borderColor := pal.Border
 	if m.agent.focused {
-		borderColor = aBrC
+		borderColor = pal.Accent
 	}
 
 	var rows []string
-	if sprite := SpriteLines(m.activeBundle(), "agent_runner", w); sprite != nil {
+	if sprite := PanelHeader(m.activeBundle(), "agent_runner", w); sprite != nil {
 		rows = append(rows, sprite...)
 	} else {
-		rows = append(rows, boxTop(w, RenderHeader("agent_runner"), borderColor))
+		rows = append(rows, boxTop(w, RenderHeader("agent_runner"), borderColor, pal.Accent))
 	}
 
 	if len(m.agent.providers) == 0 {
-		rows = append(rows, boxRow(aDim+"  no providers available"+aRst, w))
+		rows = append(rows, boxRow(pal.Dim+"  no providers available"+aRst, w, borderColor))
 	} else {
 		// Show provider list (scrollable).
 		windowSize := agentInnerHeight
@@ -1905,20 +1945,20 @@ func (m Model) buildAgentSection(w int) []string {
 			}
 			contentVis := 4 + len(label)
 			if i == m.agent.selectedProvider {
-				sel := aBrC
+				sel := pal.Accent
 				if m.agent.focused {
-					sel = aSelBg + aWht
+					sel = pal.SelBG + aWht
 				}
 				content := sel + "  > " + label + aRst
-				rows = append(rows, aBC+"│"+content+strings.Repeat(" ", max(w-2-contentVis, 0))+aBC+"│"+aRst)
+				rows = append(rows, borderColor+"│"+content+strings.Repeat(" ", max(w-2-contentVis, 0))+borderColor+"│"+aRst)
 			} else {
-				content := aDim + "    " + aBC + label + aRst
-				rows = append(rows, boxRow(content, w))
+				content := pal.Dim + "    " + pal.Accent + label + aRst
+				rows = append(rows, boxRow(content, w, borderColor))
 			}
 		}
 	}
 
-	rows = append(rows, boxBot(w))
+	rows = append(rows, boxBot(w, borderColor))
 	return rows
 }
 
@@ -1934,36 +1974,42 @@ func totalFeedLines(feed []feedEntry) int {
 
 // viewActivityFeed renders the center activity feed with scroll support.
 func (m Model) viewActivityFeed(height, width int) string {
-	feedSprite := SpriteLines(m.activeBundle(), "activity_feed", width)
+	pal := m.ansiPalette()
+	feedSprite := PanelHeader(m.activeBundle(), "activity_feed", width)
 	headerH := 1
 	if feedSprite != nil {
 		headerH = len(feedSprite)
 	}
 	visibleH := height - headerH - 1 // minus header and bottom border
 
+	borderColor := pal.Border
+	if m.feedFocused {
+		borderColor = pal.Accent
+	}
+
 	// feedRowAt appends a content row, applying the cursor highlight if the
 	// current line index matches feedCursor when the feed is focused.
 	appendRow := func(lines *[]string, content string) {
 		idx := len(*lines)
 		if m.feedFocused && idx == m.feedCursor {
-			*lines = append(*lines, boxRowCursor(content, width))
+			*lines = append(*lines, boxRowCursorColor(content, width, borderColor))
 		} else {
-			*lines = append(*lines, boxRow(content, width))
+			*lines = append(*lines, boxRow(content, width, borderColor))
 		}
 	}
 
 	// Flatten all feed entries into content lines.
 	var allLines []string
 	if len(m.feed) == 0 {
-		appendRow(&allLines, aDim+"  no activity yet"+aRst)
+		appendRow(&allLines, pal.Dim+"  no activity yet"+aRst)
 	} else {
 		for _, entry := range m.feed {
-			badge, badgeColor := statusBadge(entry.status)
+			badge, badgeColor := statusBadge(entry.status, pal)
 			ts := entry.ts.Format("15:04:05")
 			titleLine := fmt.Sprintf("  %s%s%s %s%s%s  %s",
 				badgeColor, badge, aRst,
-				aDim, ts, aRst,
-				aBrC+entry.title+aRst)
+				pal.Dim, ts, aRst,
+				pal.Accent+entry.title+aRst)
 			appendRow(&allLines, titleLine)
 
 			// Render per-step status badges if this entry has steps.
@@ -1975,11 +2021,11 @@ func (m Model) viewActivityFeed(height, width int) string {
 					case "running":
 						col = aYlw
 					case "done":
-						col = aGrn
+						col = pal.Success
 					case "failed":
-						col = aRed
+						col = pal.Error
 					default: // "pending" or unknown
-						col = aDim
+						col = pal.Dim
 					}
 					badges = append(badges, col+"["+step.status+"] "+step.id+aRst)
 				}
@@ -1997,7 +2043,7 @@ func (m Model) viewActivityFeed(height, width int) string {
 			}
 			if skipped > 0 {
 				skipMsg := fmt.Sprintf("    … %d earlier lines (press f to scroll)", skipped)
-				appendRow(&allLines, aDim+skipMsg+aRst)
+				appendRow(&allLines, pal.Dim+skipMsg+aRst)
 			}
 			for _, outLine := range entryLines {
 				// Strip ANSI codes — feed renders with its own dim style.
@@ -2006,7 +2052,7 @@ func (m Model) viewActivityFeed(height, width int) string {
 				if len(outLine) > maxLen {
 					outLine = outLine[:maxLen-1] + "…"
 				}
-				appendRow(&allLines, aDim+"    "+outLine+aRst)
+				appendRow(&allLines, pal.Dim+"    "+outLine+aRst)
 			}
 		}
 	}
@@ -2044,22 +2090,18 @@ func (m Model) viewActivityFeed(height, width int) string {
 	}
 
 	var lines []string
-	borderColor := aBC
-	if m.feedFocused {
-		borderColor = aBrC
-	}
 	if feedSprite != nil {
 		lines = append(lines, feedSprite...)
 	} else {
-		lines = append(lines, boxTop(width, RenderHeader("activity_feed")+scrollSuffix, borderColor))
+		lines = append(lines, boxTop(width, RenderHeader("activity_feed")+scrollSuffix, borderColor, pal.Accent))
 	}
 	lines = append(lines, visible...)
 
 	// Pad to fill the box body.
 	for len(lines) < height-1 {
-		lines = append(lines, boxRow("", width))
+		lines = append(lines, boxRow("", width, borderColor))
 	}
-	lines = append(lines, boxBot(width))
+	lines = append(lines, boxBot(width, borderColor))
 
 	// Trim to exact height.
 	if len(lines) > height {
@@ -2071,10 +2113,14 @@ func (m Model) viewActivityFeed(height, width int) string {
 
 // viewBottomBar renders the one-line keybinding hint strip.
 func (m Model) viewBottomBar(width int) string {
+	pal := m.ansiPalette()
+	keyColor := pal.Accent
+	descColor := pal.Dim
+	sepColor := pal.Dim
 	hint := func(key, desc string) string {
-		return aBrC + key + aDim + " " + desc + aRst
+		return keyColor + key + descColor + " " + desc + aRst
 	}
-	sep := aDim + " · " + aRst
+	sep := sepColor + " · " + aRst
 
 	var parts []string
 	switch {
@@ -2114,8 +2160,6 @@ func (m Model) viewBottomBar(width int) string {
 			hint("a", "agent"),
 			hint("s", "signals"),
 			hint("f", "feed"),
-			hint("r", "refresh"),
-			hint("↑↓", "nav"),
 			hint("q", "quit"),
 		}
 	}
@@ -2129,7 +2173,7 @@ func (m Model) viewBottomBar(width int) string {
 
 // ── Box drawing helpers ────────────────────────────────────────────────────────
 
-func boxTop(w int, title, borderColor string) string {
+func boxTop(w int, title, borderColor, labelColor string) string {
 	if title == "" {
 		return borderColor + "┌" + strings.Repeat("─", max(w-2, 0)) + "┐" + aRst
 	}
@@ -2137,22 +2181,27 @@ func boxTop(w int, title, borderColor string) string {
 	dashes := max(w-2-lipgloss.Width(label), 0)
 	left := dashes / 2
 	right := dashes - left
-	return borderColor + "┌" + strings.Repeat("─", left) + aBrC + label + borderColor + strings.Repeat("─", right) + "┐" + aRst
+	return borderColor + "┌" + strings.Repeat("─", left) + labelColor + label + borderColor + strings.Repeat("─", right) + "┐" + aRst
 }
 
-func boxBot(w int) string {
-	return aBC + "└" + strings.Repeat("─", max(w-2, 0)) + "┘" + aRst
+func boxBot(w int, borderColor string) string {
+	return borderColor + "└" + strings.Repeat("─", max(w-2, 0)) + "┘" + aRst
 }
 
-func boxRow(content string, w int) string {
+func boxRow(content string, w int, borderColor string) string {
 	inner := w - 2
 	pad := max(inner-lipgloss.Width(content), 0)
-	return aBC + "│" + aRst + content + strings.Repeat(" ", pad) + aBC + "│" + aRst
+	return borderColor + "│" + aRst + content + strings.Repeat(" ", pad) + borderColor + "│" + aRst
 }
 
 // boxRowCursor renders a feed row with a "> " cursor marker prepended to the
 // content, keeping the total visible width equal to a normal boxRow.
 func boxRowCursor(content string, w int) string {
+	return boxRowCursorColor(content, w, aBC)
+}
+
+// boxRowCursorColor is the color-aware version of boxRowCursor.
+func boxRowCursorColor(content string, w int, borderColor string) string {
 	cursorMark := aBrC + "> " + aRst
 	// The cursor mark occupies 2 visible columns; reduce available content width
 	// accordingly so the overall row width stays at w.
@@ -2169,19 +2218,19 @@ func boxRowCursor(content string, w int) string {
 		contentWidth = lipgloss.Width(content)
 	}
 	pad := max(availForContent-contentWidth, 0)
-	return aBC + "│" + aRst + cursorMark + content + strings.Repeat(" ", pad) + aBC + "│" + aRst
+	return borderColor + "│" + aRst + cursorMark + content + strings.Repeat(" ", pad) + borderColor + "│" + aRst
 }
 
-func statusBadge(s FeedStatus) (string, string) {
+func statusBadge(s FeedStatus, pal styles.ANSIPalette) (string, string) {
 	switch s {
 	case FeedRunning:
-		return "▶ running", aPnk
+		return "▶ running", pal.Accent
 	case FeedDone:
-		return "✓ done", aGrn
+		return "✓ done", pal.Success
 	case FeedFailed:
-		return "✗ failed", aRed
+		return "✗ failed", pal.Error
 	default:
-		return "? unknown", aDim
+		return "? unknown", pal.Dim
 	}
 }
 

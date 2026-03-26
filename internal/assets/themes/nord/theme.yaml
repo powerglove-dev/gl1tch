@@ -1,0 +1,40 @@
+name: nord
+display_name: "Nord"
+palette:
+  bg:      "#2e3440"
+  fg:      "#eceff4"
+  accent:  "#88c0d0"
+  dim:     "#4c566a"
+  border:  "#3b4252"
+  error:   "#bf616a"
+  success: "#a3be8c"
+borders:
+  style: light
+statusbar:
+  format: " {session} · {provider} · {model} "
+  bg: palette.bg
+  fg: palette.accent
+
+header_style:
+  panels:
+    pipelines:
+      accent: "#88c0d0"
+      text:   "#2e3440"
+    agent_runner:
+      accent: "#88c0d0"
+      text:   "#2e3440"
+    signal_board:
+      accent: "#88c0d0"
+      text:   "#2e3440"
+    activity_feed:
+      accent: "#88c0d0"
+      text:   "#2e3440"
+    modal:
+      accent: "#88c0d0"
+      text:   "#2e3440"
+
+modal:
+  bg:       palette.bg
+  border:   palette.accent
+  title_bg: palette.accent
+  title_fg: palette.bg

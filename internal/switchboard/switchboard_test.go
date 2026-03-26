@@ -172,7 +172,7 @@ func TestViewContainsBanner(t *testing.T) {
 	if !strings.Contains(view, "ORCAI") {
 		t.Errorf("View() missing ORCAI banner:\n%s", view)
 	}
-	if !strings.Contains(view, "╔") {
+	if !strings.Contains(view, "│") {
 		t.Errorf("View() missing box-drawing border:\n%s", view)
 	}
 }

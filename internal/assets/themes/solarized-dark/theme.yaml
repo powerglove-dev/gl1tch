@@ -1,0 +1,38 @@
+name: solarized-dark
+display_name: "Solarized Dark"
+palette:
+  bg:      "#002b36"
+  fg:      "#839496"
+  accent:  "#268bd2"
+  dim:     "#657b83"
+  border:  "#073642"
+  error:   "#dc322f"
+  success: "#859900"
+borders:
+  style: light
+statusbar:
+  format: " {session} · {provider} · {model} "
+  bg: palette.bg
+  fg: palette.accent
+header_style:
+  panels:
+    pipelines:
+      accent: "#268bd2"
+      text:   "#002b36"
+    agent_runner:
+      accent: "#268bd2"
+      text:   "#002b36"
+    signal_board:
+      accent: "#268bd2"
+      text:   "#002b36"
+    activity_feed:
+      accent: "#268bd2"
+      text:   "#002b36"
+    modal:
+      accent: "#268bd2"
+      text:   "#002b36"
+modal:
+  bg:       palette.bg
+  border:   palette.accent
+  title_bg: palette.accent
+  title_fg: palette.bg

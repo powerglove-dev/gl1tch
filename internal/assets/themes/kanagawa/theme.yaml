@@ -1,0 +1,38 @@
+name: kanagawa
+display_name: "Kanagawa"
+palette:
+  bg:      "#1f1f28"
+  fg:      "#dcd7ba"
+  accent:  "#7e9cd8"
+  dim:     "#727169"
+  border:  "#2a2a37"
+  error:   "#c34043"
+  success: "#76946a"
+borders:
+  style: light
+statusbar:
+  format: " {session} · {provider} · {model} "
+  bg: palette.bg
+  fg: palette.accent
+header_style:
+  panels:
+    pipelines:
+      accent: "#7e9cd8"
+      text:   "#1f1f28"
+    agent_runner:
+      accent: "#7e9cd8"
+      text:   "#1f1f28"
+    signal_board:
+      accent: "#7e9cd8"
+      text:   "#1f1f28"
+    activity_feed:
+      accent: "#7e9cd8"
+      text:   "#1f1f28"
+    modal:
+      accent: "#7e9cd8"
+      text:   "#1f1f28"
+modal:
+  bg:       palette.bg
+  border:   palette.accent
+  title_bg: palette.accent
+  title_fg: palette.bg

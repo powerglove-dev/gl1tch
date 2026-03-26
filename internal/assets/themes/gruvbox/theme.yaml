@@ -1,0 +1,40 @@
+name: gruvbox
+display_name: "Gruvbox Dark"
+palette:
+  bg:      "#282828"
+  fg:      "#ebdbb2"
+  accent:  "#458588"
+  dim:     "#928374"
+  border:  "#504945"
+  error:   "#cc241d"
+  success: "#98971a"
+borders:
+  style: light
+statusbar:
+  format: " {session} · {provider} · {model} "
+  bg: palette.bg
+  fg: palette.accent
+
+header_style:
+  panels:
+    pipelines:
+      accent: "#458588"
+      text:   "#282828"
+    agent_runner:
+      accent: "#458588"
+      text:   "#282828"
+    signal_board:
+      accent: "#458588"
+      text:   "#282828"
+    activity_feed:
+      accent: "#458588"
+      text:   "#282828"
+    modal:
+      accent: "#458588"
+      text:   "#282828"
+
+modal:
+  bg:       palette.bg
+  border:   palette.accent
+  title_bg: "#d79921"
+  title_fg: palette.bg

@@ -2,6 +2,8 @@ package switchboard
 
 import (
 	"bytes"
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/adam-stokes/orcai/internal/themes"
@@ -84,35 +86,134 @@ func RenderHeader(panel string) string {
 // SpriteLines returns the ANS sprite for a panel as individual lines, ready
 // to be prepended in place of a boxTop() call.
 //
-// Returns nil when:
-//   - the bundle has no sprite for this panel, or
-//   - panelWidth > 0 and the widest sprite line exceeds panelWidth.
+// Bundle.HeaderBytes[panel] is an ordered slice of sprite variants (widest
+// first). SpriteLines tries each variant in order and returns the first whose
+// visible width fits panelWidth. When panelWidth is 0 the width check is
+// skipped and the first variant is used.
 //
-// The last returned line has "\x1b[0m" appended to prevent color bleed into
-// subsequent box rows.
+// Returns nil when the bundle has no sprites for this panel or none fit.
+// The last returned line has "\x1b[0m" appended to prevent color bleed.
 func SpriteLines(bundle *themes.Bundle, panel string, panelWidth int) []string {
 	if bundle == nil || bundle.HeaderBytes == nil {
 		return nil
 	}
-	ans, ok := bundle.HeaderBytes[panel]
-	if !ok || len(ans) == 0 {
+	variants, ok := bundle.HeaderBytes[panel]
+	if !ok || len(variants) == 0 {
 		return nil
 	}
-	// Enforce width constraint.
-	if panelWidth > 0 && spriteWidth(ans) > panelWidth {
-		return nil
-	}
-	// Split into non-empty lines.
-	var lines []string
-	for _, raw := range bytes.Split(ans, []byte("\n")) {
-		s := strings.TrimRight(string(raw), "\r")
-		if visibleWidth(s) > 0 {
-			lines = append(lines, s)
+	for _, ans := range variants {
+		if len(ans) == 0 {
+			continue
 		}
+		if panelWidth > 0 && spriteWidth(ans) > panelWidth {
+			continue // too wide — try next variant
+		}
+		// Split into non-empty lines.
+		var lines []string
+		for _, raw := range bytes.Split(ans, []byte("\n")) {
+			s := strings.TrimRight(string(raw), "\r")
+			if visibleWidth(s) > 0 {
+				lines = append(lines, s)
+			}
+		}
+		if len(lines) == 0 {
+			continue
+		}
+		lines[len(lines)-1] += "\x1b[0m"
+		return lines
 	}
-	if len(lines) == 0 {
+	return nil
+}
+
+// hexToFGSeq converts "#rrggbb" to a 24-bit ANSI foreground sequence.
+// Falls back to Dracula purple if the value is not a valid hex color.
+func hexToFGSeq(hex string) string {
+	hex = strings.TrimPrefix(hex, "#")
+	if len(hex) != 6 {
+		return "\x1b[38;2;189;147;249m" // Dracula purple
+	}
+	parse := func(s string) uint8 {
+		v, _ := strconv.ParseUint(s, 16, 8)
+		return uint8(v)
+	}
+	r, g, b := parse(hex[0:2]), parse(hex[2:4]), parse(hex[4:6])
+	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, b)
+}
+
+// hexToBGSeq converts "#rrggbb" to a 24-bit ANSI background sequence.
+func hexToBGSeq(hex string) string {
+	hex = strings.TrimPrefix(hex, "#")
+	if len(hex) != 6 {
+		return "\x1b[48;2;189;147;249m" // Dracula purple fallback
+	}
+	parse := func(s string) uint8 {
+		v, _ := strconv.ParseUint(s, 16, 8)
+		return uint8(v)
+	}
+	r, g, b := parse(hex[0:2]), parse(hex[2:4]), parse(hex[4:6])
+	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", r, g, b)
+}
+
+// DynamicHeader generates a 3-line panel header at exactly width visible
+// columns, using colors from bundle.HeaderStyle. The header always fills the
+// full panel width regardless of terminal size.
+//
+// Returns nil when bundle is nil or bundle.HeaderStyle has no entry for panel.
+func DynamicHeader(bundle *themes.Bundle, panel string, width int) []string {
+	if bundle == nil || width < 4 {
 		return nil
 	}
-	lines[len(lines)-1] += "\x1b[0m"
-	return lines
+	hs := bundle.HeaderStyle
+	ps, ok := hs.Panels[panel]
+	if !ok {
+		return nil
+	}
+
+	topChar := "▄"
+	if hs.TopChar != "" {
+		topChar = hs.TopChar
+	}
+	botChar := "▀"
+	if hs.BotChar != "" {
+		botChar = hs.BotChar
+	}
+	accentSeq := hexToFGSeq(bundle.ResolveRef(ps.Accent))
+	accentBGSeq := hexToBGSeq(bundle.ResolveRef(ps.Accent))
+	textSeq := hexToFGSeq(bundle.ResolveRef(ps.Text))
+	rst := "\x1b[0m"
+	bold := "\x1b[1m"
+
+	// Top bar: full-width block chars starting at column 0 (matches boxRow │ position).
+	topLine := accentSeq + bold + strings.Repeat(topChar, width) + rst
+
+	// Title line: accent-colored background spanning the full width so the
+	// panel title (in ps.Text color) is always legible regardless of terminal bg.
+	title := RenderHeader(panel)
+	titleRunes := []rune(title)
+	pad := width - len(titleRunes)
+	if pad < 0 {
+		pad = 0
+		titleRunes = titleRunes[:width]
+	}
+	lp := pad / 2
+	rp := pad - lp
+	titleLine := accentBGSeq + textSeq + bold +
+		strings.Repeat(" ", lp) + string(titleRunes) + strings.Repeat(" ", rp) +
+		rst
+
+	// Bottom bar: full-width block chars.
+	botLine := accentSeq + bold + strings.Repeat(botChar, width) + rst
+
+	return []string{topLine, titleLine, botLine}
+}
+
+// PanelHeader returns the best available header for a panel at the given width.
+// It tries fixed-width .ans sprites first (SpriteLines), then falls back to
+// DynamicHeader which always produces the correct panel width.
+// Returns nil only when both sources are unavailable.
+func PanelHeader(bundle *themes.Bundle, panel string, width int) []string {
+	if lines := SpriteLines(bundle, panel, width); lines != nil {
+		return lines
+	}
+	return DynamicHeader(bundle, panel, width)
 }

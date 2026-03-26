@@ -1,0 +1,38 @@
+name: rose-pine
+display_name: "Rose Pine"
+palette:
+  bg:      "#191724"
+  fg:      "#e0def4"
+  accent:  "#c4a7e7"
+  dim:     "#6e6a86"
+  border:  "#26233a"
+  error:   "#eb6f92"
+  success: "#31748f"
+borders:
+  style: light
+statusbar:
+  format: " {session} · {provider} · {model} "
+  bg: palette.bg
+  fg: palette.accent
+header_style:
+  panels:
+    pipelines:
+      accent: "#c4a7e7"
+      text:   "#191724"
+    agent_runner:
+      accent: "#c4a7e7"
+      text:   "#191724"
+    signal_board:
+      accent: "#c4a7e7"
+      text:   "#191724"
+    activity_feed:
+      accent: "#c4a7e7"
+      text:   "#191724"
+    modal:
+      accent: "#c4a7e7"
+      text:   "#191724"
+modal:
+  bg:       palette.bg
+  border:   palette.accent
+  title_bg: palette.accent
+  title_fg: palette.bg
