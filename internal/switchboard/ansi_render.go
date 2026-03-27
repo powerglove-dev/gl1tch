@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/adam-stokes/orcai/internal/styles"
+	"github.com/adam-stokes/orcai/internal/tdf"
 	"github.com/adam-stokes/orcai/internal/themes"
 	"github.com/adam-stokes/orcai/internal/translations"
 )
@@ -235,6 +236,20 @@ func DynamicHeader(bundle *themes.Bundle, panel string, width int) []string {
 	// Title line: accent-colored background spanning the full width so the
 	// panel title (in ps.Text color) is always legible regardless of terminal bg.
 	title := RenderHeader(panel)
+	// If a TDF block-letter font is configured, attempt to render with it.
+	// Only use the TDF output when it's single-line (non-TDF fallback) or when
+	// the result differs from the plain title — multi-line TDF art is skipped
+	// here since DynamicHeader returns a flat []string and merging multi-line
+	// art is a future enhancement.
+	if bundle.HeaderFont != "" {
+		rendered := tdf.Global.Render(bundle.HeaderFont, title, width)
+		// Accept rendered output only when it is a single-line substitution
+		// (i.e. it doesn't contain newlines, meaning either TDF rendered a
+		// single row or fell back to plain text).
+		if !strings.Contains(rendered, "\n") {
+			title = rendered
+		}
+	}
 	titleRunes := []rune(title)
 	pad := width - len(titleRunes)
 	if pad < 0 {

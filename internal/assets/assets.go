@@ -14,3 +14,8 @@ var ProviderFS embed.FS
 //
 //go:embed themes
 var ThemeFS embed.FS
+
+// FontFS contains embedded TDF font files for ANSI block-letter header rendering.
+//
+//go:embed fonts/tdf/*.tdf
+var FontFS embed.FS
