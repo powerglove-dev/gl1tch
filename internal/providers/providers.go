@@ -5,12 +5,13 @@ package providers
 
 // Profile describes a single AI provider integration.
 type Profile struct {
-	Name        string        `yaml:"name"`
-	Binary      string        `yaml:"binary"`
-	DisplayName string        `yaml:"display_name"`
-	APIKeyEnv   string        `yaml:"api_key_env"`
-	Models      []Model       `yaml:"models"`
-	Session     SessionConfig `yaml:"session"`
+	Name        string         `yaml:"name"`
+	Binary      string         `yaml:"binary"`
+	DisplayName string         `yaml:"display_name"`
+	APIKeyEnv   string         `yaml:"api_key_env"`
+	Models      []Model        `yaml:"models"`
+	Session     SessionConfig  `yaml:"session"`
+	Pipeline    PipelineConfig `yaml:"pipeline"`
 }
 
 // Model describes a single model offered by a provider, including its billing rates.
@@ -28,4 +29,13 @@ type SessionConfig struct {
 	WindowName string            `yaml:"window_name"`
 	LaunchArgs []string          `yaml:"launch_args"`
 	Env        map[string]string `yaml:"env"`
+}
+
+// PipelineConfig describes how to invoke a provider binary as a non-interactive
+// pipeline executor (i.e. without a TTY or tmux session).
+type PipelineConfig struct {
+	// Args are prepended to the CLI invocation when the provider is used as a
+	// pipeline step executor. Use this to switch the binary into a headless
+	// mode (e.g. ["run"] for opencode).
+	Args []string `yaml:"args"`
 }

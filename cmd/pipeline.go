@@ -35,8 +35,7 @@ var pipelineBuildCmd = &cobra.Command{
 
 		mgr := plugin.NewManager()
 		for _, prov := range providers {
-			args := picker.PipelineLaunchArgs(prov.ID)
-			mgr.Register(plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", prov.ID, args...))
+			mgr.Register(plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", prov.ID, prov.PipelineArgs...))
 		}
 
 		m := promptbuilder.New(mgr)
@@ -96,8 +95,7 @@ var pipelineRunCmd = &cobra.Command{
 			if binary == "" {
 				binary = prov.ID
 			}
-			provArgs := picker.PipelineLaunchArgs(prov.ID)
-			if err := mgr.Register(plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", binary, provArgs...)); err != nil {
+			if err := mgr.Register(plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", binary, prov.PipelineArgs...)); err != nil {
 				fmt.Fprintf(os.Stderr, "pipeline: register provider %q: %v\n", prov.ID, err)
 			}
 		}

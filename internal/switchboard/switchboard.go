@@ -2029,12 +2029,11 @@ func (m Model) submitAgentJob() (Model, tea.Cmd) {
 	entry.logFile = logFile
 	m.feed[0] = entry
 
-	provArgs := picker.PipelineLaunchArgs(prov.ID)
 	binary := prov.Command
 	if binary == "" {
 		binary = prov.ID
 	}
-	adapter := plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", binary, provArgs...)
+	adapter := plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", binary, prov.PipelineArgs...)
 	vars := map[string]string{}
 	if modelID != "" {
 		vars["model"] = modelID

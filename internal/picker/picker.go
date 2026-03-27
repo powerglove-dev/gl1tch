@@ -25,11 +25,12 @@ type ModelOption struct {
 
 // ProviderDef describes one AI provider and its available models.
 type ProviderDef struct {
-	ID          string
-	Label       string
-	Models      []ModelOption
-	Command     string // actual binary path/name to invoke
-	SidecarPath string // path to wrappers YAML; non-empty for sidecar-backed providers
+	ID           string
+	Label        string
+	Models       []ModelOption
+	Command      string   // actual binary path/name to invoke
+	SidecarPath  string   // path to wrappers YAML; non-empty for sidecar-backed providers
+	PipelineArgs []string // extra args prepended when used as a pipeline executor
 }
 
 // Providers is the base list of built-in providers. All AI providers are
@@ -213,10 +214,20 @@ func buildProviders() []ProviderDef {
 		out = append(out, p)
 	}
 
-	// Load providers registry for display names and fallback model metadata.
+	// Load providers registry for display names, fallback model metadata,
+	// and pipeline args declared in provider profiles.
 	var reg *providers.Registry
 	if configDir != "" {
 		reg, _ = providers.NewRegistry(filepath.Join(configDir, "providers"))
+	}
+
+	// Backfill PipelineArgs for static providers from the registry.
+	for i, p := range out {
+		if reg != nil {
+			if profile, ok := reg.Get(p.ID); ok && len(profile.Pipeline.Args) > 0 {
+				out[i].PipelineArgs = profile.Pipeline.Args
+			}
+		}
 	}
 
 	// Append discovered plugins that are not in the static Providers list.
@@ -256,12 +267,19 @@ func buildProviders() []ProviderDef {
 		if cmd == "" {
 			cmd = meta.Command
 		}
+		var pipelineArgs []string
+		if reg != nil {
+			if profile, ok := reg.Get(e.name); ok {
+				pipelineArgs = profile.Pipeline.Args
+			}
+		}
 		out = append(out, ProviderDef{
-			ID:          e.name,
-			Label:       label,
-			Models:      models,
-			Command:     cmd,
-			SidecarPath: e.sidecarPath,
+			ID:           e.name,
+			Label:        label,
+			Models:       models,
+			Command:      cmd,
+			SidecarPath:  e.sidecarPath,
+			PipelineArgs: pipelineArgs,
 		})
 	}
 
@@ -281,19 +299,6 @@ func BuildProviders() []ProviderDef {
 	return out
 }
 
-// pipelineLaunchArgs maps provider IDs to the extra CLI flags needed to invoke
-// them in non-interactive (pipeline) mode.
-// opencode requires the "run" subcommand to avoid launching the interactive TUI.
-var pipelineLaunchArgs = map[string][]string{
-	"opencode": {"run"},
-}
-
-// PipelineLaunchArgs returns the fixed CLI args to prepend when a provider is
-// invoked as a non-interactive pipeline executor.
-// Returns nil if no extra args are required for the given provider.
-func PipelineLaunchArgs(providerID string) []string {
-	return pipelineLaunchArgs[providerID]
-}
 
 // injectOllamaModels appends Ollama model entries to the ollama provider.
 func injectOllamaModels(p ProviderDef, ollamaModels []string) ProviderDef {
