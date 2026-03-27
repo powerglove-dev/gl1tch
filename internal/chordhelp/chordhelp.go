@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/adam-stokes/orcai/internal/bootstrap"
-	"github.com/adam-stokes/orcai/internal/styles"
+	"github.com/adam-stokes/orcai/internal/themes"
 )
 
 type helpState int
@@ -24,11 +24,67 @@ const (
 	stateConfirmReload
 )
 
+// helpPalette holds resolved lipgloss colors for the chord-help popup.
+type helpPalette struct {
+	titleBG lipgloss.Color
+	titleFG lipgloss.Color
+	fg      lipgloss.Color
+	accent  lipgloss.Color
+	dim     lipgloss.Color
+	error   lipgloss.Color
+}
+
+// loadHelpPalette reads the persisted active theme and derives popup colors.
+// Falls back to Nord values when no theme is configured.
+func loadHelpPalette() helpPalette {
+	p := helpPalette{
+		titleBG: lipgloss.Color("#88c0d0"),
+		titleFG: lipgloss.Color("#2e3440"),
+		fg:      lipgloss.Color("#eceff4"),
+		accent:  lipgloss.Color("#88c0d0"),
+		dim:     lipgloss.Color("#4c566a"),
+		error:   lipgloss.Color("#bf616a"),
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	userThemesDir := filepath.Join(home, ".config", "orcai", "themes")
+	reg, err := themes.NewRegistry(userThemesDir)
+	if err != nil {
+		return p
+	}
+	b := reg.Active()
+	if b == nil {
+		return p
+	}
+	if v := b.ResolveRef(b.Modal.TitleBG); v != "" {
+		p.titleBG = lipgloss.Color(v)
+	}
+	if v := b.ResolveRef(b.Modal.TitleFG); v != "" {
+		p.titleFG = lipgloss.Color(v)
+	}
+	if v := b.Palette.FG; v != "" {
+		p.fg = lipgloss.Color(v)
+	}
+	if v := b.Palette.Accent; v != "" {
+		p.accent = lipgloss.Color(v)
+	}
+	if v := b.Palette.Dim; v != "" {
+		p.dim = lipgloss.Color(v)
+	}
+	if v := b.Palette.Error; v != "" {
+		p.error = lipgloss.Color(v)
+	}
+	return p
+}
+
 type model struct {
 	state  helpState
 	width  int
 	height int
 	self   string
+	pal    helpPalette
 }
 
 func newModel() model {
@@ -36,7 +92,7 @@ func newModel() model {
 	if resolved, err := filepath.EvalSymlinks(self); err == nil {
 		self = resolved
 	}
-	return model{self: self}
+	return model{self: self, pal: loadHelpPalette()}
 }
 
 func (m model) Init() tea.Cmd { return nil }
@@ -102,8 +158,8 @@ func (m model) View() string {
 	}
 
 	headerStyle := lipgloss.NewStyle().
-		Background(styles.Purple).
-		Foreground(styles.Bg).
+		Background(m.pal.titleBG).
+		Foreground(m.pal.titleFG).
 		Bold(true).
 		Width(w).
 		Padding(0, 1)
@@ -125,23 +181,23 @@ func (m model) View() string {
 			Padding(1, 2)
 
 		yesStyle := lipgloss.NewStyle().
-			Background(styles.Red).
-			Foreground(styles.Bg).
+			Background(m.pal.titleBG).
+			Foreground(m.pal.titleFG).
 			Bold(true).
 			Padding(0, 1)
 
 		noStyle := lipgloss.NewStyle().
-			Foreground(styles.Comment).
+			Foreground(m.pal.dim).
 			Padding(0, 1)
 
 		keys := lipgloss.JoinHorizontal(lipgloss.Left,
 			yesStyle.Render("y yes"),
-			lipgloss.NewStyle().Foreground(styles.Comment).Render("  "),
+			lipgloss.NewStyle().Foreground(m.pal.dim).Render("  "),
 			noStyle.Render("n no"),
 		)
 
 		body := lipgloss.JoinVertical(lipgloss.Left,
-			lipgloss.NewStyle().Foreground(styles.Red).Bold(true).Render(title),
+			lipgloss.NewStyle().Foreground(m.pal.accent).Bold(true).Render(title),
 			"",
 			keys,
 		)
@@ -154,15 +210,15 @@ func (m model) View() string {
 
 	// ── Help view ────────────────────────────────────────────────────────────
 	keyStyle := lipgloss.NewStyle().
-		Foreground(styles.Pink).
+		Foreground(m.pal.accent).
 		Bold(true).
 		Width(6)
 
 	descStyle := lipgloss.NewStyle().
-		Foreground(styles.Fg)
+		Foreground(m.pal.fg)
 
 	sectionStyle := lipgloss.NewStyle().
-		Foreground(styles.Comment).
+		Foreground(m.pal.dim).
 		Width(w).
 		PaddingTop(1).
 		Padding(0, 1)
@@ -180,7 +236,7 @@ func (m model) View() string {
 		)
 	}
 
-	dimStyle := lipgloss.NewStyle().Foreground(styles.Comment)
+	dimStyle := lipgloss.NewStyle().Foreground(m.pal.dim)
 
 	rows := []string{
 		headerStyle.Render("ORCAI  shortcuts"),
