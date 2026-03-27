@@ -828,13 +828,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 
-	case "q":
-		if len(m.activeJobs) > 0 {
-			m.confirmQuit = true
-			return m, nil
-		}
-		return m, tea.Quit
-
 	case "tab":
 		if m.feedFocused {
 			// feed → launcher
@@ -2191,7 +2184,7 @@ func (m Model) viewBottomBar(width int) string {
 			hint("f", "filter"),
 			hint("enter", "go to window"),
 			hint("tab", "focus"),
-			hint("q", "quit"),
+			hint("^spc q", "quit"),
 		}
 	case m.feedFocused:
 		parts = []string{
@@ -2200,7 +2193,7 @@ func (m Model) viewBottomBar(width int) string {
 			hint("g/G", "top/bottom"),
 			hint("enter", "open"),
 			hint("tab", "focus"),
-			hint("q", "quit"),
+			hint("^spc q", "quit"),
 		}
 	case m.launcher.focused:
 		parts = []string{
@@ -2210,7 +2203,7 @@ func (m Model) viewBottomBar(width int) string {
 			hint("d", "delete"),
 			hint("↑↓", "nav"),
 			hint("tab", "focus"),
-			hint("q", "quit"),
+			hint("^spc q", "quit"),
 		}
 	default:
 		parts = []string{
@@ -2221,7 +2214,7 @@ func (m Model) viewBottomBar(width int) string {
 			hint("a", "agent"),
 			hint("s", "signals"),
 			hint("f", "feed"),
-			hint("q", "quit"),
+			hint("^spc q", "quit"),
 		}
 	}
 
