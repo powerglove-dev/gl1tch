@@ -283,7 +283,10 @@ func BuildProviders() []ProviderDef {
 
 // pipelineLaunchArgs maps provider IDs to the extra CLI flags needed to invoke
 // them in non-interactive (pipeline) mode.
-var pipelineLaunchArgs = map[string][]string{}
+// opencode requires the "run" subcommand to avoid launching the interactive TUI.
+var pipelineLaunchArgs = map[string][]string{
+	"opencode": {"run"},
+}
 
 // PipelineLaunchArgs returns the fixed CLI args to prepend when a provider is
 // invoked as a non-interactive pipeline executor.
