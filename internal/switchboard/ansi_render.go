@@ -236,34 +236,39 @@ func DynamicHeader(bundle *themes.Bundle, panel string, width int) []string {
 	// Title: attempt TDF block-letter rendering when configured.
 	title := RenderHeader(panel)
 	if bundle.HeaderFont != "" {
-		rendered := tdf.Global.Render(bundle.HeaderFont, title, width)
-		if strings.Contains(rendered, "\n") {
-			// Multi-line TDF art — no top/bottom border rows.
-			// TDF art is left-aligned; the middle row gets a ─ rule ending with
-			// ┤ to connect visually to the right panel box border.
-			tdfLines := strings.Split(rendered, "\n")
-			midRow := len(tdfLines) / 2
-			var result []string
-			for i, tdfLine := range tdfLines {
-				visW := visibleWidth(tdfLine)
-				rightPad := width - visW
+		f := tdf.Global.Get(bundle.HeaderFont)
+		if f != nil {
+			rendered, _ := f.Render(title, width)
+			if strings.Contains(rendered, "\n") {
+				// Multi-line TDF art — no top/bottom border rows.
+				// TDF art is left-aligned; the middle row gets a ─ rule ending
+				// with ┤ to connect visually to the right panel box border.
+				// Use Font.MeasureWidth for right-pad so block-char Unicode
+				// width ambiguity in visibleWidth() can't cause misalignment.
+				tdfLines := strings.Split(rendered, "\n")
+				midRow := len(tdfLines) / 2
+				artWidth := f.MeasureWidth(title)
+				rightPad := width - artWidth
 				if rightPad < 0 {
 					rightPad = 0
 				}
-				var right string
-				if i == midRow && rightPad > 0 {
-					// ─────┤  connector to right panel border.
-					rule := strings.Repeat("─", rightPad-1) + "┤"
-					right = accentSeq + bold + rule + rst
-				} else {
-					right = strings.Repeat(" ", rightPad)
+				var result []string
+				for i, tdfLine := range tdfLines {
+					var right string
+					if i == midRow && rightPad > 0 {
+						// ─────┤  connector to right panel border.
+						rule := strings.Repeat("─", rightPad-1) + "┤"
+						right = accentSeq + bold + rule + rst
+					} else {
+						right = strings.Repeat(" ", rightPad)
+					}
+					result = append(result, tdfLine+right)
 				}
-				result = append(result, tdfLine+right)
+				return result
 			}
-			return result
+			// Single-line fallback (plain text or narrow font).
+			title = rendered
 		}
-		// Single-line fallback (plain text or narrow font).
-		title = rendered
 	}
 	titleRunes := []rune(title)
 	pad := width - len(titleRunes)
