@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -85,6 +86,11 @@ func isLegacyPipeline(p *Pipeline) bool {
 // It handles "input"/"output" step types and condition branches.
 func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput string, publisher EventPublisher) (string, error) {
 	ec := NewExecutionContext()
+
+	// Expose the process working directory so pipeline steps can use {{cwd}}.
+	if cwd, err := os.Getwd(); err == nil {
+		ec.Set("cwd", cwd)
+	}
 
 	for k, v := range p.Vars {
 		ec.Set("param."+k, v)
@@ -185,6 +191,10 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 
 	// Set up shared execution context.
 	ec := NewExecutionContext()
+	// Expose the process working directory so pipeline steps can use {{cwd}}.
+	if cwd, err := os.Getwd(); err == nil {
+		ec.Set("cwd", cwd)
+	}
 	for k, v := range p.Vars {
 		ec.Set("param."+k, v)
 	}

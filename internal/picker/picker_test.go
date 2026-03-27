@@ -198,25 +198,6 @@ func TestPickerItem_PipelineJSONRoundTrip(t *testing.T) {
 	}
 }
 
-func TestPickerStates_AllDistinct(t *testing.T) {
-	states := []picker.PickerState{
-		picker.StateSearch,
-		picker.StateProvider,
-		picker.StateModel,
-		picker.StateWorkdirPick,
-		picker.StateWorkdir,
-		picker.StateWorkflow,
-		picker.StateOpenSpecName,
-	}
-	seen := map[picker.PickerState]bool{}
-	for _, s := range states {
-		if seen[s] {
-			t.Errorf("duplicate picker state value: %v", s)
-		}
-		seen[s] = true
-	}
-}
-
 // TestBuildProviders_OllamaSidecarPathSet verifies that after BuildProviders(),
 // the ollama ProviderDef has a non-empty SidecarPath when a wrappers YAML is
 // present — ensuring the pipelineRunCmd skip guard fires correctly.

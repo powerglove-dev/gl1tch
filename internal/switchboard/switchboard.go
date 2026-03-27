@@ -234,12 +234,20 @@ type Model struct {
 	confirmDelete         bool
 	pendingDeletePipeline string
 	agentModalOpen        bool
-	agentModalFocus       int // 0=provider, 1=model, 2=prompt (within modal)
+	agentModalFocus       int // 0=provider, 1=model, 2=prompt, 3=cwd (within modal)
 	helpOpen              bool
 	helpScrollOffset      int
 	registry              *themes.Registry
 	themePickerOpen       bool
 	themePickerCursor     int
+	// CWD / dir picker
+	launchCWD           string         // CWD at orcai startup (immutable after New())
+	agentCWD            string         // current agent session CWD (user-editable)
+	dirPicker           DirPickerModel // reusable dir picker overlay
+	dirPickerOpen       bool           // whether the dir picker overlay is visible
+	dirPickerCtx        string         // "agent" or "pipeline"
+	pendingPipelineName string         // pipeline waiting for CWD selection
+	pendingPipelineYAML string         // YAML path for pendingPipelineName
 }
 
 // New creates a new Switchboard Model, discovering pipelines and providers.
@@ -250,6 +258,8 @@ func New() Model {
 	ta.ShowLineNumbers = false
 	ta.SetWidth(80)
 	ta.SetHeight(4)
+
+	cwd, _ := os.Getwd()
 
 	m := Model{
 		launcher: launcherSection{
@@ -262,6 +272,8 @@ func New() Model {
 		},
 		signalBoard: SignalBoard{activeFilter: "all"},
 		activeJobs:  make(map[string]*jobHandle),
+		launchCWD:   cwd,
+		agentCWD:    cwd,
 	}
 
 	// Initialize theme registry from user themes dir.
@@ -604,6 +616,32 @@ var _ io.Writer = (*lineWriter)(nil)
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
+	// ── Dir picker messages ───────────────────────────────────────────────────
+
+	case dirWalkResultMsg:
+		if m.dirPickerOpen {
+			var cmd tea.Cmd
+			m.dirPicker, cmd = m.dirPicker.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+
+	case DirSelectedMsg:
+		m.dirPickerOpen = false
+		if m.dirPickerCtx == "agent" {
+			m.agentCWD = msg.Path
+		} else if m.dirPickerCtx == "pipeline" {
+			// Launch the pending pipeline with the selected CWD.
+			return m.launchPendingPipeline(msg.Path)
+		}
+		return m, nil
+
+	case DirCancelledMsg:
+		m.dirPickerOpen = false
+		m.pendingPipelineName = ""
+		m.pendingPipelineYAML = ""
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -732,6 +770,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	key := msg.String()
+
+	// Dir picker overlay — capture all keys when open.
+	if m.dirPickerOpen {
+		var cmd tea.Cmd
+		m.dirPicker, cmd = m.dirPicker.Update(msg)
+		return m, cmd
+	}
 
 	// Theme picker — capture all keys when open.
 	if m.themePickerOpen {
@@ -1085,7 +1130,7 @@ func (m Model) handleAgentModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.submitAgentJob()
 
 	case "tab":
-		m.agentModalFocus = (m.agentModalFocus + 1) % 3
+		m.agentModalFocus = (m.agentModalFocus + 1) % 4
 		if m.agentModalFocus == 2 {
 			m.agent.prompt.Focus()
 		} else {
@@ -1094,13 +1139,22 @@ func (m Model) handleAgentModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case "shift+tab":
-		m.agentModalFocus = (m.agentModalFocus + 2) % 3
+		m.agentModalFocus = (m.agentModalFocus + 3) % 4
 		if m.agentModalFocus == 2 {
 			m.agent.prompt.Focus()
 		} else {
 			m.agent.prompt.Blur()
 		}
 		return m, nil
+
+	case "enter":
+		if m.agentModalFocus == 3 {
+			// Open dir picker to select CWD.
+			m.dirPicker = NewDirPickerModel()
+			m.dirPickerOpen = true
+			m.dirPickerCtx = "agent"
+			return m, DirPickerInit()
+		}
 
 	case "up", "k":
 		switch m.agentModalFocus {
@@ -1229,12 +1283,12 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Launcher: launch selected pipeline.
+	// Launcher: show dir picker before launching pipeline.
 	if m.launcher.focused {
 		if len(m.launcher.pipelines) == 0 {
 			return m, nil
 		}
-		// Enforce parallel job cap.
+		// Enforce parallel job cap before opening the picker.
 		if len(m.activeJobs) >= maxParallelJobs {
 			feedID := fmt.Sprintf("warn-%d", time.Now().UnixNano())
 			warnEntry := feedEntry{
@@ -1254,50 +1308,15 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 		name := m.launcher.pipelines[m.launcher.selected]
 		yamlPath := filepath.Join(pipelinesDir(), name+".pipeline.yaml")
 
-		feedID := fmt.Sprintf("pipe-%d", time.Now().UnixNano())
-		entry := feedEntry{
-			id:     feedID,
-			title:  "pipeline: " + name,
-			status: FeedRunning,
-			ts:     time.Now(),
-		}
-		// Load pipeline YAML to populate the initial step list.
-		if f, err := os.Open(yamlPath); err == nil {
-			if pl, err := pipeline.Load(f); err == nil {
-				for _, s := range pl.Steps {
-					if s.Type != "input" && s.Type != "output" {
-						entry.steps = append(entry.steps, StepInfo{id: s.ID, status: "pending"})
-					}
-				}
-			}
-			f.Close()
-		}
-		m.feed = append([]feedEntry{entry}, m.feed...)
-		if len(m.feed) > 200 {
-			m.feed = m.feed[:200]
-		}
-		m.feedSelected = 0
-		m.feedScrollOffset = 0
-
-		// Run the pipeline directly in a background tmux window so the user
-		// gets real shell history and scrollback.
-		orcaiBin := orcaiBinaryPath()
-		shellCmd := orcaiBin + " pipeline run " + yamlPath
-		windowName, logFile, doneFile := createJobWindow(feedID, shellCmd, name)
-		entry.tmuxWindow = windowName
-		entry.logFile = logFile
-		entry.doneFile = doneFile
-		m.feed[0] = entry
-
-		ch := make(chan tea.Msg, 256)
-		_, cancel := context.WithCancel(context.Background())
-		m.activeJobs[feedID] = &jobHandle{id: feedID, cancel: cancel, ch: ch, tmuxWindow: windowName, logFile: logFile}
-
-		// Watch the log file for output; detect completion via the done file.
-		startLogWatcher(feedID, logFile, doneFile, ch)
-		return m, drainChan(ch)
+		// Open the dir picker so the user can choose the working directory
+		// before the pipeline runs.
+		m.pendingPipelineName = name
+		m.pendingPipelineYAML = yamlPath
+		m.dirPicker = NewDirPickerModel()
+		m.dirPickerOpen = true
+		m.dirPickerCtx = "pipeline"
+		return m, DirPickerInit()
 	}
-
 	// Agent section: open modal overlay.
 	if m.agent.focused {
 		if m.width >= 62 {
@@ -1309,6 +1328,59 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// launchPendingPipeline runs the pipeline stored in pendingPipelineName/YAML
+// using cwd as the working directory. Called when the dir picker confirms.
+func (m Model) launchPendingPipeline(cwd string) (Model, tea.Cmd) {
+	name := m.pendingPipelineName
+	yamlPath := m.pendingPipelineYAML
+	m.pendingPipelineName = ""
+	m.pendingPipelineYAML = ""
+
+	if name == "" || yamlPath == "" {
+		return m, nil
+	}
+
+	feedID := fmt.Sprintf("pipe-%d", time.Now().UnixNano())
+	entry := feedEntry{
+		id:     feedID,
+		title:  "pipeline: " + name,
+		status: FeedRunning,
+		ts:     time.Now(),
+	}
+	// Load pipeline YAML to populate the initial step list.
+	if f, err := os.Open(yamlPath); err == nil {
+		if pl, err := pipeline.Load(f); err == nil {
+			for _, s := range pl.Steps {
+				if s.Type != "input" && s.Type != "output" {
+					entry.steps = append(entry.steps, StepInfo{id: s.ID, status: "pending"})
+				}
+			}
+		}
+		f.Close()
+	}
+	m.feed = append([]feedEntry{entry}, m.feed...)
+	if len(m.feed) > 200 {
+		m.feed = m.feed[:200]
+	}
+	m.feedSelected = 0
+	m.feedScrollOffset = 0
+
+	orcaiBin := orcaiBinaryPath()
+	shellCmd := orcaiBin + " pipeline run " + yamlPath
+	windowName, logFile, doneFile := createJobWindow(feedID, shellCmd, name, cwd)
+	entry.tmuxWindow = windowName
+	entry.logFile = logFile
+	entry.doneFile = doneFile
+	m.feed[0] = entry
+
+	ch := make(chan tea.Msg, 256)
+	_, cancel := context.WithCancel(context.Background())
+	m.activeJobs[feedID] = &jobHandle{id: feedID, cancel: cancel, ch: ch, tmuxWindow: windowName, logFile: logFile}
+
+	startLogWatcher(feedID, logFile, doneFile, ch)
+	return m, drainChan(ch)
 }
 
 // submitAgentJob submits the agent job from the modal overlay.
@@ -1365,7 +1437,21 @@ func (m Model) submitAgentJob() (Model, tea.Cmd) {
 	m.feedScrollOffset = 0
 
 	// Agent runs in-process; window shows live output via tail.
-	windowName, logFile, _ := createJobWindow(feedID, "", title)
+	// Pass agentCWD as the tmux window start directory so the tail window
+	// opens in the selected project directory.
+	cwd := m.agentCWD
+	if cwd == "" {
+		cwd = m.launchCWD
+	}
+
+	// If the selected CWD is inside a git repo, create (or reuse) a worktree
+	// so the agent session has an isolated branch to work on.
+	if worktreePath, _ := picker.GetOrCreateWorktreeFrom(cwd, feedID); worktreePath != "" {
+		picker.CopyDotEnv(cwd, worktreePath)
+		cwd = worktreePath
+	}
+
+	windowName, logFile, _ := createJobWindow(feedID, "", title, cwd)
 	entry.tmuxWindow = windowName
 	entry.logFile = logFile
 	m.feed[0] = entry
@@ -1379,6 +1465,9 @@ func (m Model) submitAgentJob() (Model, tea.Cmd) {
 	vars := map[string]string{}
 	if modelID != "" {
 		vars["model"] = modelID
+	}
+	if cwd != "" {
+		vars["cwd"] = cwd
 	}
 
 	ch := make(chan tea.Msg, 256)
@@ -1599,6 +1688,12 @@ func (m Model) View() string {
 	}
 
 	body := strings.Join(rows, "\n")
+
+	// Dir picker overlay — highest priority, shown on top of everything.
+	if m.dirPickerOpen {
+		base := body + "\n" + m.viewBottomBar(w)
+		return overlayCenter(base, m.dirPicker.viewDirPickerBox(w), w, h)
+	}
 
 	if m.helpOpen {
 		base := body + "\n" + m.viewBottomBar(w)
@@ -1870,13 +1965,45 @@ func (m Model) viewAgentModalBox(w int) string {
 		rows = append(rows, boxRow(padded, modalW, modalBorderColor))
 	}
 
+	// ── WORKING DIRECTORY section ─────────────────────────────────────────────
+	rows = append(rows, boxRow("", modalW, modalBorderColor))
+	cwdHeader := "  " + sectionLabel("WORKING DIRECTORY", m.agentModalFocus == 3)
+	rows = append(rows, boxRow(cwdHeader, modalW, modalBorderColor))
+	cwdDisplay := m.agentCWD
+	if cwdDisplay == "" {
+		cwdDisplay = m.launchCWD
+	}
+	// Trim to home-relative display for readability.
+	if home := os.Getenv("HOME"); home != "" && strings.HasPrefix(cwdDisplay, home) {
+		cwdDisplay = "~" + cwdDisplay[len(home):]
+	}
+	// Truncate long paths to fit the modal.
+	maxCWDLen := max(modalW-8, 10)
+	if len(cwdDisplay) > maxCWDLen {
+		cwdDisplay = "…" + cwdDisplay[len(cwdDisplay)-maxCWDLen+1:]
+	}
+	var cwdContent string
+	if m.agentModalFocus == 3 {
+		cwdContent = pal.SelBG + aWht + "  > " + cwdDisplay + aRst
+	} else {
+		cwdContent = pal.Dim + "    " + aRst + pal.Accent + cwdDisplay + aRst
+	}
+	rows = append(rows, boxRow(cwdContent, modalW, modalBorderColor))
+	if m.agentModalFocus == 3 {
+		rows = append(rows, boxRow(pal.Dim+"  enter to browse directories"+aRst, modalW, modalBorderColor))
+	}
+
 	// ── Hint bar ──────────────────────────────────────────────────────────────
 	rows = append(rows, boxRow("", modalW, modalBorderColor))
-	hintStr := "  " + strings.Join([]string{
+	hintParts := []string{
 		hint("tab", "focus"),
 		hint("ctrl+s", "submit"),
 		hint("esc", "close"),
-	}, sep)
+	}
+	if m.agentModalFocus == 3 {
+		hintParts = append([]string{hint("enter", "browse dirs")}, hintParts...)
+	}
+	hintStr := "  " + strings.Join(hintParts, sep)
 	rows = append(rows, boxRow(hintStr, modalW, modalBorderColor))
 	rows = append(rows, boxBot(modalW, modalBorderColor))
 

@@ -1,12 +1,10 @@
-// Binary orcai-picker is the ABS provider/model picker widget.
-//
-// It is launched via tmux display-popup (typically from orcai-welcome or a
-// chord binding) and lets the user select an AI provider and model to start
-// a new session.
+// Binary orcai-picker is deprecated.
+// New sessions are started via the agent runner overlay in the switchboard.
+// This binary is retained as a stub to avoid breaking existing shell scripts.
 package main
 
-import "github.com/adam-stokes/orcai/internal/picker"
+import "fmt"
 
 func main() {
-	picker.Run()
+	fmt.Println("orcai-picker: use 'a' in the orcai switchboard to start a new agent session.")
 }

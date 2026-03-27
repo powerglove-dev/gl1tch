@@ -1,20 +1,20 @@
 package cmd
 
 import (
-	"github.com/adam-stokes/orcai/internal/picker"
+	"fmt"
+
 	"github.com/spf13/cobra"
 )
 
 func init() {
 	rootCmd.AddCommand(pickerCmd)
-	pickerCmd.Flags().String("bus-socket", "", "Path to orcai bus Unix socket")
 }
 
 var pickerCmd = &cobra.Command{
 	Use:   "picker",
-	Short: "Open the session picker",
+	Short: "Deprecated: use the agent runner overlay in the switchboard",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		picker.Run()
+		fmt.Println("orcai picker: use 'a' in the orcai switchboard to start a new agent session.")
 		return nil
 	},
 }

@@ -122,6 +122,11 @@ func (c *CliAdapter) Execute(ctx context.Context, input string, vars map[string]
 	cmd.Stdout = w
 	cmd.Stderr = w
 
+	// Set the working directory if provided.
+	if cwd := vars["cwd"]; cwd != "" {
+		cmd.Dir = cwd
+	}
+
 	// Inherit the current environment then overlay ORCAI_* vars.
 	env := os.Environ()
 	for k, v := range vars {

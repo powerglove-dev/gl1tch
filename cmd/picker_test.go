@@ -17,9 +17,3 @@ func TestPickerCmd_Registered(t *testing.T) {
 	}
 }
 
-func TestPickerCmd_BusSocketFlag(t *testing.T) {
-	f := pickerCmd.Flags().Lookup("bus-socket")
-	if f == nil {
-		t.Fatal("--bus-socket flag not registered on pickerCmd")
-	}
-}

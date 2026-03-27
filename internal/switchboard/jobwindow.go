@@ -34,6 +34,9 @@ func currentTmuxSession() string {
 // option @orcai-label so the jump-window popup can display it instead of the
 // raw window name. Pass an empty string to skip setting the option.
 //
+// startDir, when non-empty, sets the working directory for the new tmux window
+// via the -c flag. Pass an empty string to inherit the session's default.
+//
 // If shellCmd is non-empty the window runs the command, tees output to logFile,
 // and writes the exit code to doneFile. remain-on-exit keeps the window alive
 // after the command finishes so the user can inspect the scrollback. Use
@@ -43,7 +46,7 @@ func currentTmuxSession() string {
 // in-process agent jobs that write to logFile themselves).
 //
 // Returns (target, logFile, doneFile). All empty strings if tmux is unavailable.
-func createJobWindow(feedID, shellCmd, label string) (target, logFile, doneFile string) {
+func createJobWindow(feedID, shellCmd, label, startDir string) (target, logFile, doneFile string) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		return "", "", ""
 	}
@@ -73,11 +76,12 @@ func createJobWindow(feedID, shellCmd, label string) (target, logFile, doneFile 
 	// Use -t "session:" (trailing colon) to always append at the end of the
 	// window list, avoiding index conflicts when multiple windows are created
 	// in rapid succession.
-	out, err := exec.Command("tmux", "new-window",
-		"-d", "-t", session+":", "-n", windowName,
-		"-P", "-F", "#{window_id}",
-		windowCmd,
-	).Output()
+	args := []string{"new-window", "-d", "-t", session + ":", "-n", windowName, "-P", "-F", "#{window_id}"}
+	if startDir != "" {
+		args = append(args, "-c", startDir)
+	}
+	args = append(args, windowCmd)
+	out, err := exec.Command("tmux", args...).Output()
 	if err == nil {
 		if id := strings.TrimSpace(string(out)); id != "" {
 			target = session + ":" + id // stable @N ID, survives auto-rename

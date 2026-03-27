@@ -210,9 +210,8 @@ func TestViewContainsBottomBar(t *testing.T) {
 	if !strings.Contains(view, "ctrl+s") {
 		t.Errorf("View() bottom bar missing hint when agent focused:\n%s", view)
 	}
-	if !strings.Contains(view, "quit") {
-		t.Errorf("View() bottom bar missing 'quit' hint:\n%s", view)
-	}
+	// Note: "quit" was moved to the tmux status bar (^spc q quit) and is no
+	// longer rendered in the BubbleTea bottom bar.
 }
 
 // ── Feed scroll (task 1.6) ─────────────────────────────────────────────────────
