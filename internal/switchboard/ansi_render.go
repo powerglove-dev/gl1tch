@@ -209,8 +209,28 @@ func DynamicHeader(bundle *themes.Bundle, panel string, width int) []string {
 		botRow = strings.Repeat(botChar, width)
 	}
 
-	// Top bar: full-width block chars starting at column 0 (matches boxRow │ position).
-	topLine := accentSeq + bold + topRow + rst
+	// Resolve gradient stops: per-panel override takes precedence over bundle-level.
+	gradStops := ps.GradientBorder
+	if len(gradStops) == 0 {
+		gradStops = bundle.GradientBorder
+	}
+
+	var topLine, botLine string
+	if len(gradStops) > 0 {
+		// Apply per-character gradient coloring to top and bottom rows.
+		topLine = bold + applyGradientToRow(topRow, gradStops) + rst
+		// Reverse the gradient for the bottom row.
+		reversed := make([]string, len(gradStops))
+		for i, s := range gradStops {
+			reversed[len(gradStops)-1-i] = s
+		}
+		botLine = bold + applyGradientToRow(botRow, reversed) + rst
+	} else {
+		// Top bar: full-width block chars starting at column 0 (matches boxRow │ position).
+		topLine = accentSeq + bold + topRow + rst
+		// Bottom bar: full-width block chars (or pattern row).
+		botLine = accentSeq + bold + botRow + rst
+	}
 
 	// Title line: accent-colored background spanning the full width so the
 	// panel title (in ps.Text color) is always legible regardless of terminal bg.
@@ -227,10 +247,26 @@ func DynamicHeader(bundle *themes.Bundle, panel string, width int) []string {
 		strings.Repeat(" ", lp) + string(titleRunes) + strings.Repeat(" ", rp) +
 		rst
 
-	// Bottom bar: full-width block chars (or pattern row).
-	botLine := accentSeq + bold + botRow + rst
-
 	return []string{topLine, titleLine, botLine}
+}
+
+// applyGradientToRow applies per-character gradient colors to a string of
+// runes. stops are hex color strings; the gradient is distributed evenly
+// across the visible rune count of row.
+func applyGradientToRow(row string, stops []string) string {
+	runes := []rune(row)
+	if len(runes) == 0 {
+		return row
+	}
+	colors := styles.GradientStops(stops, len(runes))
+	var sb strings.Builder
+	for i, r := range runes {
+		if i < len(colors) {
+			sb.WriteString(styles.HexToFGEsc(colors[i]))
+		}
+		sb.WriteRune(r)
+	}
+	return sb.String()
 }
 
 // PanelHeader returns the best available header for a panel at the given width.

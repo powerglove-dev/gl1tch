@@ -1,6 +1,9 @@
 name: dracula
 display_name: "Dracula"
 header_pattern: texture
+gradient_border:
+  - "#ff79c6"
+  - "#bd93f9"
 palette:
   bg:      "#282a36"
   fg:      "#f8f8f2"

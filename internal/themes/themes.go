@@ -36,6 +36,9 @@ type Modal struct {
 type PanelHeaderStyle struct {
 	Accent string `yaml:"accent"` // border/bar color
 	Text   string `yaml:"text"`   // title text color
+	// GradientBorder overrides the bundle-level gradient for this specific panel.
+	// When empty, falls back to Bundle.GradientBorder.
+	GradientBorder []string `yaml:"gradient_border"`
 }
 
 // HeaderStyle configures the dynamic panel header generator.
@@ -61,6 +64,10 @@ type Bundle struct {
 	// HeaderStyle drives dynamic header generation at the exact panel width.
 	// Used by DynamicHeader() when no fixed-width .ans sprite fits the panel.
 	HeaderStyle HeaderStyle `yaml:"header_style"`
+
+	// GradientBorder holds 0–4 hex color stops for gradient panel borders.
+	// When empty, solid accent color is used. When 1 stop, solid that color.
+	GradientBorder []string `yaml:"gradient_border"`
 
 	// Headers maps panel key → ordered list of relative .ans paths, widest first.
 	// SpriteLines selects the first entry whose visible width fits the panel.
