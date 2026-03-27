@@ -637,6 +637,38 @@ func pipelinesDir() string {
 	return filepath.Join(home, ".config", "orcai", "pipelines")
 }
 
+// writeSingleStepPipeline generates a minimal single-step pipeline YAML for a
+// scheduled agent run and writes it to the pipelines directory. Returns the
+// absolute path of the written file so the caller can reference it in a cron entry.
+func writeSingleStepPipeline(name, providerID, modelID, prompt string) (string, error) {
+	dir := pipelinesDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, name+".pipeline.yaml")
+
+	// Indent every line of the prompt for the YAML block scalar.
+	var promptLines strings.Builder
+	for _, line := range strings.Split(prompt, "\n") {
+		promptLines.WriteString("      ")
+		promptLines.WriteString(line)
+		promptLines.WriteString("\n")
+	}
+
+	model := ""
+	if modelID != "" {
+		model = "\n    model: " + modelID
+	}
+
+	content := fmt.Sprintf("name: %s\nversion: \"1\"\nsteps:\n  - id: run\n    executor: %s%s\n    prompt: |\n%s",
+		name, providerID, model, promptLines.String())
+
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 // ScanPipelines lists *.pipeline.yaml basenames (without extension) from dir.
 // Exported so tests can call it directly.
 // Returns an empty slice if dir is missing or empty.
@@ -1940,11 +1972,20 @@ func (m Model) submitAgentJob() (Model, tea.Cmd) {
 		m.agentScheduleErr = ""
 
 		entryName := fmt.Sprintf("agent-%s-%d", prov.ID, time.Now().UnixNano())
+
+		// Generate a minimal single-step pipeline YAML so the scheduled run
+		// has the prompt embedded and runs via the standard pipeline executor.
+		pipelineFile, pipelineErr := writeSingleStepPipeline(entryName, prov.ID, modelID, input)
+		if pipelineErr != nil {
+			m.agentScheduleErr = "pipeline write error: " + pipelineErr.Error()
+			return m, nil
+		}
+
 		cronEntry := orcaicron.Entry{
 			Name:     entryName,
 			Schedule: schedExpr,
-			Kind:     "agent",
-			Target:   agentName,
+			Kind:     "pipeline",
+			Target:   pipelineFile,
 		}
 		if werr := orcaicron.WriteEntry(cronEntry); werr != nil {
 			m.agentScheduleErr = "write error: " + werr.Error()

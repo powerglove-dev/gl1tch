@@ -44,7 +44,7 @@ func main() {
 		case "_jump":
 			jumpwindow.Run()
 			return
-		case "bridge", "git", "weather", "code", "new", "kill", "help", "pipeline", "ollama", "_opsx", "completion",
+		case "agent", "bridge", "git", "weather", "code", "new", "kill", "help", "pipeline", "ollama", "_opsx", "completion",
 			"sysop", "picker", "welcome", "config", "cron":
 			cmd.Execute()
 			return

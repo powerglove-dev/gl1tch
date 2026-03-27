@@ -134,10 +134,8 @@ func (s *Scheduler) runEntry(entry Entry) {
 	// Determine subprocess args.
 	var args []string
 	switch entry.Kind {
-	case "pipeline":
+	case "pipeline", "agent":
 		args = []string{"pipeline", "run", entry.Target}
-	case "agent":
-		args = []string{"agent", "run", entry.Target}
 	default:
 		s.logError("cron: unknown entry kind", "name", entry.Name, "kind", entry.Kind)
 		return
