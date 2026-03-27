@@ -343,6 +343,7 @@ func NewWithStore(s *store.Store) Model {
 	if reg, err := themes.NewRegistry(userThemesDir); err == nil {
 		m.registry = reg
 		m.inboxModel.SetTheme(reg.Active())
+		themes.SetGlobalRegistry(reg)
 	}
 
 	m.inboxReadIDs = LoadReadSet(m.readStateFile())

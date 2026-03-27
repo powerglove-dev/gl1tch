@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // activeThemeFile returns the path used to persist the active theme name.
@@ -19,9 +20,11 @@ func activeThemeFile() (string, error) {
 
 // Registry holds all available theme bundles and tracks the active theme.
 type Registry struct {
-	bundles []Bundle
-	byName  map[string]*Bundle
-	active  *Bundle
+	bundles     []Bundle
+	byName      map[string]*Bundle
+	active      *Bundle
+	mu          sync.Mutex
+	subscribers []chan<- string
 }
 
 // NewRegistry loads bundled themes and optional user themes from userDir,
@@ -114,6 +117,8 @@ func (r *Registry) Active() *Bundle {
 
 // SetActive sets the active theme by name and persists the choice to disk.
 // Returns an error if name is not found.
+// After updating the active theme it notifies all subscribers via non-blocking
+// sends so a slow subscriber never blocks the caller.
 func (r *Registry) SetActive(name string) error {
 	b, ok := r.byName[name]
 	if !ok {
@@ -132,5 +137,50 @@ func (r *Registry) SetActive(name string) error {
 	if err := os.WriteFile(path, []byte(name), 0o644); err != nil {
 		return fmt.Errorf("themes: write active theme: %w", err)
 	}
+
+	// Notify subscribers — non-blocking so slow listeners don't stall the caller.
+	r.mu.Lock()
+	subs := make([]chan<- string, len(r.subscribers))
+	copy(subs, r.subscribers)
+	r.mu.Unlock()
+
+	for _, ch := range subs {
+		select {
+		case ch <- name:
+		default:
+		}
+	}
+
 	return nil
+}
+
+// Subscribe registers ch to receive the new theme name whenever SetActive is
+// called. Sends are non-blocking; if the channel is full the notification is
+// dropped for that subscriber. ch must not be nil.
+func (r *Registry) Subscribe(ch chan<- string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.subscribers = append(r.subscribers, ch)
+}
+
+// Unsubscribe removes ch from the subscriber list. It is safe to call even if
+// ch was never subscribed.
+func (r *Registry) Unsubscribe(ch chan<- string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := r.subscribers[:0]
+	for _, s := range r.subscribers {
+		if s != ch {
+			out = append(out, s)
+		}
+	}
+	r.subscribers = out
+}
+
+// SafeSubscribe creates a 1-element buffered channel, subscribes it, and
+// returns it. The caller should call Unsubscribe when done.
+func (r *Registry) SafeSubscribe() chan string {
+	ch := make(chan string, 1)
+	r.Subscribe(ch)
+	return ch
 }

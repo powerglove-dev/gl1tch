@@ -15,8 +15,16 @@ import (
 
 // New creates the cron TUI model, wiring up the scheduler with a LogSink so
 // that all scheduler log output is captured to the in-app log pane.
-// bundle may be nil; in that case the Dracula palette is used as fallback.
+// bundle may be nil; in that case GlobalRegistry is tried and, if also nil,
+// the Dracula palette is used as fallback.
 func New(bundle *themes.Bundle) (Model, error) {
+	// Fall back to global registry when no explicit bundle is provided.
+	if bundle == nil {
+		if gr := themes.GlobalRegistry(); gr != nil {
+			bundle = gr.Active()
+		}
+	}
+
 	logCh := make(chan tea.Msg, 256)
 	sink := NewLogSink(logCh)
 	logger := log.NewWithOptions(sink, log.Options{
@@ -38,6 +46,12 @@ func New(bundle *themes.Bundle) (Model, error) {
 	fi.Placeholder = "/ filter..."
 	fi.CharLimit = 64
 
+	// Subscribe to theme changes via the global registry (if available).
+	var themeCh chan string
+	if gr := themes.GlobalRegistry(); gr != nil {
+		themeCh = gr.SafeSubscribe()
+	}
+
 	m := Model{
 		scheduler:   sched,
 		runStore:    s,
@@ -47,14 +61,15 @@ func New(bundle *themes.Bundle) (Model, error) {
 		filtered:    entries,
 		logCh:       logCh,
 		filterInput: fi,
+		themeCh:     themeCh,
 	}
 	return m, nil
 }
 
 // Init starts the scheduler, begins the 30-second tick, and starts listening
-// for log lines.
+// for log lines and theme changes.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		func() tea.Msg {
 			if err := m.scheduler.Start(context.Background()); err != nil {
 				m.logger.Error("failed to start scheduler", "err", err)
@@ -65,7 +80,11 @@ func (m Model) Init() tea.Cmd {
 		},
 		tick(),
 		listenLogs(m.logCh),
-	)
+	}
+	if m.themeCh != nil {
+		cmds = append(cmds, listenTheme(m.themeCh))
+	}
+	return tea.Batch(cmds...)
 }
 
 // tick schedules a reload every 30 seconds.
@@ -81,5 +100,13 @@ func tick() tea.Cmd {
 func listenLogs(ch chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		return <-ch
+	}
+}
+
+// listenTheme blocks until a theme name arrives on ch and returns a
+// themeChangedMsg. The Update handler re-schedules this to keep listening.
+func listenTheme(ch chan string) tea.Cmd {
+	return func() tea.Msg {
+		return themeChangedMsg{name: <-ch}
 	}
 }

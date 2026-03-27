@@ -36,6 +36,10 @@ type runDoneMsg struct {
 }
 type entriesReloadedMsg struct{ entries []cron.Entry }
 
+// themeChangedMsg is sent when the active theme changes.
+// The name field holds the new theme name looked up from GlobalRegistry.
+type themeChangedMsg struct{ name string }
+
 // LogSink implements io.Writer and posts each line as logLineMsg to a channel.
 type LogSink struct {
 	ch chan tea.Msg
@@ -82,6 +86,7 @@ type Model struct {
 	filtered  []cron.Entry // after fuzzy filter
 	logBuf    []string     // ring buffer, max logBufMax lines
 	logCh     chan tea.Msg  // LogSink writes here
+	themeCh   chan string   // receives new theme names from GlobalRegistry; may be nil
 
 	filterInput textinput.Model
 	filtering   bool // true when filter input is active

@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 
 	"github.com/adam-stokes/orcai/internal/cron"
+	"github.com/adam-stokes/orcai/internal/themes"
 )
 
 // Update handles all incoming messages and key events.
@@ -34,6 +35,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case runDoneMsg:
 		// Re-render only; the scheduler already logged the result.
+		return m, nil
+
+	case themeChangedMsg:
+		// Look up the new bundle from the global registry and update the model.
+		if gr := themes.GlobalRegistry(); gr != nil {
+			if b, ok := gr.Get(msg.name); ok {
+				m.bundle = b
+			}
+		}
+		// Re-schedule the listener to keep receiving future changes.
+		if m.themeCh != nil {
+			return m, listenTheme(m.themeCh)
+		}
 		return m, nil
 
 	case tea.KeyMsg:
