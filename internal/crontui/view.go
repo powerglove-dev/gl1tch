@@ -8,6 +8,7 @@ import (
 
 	"github.com/adam-stokes/orcai/internal/cron"
 	"github.com/adam-stokes/orcai/internal/modal"
+	"github.com/adam-stokes/orcai/internal/translations"
 )
 
 // viewPal caches resolved lipgloss colors for the current render pass.
@@ -105,7 +106,8 @@ func (m Model) viewJobList(width, height int) string {
 	if m.filtering {
 		headerRight = " " + m.filterInput.View()
 	}
-	header := m.panelBand("CRON JOBS"+headerRight, inner)
+	cronTitle := translations.Safe(translations.GlobalProvider(), translations.KeyCronTitle, "CRON JOBS")
+	header := m.panelBand(cronTitle+headerRight, inner)
 
 	// Build rows.
 	var rows []string

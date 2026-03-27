@@ -33,6 +33,7 @@ import (
 	"github.com/adam-stokes/orcai/internal/store"
 	"github.com/adam-stokes/orcai/internal/styles"
 	"github.com/adam-stokes/orcai/internal/themes"
+	"github.com/adam-stokes/orcai/internal/translations"
 )
 
 // ── ANSI palette — Dracula BBS aesthetic ─────────────────────────────────────
@@ -346,6 +347,9 @@ func NewWithStore(s *store.Store) Model {
 		m.inboxModel.SetTheme(reg.Active())
 		themes.SetGlobalRegistry(reg)
 	}
+
+	// Initialize translations provider from ~/.config/orcai/translations.yaml.
+	translations.SetGlobalProvider(translations.NewYAMLProvider())
 
 	m.inboxReadIDs = LoadReadSet(m.readStateFile())
 
@@ -2403,7 +2407,7 @@ func (m Model) viewQuitModalBox(w int) string {
 
 	cfg := modal.Config{
 		Bundle:       m.activeBundle(),
-		Title:        "ORCAI  Quit?",
+		Title:        translations.Safe(translations.GlobalProvider(), translations.KeyQuitModalTitle, "ORCAI  Quit?"),
 		Message:      message,
 		ConfirmLabel: lipgloss.NewStyle().Foreground(mc.accent).Bold(true).Render("[y]") + "es",
 		DismissLabel: lipgloss.NewStyle().Foreground(mc.dim).Render("[n]") + "o / esc",

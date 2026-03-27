@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/glamour"
 
 	"github.com/adam-stokes/orcai/internal/modal"
+	"github.com/adam-stokes/orcai/internal/translations"
 )
 
 // readmeContent returns the README.md content, falling back to inline text.
@@ -41,7 +42,7 @@ func (m Model) viewHelpModal(w, h int) string {
 
 	cfg := modal.Config{
 		Bundle: m.activeBundle(),
-		Title:  "ORCAI  getting started",
+		Title:  translations.Safe(translations.GlobalProvider(), translations.KeyHelpModalTitle, "ORCAI  getting started"),
 	}
 	return modal.RenderScroll(cfg, lines, m.helpScrollOffset, w, h)
 }

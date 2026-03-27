@@ -26,6 +26,11 @@ func (ap *actionPlugin) Execute(ctx context.Context, input string, vars map[stri
 	return ap.Plugin.Execute(ctx, input, merged, w)
 }
 
+// TODO(translations): When a plugin execution context interface is added,
+// inject a translations.Provider via a Translations() method so plugins can
+// use the same operator-configured string overrides as the TUI. Wire it from
+// translations.GlobalProvider() in the plugin host/executor setup.
+
 // Manager holds the registry of all active plugins.
 type Manager struct {
 	mu            sync.RWMutex

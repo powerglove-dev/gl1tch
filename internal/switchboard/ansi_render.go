@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/adam-stokes/orcai/internal/themes"
+	"github.com/adam-stokes/orcai/internal/translations"
 )
 
 // panelTitles maps panel keys to their plain-text fallback titles.
@@ -76,13 +77,19 @@ func minInt(a, b int) int {
 	return b
 }
 
-// RenderHeader returns the plain-text fallback title for a panel.
-// Used in boxTop() when no ANS sprite is available.
+// RenderHeader returns the translated (or plain-text fallback) title for a panel.
+// Used in boxTop() and DynamicHeader() when no ANS sprite is available.
+// If a GlobalProvider is set, the panel's translation key is looked up first.
 func RenderHeader(panel string) string {
-	if title, ok := panelTitles[panel]; ok {
-		return title
+	title := panelTitles[panel]
+	if title == "" {
+		title = strings.ToUpper(panel)
 	}
-	return strings.ToUpper(panel)
+	if p := translations.GlobalProvider(); p != nil {
+		key := panel + "_panel_title"
+		return p.T(key, title)
+	}
+	return title
 }
 
 // SpriteLines returns the ANS sprite for a panel as individual lines, ready
