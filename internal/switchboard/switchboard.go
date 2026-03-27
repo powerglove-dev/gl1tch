@@ -228,6 +228,15 @@ type TelemetryMsg struct {
 
 // ── Model ─────────────────────────────────────────────────────────────────────
 
+// InboxPanel holds display and interaction state for the INBOX panel.
+type InboxPanel struct {
+	focused      bool
+	selectedIdx  int
+	scrollOffset int
+	filterQuery  string
+	filterActive bool
+}
+
 // Model is the BubbleTea model for the Switchboard.
 type Model struct {
 	width                 int
@@ -269,7 +278,8 @@ type Model struct {
 	pipelineScheduleErr  string
 	// Inbox panel
 	inboxModel              inbox.Model
-	inboxFocused            bool
+	inboxPanel              InboxPanel
+	inboxReadIDs            map[int64]bool
 	store                   *store.Store
 	inboxDetailOpen         bool
 	inboxDetailIdx    int
@@ -334,6 +344,8 @@ func NewWithStore(s *store.Store) Model {
 		m.inboxModel.SetTheme(reg.Active())
 	}
 
+	m.inboxReadIDs = LoadReadSet(m.readStateFile())
+
 	return m
 }
 
@@ -364,6 +376,11 @@ func NewWithTestProviders() Model {
 		},
 	}
 	return m
+}
+
+// readStateFile returns the path to the inbox read-state persistence file.
+func (m Model) readStateFile() string {
+	return filepath.Join(os.Getenv("HOME"), ".config", "orcai", "inbox-read.json")
 }
 
 // Cursor returns the launcher cursor position — used in tests.
@@ -419,7 +436,7 @@ func (m Model) BuildAgentSection(w int) []string { return m.buildAgentSection(w)
 func (m Model) BuildSignalBoard(height, width int) []string { return m.buildSignalBoard(height, width) }
 
 // BuildCronSection is an exported wrapper for tests.
-func (m Model) BuildCronSection(w int) []string { return m.buildCronSection(w) }
+func (m Model) BuildCronSection(w int) []string { return m.buildCronSection(w, 10) }
 
 // CronPanelFocused returns whether the cron panel is focused — used in tests.
 func (m Model) CronPanelFocused() bool { return m.cronPanel.focused }
@@ -894,7 +911,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Inbox captures all other keys when focused, but the detail overlay
 		// takes priority and routes through handleKey so it can intercept keys.
-		if m.inboxFocused {
+		if m.inboxPanel.focused {
 			if m.inboxDetailOpen {
 				return m.handleKey(msg)
 			}
@@ -903,20 +920,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "ctrl+h", "T":
 				return m.handleKey(msg)
 			}
-			// Check for enter to open the detail overlay.
-			if msg.String() == "enter" {
-				idx := m.inboxModel.SelectedIndex()
-				runs := m.inboxModel.Runs()
-				if len(runs) > 0 && idx >= 0 && idx < len(runs) {
-					m.inboxDetailOpen = true
-					m.inboxDetailIdx = idx
-					m.inboxDetailScroll = 0
-				}
-				return m, nil
-			}
-			var inboxCmd tea.Cmd
-			m.inboxModel, inboxCmd = m.inboxModel.Update(msg)
-			return m, inboxCmd
+			return m.handleKey(msg)
 		}
 		return m.handleKey(msg)
 
@@ -974,7 +978,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	// Inbox detail overlay — capture all keys when open.
 	if m.inboxDetailOpen {
-		runs := m.inboxModel.Runs()
+		runs := m.filteredInboxRuns()
 		switch key {
 		case "q", "esc":
 			m.inboxDetailOpen = false
@@ -1087,27 +1091,145 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Cron panel focused — handle cron-specific keys.
+	// ── Cron panel ────────────────────────────────────────────────────────────
 	if m.cronPanel.focused {
-		entries, _ := orcaicron.LoadConfig()
+		entries := m.filteredCronEntries()
+		// Search mode.
+		if m.cronPanel.filterActive {
+			switch key {
+			case "esc":
+				m.cronPanel.filterActive = false
+				m.cronPanel.filterQuery = ""
+				m.cronPanel.scrollOffset = 0
+			case "backspace":
+				if len(m.cronPanel.filterQuery) > 0 {
+					_, size := utf8.DecodeLastRuneInString(m.cronPanel.filterQuery)
+					m.cronPanel.filterQuery = m.cronPanel.filterQuery[:len(m.cronPanel.filterQuery)-size]
+					m.cronPanel.scrollOffset = 0
+					filtered := m.filteredCronEntries()
+					if m.cronPanel.selectedIdx >= len(filtered) {
+						m.cronPanel.selectedIdx = max(len(filtered)-1, 0)
+					}
+				}
+			default:
+				if len(msg.Runes) > 0 {
+					m.cronPanel.filterQuery += string(msg.Runes)
+					m.cronPanel.scrollOffset = 0
+					if m.cronPanel.selectedIdx >= len(m.filteredCronEntries()) {
+						m.cronPanel.selectedIdx = 0
+					}
+				}
+			}
+			return m, nil
+		}
 		switch key {
+		case "/":
+			m.cronPanel.filterActive = true
+			return m, nil
 		case "m":
 			go ensureCronDaemon()
 			exec.Command("tmux", "switch-client", "-t", "orcai-cron").Run() //nolint:errcheck
 			return m, nil
-		case "esc":
+		case "esc", "p":
 			m.cronPanel.focused = false
 			m.launcher.focused = true
 			return m, nil
 		case "j", "down":
 			if m.cronPanel.selectedIdx < len(entries)-1 {
 				m.cronPanel.selectedIdx++
+				if m.cronPanel.selectedIdx >= m.cronPanel.scrollOffset+8 {
+					m.cronPanel.scrollOffset = m.cronPanel.selectedIdx - 7
+				}
 			}
 			return m, nil
 		case "k", "up":
 			if m.cronPanel.selectedIdx > 0 {
 				m.cronPanel.selectedIdx--
+				if m.cronPanel.selectedIdx < m.cronPanel.scrollOffset {
+					m.cronPanel.scrollOffset = m.cronPanel.selectedIdx
+				}
 			}
+			return m, nil
+		}
+	}
+
+	// ── Inbox panel ───────────────────────────────────────────────────────────
+	if m.inboxPanel.focused && !m.inboxDetailOpen {
+		runs := m.filteredInboxRuns()
+		// Search mode captures printable keys.
+		if m.inboxPanel.filterActive {
+			switch key {
+			case "esc":
+				m.inboxPanel.filterActive = false
+				m.inboxPanel.filterQuery = ""
+				m.inboxPanel.scrollOffset = 0
+			case "backspace":
+				if len(m.inboxPanel.filterQuery) > 0 {
+					_, size := utf8.DecodeLastRuneInString(m.inboxPanel.filterQuery)
+					m.inboxPanel.filterQuery = m.inboxPanel.filterQuery[:len(m.inboxPanel.filterQuery)-size]
+					m.inboxPanel.scrollOffset = 0
+					// Re-clamp selectedIdx to new filtered length.
+					filtered := m.filteredInboxRuns()
+					if m.inboxPanel.selectedIdx >= len(filtered) {
+						m.inboxPanel.selectedIdx = max(len(filtered)-1, 0)
+					}
+				}
+			default:
+				if len(msg.Runes) > 0 {
+					m.inboxPanel.filterQuery += string(msg.Runes)
+					m.inboxPanel.scrollOffset = 0
+					if m.inboxPanel.selectedIdx >= len(m.filteredInboxRuns()) {
+						m.inboxPanel.selectedIdx = 0
+					}
+				}
+			}
+			return m, nil
+		}
+		switch key {
+		case "/":
+			m.inboxPanel.filterActive = true
+			return m, nil
+		case "j", "down":
+			if m.inboxPanel.selectedIdx < len(runs)-1 {
+				m.inboxPanel.selectedIdx++
+				if m.inboxPanel.selectedIdx >= m.inboxPanel.scrollOffset+8 {
+					m.inboxPanel.scrollOffset = m.inboxPanel.selectedIdx - 7
+				}
+			}
+			return m, nil
+		case "k", "up":
+			if m.inboxPanel.selectedIdx > 0 {
+				m.inboxPanel.selectedIdx--
+				if m.inboxPanel.selectedIdx < m.inboxPanel.scrollOffset {
+					m.inboxPanel.scrollOffset = m.inboxPanel.selectedIdx
+				}
+			}
+			return m, nil
+		case "enter":
+			if len(runs) > 0 && m.inboxPanel.selectedIdx >= 0 && m.inboxPanel.selectedIdx < len(runs) {
+				m.inboxDetailOpen = true
+				m.inboxDetailIdx = m.inboxPanel.selectedIdx
+				m.inboxDetailScroll = 0
+			}
+			return m, nil
+		case "x":
+			if len(runs) > 0 && m.inboxPanel.selectedIdx >= 0 && m.inboxPanel.selectedIdx < len(runs) {
+				run := runs[m.inboxPanel.selectedIdx]
+				m.inboxReadIDs[run.ID] = true
+				_ = SaveReadSet(m.readStateFile(), m.inboxReadIDs)
+				// Advance or clamp cursor.
+				newRuns := m.filteredInboxRuns()
+				if m.inboxPanel.selectedIdx >= len(newRuns) {
+					m.inboxPanel.selectedIdx = max(len(newRuns)-1, 0)
+				}
+				if m.inboxPanel.scrollOffset > m.inboxPanel.selectedIdx {
+					m.inboxPanel.scrollOffset = m.inboxPanel.selectedIdx
+				}
+			}
+			return m, nil
+		case "esc":
+			m.inboxPanel.focused = false
+			m.inboxModel.SetFocused(false)
 			return m, nil
 		}
 	}
@@ -1126,7 +1248,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.agent.focused = false
 		m.feedFocused = false
 		m.signalBoardFocused = false
-		m.inboxFocused = false
+		m.inboxPanel.focused = false
 		m.inboxModel.SetFocused(false)
 		m.cronPanel.focused = true
 		return m, nil
@@ -1151,9 +1273,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			// feed → cron
 			m.feedFocused = false
 			m.cronPanel.focused = true
-		} else if m.inboxFocused {
+		} else if m.inboxPanel.focused {
 			// inbox → feed
-			m.inboxFocused = false
+			m.inboxPanel.focused = false
 			m.inboxModel.SetFocused(false)
 			m.feedFocused = true
 			m.feedCursor = 0
@@ -1161,7 +1283,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			// signalBoard → inbox
 			m.signalBoardFocused = false
 			m.signalBoard.clearSearch()
-			m.inboxFocused = true
+			m.inboxPanel.focused = true
 			m.inboxModel.SetFocused(true)
 		} else if m.agent.focused {
 			// agent → signalBoard
@@ -1197,7 +1319,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.agent.focused = false
 		m.feedFocused = false
 		m.signalBoardFocused = true
-		m.inboxFocused = false
+		m.inboxPanel.focused = false
 		m.inboxModel.SetFocused(false)
 		return m, nil
 
@@ -1206,7 +1328,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.agent.focused = false
 		m.feedFocused = false
 		m.signalBoardFocused = false
-		m.inboxFocused = true
+		m.inboxPanel.focused = true
 		m.inboxModel.SetFocused(true)
 		return m, nil
 
@@ -2588,28 +2710,34 @@ func (m Model) viewLeftColumn(height, width int) string {
 	lines = append(lines, strings.Split(banner, "\n")...)
 	lines = append(lines, "")
 
-	lines = append(lines, m.buildLauncherSection(width)...)
+	launcherLines := m.buildLauncherSection(width)
+	lines = append(lines, launcherLines...)
 	lines = append(lines, "")
 
-	lines = append(lines, m.buildAgentSection(width)...)
+	agentLines := m.buildAgentSection(width)
+	lines = append(lines, agentLines...)
 
-	// Inbox panel takes any remaining space (min 4 rows to be useful).
+	// Distribute remaining rows between Inbox (60%) and Cron (40%), min 4 each.
 	remaining := height - len(lines)
 	if remaining >= 4 {
 		lines = append(lines, "")
 		remaining--
-		if remaining >= 3 {
-			// Reserve some rows for the cron section if there's enough room.
-			cronRows := 4 // header + 1 row + footer + spacing
-			inboxRows := remaining
-			if remaining >= cronRows+4 {
-				inboxRows = remaining - cronRows - 1 // 1 for blank separator
-			}
-			lines = append(lines, m.buildInboxSection(width, inboxRows)...)
-			if remaining > inboxRows+1 {
-				lines = append(lines, "")
-				lines = append(lines, m.buildCronSection(width)...)
-			}
+
+		inboxRows := remaining * 6 / 10
+		cronRows := remaining - inboxRows - 1 // 1 for blank separator
+		if inboxRows < 4 {
+			inboxRows = 4
+		}
+		if cronRows < 4 {
+			// Can't fit both — give everything to inbox.
+			inboxRows = remaining
+			cronRows = 0
+		}
+
+		lines = append(lines, m.buildInboxSection(width, inboxRows)...)
+		if cronRows >= 4 {
+			lines = append(lines, "")
+			lines = append(lines, m.buildCronSection(width, cronRows)...)
 		}
 	}
 
@@ -2742,13 +2870,30 @@ func (m Model) buildAgentSection(w int) []string {
 	return rows
 }
 
+// filteredInboxRuns returns inbox runs filtered by read state and search query.
+func (m Model) filteredInboxRuns() []store.Run {
+	all := m.inboxModel.Runs()
+	query := strings.ToLower(m.inboxPanel.filterQuery)
+	var out []store.Run
+	for _, r := range all {
+		if m.inboxReadIDs[r.ID] {
+			continue
+		}
+		if query != "" && !strings.Contains(strings.ToLower(r.Name), query) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
 // buildInboxSection renders the Inbox panel using the same ANSI box style as
 // the Pipelines and Agent Runner panels. height is the maximum number of rows
 // the section may occupy (including header and bottom border).
 func (m Model) buildInboxSection(w, height int) []string {
 	pal := m.ansiPalette()
 	borderColor := pal.Border
-	if m.inboxFocused {
+	if m.inboxPanel.focused {
 		borderColor = pal.Accent
 	}
 
@@ -2759,21 +2904,32 @@ func (m Model) buildInboxSection(w, height int) []string {
 		rows = append(rows, boxTop(w, RenderHeader("inbox"), borderColor, pal.Accent))
 	}
 
-	runs := m.inboxModel.Runs()
-	maxRows := height - 2 // reserve top + bottom border
-	if maxRows < 1 {
-		maxRows = 1
+	runs := m.filteredInboxRuns()
+	// maxRows is remaining content rows: total height minus header lines minus 1 for boxBot.
+	maxRows := height - len(rows) - 1
+	if maxRows < 0 {
+		maxRows = 0
+	}
+
+	// Search prompt row.
+	if m.inboxPanel.filterActive {
+		cursor := "█"
+		prompt := fmt.Sprintf("  %s/%s %s%s%s%s", pal.Accent, aRst, pal.FG, m.inboxPanel.filterQuery, cursor, aRst)
+		rows = append(rows, boxRow(prompt, w, borderColor))
+		maxRows--
+		if maxRows < 0 {
+			maxRows = 0
+		}
 	}
 
 	if len(runs) == 0 {
 		rows = append(rows, boxRow(pal.Dim+"  (empty)"+aRst, w, borderColor))
 	} else {
-		sel := m.inboxModel.SelectedIndex()
+		sel := m.inboxPanel.selectedIdx
+		offset := m.inboxPanel.scrollOffset
 		shown := 0
-		for i, run := range runs {
-			if shown >= maxRows {
-				break
-			}
+		for i := offset; i < len(runs) && shown < maxRows; i++ {
+			run := runs[i]
 			var dot string
 			switch {
 			case run.ExitStatus == nil:
@@ -2784,24 +2940,24 @@ func (m Model) buildInboxSection(w, height int) []string {
 				dot = aRed + "●" + aRst
 			}
 			ts := time.UnixMilli(run.StartedAt).Format("1/2 3:04 PM")
-			tsVis := len(ts) + 1 // +1 for space separator
+			tsVis := len(ts) + 1
 			maxNameLen := max(w-7-tsVis, 1)
 			name := run.Name
 			if len(name) > maxNameLen {
 				name = name[:maxNameLen-1] + "…"
 			}
-			// Pad name so timestamp is right-aligned inside the box.
 			inner := w - 2
+			focused := m.inboxPanel.focused
 			var prefixVis int
-			if i == sel && m.inboxFocused {
-				prefixVis = 2 + 1 + 1 + len(name) // "> ● name"
+			if i == sel && focused {
+				prefixVis = 2 + 1 + 1 + len(name)
 			} else {
-				prefixVis = 2 + 1 + 1 + len(name) // "  ● name"
+				prefixVis = 2 + 1 + 1 + len(name)
 			}
 			pad := max(inner-prefixVis-tsVis, 0)
 			dimTS := pal.Dim + strings.Repeat(" ", pad) + ts + aRst
 			var content string
-			if i == sel && m.inboxFocused {
+			if i == sel && focused {
 				content = pal.Accent + "> " + aRst + dot + " " + pal.FG + name + aRst + dimTS
 			} else {
 				content = "  " + dot + " " + pal.Dim + name + aRst + dimTS
@@ -2811,7 +2967,14 @@ func (m Model) buildInboxSection(w, height int) []string {
 		}
 	}
 
+	// Pad to fill allocated height so cron panel stays at a fixed position.
+	for len(rows) < height-1 {
+		rows = append(rows, boxRow("", w, borderColor))
+	}
 	rows = append(rows, boxBot(w, borderColor))
+	if len(rows) > height {
+		rows = rows[:height]
+	}
 	return rows
 }
 
@@ -3046,19 +3209,37 @@ func (m Model) viewBottomBar(width int) string {
 			hint("↑↓", "nav"),
 			hint("tab", "focus"),
 		}
-	case m.inboxFocused:
-		parts = []string{
-			hint("enter", "open"),
-			hint("↑↓", "nav"),
-			hint("tab", "focus"),
-			hint("i", "inbox"),
+	case m.inboxPanel.focused:
+		if m.inboxPanel.filterActive {
+			parts = []string{
+				hint("esc", "cancel"),
+				hint("backspace", "delete"),
+				hint("tab", "focus"),
+			}
+		} else {
+			parts = []string{
+				hint("enter", "open"),
+				hint("x", "mark read"),
+				hint("/", "search"),
+				hint("↑↓", "nav"),
+				hint("tab", "focus"),
+			}
 		}
 	case m.cronPanel.focused:
-		parts = []string{
-			hint("m", "manage"),
-			hint("↑↓", "nav"),
-			hint("tab", "focus"),
-			hint("esc", "unfocus"),
+		if m.cronPanel.filterActive {
+			parts = []string{
+				hint("esc", "cancel"),
+				hint("backspace", "delete"),
+				hint("tab", "focus"),
+			}
+		} else {
+			parts = []string{
+				hint("m", "manage"),
+				hint("/", "search"),
+				hint("↑↓", "nav"),
+				hint("tab", "focus"),
+				hint("esc", "unfocus"),
+			}
 		}
 	default:
 		parts = []string{
