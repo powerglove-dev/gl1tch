@@ -12,16 +12,22 @@ import (
 func tmuxStatusRight(accent, dim string) string {
 	key := func(k string) string { return fmt.Sprintf("#[fg=%s]%s", accent, k) }
 	desc := func(d string) string { return fmt.Sprintf("#[fg=%s]%s", dim, d) }
-	sep := fmt.Sprintf("#[fg=%s]  ", dim)
+	sp := fmt.Sprintf("#[fg=%s]  ", dim)
+	grp := fmt.Sprintf("#[fg=%s]  │  ", dim) // group separator
 	return " " +
-		key("^spc h") + desc(" help") + sep +
-		key("^spc t") + desc(" switchboard") + sep +
-		key("^spc m") + desc(" themes") + sep +
-		key("^spc j") + desc(" jump") + sep +
-		key("^spc c") + desc(" win") + sep +
-		key("^spc d") + desc(" detach") + sep +
-		key("^spc r") + desc(" reload") + sep +
-		key("^spc q") + desc(" quit") + sep +
+		// Navigation
+		key("^spc t") + desc(" switchboard") + sp +
+		key("^spc j") + desc(" jump") + grp +
+		// Windows
+		key("^spc c") + desc(" win") + grp +
+		// Appearance
+		key("^spc m") + desc(" themes") + grp +
+		// Help
+		key("^spc h") + desc(" help") + grp +
+		// Session
+		key("^spc d") + desc(" detach") + sp +
+		key("^spc r") + desc(" reload") + sp +
+		key("^spc q") + desc(" quit") + sp +
 		fmt.Sprintf("#[fg=%s]%%H:%%M ", dim)
 }
 
