@@ -256,7 +256,7 @@ type Model struct {
 	confirmDelete         bool
 	pendingDeletePipeline string
 	agentModalOpen        bool
-	agentModalFocus       int // 0=provider, 1=model, 2=prompt, 3=schedule (within modal)
+	agentModalFocus       int // 0=provider, 1=model, 2=prompt, 3=cwd, 4=schedule (within modal)
 	agentSchedule         textarea.Model
 	agentScheduleErr      string
 	helpOpen              bool
@@ -1590,12 +1590,12 @@ func (m Model) handleAgentModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.submitAgentJob()
 
 	case "tab":
-		m.agentModalFocus = (m.agentModalFocus + 1) % 4
+		m.agentModalFocus = (m.agentModalFocus + 1) % 5
 		switch m.agentModalFocus {
 		case 2:
 			m.agent.prompt.Focus()
 			m.agentSchedule.Blur()
-		case 3:
+		case 4:
 			m.agent.prompt.Blur()
 			m.agentSchedule.Focus()
 		default:
@@ -1605,12 +1605,12 @@ func (m Model) handleAgentModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case "shift+tab":
-		m.agentModalFocus = (m.agentModalFocus + 3) % 4
+		m.agentModalFocus = (m.agentModalFocus + 4) % 5
 		switch m.agentModalFocus {
 		case 2:
 			m.agent.prompt.Focus()
 			m.agentSchedule.Blur()
-		case 3:
+		case 4:
 			m.agent.prompt.Blur()
 			m.agentSchedule.Focus()
 		default:
@@ -1620,8 +1620,8 @@ func (m Model) handleAgentModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case "up", "k":
-		if m.agentModalFocus == 3 {
-			// Let textarea handle the key when schedule is focused.
+		if m.agentModalFocus == 2 || m.agentModalFocus == 4 {
+			// Let textarea handle the key when prompt or schedule is focused.
 			break
 		}
 		switch m.agentModalFocus {
@@ -1637,8 +1637,8 @@ func (m Model) handleAgentModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case "down", "j":
-		if m.agentModalFocus == 3 {
-			// Let textarea handle the key when schedule is focused.
+		if m.agentModalFocus == 2 || m.agentModalFocus == 4 {
+			// Let textarea handle the key when prompt or schedule is focused.
 			break
 		}
 		switch m.agentModalFocus {
@@ -1660,13 +1660,23 @@ func (m Model) handleAgentModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 	default:
 	}
 
+	// CWD focus: enter opens the dir picker.
+	if m.agentModalFocus == 3 {
+		if msg.String() == "enter" {
+			m.dirPicker = NewDirPickerModel()
+			m.dirPickerOpen = true
+			m.dirPickerCtx = "agent"
+		}
+		return m, nil
+	}
+
 	// Forward key events to the focused textarea.
 	if m.agentModalFocus == 2 {
 		var cmd tea.Cmd
 		m.agent.prompt, cmd = m.agent.prompt.Update(msg)
 		return m, cmd
 	}
-	if m.agentModalFocus == 3 {
+	if m.agentModalFocus == 4 {
 		var cmd tea.Cmd
 		m.agentSchedule, cmd = m.agentSchedule.Update(msg)
 		return m, cmd
@@ -2723,9 +2733,29 @@ func (m Model) viewAgentModalBox(w int) string {
 		rows = append(rows, boxRow(padded, modalW, modalBorderColor))
 	}
 
+	// ── WORKING DIRECTORY section ─────────────────────────────────────────────
+	rows = append(rows, boxRow("", modalW, modalBorderColor))
+	cwdHeader := "  " + sectionLabel("WORKING DIRECTORY", m.agentModalFocus == 3)
+	rows = append(rows, boxRow(cwdHeader, modalW, modalBorderColor))
+	cwdDisplay := m.agentCWD
+	if cwdDisplay == "" {
+		cwdDisplay = m.launchCWD
+	}
+	if cwdDisplay == "" {
+		cwdDisplay = "(current directory)"
+	}
+	cwdColor := pal.Dim
+	if m.agentModalFocus == 3 {
+		cwdColor = pal.Accent
+	}
+	rows = append(rows, boxRow("  "+cwdColor+cwdDisplay+aRst, modalW, modalBorderColor))
+	if m.agentModalFocus == 3 {
+		rows = append(rows, boxRow(aDim+"  press enter to browse"+aRst, modalW, modalBorderColor))
+	}
+
 	// ── SCHEDULE section ──────────────────────────────────────────────────────
 	rows = append(rows, boxRow("", modalW, modalBorderColor))
-	schedHeader := "  " + sectionLabel("SCHEDULE (cron expr, blank = run now)", m.agentModalFocus == 3)
+	schedHeader := "  " + sectionLabel("SCHEDULE (cron expr, blank = run now)", m.agentModalFocus == 4)
 	rows = append(rows, boxRow(schedHeader, modalW, modalBorderColor))
 	schedInnerW := max(modalW-6, 10)
 	m.agentSchedule.SetWidth(schedInnerW)

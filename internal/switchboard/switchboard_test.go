@@ -938,8 +938,9 @@ func TestAgentModal_InvalidScheduleShowsError(t *testing.T) {
 		m8 = nx
 	}
 
-	// Tab to SCHEDULE (slot 3) and type an invalid cron expression.
-	m9, _ := m8.(switchboard.Model).Update(tea.KeyMsg{Type: tea.KeyTab})
+	// Tab to CWD (slot 3) then SCHEDULE (slot 4) and type an invalid cron expression.
+	m9tmp, _ := m8.(switchboard.Model).Update(tea.KeyMsg{Type: tea.KeyTab})
+	m9, _ := m9tmp.(switchboard.Model).Update(tea.KeyMsg{Type: tea.KeyTab})
 	for _, r := range "not-a-valid-cron" {
 		nx, _ := m9.(switchboard.Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 		m9 = nx
