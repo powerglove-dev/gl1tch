@@ -71,14 +71,40 @@ func (sb *SignalBoard) clampScroll(visibleRows int) {
 	}
 }
 
-// signalBoardVisibleRows estimates the number of visible body rows in the signal board.
+// signalBoardVisibleRows computes the number of visible body rows using the
+// same height formula as the View() layout and buildSignalBoard header count.
 func (m Model) signalBoardVisibleRows() int {
-	h := m.height / 2 // signal board occupies upper half
-	if h < 4 {
-		h = 4
+	h := m.height
+	if h <= 0 {
+		h = 40
 	}
-	// subtract header rows (sprite ~3 lines + filter + search) and bottom border
-	return max(h-6, 1)
+	contentH := max(h-1, 5)
+	maxSB := max(contentH*40/100, 8)
+	sbHeight := min(len(m.feed)+6, maxSB)
+	if sbHeight < 5 {
+		sbHeight = 5
+	}
+	if sbHeight > contentH-3 {
+		sbHeight = max(contentH-3, 5)
+	}
+
+	// Mirror header line count from buildSignalBoard:
+	// sprite path: 3 sprite lines + 1 filter line = 4; else boxTop = 1 line.
+	// Plus 1 search line when focused. Plus 1 for boxBot.
+	headerRows := 1 // boxTop fallback
+	if PanelHeader(m.activeBundle(), "signal_board", 80) != nil {
+		headerRows = 4 // sprite(3) + filter(1)
+	}
+	if m.signalBoardFocused || m.signalBoard.query != "" {
+		headerRows++ // search input line
+	}
+	headerRows++ // boxBot
+
+	bodyH := sbHeight - headerRows
+	if bodyH < 1 {
+		bodyH = 1
+	}
+	return bodyH
 }
 
 // buildSignalBoard renders the SIGNAL BOARD panel.
@@ -95,10 +121,22 @@ func (m Model) buildSignalBoard(height, width int) []string {
 		borderColor = pal.Accent
 	}
 
+	// Pre-compute filtered results so we can show count in the header.
+	preFiltered := fuzzyFeed(m.signalBoard.query, m.filteredFeed())
+	total := len(preFiltered)
+	sel := m.signalBoard.selectedIdx + 1
+	if total == 0 {
+		sel = 0
+	}
+
 	var lines []string
 	if sprite := PanelHeader(m.activeBundle(), "signal_board", width); sprite != nil {
 		lines = append(lines, sprite...)
-		filterLine := fmt.Sprintf("  filter: %s%s%s", pal.Accent, filter, aRst)
+		scrollIndicator := ""
+		if total > 0 {
+			scrollIndicator = fmt.Sprintf("  %s%d/%d%s", pal.Dim, sel, total, aRst)
+		}
+		filterLine := fmt.Sprintf("  filter: %s%s%s%s", pal.Accent, filter, aRst, scrollIndicator)
 		lines = append(lines, boxRow(filterLine, width, borderColor))
 	} else {
 		header := fmt.Sprintf("%s [%s]", RenderHeader("signal_board"), filter)
@@ -115,8 +153,7 @@ func (m Model) buildSignalBoard(height, width int) []string {
 		lines = append(lines, boxRow(searchLine, width, borderColor))
 	}
 
-	// Apply status filter then fuzzy filter.
-	filtered := fuzzyFeed(m.signalBoard.query, m.filteredFeed())
+	filtered := preFiltered
 
 	// Cap to available body rows.
 	bodyH := height - len(lines) - 1 // -1 for boxBot

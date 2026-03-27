@@ -1451,9 +1451,13 @@ func (m *Model) clampFeedScroll() {
 		h = 40
 	}
 	contentH := max(h-1, 5)
-	sbHeight := min(len(m.feed)+2, 8)
-	if sbHeight < 2 {
-		sbHeight = 2
+	maxSBClamp := max(contentH*40/100, 8)
+	sbHeight := min(len(m.feed)+6, maxSBClamp)
+	if sbHeight < 5 {
+		sbHeight = 5
+	}
+	if sbHeight > contentH-3 {
+		sbHeight = max(contentH-3, 5)
 	}
 	feedH := max(contentH-sbHeight, 3)
 	visibleH := feedH - 2
@@ -1534,9 +1538,10 @@ func (m Model) View() string {
 	feedW := max(w-leftW-1, 20)
 	contentH := max(h-1, 5) // reserve one line for bottom bar
 
-	// Signal board: fixed height above the feed.
-	// Minimum 5 rows so the box is always visible (top+3body+bottom).
-	sbHeight := min(len(m.feed)+4, 8)
+	// Signal board: grows with entries up to 40% of screen height.
+	// Minimum 5 rows so the box is always visible (header+border).
+	maxSB := max(contentH*40/100, 8)
+	sbHeight := min(len(m.feed)+6, maxSB)
 	if sbHeight < 5 {
 		sbHeight = 5
 	}
@@ -2172,9 +2177,17 @@ func (m Model) viewBottomBar(width int) string {
 
 	var parts []string
 	switch {
+	case m.signalBoardFocused && m.signalBoard.searching:
+		parts = []string{
+			hint("type", "search"),
+			hint("↑↓", "nav"),
+			hint("enter", "confirm"),
+			hint("esc", "clear"),
+		}
 	case m.signalBoardFocused:
 		parts = []string{
 			hint("↑↓", "nav"),
+			hint("/", "search"),
 			hint("f", "filter"),
 			hint("enter", "go to window"),
 			hint("tab", "focus"),
