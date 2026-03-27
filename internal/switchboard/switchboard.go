@@ -1666,6 +1666,7 @@ func (m Model) handleAgentModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.dirPicker = NewDirPickerModel()
 			m.dirPickerOpen = true
 			m.dirPickerCtx = "agent"
+			return m, DirPickerInit()
 		}
 		return m, nil
 	}
