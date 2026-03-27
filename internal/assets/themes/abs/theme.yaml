@@ -1,5 +1,6 @@
 name: abs
 display_name: "ABS Dark"
+header_pattern: waves
 palette:
   bg:      "#282a36"
   fg:      "#f8f8f2"

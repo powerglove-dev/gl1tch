@@ -1,5 +1,6 @@
 name: dracula
 display_name: "Dracula"
+header_pattern: texture
 palette:
   bg:      "#282a36"
   fg:      "#f8f8f2"

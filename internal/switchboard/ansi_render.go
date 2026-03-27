@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/adam-stokes/orcai/internal/styles"
 	"github.com/adam-stokes/orcai/internal/themes"
 	"github.com/adam-stokes/orcai/internal/translations"
 )
@@ -192,8 +193,24 @@ func DynamicHeader(bundle *themes.Bundle, panel string, width int) []string {
 	rst := "\x1b[0m"
 	bold := "\x1b[1m"
 
+	// Determine top/bottom row content: use pattern tiling if HeaderPattern is set.
+	var topRow, botRow string
+	if bundle.HeaderPattern != "" {
+		if def, ok := styles.Patterns[bundle.HeaderPattern]; ok {
+			topRow = styles.TilePattern(def.Top, width)
+			botRow = styles.TilePattern(def.Bottom, width)
+		}
+	}
+	// Fall back to block char repetition when no pattern was resolved.
+	if topRow == "" {
+		topRow = strings.Repeat(topChar, width)
+	}
+	if botRow == "" {
+		botRow = strings.Repeat(botChar, width)
+	}
+
 	// Top bar: full-width block chars starting at column 0 (matches boxRow │ position).
-	topLine := accentSeq + bold + strings.Repeat(topChar, width) + rst
+	topLine := accentSeq + bold + topRow + rst
 
 	// Title line: accent-colored background spanning the full width so the
 	// panel title (in ps.Text color) is always legible regardless of terminal bg.
@@ -210,8 +227,8 @@ func DynamicHeader(bundle *themes.Bundle, panel string, width int) []string {
 		strings.Repeat(" ", lp) + string(titleRunes) + strings.Repeat(" ", rp) +
 		rst
 
-	// Bottom bar: full-width block chars.
-	botLine := accentSeq + bold + strings.Repeat(botChar, width) + rst
+	// Bottom bar: full-width block chars (or pattern row).
+	botLine := accentSeq + bold + botRow + rst
 
 	return []string{topLine, titleLine, botLine}
 }

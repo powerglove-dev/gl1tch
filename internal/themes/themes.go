@@ -70,6 +70,14 @@ type Bundle struct {
 	// HeaderBytes is populated by the loader after YAML unmarshal — not from YAML.
 	// Keys match Headers; each inner slice mirrors the order of Headers[key].
 	HeaderBytes map[string][][]byte `yaml:"-"`
+
+	// HeaderPattern names a pattern from styles.Patterns for decorative header rows.
+	// Empty string uses the default ▄/▀ block character rendering.
+	HeaderPattern string `yaml:"header_pattern"`
+
+	// HeaderFont names a TDF font in internal/assets/fonts/tdf/ for block-letter titles.
+	// Empty string uses plain centered text.
+	HeaderFont string `yaml:"header_font"`
 }
 
 // Palette holds the seven canonical color slots for a theme.
