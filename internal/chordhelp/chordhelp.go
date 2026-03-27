@@ -19,7 +19,6 @@ type helpState int
 
 const (
 	stateHelp helpState = iota
-	stateConfirmQuit
 	stateConfirmDetach
 	stateConfirmReload
 )
@@ -108,8 +107,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case stateHelp:
 			switch msg.String() {
-			case "q":
-				m.state = stateConfirmQuit
 			case "d":
 				m.state = stateConfirmDetach
 			case "r":
@@ -130,12 +127,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 
-		case stateConfirmQuit, stateConfirmDetach, stateConfirmReload:
+		case stateConfirmDetach, stateConfirmReload:
 			switch msg.String() {
 			case "y", "enter":
 				switch m.state {
-				case stateConfirmQuit:
-					exec.Command("tmux", "kill-session", "-t", "orcai").Run() //nolint:errcheck
 				case stateConfirmDetach:
 					exec.Command("tmux", "detach-client").Run() //nolint:errcheck
 				case stateConfirmReload:
@@ -165,11 +160,9 @@ func (m model) View() string {
 		Padding(0, 1)
 
 	// ── Confirmation view ────────────────────────────────────────────────────
-	if m.state == stateConfirmQuit || m.state == stateConfirmDetach || m.state == stateConfirmReload {
+	if m.state == stateConfirmDetach || m.state == stateConfirmReload {
 		var title string
 		switch m.state {
-		case stateConfirmQuit:
-			title = "Quit ORCAI?"
 		case stateConfirmDetach:
 			title = "Detach session?"
 		case stateConfirmReload:
@@ -241,7 +234,7 @@ func (m model) View() string {
 	rows := []string{
 		headerStyle.Render("ORCAI  shortcuts"),
 		sectionStyle.Render("session"),
-		row("q", "quit workspace"),
+		row("^spc q", "quit workspace"),
 		row("d", "detach  (reconnect with: orcai)"),
 		row("r", "reload  (updated binary, sessions preserved)"),
 		row("n", "new session"),
@@ -271,8 +264,6 @@ func Run() {
 func RunAction(action string) {
 	m := newModel()
 	switch action {
-	case "quit":
-		m.state = stateConfirmQuit
 	case "detach":
 		m.state = stateConfirmDetach
 	case "reload":
