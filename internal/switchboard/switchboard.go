@@ -2523,50 +2523,40 @@ func (m Model) viewPipelineModeSelect(w int) string {
 
 // viewPipelineScheduleInput renders the schedule-input overlay for pipeline scheduling.
 func (m Model) viewPipelineScheduleInput(w int) string {
-	innerW := max(min(w-8, 60), 36)
-	outerW := innerW + 2
-
-	mc := m.resolveModalColors()
+	boxW := max(min(w-8, 60), 38)
 	pal := m.ansiPalette()
 
-	headerStyle := lipgloss.NewStyle().
-		Background(mc.titleBG).
-		Foreground(mc.titleFG).
-		Bold(true).
-		Width(innerW).
-		Padding(0, 1)
-
-	rowStyle := lipgloss.NewStyle().Foreground(mc.fg).Width(innerW).Padding(0, 1)
+	title := "schedule  " + m.pendingPipelineName
+	if lipgloss.Width(title) > boxW-4 {
+		title = title[:boxW-5] + "…"
+	}
 
 	var rows []string
-	title := "SCHEDULE PIPELINE  " + m.pendingPipelineName
-	if len(title) > innerW-1 {
-		title = title[:innerW-1] + "…"
-	}
-	rows = append(rows, headerStyle.Render(title))
-	rows = append(rows, "")
+	rows = append(rows, boxTop(boxW, title, pal.Border, pal.Accent))
+	rows = append(rows, boxRow("", boxW, pal.Border))
 
-	schedInnerW := max(innerW-4, 10)
+	schedInnerW := max(boxW-6, 10)
 	m.pipelineScheduleInput.SetWidth(schedInnerW)
 	for _, sLine := range strings.Split(m.pipelineScheduleInput.View(), "\n") {
 		sLine = strings.TrimRight(sLine, "\r")
-		rows = append(rows, rowStyle.Render("  "+sLine))
+		rows = append(rows, boxRow("  "+sLine, boxW, pal.Border))
 	}
+	rows = append(rows, boxRow("", boxW, pal.Border))
 	if m.pipelineScheduleErr != "" {
-		rows = append(rows, rowStyle.Render(pal.Error+"  "+m.pipelineScheduleErr+aRst))
+		rows = append(rows, boxRow(pal.Error+"  "+m.pipelineScheduleErr+aRst, boxW, pal.Border))
 	} else {
-		rows = append(rows, rowStyle.Render(pal.Dim+"  0 * * * *    every hour"+aRst))
-		rows = append(rows, rowStyle.Render(pal.Dim+"  0 9 * * *    daily at 9am"+aRst))
-		rows = append(rows, rowStyle.Render(pal.Dim+"  0 9 * * 1-5  weekdays at 9am"+aRst))
+		rows = append(rows, boxRow(pal.Dim+"  0 * * * *    every hour"+aRst, boxW, pal.Border))
+		rows = append(rows, boxRow(pal.Dim+"  0 9 * * *    daily at 9am"+aRst, boxW, pal.Border))
+		rows = append(rows, boxRow(pal.Dim+"  0 9 * * 1-5  weekdays at 9am"+aRst, boxW, pal.Border))
 	}
-	rows = append(rows, "")
-	rows = append(rows, rowStyle.Render(pal.Dim+"  enter/ctrl+s confirm  esc cancel"+aRst))
-
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(mc.border).
-		Width(outerW).
-		Render(strings.Join(rows, "\n"))
+	rows = append(rows, boxRow("", boxW, pal.Border))
+	hints := panelrender.HintBar([]panelrender.Hint{
+		{Key: "enter", Desc: "confirm"},
+		{Key: "esc", Desc: "cancel"},
+	}, boxW-2, pal)
+	rows = append(rows, boxRow(hints, boxW, pal.Border))
+	rows = append(rows, boxBot(boxW, pal.Border))
+	return strings.Join(rows, "\n")
 }
 
 // viewAgentModal renders the full-screen agent overlay.
