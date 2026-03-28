@@ -3319,7 +3319,8 @@ func (m Model) viewActivityFeed(height, width int) string {
 			{Key: "↑↓", Desc: "nav"},
 			{Key: "[", Desc: "page up"},
 			{Key: "]", Desc: "page down"},
-			{Key: "g/G", Desc: "top/bottom"},
+			{Key: "g", Desc: "top"},
+			{Key: "G", Desc: "bottom"},
 		}
 	}
 	lines = append(lines, boxRow(panelrender.HintBar(feedHints, width-2, pal), width, borderColor))
