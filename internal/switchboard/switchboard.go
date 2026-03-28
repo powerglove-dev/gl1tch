@@ -2491,45 +2491,34 @@ func (m Model) viewDeleteModalBox(w int) string {
 
 // viewPipelineModeSelect renders the mode-select overlay for pipeline launch.
 func (m Model) viewPipelineModeSelect(w int) string {
-	innerW := max(min(w-8, 52), 30)
-	outerW := innerW + 2
-
-	mc := m.resolveModalColors()
+	boxW := max(min(w-8, 52), 34)
 	pal := m.ansiPalette()
 
-	headerStyle := lipgloss.NewStyle().
-		Background(mc.titleBG).
-		Foreground(mc.titleFG).
-		Bold(true).
-		Width(innerW).
-		Padding(0, 1)
-
-	rowStyle := lipgloss.NewStyle().Foreground(mc.fg).Width(innerW).Padding(0, 1)
+	title := "pipeline  " + m.pendingPipelineName
+	if lipgloss.Width(title) > boxW-4 {
+		title = title[:boxW-5] + "…"
+	}
 
 	options := []string{"Run now", "Schedule recurring"}
 	var rows []string
-	title := "PIPELINE  " + m.pendingPipelineName
-	if len(title) > innerW-1 {
-		title = title[:innerW-1] + "…"
-	}
-	rows = append(rows, headerStyle.Render(title))
-	rows = append(rows, "")
+	rows = append(rows, boxTop(boxW, title, pal.Border, pal.Accent))
+	rows = append(rows, boxRow("", boxW, pal.Border))
 	for i, opt := range options {
 		if i == m.pipelineModeSelected {
-			sel := pal.SelBG + aWht + "  > " + opt + aRst
-			rows = append(rows, rowStyle.Render(sel))
+			rows = append(rows, boxRow(pal.SelBG+pal.Accent+"  > "+opt+aRst, boxW, pal.Border))
 		} else {
-			rows = append(rows, rowStyle.Render(pal.Dim+"    "+opt+aRst))
+			rows = append(rows, boxRow(pal.Dim+"    "+opt+aRst, boxW, pal.Border))
 		}
 	}
-	rows = append(rows, "")
-	rows = append(rows, rowStyle.Render(pal.Dim+"↑↓ select  enter confirm  esc cancel"+aRst))
-
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(mc.border).
-		Width(outerW).
-		Render(strings.Join(rows, "\n"))
+	rows = append(rows, boxRow("", boxW, pal.Border))
+	hints := panelrender.HintBar([]panelrender.Hint{
+		{Key: "j/k", Desc: "select"},
+		{Key: "enter", Desc: "confirm"},
+		{Key: "esc", Desc: "cancel"},
+	}, boxW-2, pal)
+	rows = append(rows, boxRow(hints, boxW, pal.Border))
+	rows = append(rows, boxBot(boxW, pal.Border))
+	return strings.Join(rows, "\n")
 }
 
 // viewPipelineScheduleInput renders the schedule-input overlay for pipeline scheduling.
