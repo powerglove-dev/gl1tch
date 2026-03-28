@@ -97,6 +97,9 @@ type Model struct {
 	deleteConfirm *DeleteConfirm
 	quitConfirm   bool
 
+	themePickerOpen   bool
+	themePickerCursor int
+
 	width  int
 	height int
 }

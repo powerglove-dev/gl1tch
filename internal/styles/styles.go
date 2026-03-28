@@ -158,6 +158,12 @@ func BundleANSI(b *themes.Bundle) ANSIPalette {
 	}
 }
 
+// FgSeq converts a "#rrggbb" hex color string to an ANSI 24-bit foreground escape sequence.
+func FgSeq(hex string) string {
+	r, g, b := hexToRGB(hex)
+	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, b)
+}
+
 // hexToRGB parses a "#rrggbb" hex string to R, G, B uint8 values.
 func hexToRGB(hex string) (uint8, uint8, uint8) {
 	hex = strings.TrimPrefix(hex, "#")

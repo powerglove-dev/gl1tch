@@ -10,6 +10,8 @@ import (
 	"github.com/adam-stokes/orcai/internal/modal"
 	"github.com/adam-stokes/orcai/internal/panelrender"
 	"github.com/adam-stokes/orcai/internal/styles"
+	"github.com/adam-stokes/orcai/internal/themes"
+	"github.com/adam-stokes/orcai/internal/tuikit"
 )
 
 // ansiPal returns the ANSI-escape palette for the current bundle.
@@ -90,14 +92,17 @@ func (m Model) View() string {
 
 	// Render overlays on top if open.
 	bgColor := string(m.pal().bg)
+	if m.themePickerOpen {
+		return renderOverlay(content, m.viewThemePicker(), m.width, m.height, bgColor)
+	}
+	if m.quitConfirm {
+		return renderOverlay(content, m.viewQuitConfirm(), m.width, m.height, bgColor)
+	}
 	if m.editOverlay != nil {
 		return renderOverlay(content, m.viewEditOverlay(), m.width, m.height, bgColor)
 	}
 	if m.deleteConfirm != nil {
 		return renderOverlay(content, m.viewDeleteConfirm(), m.width, m.height, bgColor)
-	}
-	if m.quitConfirm {
-		return renderOverlay(content, m.viewQuitConfirm(), m.width, m.height, bgColor)
 	}
 	return content
 }
@@ -282,14 +287,12 @@ func (m Model) viewHintBar(width int) string {
 				hint("enter/r", "run now"),
 				hint("/", "filter"),
 				hint("tab", "logs"),
-				hint("q", "quit"),
 			}
 		}
 	} else {
 		parts = []string{
 			hint("j/k", "scroll"),
 			hint("tab", "jobs pane"),
-			hint("q", "quit"),
 		}
 	}
 
@@ -334,9 +337,20 @@ func (m Model) viewEditOverlay() string {
 	return overlayStyle.Render(sb.String())
 }
 
+// viewThemePicker renders the theme picker overlay using the shared tuikit component.
+func (m Model) viewThemePicker() string {
+	var bundles []themes.Bundle
+	if gr := themes.GlobalRegistry(); gr != nil {
+		bundles = gr.All()
+	}
+	// Use m.bundle for color resolution so the picker always reflects the
+	// live theme tracked by BubbleTea, not a potentially-stale registry read.
+	return tuikit.ViewThemePicker(bundles, m.themePickerCursor, m.bundle, m.width)
+}
+
 // viewQuitConfirm renders the quit confirmation overlay.
 func (m Model) viewQuitConfirm() string {
-	return panelrender.QuitConfirmBox(m.ansiPal(), "ORCAI  Quit?", "Exit the cron job manager?", m.width)
+	return panelrender.QuitConfirmBox(m.ansiPal(), "Quit ORCAI", "Quit ORCAI?", m.width)
 }
 
 // viewDeleteConfirm renders the delete confirmation overlay.

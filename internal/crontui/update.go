@@ -1,10 +1,14 @@
 package crontui
 
 import (
+	"os/exec"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
 
 	"github.com/adam-stokes/orcai/internal/cron"
+	"github.com/adam-stokes/orcai/internal/themes"
+	"github.com/adam-stokes/orcai/internal/tuikit"
 )
 
 // Update handles all incoming messages and key events.
@@ -49,21 +53,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleKey routes key events based on the current UI state.
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Overlays take priority.
+	if m.themePickerOpen {
+		return m.handleThemePickerKey(msg)
+	}
+	if m.quitConfirm {
+		return m.handleQuitConfirmKey(msg)
+	}
 	if m.editOverlay != nil {
 		return m.handleEditKey(msg)
 	}
 	if m.deleteConfirm != nil {
 		return m.handleDeleteKey(msg)
 	}
-	if m.quitConfirm {
-		return m.handleQuitConfirmKey(msg)
-	}
 
 	switch msg.String() {
-	case "ctrl+c", "q":
-		if msg.String() == "q" && m.filtering {
-			break
+	case "T":
+		if gr := themes.GlobalRegistry(); gr != nil {
+			bundles := gr.All()
+			// Set cursor to the currently active theme.
+			if active := gr.Active(); active != nil {
+				for i, b := range bundles {
+					if b.Name == active.Name {
+						m.themePickerCursor = i
+						break
+					}
+				}
+			}
 		}
+		m.themePickerOpen = true
+		return m, nil
+	case "ctrl+q":
 		m.quitConfirm = true
 		return m, nil
 	case "tab":
@@ -77,6 +96,41 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m.handleLogPaneKey(msg)
 }
 
+// handleThemePickerKey handles key events when the theme picker is open.
+func (m Model) handleThemePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	gr := themes.GlobalRegistry()
+	if gr == nil {
+		m.themePickerOpen = false
+		return m, nil
+	}
+	bundles := gr.All()
+	newCursor, close, selected, cmd := tuikit.HandleThemePicker(m.themePickerCursor, bundles, msg.String())
+	m.themePickerCursor = newCursor
+	if close {
+		m.themePickerOpen = false
+	}
+	// Update m.bundle immediately on selection so the view reflects the new
+	// theme without waiting for the busd ThemeChangedMsg round-trip.
+	if selected != nil {
+		m.bundle = selected
+	}
+	return m, cmd
+}
+
+// handleQuitConfirmKey handles key events when the quit confirmation is shown.
+func (m Model) handleQuitConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		// Kill the main ORCAI session so quitting from cron exits everything.
+		_ = exec.Command("tmux", "kill-session", "-t", "orcai").Run()
+		return m, tea.Quit
+	case "n", "N", "esc":
+		m.quitConfirm = false
+		return m, nil
+	}
+	return m, nil
+}
+
 // handleJobPaneKey handles keys for the jobs pane (pane 0).
 func (m Model) handleJobPaneKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.filtering {
@@ -87,10 +141,6 @@ func (m Model) handleJobPaneKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		m.filtering = true
 		m.filterInput.Focus()
-		return m, nil
-
-	case "esc":
-		m.quitConfirm = true
 		return m, nil
 
 	case "j", "down":
@@ -271,18 +321,6 @@ func (m Model) handleDeleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "n", "N", "esc":
 		m.deleteConfirm = nil
-		return m, nil
-	}
-	return m, nil
-}
-
-// handleQuitConfirmKey handles key events when the quit confirmation is shown.
-func (m Model) handleQuitConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "y", "Y":
-		return m, tea.Quit
-	case "n", "N", "esc":
-		m.quitConfirm = false
 		return m, nil
 	}
 	return m, nil

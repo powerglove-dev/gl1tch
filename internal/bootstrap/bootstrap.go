@@ -25,29 +25,6 @@ const (
 	configSubdir = ".config/orcai"
 )
 
-// buildStatusRight returns the tmux status-right string with keys in accent
-// color and descriptions in dim color.
-func buildStatusRight(accent, dim string) string {
-	key := func(k string) string { return fmt.Sprintf("#[fg=%s]%s", accent, k) }
-	desc := func(d string) string { return fmt.Sprintf("#[fg=%s]%s", dim, d) }
-	sp := fmt.Sprintf("#[fg=%s]  ", dim)
-	grp := fmt.Sprintf("#[fg=%s]  │  ", dim) // group separator
-	return " " +
-		// Navigation
-		key("^spc t") + desc(" switchboard") + sp +
-		key("^spc j") + desc(" jump") + grp +
-		// Windows
-		key("^spc c") + desc(" win") + grp +
-		// Appearance
-		key("^spc m") + desc(" themes") + grp +
-		// Help
-		key("^spc h") + desc(" help") + grp +
-		// Session
-		key("^spc d") + desc(" detach") + sp +
-		key("^spc r") + desc(" reload") + sp +
-		key("^spc q") + desc(" quit") + sp +
-		fmt.Sprintf("#[fg=%s]%%H:%%M ", dim)
-}
 
 // resolveCompanion returns the invocation string for a companion widget.
 // Checks PATH for an override binary (e.g. orcai-picker) first; falls back
@@ -113,7 +90,7 @@ func buildTmuxConf(self string) string {
 		"set -g window-status-current-format \"\"\n" +
 		fmt.Sprintf("set -g status-left \"#[fg=%s,bold] ORCAI #[default]\"\n", pal.accent) +
 		"set -g status-left-length 20\n" +
-		"set -g status-right \"" + buildStatusRight(pal.accent, pal.dim) + "\"\n" +
+		"set -g status-right \"" + themes.TmuxStatusRight(pal.accent, pal.dim) + "\"\n" +
 		"set -g status-right-length 200\n" +
 		"set -g mouse on\n" +
 		"set -g default-terminal \"screen-256color\"\n" +
@@ -126,7 +103,7 @@ func buildTmuxConf(self string) string {
 	leaderBinding := "bind-key -n C-Space switch-client -T orcai-chord\n"
 
 	// Chord bindings inside the orcai-chord key table.
-	chords := "bind-key -T orcai-chord q     { switch-client -T root ; if-shell -F '#{==:#{session_name},orcai-cron}' { send-keys q } { switch-client -t orcai ; select-window -t orcai:0 ; send-keys -t orcai:0 C-q } }\n" +
+	chords := "bind-key -T orcai-chord q     { switch-client -T root ; if-shell -F '#{==:#{session_name},orcai-cron}' { send-keys C-q } { switch-client -t orcai ; select-window -t orcai:0 ; send-keys -t orcai:0 C-q } }\n" +
 		"bind-key -T orcai-chord d     { switch-client -T root ; detach-client }\n" +
 		"bind-key -T orcai-chord r     { switch-client -T root ; run-shell \"" + self + " _reload\" }\n" +
 		"bind-key -T orcai-chord o     { switch-client -T root ; display-popup -E -w 68 -h 24 \"" + self + " ollama\" }\n" +
