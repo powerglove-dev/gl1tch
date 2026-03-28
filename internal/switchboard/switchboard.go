@@ -1334,6 +1334,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			// launcher → agent
 			m.launcher.focused = false
 			m.agent.focused = true
+		} else {
+			// nothing focused → return to top-left panel
+			m.launcher.focused = true
 		}
 		return m, nil
 
@@ -2934,7 +2937,6 @@ func (m Model) buildLauncherSection(w int) []string {
 			{Key: "e", Desc: "edit"},
 			{Key: "d", Desc: "delete"},
 			{Key: "↑↓", Desc: "nav"},
-			{Key: "tab", Desc: "focus"},
 		}
 	}
 	rows = append(rows, boxRow(panelrender.HintBar(launcherHints, w-2, pal), w, borderColor))
@@ -3000,7 +3002,6 @@ func (m Model) buildAgentSection(w int) []string {
 		agentHints = []panelrender.Hint{
 			{Key: "enter", Desc: "launch"},
 			{Key: "↑↓", Desc: "nav"},
-			{Key: "tab", Desc: "focus"},
 		}
 	}
 	rows = append(rows, boxRow(panelrender.HintBar(agentHints, w-2, pal), w, borderColor))
@@ -3117,7 +3118,6 @@ func (m Model) buildInboxSection(w, height int) []string {
 			inboxHints = []panelrender.Hint{
 				{Key: "esc", Desc: "cancel"},
 				{Key: "backspace", Desc: "delete"},
-				{Key: "tab", Desc: "focus"},
 			}
 		} else {
 			inboxHints = []panelrender.Hint{
@@ -3125,7 +3125,6 @@ func (m Model) buildInboxSection(w, height int) []string {
 				{Key: "x", Desc: "mark read"},
 				{Key: "/", Desc: "search"},
 				{Key: "↑↓", Desc: "nav"},
-				{Key: "tab", Desc: "focus"},
 			}
 		}
 	}
@@ -3321,7 +3320,6 @@ func (m Model) viewActivityFeed(height, width int) string {
 			{Key: "[/]", Desc: "page"},
 			{Key: "g/G", Desc: "top/bottom"},
 			{Key: "enter", Desc: "open"},
-			{Key: "tab", Desc: "focus"},
 		}
 	}
 	lines = append(lines, boxRow(panelrender.HintBar(feedHints, width-2, pal), width, borderColor))

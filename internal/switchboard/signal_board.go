@@ -91,11 +91,15 @@ func (m Model) signalBoardVisibleRows() int {
 	}
 
 	// Mirror header line count from buildSignalBoard:
-	// sprite path: 3 sprite lines + 1 filter line = 4; else boxTop = 1 line.
-	// Plus 1 search line when focused. Plus 1 for boxBot.
+	// sprite path: 3 sprite lines; else boxTop = 1 line.
+	// Plus 1 filter line when filter is not "all". Plus 1 search line when searching.
+	// Plus 1 for boxBot.
 	headerRows := 1 // boxTop fallback
 	if PanelHeader(m.activeBundle(), "signal_board", 80, "") != nil {
-		headerRows = 4 // sprite(3) + filter(1)
+		headerRows = 3 // sprite(3)
+	}
+	if m.signalBoard.activeFilter != "" && m.signalBoard.activeFilter != "all" {
+		headerRows++ // filter line
 	}
 	if m.signalBoard.searching || m.signalBoard.query != "" {
 		headerRows++ // search input line
@@ -134,15 +138,17 @@ func (m Model) buildSignalBoard(height, width int) []string {
 	var lines []string
 	if sprite := PanelHeader(m.activeBundle(), "signal_board", width, borderColor); sprite != nil {
 		lines = append(lines, sprite...)
-		scrollIndicator := ""
-		if total > 0 {
-			scrollIndicator = fmt.Sprintf("  %s%d/%d%s", pal.Dim, sel, total, aRst)
+		// Only show the filter line when a non-default filter is active.
+		if filter != "all" {
+			scrollIndicator := ""
+			if total > 0 {
+				scrollIndicator = fmt.Sprintf("  %s%d/%d%s", pal.Dim, sel, total, aRst)
+			}
+			filterLine := fmt.Sprintf("  filter: %s%s%s%s", pal.Accent, filter, aRst, scrollIndicator)
+			lines = append(lines, boxRow(filterLine, width, borderColor))
 		}
-		filterLine := fmt.Sprintf("  filter: %s%s%s%s", pal.Accent, filter, aRst, scrollIndicator)
-		lines = append(lines, boxRow(filterLine, width, borderColor))
 	} else {
-		header := fmt.Sprintf("%s [%s]", RenderHeader("signal_board"), filter)
-		lines = append(lines, boxTop(width, header, borderColor, pal.Accent))
+		lines = append(lines, boxTop(width, RenderHeader("signal_board"), borderColor, pal.Accent))
 	}
 
 	// Search input line (only visible when / search mode is active, or query is non-empty).
@@ -252,7 +258,6 @@ func (m Model) buildSignalBoard(height, width int) []string {
 				{Key: "/", Desc: "search"},
 				{Key: "f", Desc: "filter"},
 				{Key: "enter", Desc: "go to window"},
-				{Key: "tab", Desc: "focus"},
 			}
 		}
 	}
