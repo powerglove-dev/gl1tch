@@ -389,7 +389,7 @@ func (m Model) viewHelpModal() string {
 		panelrender.BoxTop(boxW, "help", pal.Border, pal.Accent),
 		blank(),
 		section("NAVIGATION"),
-		bind("j / k  ↑ / ↓", "move up / down in active pane"),
+		bind("j / k", "move up / down in active pane"),
 		bind("tab", "switch pane  jobs ↔ logs"),
 		bind("/", "search jobs"),
 		blank(),

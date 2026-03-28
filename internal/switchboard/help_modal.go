@@ -65,7 +65,7 @@ func (m Model) viewHelpModal(w, _ int) string {
 		bind("^spc c", "new window"),
 		bind("^spc [ / ]", "previous / next window"),
 		bind("^spc | / -", "split pane right / down"),
-		bind("^spc ←→↑↓", "navigate panes"),
+		bind("^spc h/j/k/l", "navigate panes"),
 		bind("^spc x / X", "kill pane / window"),
 		blank(),
 		section("NAVIGATION"),
