@@ -323,7 +323,7 @@ func (m model) View() string {
 	}
 	sep := apal.Dim + " · " + panelrender.RST
 	hintContent := strings.Join([]string{
-		hint("↑↓", "nav"),
+		hint("j/k", "nav"),
 		hint("enter", "select"),
 		hint("e", "edit"),
 		hint("esc", "cancel"),
