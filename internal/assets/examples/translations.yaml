@@ -5,11 +5,11 @@
 
 # Panel titles
 pipelines_panel_title: "▓▒░ PIPELINES ░▒▓"
-agent_runner_panel_title: "▓▒░ AGENT RUNNER ░▒▓"
-signal_board_panel_title: "▓▒░ SIGNAL BOARD ░▒▓"
-activity_feed_panel_title: "▓▒░ ACTIVITY FEED ░▒▓"
+agent_runner_panel_title: "▓▒░ AGENTS ░▒▓"
+signal_board_panel_title: "▓▒░ BOARD ░▒▓"
+activity_feed_panel_title: "▓▒░ ACTIVITY ░▒▓"
 inbox_panel_title: "▓▒░ INBOX ░▒▓"
-cron_panel_title: "▓▒░ CRON DAEMON ░▒▓"
+cron_panel_title: "▓▒░ SCHEDULED ░▒▓"
 
 # Header title (full-width centered bar at top)
 switchboard_header_title: "\e[38;2;189;147;249m✦ ORCAI — ABBS ✦\e[0m"

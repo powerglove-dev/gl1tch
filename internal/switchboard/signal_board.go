@@ -92,7 +92,7 @@ func (m Model) signalBoardVisibleRows() int {
 	// sprite path: 3 sprite lines + 1 filter line = 4; else boxTop = 1 line.
 	// Plus 1 search line when focused. Plus 1 for boxBot.
 	headerRows := 1 // boxTop fallback
-	if PanelHeader(m.activeBundle(), "signal_board", 80) != nil {
+	if PanelHeader(m.activeBundle(), "signal_board", 80, "") != nil {
 		headerRows = 4 // sprite(3) + filter(1)
 	}
 	if m.signalBoardFocused || m.signalBoard.query != "" {
@@ -130,7 +130,7 @@ func (m Model) buildSignalBoard(height, width int) []string {
 	}
 
 	var lines []string
-	if sprite := PanelHeader(m.activeBundle(), "signal_board", width); sprite != nil {
+	if sprite := PanelHeader(m.activeBundle(), "signal_board", width, borderColor); sprite != nil {
 		lines = append(lines, sprite...)
 		scrollIndicator := ""
 		if total > 0 {

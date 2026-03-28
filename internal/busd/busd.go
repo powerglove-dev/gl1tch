@@ -11,6 +11,14 @@
 // Registration frame (client → server, sent once on connect):
 //
 //	{"name":"weather","subscribe":["theme.changed","session.*"]}\n
+//
+// Publish frame (client → server, after registration):
+//
+//	{"action":"publish","event":"theme.changed","payload":{...}}\n
+//
+// The daemon broadcasts publish frames to all subscribed clients, allowing
+// any connected process to emit events without holding a Daemon reference.
+// Use [PublishEvent] as a convenience wrapper.
 package busd
 
 import (
@@ -205,6 +213,17 @@ func (d *Daemon) handleConn(conn net.Conn) {
 	d.clients[c] = struct{}{}
 	d.mu.Unlock()
 
+	// Relay any publish frames forwarded by this client to all subscribers.
+	go func() {
+		for f := range c.publishCh {
+			var payload any
+			if len(f.Payload) > 0 {
+				_ = json.Unmarshal(f.Payload, &payload)
+			}
+			_ = d.Publish(f.Event, payload)
+		}
+	}()
+
 	// Block until the client disconnects (reads EOF or error).
 	c.wait()
 
@@ -216,4 +235,50 @@ func (d *Daemon) handleConn(conn net.Conn) {
 	delete(d.clients, c)
 	d.mu.Unlock()
 	c.close()
+}
+
+// publishClientFrame is the wire frame sent by PublishEvent to the daemon.
+type publishClientFrame struct {
+	Action  string `json:"action"`
+	Event   string `json:"event"`
+	Payload any    `json:"payload"`
+}
+
+// PublishEvent dials the busd daemon at sockPath, sends a publish frame for
+// topic with payload, and closes the connection. The daemon broadcasts the
+// event to all subscribers.
+//
+// This is the primary mechanism for out-of-process event publishing — callers
+// that do not hold a *Daemon reference (e.g. the switchboard subprocess) use
+// this to emit events onto the bus.
+//
+// Returns nil if the daemon is not running (dial fails), so callers can safely
+// call this without checking whether busd is available.
+func PublishEvent(sockPath, topic string, payload any) error {
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		// Daemon not running — degrade silently.
+		return nil
+	}
+	defer conn.Close()
+
+	// Registration frame — subscribe to nothing, just here to publish.
+	reg := registrationFrame{Name: "publisher", Subscribe: nil}
+	regBytes, _ := json.Marshal(reg)
+	regBytes = append(regBytes, '\n')
+	if _, err := conn.Write(regBytes); err != nil {
+		return fmt.Errorf("busd: write registration: %w", err)
+	}
+
+	// Publish frame.
+	pub := publishClientFrame{Action: "publish", Event: topic, Payload: payload}
+	pubBytes, err := json.Marshal(pub)
+	if err != nil {
+		return fmt.Errorf("busd: marshal publish frame: %w", err)
+	}
+	pubBytes = append(pubBytes, '\n')
+	if _, err := conn.Write(pubBytes); err != nil {
+		return fmt.Errorf("busd: write publish frame: %w", err)
+	}
+	return nil
 }

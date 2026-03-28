@@ -239,3 +239,42 @@ func TestStop_RemovesSocketFile(t *testing.T) {
 		t.Error("socket file should be removed after Stop()")
 	}
 }
+
+// TestPublishEvent_DeliveredToSubscriber verifies that PublishEvent (client-side
+// publish) delivers the event to a connected subscriber. This specifically tests
+// the scanner-reuse fix: PublishEvent writes both the registration frame and the
+// publish frame in one burst; without reusing the scanner the publish frame is
+// lost because the first scanner already buffered it.
+func TestPublishEvent_DeliveredToSubscriber(t *testing.T) {
+	_, sockPath := startDaemon(t)
+
+	// Connect a subscriber before publishing.
+	sub := dialSocket(t, sockPath, "listener", []string{"theme.changed"})
+
+	// Wait for subscriber to be registered.
+	waitFor(t, func() bool {
+		// We can't use ClientCount here since we don't have d in scope.
+		// Instead just give the server a moment to process the registration.
+		return true
+	}, 50*time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
+
+	// Publish via the client-side PublishEvent (not Daemon.Publish).
+	if err := busd.PublishEvent(sockPath, "theme.changed", map[string]string{"name": "dracula"}); err != nil {
+		t.Fatalf("PublishEvent: %v", err)
+	}
+
+	ev := readEvent(t, sub)
+	if ev.Event != "theme.changed" {
+		t.Errorf("event.Event = %q; want \"theme.changed\"", ev.Event)
+	}
+}
+
+// TestPublishEvent_NoDaemon verifies graceful degradation when the daemon is absent.
+func TestPublishEvent_NoDaemon(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "noexist.sock")
+	if err := busd.PublishEvent(sockPath, "theme.changed", nil); err != nil {
+		t.Errorf("PublishEvent with no daemon should return nil, got: %v", err)
+	}
+}

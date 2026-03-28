@@ -18,7 +18,6 @@ type Config struct {
 	Message      string
 	ConfirmLabel string
 	DismissLabel string
-	TDFFont      string // reserved for future use
 }
 
 // Colors holds resolved lipgloss-compatible color strings.
@@ -99,7 +98,7 @@ func RenderConfirm(cfg Config, w, _ int) string {
 		Foreground(lipgloss.Color(c.TitleFG)).
 		Bold(true).
 		Width(innerW).
-		Padding(0, 1)
+		Align(lipgloss.Center)
 
 	rowStyle := func(fg lipgloss.Color) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(fg).Width(innerW).Padding(0, 1)
@@ -151,7 +150,7 @@ func RenderAlert(cfg Config, message string, w, _ int) string {
 		Foreground(lipgloss.Color(c.TitleFG)).
 		Bold(true).
 		Width(innerW).
-		Padding(0, 1)
+		Align(lipgloss.Center)
 
 	rowStyle := func(fg lipgloss.Color) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(fg).Width(innerW).Padding(0, 1)
@@ -198,7 +197,7 @@ func RenderScroll(cfg Config, lines []string, offset, w, h int) string {
 		Foreground(lipgloss.Color(c.TitleFG)).
 		Bold(true).
 		Width(innerW).
-		Padding(0, 1)
+		Align(lipgloss.Center)
 
 	title := cfg.Title
 	if title == "" {

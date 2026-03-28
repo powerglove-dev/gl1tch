@@ -85,6 +85,37 @@ func TestLoadConfigFrom_Missing(t *testing.T) {
 	}
 }
 
+// TestLoadConfigFrom_WorkingDir verifies that working_dir is parsed correctly.
+func TestLoadConfigFrom_WorkingDir(t *testing.T) {
+	yaml := `
+entries:
+  - name: with-dir
+    schedule: "0 8 * * *"
+    kind: pipeline
+    target: report.pipeline.yaml
+    working_dir: /some/project
+  - name: without-dir
+    schedule: "0 9 * * *"
+    kind: pipeline
+    target: other.pipeline.yaml
+`
+	path := writeTempYAML(t, yaml)
+
+	entries, err := LoadConfigFrom(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	if entries[0].WorkingDir != "/some/project" {
+		t.Errorf("expected working_dir %q, got %q", "/some/project", entries[0].WorkingDir)
+	}
+	if entries[1].WorkingDir != "" {
+		t.Errorf("expected empty working_dir, got %q", entries[1].WorkingDir)
+	}
+}
+
 // TestLoadConfigFrom_InvalidCron verifies that an entry with a bad cron
 // expression is still loaded (validation happens at AddFunc time, not load
 // time).

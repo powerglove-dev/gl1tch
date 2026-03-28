@@ -8,8 +8,12 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
+	"github.com/muesli/ansi"
+	"github.com/muesli/reflow/truncate"
 
 	"github.com/adam-stokes/orcai/internal/styles"
 	"github.com/adam-stokes/orcai/internal/themes"
@@ -300,4 +304,97 @@ func pmax(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// QuitConfirmBox renders a reusable ANSI box-style quit confirmation modal.
+// title is the box header, message is the body line (e.g. "Quit ORCAI?" or
+// a running-jobs warning). An empty message defaults to "Are you sure?".
+func QuitConfirmBox(pal styles.ANSIPalette, title, message string, screenW int) string {
+	boxW := 52
+	if screenW > 0 && screenW < boxW+4 {
+		boxW = screenW - 4
+	}
+	if message == "" {
+		message = "Are you sure?"
+	}
+	yesLabel := pal.Accent + BLD + "[y]" + RST + "es"
+	noLabel := pal.Dim + "[n]" + RST + "o / esc"
+	rows := []string{
+		BoxTop(boxW, title, pal.Border, pal.Accent),
+		BoxRow("", boxW, pal.Border),
+		BoxRow(pal.FG+"  "+message+RST, boxW, pal.Border),
+		BoxRow("", boxW, pal.Border),
+		BoxRow("  "+yesLabel+"   "+noLabel, boxW, pal.Border),
+		BoxRow("", boxW, pal.Border),
+		BoxBot(boxW, pal.Border),
+	}
+	return strings.Join(rows, "\n")
+}
+
+// OverlayCenter draws overlayContent centered over base, splicing each overlay
+// line into the corresponding base line so the background content remains
+// visible on either side of the floating box.
+func OverlayCenter(base, overlay string, w, h int) string {
+	baseLines := strings.Split(base, "\n")
+	overlayLines := strings.Split(overlay, "\n")
+
+	popW := 0
+	for _, l := range overlayLines {
+		if vl := lipgloss.Width(l); vl > popW {
+			popW = vl
+		}
+	}
+	popH := len(overlayLines)
+	startRow := pmax((h-popH)/2, 0)
+	startCol := pmax((w-popW)/2, 0)
+
+	for i, oLine := range overlayLines {
+		row := startRow + i
+		for len(baseLines) <= row {
+			baseLines = append(baseLines, "")
+		}
+		left := ansiTruncAt(baseLines[row], startCol)
+		right := ansiFromCol(baseLines[row], startCol+popW)
+		baseLines[row] = left + oLine + right
+	}
+	return strings.Join(baseLines, "\n")
+}
+
+// ansiTruncAt truncates s at visible column n, respecting ANSI escape sequences.
+func ansiTruncAt(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return truncate.String(s, uint(n))
+}
+
+// ansiFromCol returns the portion of s starting at visible column n.
+func ansiFromCol(s string, n int) string {
+	if n <= 0 {
+		return s
+	}
+	vis := 0
+	i := 0
+	inEsc := false
+	for i < len(s) {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == ansi.Marker {
+			inEsc = true
+			i += size
+			continue
+		}
+		if inEsc {
+			if ansi.IsTerminator(r) {
+				inEsc = false
+			}
+			i += size
+			continue
+		}
+		if vis >= n {
+			return "\x1b[0m" + s[i:]
+		}
+		vis += runewidth.RuneWidth(r)
+		i += size
+	}
+	return ""
 }

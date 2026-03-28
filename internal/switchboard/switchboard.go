@@ -20,8 +20,6 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
-	"github.com/muesli/ansi"
 	"github.com/muesli/reflow/truncate"
 	robfigcron "github.com/robfig/cron/v3"
 
@@ -2434,29 +2432,20 @@ func (m Model) View() string {
 
 // viewQuitModalBox renders the quit confirmation popup box.
 func (m Model) viewQuitModalBox(w int) string {
+	pal := m.ansiPalette()
 	jobs := len(m.activeJobs)
-	jobWord := "job"
-	if jobs != 1 {
-		jobWord = "jobs"
-	}
-
-	mc := m.resolveModalColors()
 
 	message := "Quit ORCAI?"
 	if jobs > 0 {
-		// Wrap in error color for the running-jobs warning.
-		message = lipgloss.NewStyle().Foreground(mc.error).
-			Render(fmt.Sprintf("%d %s still running.", jobs, jobWord))
+		jobWord := "job"
+		if jobs != 1 {
+			jobWord = "jobs"
+		}
+		message = pal.Error + fmt.Sprintf("%d %s still running.", jobs, jobWord) + panelrender.RST
 	}
 
-	cfg := modal.Config{
-		Bundle:       m.activeBundle(),
-		Title:        translations.Safe(translations.GlobalProvider(), translations.KeyQuitModalTitle, "ORCAI  Quit?"),
-		Message:      message,
-		ConfirmLabel: lipgloss.NewStyle().Foreground(mc.accent).Bold(true).Render("[y]") + "es",
-		DismissLabel: lipgloss.NewStyle().Foreground(mc.dim).Render("[n]") + "o / esc",
-	}
-	return modal.RenderConfirm(cfg, w, 0)
+	title := translations.Safe(translations.GlobalProvider(), translations.KeyQuitModalTitle, "ORCAI  Quit?")
+	return panelrender.QuitConfirmBox(pal, title, message, w)
 }
 
 // viewDeleteModalBox renders just the delete confirmation popup box (no
@@ -3487,79 +3476,9 @@ func padToVis(s string, w int) string {
 	return s + strings.Repeat(" ", w-vl)
 }
 
-// overlayCenter draws overlay centered over base. Each overlay line replaces
-// the base line from startCol onward so the switchboard content shows around
-// the floating box.
+// overlayCenter draws overlay centered over base, delegating to panelrender.
 func overlayCenter(base, overlay string, w, h int) string {
-	baseLines := strings.Split(base, "\n")
-	overlayLines := strings.Split(overlay, "\n")
-
-	popW := 0
-	for _, l := range overlayLines {
-		if vl := lipgloss.Width(l); vl > popW {
-			popW = vl
-		}
-	}
-	popH := len(overlayLines)
-	startRow := max((h-popH)/2, 0)
-	startCol := max((w-popW)/2, 0)
-
-	// For each popup row: splice left base + popup + right base so all panels
-	// remain visible on both sides of the floating box.
-	for i, oLine := range overlayLines {
-		row := startRow + i
-		for len(baseLines) <= row {
-			baseLines = append(baseLines, "")
-		}
-		left := ansiTrunc(baseLines[row], startCol)
-		right := ansiFrom(baseLines[row], startCol+popW)
-		baseLines[row] = left + oLine + right
-	}
-	return strings.Join(baseLines, "\n")
-}
-
-// ansiTrunc returns s truncated at visible column n, skipping SGR escapes.
-// ansiTrunc truncates s at visible column n using muesli/reflow/truncate,
-// which correctly handles ANSI SGR sequences and Unicode wide characters.
-func ansiTrunc(s string, n int) string {
-	if n <= 0 {
-		return ""
-	}
-	return truncate.String(s, uint(n))
-}
-
-// ansiFrom returns the portion of s starting at visible column n.
-// Uses muesli/ansi for escape-sequence detection and go-runewidth for
-// accurate Unicode column widths. A reset is prepended so prior SGR state
-// doesn't bleed into the returned segment.
-func ansiFrom(s string, n int) string {
-	if n <= 0 {
-		return s
-	}
-	vis := 0
-	i := 0
-	inEsc := false
-	for i < len(s) {
-		r, size := utf8.DecodeRuneInString(s[i:])
-		if r == ansi.Marker {
-			inEsc = true
-			i += size
-			continue
-		}
-		if inEsc {
-			if ansi.IsTerminator(r) {
-				inEsc = false
-			}
-			i += size
-			continue
-		}
-		if vis >= n {
-			return aRst + s[i:]
-		}
-		vis += runewidth.RuneWidth(r)
-		i += size
-	}
-	return ""
+	return panelrender.OverlayCenter(base, overlay, w, h)
 }
 
 // hexToRGBFromStyles parses "#rrggbb" → uint8 r, g, b.

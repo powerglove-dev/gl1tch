@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/adam-stokes/orcai/internal/busd"
 	"github.com/adam-stokes/orcai/internal/themes"
 )
 
@@ -140,6 +141,10 @@ func (m Model) handleThemePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 			chosen := bundles[m.themePickerCursor]
 			_ = m.registry.SetActive(chosen.Name)
 			applyTmuxTheme(&chosen)
+			// Notify other processes (e.g. crontui) via busd.
+			if sockPath, err := busd.SocketPath(); err == nil {
+				_ = busd.PublishEvent(sockPath, themes.TopicThemeChanged, themes.ThemeChangedPayload{Name: chosen.Name})
+			}
 			m.themePickerOpen = false
 			return m, tea.ClearScreen
 		}

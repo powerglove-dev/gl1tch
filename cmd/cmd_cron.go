@@ -165,10 +165,12 @@ var cronTuiCmd = &cobra.Command{
 			}
 		}()
 
-		// Load theme registry to pick up the user's active theme and make it
-		// globally accessible for cross-process theme polling.
+		// Load theme registry (built-in + user themes) and make it globally
+		// accessible so busd theme-change events can look up bundles by name.
 		var bundle *themes.Bundle
-		if reg, err := themes.NewRegistry(""); err == nil {
+		home, _ := os.UserHomeDir()
+		userThemesDir := filepath.Join(home, ".config", "orcai", "themes")
+		if reg, err := themes.NewRegistry(userThemesDir); err == nil {
 			bundle = reg.Active()
 			themes.SetGlobalRegistry(reg)
 		}

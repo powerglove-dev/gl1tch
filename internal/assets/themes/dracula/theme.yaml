@@ -1,7 +1,6 @@
 name: dracula
 display_name: "Dracula"
 header_pattern: texture
-header_font: tiny
 gradient_border:
   - "#ff79c6"
   - "#bd93f9"
@@ -40,6 +39,9 @@ header_style:
     cron:
       accent: "#ff79c6"
       text:   "#282a36"
+    log_output:
+      accent: "#6272a4"
+      text:   "#f8f8f2"
     modal:
       accent: "#ff79c6"
       text:   "#282a36"

@@ -68,10 +68,10 @@ func (m Model) buildCronSection(w, height int) []string {
 	}
 
 	var rows []string
-	if sprite := PanelHeader(m.activeBundle(), "cron", w); sprite != nil {
+	if sprite := PanelHeader(m.activeBundle(), "cron", w, borderColor); sprite != nil {
 		rows = append(rows, sprite...)
 	} else {
-		rows = append(rows, boxTop(w, "CRON JOBS", borderColor, pal.Accent))
+		rows = append(rows, boxTop(w, RenderHeader("cron"), borderColor, pal.Accent))
 	}
 
 	// maxRows: remaining content rows after header, leaving 1 for boxBot.

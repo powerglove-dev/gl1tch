@@ -22,6 +22,9 @@ type Entry struct {
 	Args map[string]any `yaml:"args"`
 	// Timeout is an optional duration string, e.g. "5m". Zero means no timeout.
 	Timeout string `yaml:"timeout"`
+	// WorkingDir sets the working directory for the spawned subprocess.
+	// When empty the subprocess inherits the daemon's working directory.
+	WorkingDir string `yaml:"working_dir"`
 }
 
 // cronConfig is the top-level structure of cron.yaml.

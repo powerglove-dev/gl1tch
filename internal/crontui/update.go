@@ -1,17 +1,20 @@
 package crontui
 
 import (
-	"os/exec"
-
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
 
 	"github.com/adam-stokes/orcai/internal/cron"
-	"github.com/adam-stokes/orcai/internal/themes"
 )
 
 // Update handles all incoming messages and key events.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if ts, cmd, ok := m.themeState.Handle(msg); ok {
+		m.themeState = ts
+		m.bundle = ts.Bundle()
+		return m, cmd
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -37,32 +40,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Re-render only; the scheduler already logged the result.
 		return m, nil
 
-	case themeChangedMsg:
-		// Look up the new bundle from the global registry and update the model.
-		if gr := themes.GlobalRegistry(); gr != nil {
-			if b, ok := gr.Get(msg.name); ok {
-				m.bundle = b
-				m.lastThemeName = b.Name
-			}
-		}
-		// Re-schedule the listener to keep receiving future changes.
-		if m.themeCh != nil {
-			return m, listenTheme(m.themeCh)
-		}
-		return m, nil
-
-	case themeFilePollMsg:
-		// Cross-process theme detection: re-read the active_theme file.
-		// This fires every 5 s in standalone mode to pick up changes from the
-		// switchboard process.
-		if gr := themes.GlobalRegistry(); gr != nil {
-			if name := gr.RefreshActive(); name != "" && name != m.lastThemeName {
-				m.bundle = gr.Active()
-				m.lastThemeName = name
-			}
-		}
-		return m, pollThemeFile()
-
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -78,14 +55,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.deleteConfirm != nil {
 		return m.handleDeleteKey(msg)
 	}
+	if m.quitConfirm {
+		return m.handleQuitConfirmKey(msg)
+	}
 
 	switch msg.String() {
 	case "ctrl+c", "q":
 		if msg.String() == "q" && m.filtering {
 			break
 		}
-		// Switch back to the switchboard — leave the cron TUI running in its session.
-		exec.Command("tmux", "switch-client", "-t", "orcai").Run() //nolint:errcheck
+		m.quitConfirm = true
 		return m, nil
 	case "tab":
 		m.activePane = 1 - m.activePane
@@ -111,7 +90,7 @@ func (m Model) handleJobPaneKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "esc":
-		exec.Command("tmux", "switch-client", "-t", "orcai").Run() //nolint:errcheck
+		m.quitConfirm = true
 		return m, nil
 
 	case "j", "down":
@@ -292,6 +271,18 @@ func (m Model) handleDeleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "n", "N", "esc":
 		m.deleteConfirm = nil
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleQuitConfirmKey handles key events when the quit confirmation is shown.
+func (m Model) handleQuitConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		return m, tea.Quit
+	case "n", "N", "esc":
+		m.quitConfirm = false
 		return m, nil
 	}
 	return m, nil

@@ -17,6 +17,7 @@ import (
 	"github.com/adam-stokes/orcai/internal/panelrender"
 	"github.com/adam-stokes/orcai/internal/styles"
 	"github.com/adam-stokes/orcai/internal/themes"
+	"github.com/adam-stokes/orcai/internal/tuikit"
 )
 
 // window is a single tmux window entry.
@@ -26,87 +27,58 @@ type window struct {
 	id    string // window ID (@N)
 }
 
-type jumpPalette struct {
-	titleBG lipgloss.Color
-	titleFG lipgloss.Color
-	fg      lipgloss.Color
-	accent  lipgloss.Color
-	selBG   lipgloss.Color
-	selFG   lipgloss.Color
-	dim     lipgloss.Color
-}
-
-func loadPalette() jumpPalette {
-	p := jumpPalette{
-		titleBG: lipgloss.Color("#bd93f9"),
-		titleFG: lipgloss.Color("#282a36"),
-		fg:      lipgloss.Color("#f8f8f2"),
-		accent:  lipgloss.Color("#8be9fd"),
-		selBG:   lipgloss.Color("#44475a"),
-		selFG:   lipgloss.Color("#f8f8f2"),
-		dim:     lipgloss.Color("#6272a4"),
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return p
-	}
-	userThemesDir := filepath.Join(home, ".config", "orcai", "themes")
-	reg, err := themes.NewRegistry(userThemesDir)
-	if err != nil {
-		return p
-	}
-	b := reg.Active()
-	if b == nil {
-		return p
-	}
-	if v := b.ResolveRef(b.Modal.Border); v != "" {
-		p.titleBG = lipgloss.Color(v)
-	}
-	if v := b.ResolveRef(b.Modal.TitleBG); v != "" {
-		p.titleBG = lipgloss.Color(v)
-	}
-	if v := b.ResolveRef(b.Modal.TitleFG); v != "" {
-		p.titleFG = lipgloss.Color(v)
-	}
-	if v := b.Palette.FG; v != "" {
-		p.fg = lipgloss.Color(v)
-		p.selFG = lipgloss.Color(v)
-	}
-	if v := b.Palette.Accent; v != "" {
-		p.accent = lipgloss.Color(v)
-	}
-	if v := b.Palette.Border; v != "" {
-		p.selBG = lipgloss.Color(v)
-	}
-	if v := b.Palette.Dim; v != "" {
-		p.dim = lipgloss.Color(v)
-	}
-	return p
-}
-
 type model struct {
-	windows  []window
-	filtered []window
-	sysop    []window
-	selected int
-	input    textinput.Model
-	width    int
-	height   int
-	err      string
-	pal      jumpPalette
+	windows    []window
+	filtered   []window
+	sysop      []window
+	selected   int
+	input      textinput.Model
+	width      int
+	height     int
+	err        string
+	themeState tuikit.ThemeState
 }
 
 func newModel() model {
-	pal := loadPalette()
+	// Seed themeState from GlobalRegistry (set by the caller) or user themes dir.
+	var bundle *themes.Bundle
+	if gr := themes.GlobalRegistry(); gr != nil {
+		bundle = gr.Active()
+	} else {
+		home, _ := os.UserHomeDir()
+		if reg, err := themes.NewRegistry(filepath.Join(home, ".config", "orcai", "themes")); err == nil {
+			bundle = reg.Active()
+		}
+	}
+
+	// Default Dracula accent/fg/dim colors; override from bundle if available.
+	accent := lipgloss.Color("#8be9fd")
+	fg := lipgloss.Color("#f8f8f2")
+	dim := lipgloss.Color("#6272a4")
+	if bundle != nil {
+		if v := bundle.Palette.Accent; v != "" {
+			accent = lipgloss.Color(v)
+		}
+		if v := bundle.Palette.FG; v != "" {
+			fg = lipgloss.Color(v)
+		}
+		if v := bundle.Palette.Dim; v != "" {
+			dim = lipgloss.Color(v)
+		}
+	}
+
 	ti := textinput.New()
 	ti.Placeholder = "search windows..."
 	ti.Focus()
-	ti.PromptStyle = lipgloss.NewStyle().Foreground(pal.accent)
-	ti.TextStyle = lipgloss.NewStyle().Foreground(pal.fg)
-	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(pal.dim)
+	ti.PromptStyle = lipgloss.NewStyle().Foreground(accent)
+	ti.TextStyle = lipgloss.NewStyle().Foreground(fg)
+	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(dim)
 	ti.Prompt = "> "
 
-	m := model{input: ti, pal: pal}
+	m := model{
+		input:      ti,
+		themeState: tuikit.NewThemeState(bundle),
+	}
 	m.windows = listWindows()
 	m.filtered = m.windows
 	m.sysop = listSysopWindows()
@@ -176,9 +148,16 @@ func listSysopWindows() []window {
 	return wins
 }
 
-func (m model) Init() tea.Cmd { return textinput.Blink }
+func (m model) Init() tea.Cmd {
+	return tea.Batch(textinput.Blink, m.themeState.Init())
+}
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if ts, cmd, ok := m.themeState.Handle(msg); ok {
+		m.themeState = ts
+		return m, cmd
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -275,11 +254,7 @@ func (m model) View() string {
 		w = 70
 	}
 
-	// Resolve bundle for ANSI palette — re-read from global registry if set.
-	var bundle *themes.Bundle
-	if gr := themes.GlobalRegistry(); gr != nil {
-		bundle = gr.Active()
-	}
+	bundle := m.themeState.Bundle()
 
 	// ANSI palette for box-drawing rows.
 	var apal styles.ANSIPalette

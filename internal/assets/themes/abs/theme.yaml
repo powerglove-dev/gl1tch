@@ -1,7 +1,6 @@
 name: abs
 display_name: "ABS Dark"
 header_pattern: waves
-header_font: fire
 gradient_border:
   - "#bd93f9"
   - "#8be9fd"
@@ -45,6 +44,9 @@ header_style:
     cron:
       accent: "#bd93f9"
       text:   "#282a36"
+    log_output:
+      accent: "#6272a4"
+      text:   "#f8f8f2"
     modal:
       accent: "#bd93f9"
       text:   "#282a36"

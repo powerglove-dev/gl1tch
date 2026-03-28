@@ -17,7 +17,7 @@ func TestDynamicHeader_FullWidth(t *testing.T) {
 		},
 	}
 	for _, w := range []int{80, 120, 200, 220} {
-		lines := DynamicHeader(b, "pipelines", w)
+		lines := DynamicHeader(b, "pipelines", w, "")
 		if lines == nil {
 			t.Fatalf("width %d: DynamicHeader returned nil", w)
 		}

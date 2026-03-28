@@ -11,6 +11,7 @@ import (
 	"github.com/adam-stokes/orcai/internal/cron"
 	"github.com/adam-stokes/orcai/internal/store"
 	"github.com/adam-stokes/orcai/internal/themes"
+	"github.com/adam-stokes/orcai/internal/tuikit"
 )
 
 // New creates the cron TUI model, wiring up the scheduler with a LogSink so
@@ -46,28 +47,16 @@ func New(bundle *themes.Bundle) (Model, error) {
 	fi.Placeholder = "/ filter..."
 	fi.CharLimit = 64
 
-	// Subscribe to theme changes via the global registry (if available).
-	var themeCh chan string
-	if gr := themes.GlobalRegistry(); gr != nil {
-		themeCh = gr.SafeSubscribe()
-	}
-
-	var lastThemeName string
-	if bundle != nil {
-		lastThemeName = bundle.Name
-	}
-
 	m := Model{
-		scheduler:     sched,
-		runStore:      s,
-		logger:        logger,
-		bundle:        bundle,
-		lastThemeName: lastThemeName,
-		entries:       entries,
-		filtered:      entries,
-		logCh:         logCh,
-		filterInput:   fi,
-		themeCh:       themeCh,
+		scheduler:   sched,
+		runStore:    s,
+		logger:      logger,
+		bundle:      bundle,
+		themeState:  tuikit.NewThemeState(bundle),
+		entries:     entries,
+		filtered:    entries,
+		logCh:       logCh,
+		filterInput: fi,
 	}
 	return m, nil
 }
@@ -75,7 +64,7 @@ func New(bundle *themes.Bundle) (Model, error) {
 // Init starts the scheduler, begins the 30-second tick, and starts listening
 // for log lines and theme changes.
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{
+	return tea.Batch(
 		func() tea.Msg {
 			if err := m.scheduler.Start(context.Background()); err != nil {
 				m.logger.Error("failed to start scheduler", "err", err)
@@ -86,12 +75,8 @@ func (m Model) Init() tea.Cmd {
 		},
 		tick(),
 		listenLogs(m.logCh),
-		pollThemeFile(),
-	}
-	if m.themeCh != nil {
-		cmds = append(cmds, listenTheme(m.themeCh))
-	}
-	return tea.Batch(cmds...)
+		m.themeState.Init(),
+	)
 }
 
 // tick schedules a reload every 30 seconds.
@@ -110,20 +95,4 @@ func listenLogs(ch chan tea.Msg) tea.Cmd {
 	}
 }
 
-// listenTheme blocks until a theme name arrives on ch and returns a
-// themeChangedMsg. The Update handler re-schedules this to keep listening.
-func listenTheme(ch chan string) tea.Cmd {
-	return func() tea.Msg {
-		return themeChangedMsg{name: <-ch}
-	}
-}
 
-// pollThemeFile schedules a periodic check of the active_theme config file so
-// that a standalone crontui process picks up theme changes made by the
-// switchboard (which runs in a different OS process and writes the file when
-// the user switches themes).
-func pollThemeFile() tea.Cmd {
-	return tea.Tick(5*time.Second, func(_ time.Time) tea.Msg {
-		return themeFilePollMsg{}
-	})
-}

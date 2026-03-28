@@ -96,6 +96,9 @@ func (m Model) View() string {
 	if m.deleteConfirm != nil {
 		return renderOverlay(content, m.viewDeleteConfirm(), m.width, m.height, bgColor)
 	}
+	if m.quitConfirm {
+		return renderOverlay(content, m.viewQuitConfirm(), m.width, m.height, bgColor)
+	}
 	return content
 }
 
@@ -331,6 +334,11 @@ func (m Model) viewEditOverlay() string {
 	return overlayStyle.Render(sb.String())
 }
 
+// viewQuitConfirm renders the quit confirmation overlay.
+func (m Model) viewQuitConfirm() string {
+	return panelrender.QuitConfirmBox(m.ansiPal(), "ORCAI  Quit?", "Exit the cron job manager?", m.width)
+}
+
 // viewDeleteConfirm renders the delete confirmation overlay.
 func (m Model) viewDeleteConfirm() string {
 	name := m.deleteConfirm.entry.Name
@@ -358,13 +366,9 @@ func splitHeight(total int, ratio float64, minRows int) (top, bot int) {
 	return
 }
 
-// renderOverlay places overlayContent centered over background using lipgloss.Place.
-func renderOverlay(_, overlayContent string, width, height int, bgColor string) string {
-	return lipgloss.Place(width, height,
-		lipgloss.Center, lipgloss.Center,
-		overlayContent,
-		lipgloss.WithWhitespaceBackground(lipgloss.Color(bgColor)),
-	)
+// renderOverlay places overlayContent centered over background content.
+func renderOverlay(background, overlayContent string, width, height int, _ string) string {
+	return panelrender.OverlayCenter(background, overlayContent, width, height)
 }
 
 // truncate shortens s to at most n runes, appending "…" if truncated.

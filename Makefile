@@ -4,10 +4,12 @@ BINARY := orcai
 
 all: build run
 
-run: build
+run: install
+	-tmux detach-client -s orcai 2>/dev/null
 	-tmux kill-session -t orcai 2>/dev/null
+	-tmux kill-session -t orcai-cron 2>/dev/null
 	rm -f ~/.config/orcai/layout.yaml ~/.config/orcai/keybindings.yaml
-	bin/$(BINARY)
+	$(BINARY)
 
 build:
 	go build -o bin/$(BINARY) .

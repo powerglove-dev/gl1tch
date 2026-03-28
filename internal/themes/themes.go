@@ -82,9 +82,6 @@ type Bundle struct {
 	// Empty string uses the default ▄/▀ block character rendering.
 	HeaderPattern string `yaml:"header_pattern"`
 
-	// HeaderFont names a TDF font in internal/assets/fonts/tdf/ for block-letter titles.
-	// Empty string uses plain centered text.
-	HeaderFont string `yaml:"header_font"`
 }
 
 // Palette holds the seven canonical color slots for a theme.

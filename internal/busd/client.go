@@ -14,6 +14,15 @@ type registrationFrame struct {
 	Subscribe []string `json:"subscribe"`
 }
 
+// incomingFrame is a frame sent by a client after registration.
+// When Action is "publish", the daemon re-broadcasts the event to all
+// subscribers. Other actions are silently ignored.
+type incomingFrame struct {
+	Action  string          `json:"action"`  // "publish"
+	Event   string          `json:"event"`   // topic
+	Payload json.RawMessage `json:"payload"` // arbitrary JSON
+}
+
 // client represents a connected widget binary.
 type client struct {
 	conn   net.Conn
@@ -23,6 +32,8 @@ type client struct {
 	closed bool
 	// disc is closed when the client's read loop ends (disconnect detected).
 	disc chan struct{}
+	// publishCh receives incomingFrames with action=="publish" for relay.
+	publishCh chan incomingFrame
 }
 
 // newClient reads the registration frame from conn and returns a ready client.
@@ -46,19 +57,29 @@ func newClient(conn net.Conn) (*client, error) {
 	}
 
 	c := &client{
-		conn: conn,
-		name: reg.Name,
-		subs: reg.Subscribe,
-		disc: make(chan struct{}),
+		conn:      conn,
+		name:      reg.Name,
+		subs:      reg.Subscribe,
+		disc:      make(chan struct{}),
+		publishCh: make(chan incomingFrame, 16),
 	}
 
-	// Start a goroutine that drains any further reads so we detect disconnect.
+	// Read post-registration frames. Reuse the same scanner so that any
+	// bytes already buffered (e.g. a publish frame written back-to-back with
+	// the registration frame by PublishEvent) are not lost. A fresh scanner
+	// would read from conn directly, missing data already in the buffer.
 	go func() {
 		defer close(c.disc)
-		buf := make([]byte, 256)
-		for {
-			if _, err := conn.Read(buf); err != nil {
-				return
+		for scanner.Scan() {
+			var f incomingFrame
+			if err := json.Unmarshal(scanner.Bytes(), &f); err != nil {
+				continue
+			}
+			if f.Action == "publish" && f.Event != "" {
+				select {
+				case c.publishCh <- f:
+				default: // drop if channel full
+				}
 			}
 		}
 	}()
