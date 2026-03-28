@@ -3316,7 +3316,6 @@ func (m Model) viewActivityFeed(height, width int) string {
 	var feedHints []panelrender.Hint
 	if m.feedFocused {
 		feedHints = []panelrender.Hint{
-			{Key: "[/]", Desc: "page"},
 			{Key: "g/G", Desc: "top/bottom"},
 		}
 	}
