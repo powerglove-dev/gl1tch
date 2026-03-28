@@ -6,6 +6,7 @@ package switchboard
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -1907,18 +1908,23 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 }
 
 // runMetadataJSON returns a compact JSON blob for run metadata.
-// Empty fields are omitted.
+// Empty fields are omitted. Returns "" when both are empty.
 func runMetadataJSON(pipelineFile, cwd string) string {
-	switch {
-	case pipelineFile != "" && cwd != "":
-		return fmt.Sprintf(`{"pipeline_file":%q,"cwd":%q}`, pipelineFile, cwd)
-	case pipelineFile != "":
-		return fmt.Sprintf(`{"pipeline_file":%q}`, pipelineFile)
-	case cwd != "":
-		return fmt.Sprintf(`{"cwd":%q}`, cwd)
-	default:
+	if pipelineFile == "" && cwd == "" {
 		return ""
 	}
+	m := make(map[string]string, 2)
+	if pipelineFile != "" {
+		m["pipeline_file"] = pipelineFile
+	}
+	if cwd != "" {
+		m["cwd"] = cwd
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // launchPendingPipeline runs the pipeline stored in pendingPipelineName/YAML
