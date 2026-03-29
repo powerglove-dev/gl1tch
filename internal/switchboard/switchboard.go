@@ -1956,11 +1956,7 @@ func (m Model) launchPendingPipeline(cwd string) (Model, tea.Cmd) {
 	ch := make(chan tea.Msg, 256)
 	_, cancel := context.WithCancel(context.Background())
 	jh := &jobHandle{id: feedID, cancel: cancel, ch: ch, tmuxWindow: windowName, logFile: logFile}
-	if m.store != nil {
-		if runID, err := m.store.RecordRunStart("pipeline", name, runMetadataJSON(yamlPath, cwd)); err == nil {
-			jh.storeRunID = runID
-		}
-	}
+	// Run recorded by the orcai pipeline CLI subprocess via WithRunStore — don't double-record here.
 	m.activeJobs[feedID] = jh
 
 	startLogWatcher(feedID, logFile, doneFile, ch)
