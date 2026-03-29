@@ -9,6 +9,8 @@
 #   task --list          show all available tasks
 #   task build           compile binary to bin/orcai
 #   task install         build and install to GOPATH/bin + ~/.local/bin symlink
+#   task dev             clean-slate build from source (wipes config/data, runs ./bin/orcai)
+#   task prod            install fresh build from source to GOPATH/bin (run manually)
 #   task run             start orcai (non-destructive, assumes already installed)
 #   task run:clean       wipe db/config, kill tmux sessions, then start orcai
 #   task release:tag VERSION=v1.2.3   create signed git tag for release
@@ -93,11 +95,10 @@ tasks:
       - ./bin/{{.BINARY}}
 
   prod:
-    desc: "Daily driver: install fresh build from source, run non-destructively (state preserved)"
+    desc: "Daily driver: install fresh build from source to GOPATH/bin and ~/.local/bin (run manually)"
     cmds:
       - go install .
       - ln -sf $(go env GOPATH)/bin/{{.BINARY}} ~/.local/bin/{{.BINARY}}
-      - "{{.BINARY}}"
 
   # ---------------------------------------------------------------------------
   # Debug tasks
