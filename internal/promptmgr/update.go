@@ -17,7 +17,6 @@ import (
 // Message types
 
 type promptsLoadedMsg struct{ prompts []store.Prompt }
-type modelSlugsLoadedMsg struct{ slugs []string }
 type runTokenMsg struct{ token string }
 type runDoneMsg struct{ full string }
 type runErrMsg struct{ err error }
@@ -31,20 +30,6 @@ func loadPromptsCmd(st *store.Store) tea.Cmd {
 			return runErrMsg{err: err}
 		}
 		return promptsLoadedMsg{prompts: prompts}
-	}
-}
-
-// loadModelSlugsCmd fetches available model slugs from the plugin manager.
-func loadModelSlugsCmd(mgr *plugin.Manager) tea.Cmd {
-	return func() tea.Msg {
-		if mgr == nil {
-			return modelSlugsLoadedMsg{slugs: []string{}}
-		}
-		var slugs []string
-		for _, p := range mgr.List() {
-			slugs = append(slugs, p.Name())
-		}
-		return modelSlugsLoadedMsg{slugs: slugs}
 	}
 }
 
@@ -167,6 +152,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case tea.KeyMsg:
+		// When agent picker overlay is active, route all keys through it.
+		if m.agentPickerActive {
+			newPicker, ev := m.agentPicker.Update(msg)
+			m.agentPicker = newPicker
+			switch ev {
+			case modal.AgentPickerConfirmed:
+				m.agentPickerActive = false
+				m.editingPrompt.ModelSlug = m.agentPicker.SelectedProviderID() + "/" + m.agentPicker.SelectedModelID()
+			case modal.AgentPickerCancelled:
+				m.agentPickerActive = false
+			}
+			return m, nil
+		}
+
 		// When the runner panel is focused, route all keys through it first so
 		// ctrl+c can cancel an in-progress run instead of quitting.
 		if m.focusPanel == 2 {
@@ -198,9 +197,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, reloadPromptsCmd(m.store)
 		}
 		m.applyFilter()
-
-	case modelSlugsLoadedMsg:
-		m.modelSlugs = msg.slugs
 
 	case runDoneMsg:
 		m.runnerOutput = msg.full
@@ -310,10 +306,7 @@ func (m *Model) updateEditorPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		p := m.editingPrompt
 		p.Title = m.titleInput.Value()
 		p.Body = m.bodyInput.Value()
-		// CWD is already stored in m.editingPrompt.CWD via DirSelectedMsg handler.
-		if len(m.modelSlugs) > 0 && m.modelIdx < len(m.modelSlugs) {
-			p.ModelSlug = m.modelSlugs[m.modelIdx]
-		}
+		// ModelSlug and CWD are already stored in m.editingPrompt via picker handlers.
 		return m, tea.Batch(savePromptCmd(m.store, p), reloadPromptsCmd(m.store))
 
 	case "ctrl+r":
@@ -323,10 +316,7 @@ func (m *Model) updateEditorPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.runCancel = nil
 		}
 		body := m.bodyInput.Value()
-		var slug string
-		if len(m.modelSlugs) > 0 && m.modelIdx < len(m.modelSlugs) {
-			slug = m.modelSlugs[m.modelIdx]
-		}
+		slug := m.editingPrompt.ModelSlug
 		if slug == "" {
 			m.runnerErrMsg = "no model selected"
 			return m, nil
@@ -344,25 +334,20 @@ func (m *Model) updateEditorPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.runnerScrollOffset = 0
 		return m, runPluginCmd(ctx, p, body, m.editingPrompt.CWD)
 
-	case "[":
-		if len(m.modelSlugs) > 0 {
-			m.modelIdx = (m.modelIdx - 1 + len(m.modelSlugs)) % len(m.modelSlugs)
-		}
-
-	case "]":
-		if len(m.modelSlugs) > 0 {
-			m.modelIdx = (m.modelIdx + 1) % len(m.modelSlugs)
-		}
-
-	case "tab":
-		// Cycle editor sub-focus: title→body→cwd→title
-		m.editorSubFocus = (m.editorSubFocus + 1) % 3
-		m.syncEditorFocus()
-		// When sub-focus lands on cwd (2), open the dir picker immediately.
-		if m.editorSubFocus == 2 {
+	case "enter":
+		switch m.editorSubFocus {
+		case 2:
+			m.agentPickerActive = true
+			return m, nil
+		case 3:
 			m.dirPickerActive = true
 			return m, modal.DirPickerInit()
 		}
+
+	case "tab":
+		// Cycle editor sub-focus: title→body→model→cwd→title
+		m.editorSubFocus = (m.editorSubFocus + 1) % 4
+		m.syncEditorFocus()
 
 	case "shift+tab":
 		// Cycle panel: 0→2→1→0
@@ -379,10 +364,8 @@ func (m *Model) updateEditorPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.titleInput, cmd = m.titleInput.Update(msg)
 		case 1:
 			m.bodyInput, cmd = m.bodyInput.Update(msg)
-		case 2:
-			// CWD sub-focus: open dir picker on any key.
-			m.dirPickerActive = true
-			return m, modal.DirPickerInit()
+		// case 2: model picker — no text input; enter opens overlay
+		// case 3: CWD dir picker — no text input; enter opens overlay
 		}
 		return m, cmd
 	}
@@ -391,7 +374,8 @@ func (m *Model) updateEditorPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // syncEditorFocus calls Focus/Blur on editor inputs based on editorSubFocus.
-// Sub-focus 2 (CWD) is handled via the dir picker overlay, not a text input.
+// Sub-focus 2 (model picker) and 3 (CWD dir picker) are handled via overlays,
+// not text inputs.
 func (m *Model) syncEditorFocus() {
 	m.titleInput.Blur()
 	m.bodyInput.Blur()
@@ -400,7 +384,8 @@ func (m *Model) syncEditorFocus() {
 		m.titleInput.Focus()
 	case 1:
 		m.bodyInput.Focus()
-	// case 2: CWD is managed via dirPickerActive overlay — no text input to focus.
+	// case 2: model picker — no text input to focus.
+	// case 3: CWD dir picker — no text input to focus.
 	}
 }
 

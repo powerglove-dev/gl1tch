@@ -267,13 +267,10 @@ func TestModel_RunnerWithMockPlugin(t *testing.T) {
 
 	m := New(st, mgr, nil)
 
-	// Deliver slugs loaded msg so modelSlugs is populated.
-	model, _ := m.Update(modelSlugsLoadedMsg{slugs: []string{"test-model"}})
-	m = model.(*Model)
-
-	// Switch to editor panel and set body text.
+	// Switch to editor panel, set body text, and set model slug directly.
 	m.focusPanel = 1
 	m.bodyInput.SetValue("my prompt body")
+	m.editingPrompt.ModelSlug = "test-model"
 
 	// Send ctrl+r to start a run.
 	m, cmd := sendKey(t, m, "ctrl+r")
@@ -317,11 +314,9 @@ func TestModel_RunnerCancellation(t *testing.T) {
 
 	m := New(st, mgr, nil)
 
-	model, _ := m.Update(modelSlugsLoadedMsg{slugs: []string{"test-model"}})
-	m = model.(*Model)
-
 	m.focusPanel = 1
 	m.bodyInput.SetValue("some prompt")
+	m.editingPrompt.ModelSlug = "test-model"
 
 	// Start run.
 	m, _ = sendKey(t, m, "ctrl+r")

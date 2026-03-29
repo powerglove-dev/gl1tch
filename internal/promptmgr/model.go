@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 
 	"github.com/adam-stokes/orcai/internal/modal"
+	"github.com/adam-stokes/orcai/internal/picker"
 	"github.com/adam-stokes/orcai/internal/plugin"
 	"github.com/adam-stokes/orcai/internal/store"
 	"github.com/adam-stokes/orcai/internal/themes"
@@ -43,13 +44,13 @@ type Model struct {
 	dirPicker       modal.DirPickerModel
 	dirPickerActive bool
 
-	// Model selector
-	modelSlugs []string // available model slugs
-	modelIdx   int      // selected model index
+	// Agent / model picker overlay
+	agentPicker       modal.AgentPickerModel
+	agentPickerActive bool
 
 	// Editor state
 	editingPrompt  store.Prompt // prompt currently being edited (zero value = new)
-	editorSubFocus int          // 0=title, 1=body, 2=cwd
+	editorSubFocus int          // 0=title, 1=body, 2=model, 3=cwd
 
 	// Panel focus: 0=list, 1=editor, 2=runner
 	focusPanel int
@@ -80,6 +81,7 @@ func New(st *store.Store, pluginMgr *plugin.Manager, bundle *themes.Bundle) *Mod
 	bi := textarea.New()
 	bi.Placeholder = "Prompt body..."
 
+	providers := picker.BuildProviders()
 	return &Model{
 		store:       st,
 		pluginMgr:   pluginMgr,
@@ -88,6 +90,7 @@ func New(st *store.Store, pluginMgr *plugin.Manager, bundle *themes.Bundle) *Mod
 		titleInput:  ti,
 		bodyInput:   bi,
 		dirPicker:   modal.NewDirPickerModel(),
+		agentPicker: modal.NewAgentPickerModel(providers),
 	}
 }
 
@@ -96,6 +99,5 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.themeState.Init(),
 		loadPromptsCmd(m.store),
-		loadModelSlugsCmd(m.pluginMgr),
 	)
 }
