@@ -39,18 +39,23 @@ func (m Model) View() string {
 		return "loading..."
 	}
 
-	// Split height: 35% jobs (capped at 14 rows), 65% logs.
+	topBar := panelrender.TopBar(m.bundle, "░▒▓ ORCAI — ABBS Cron ▓▒░", m.width)
+
+	// Reserve 2 rows for the top bar (1) and blank padding row (1).
+	contentH := m.height - 2
+
+	// Split remaining height: 35% jobs (capped at 14 rows), 65% logs.
 	// Hint bars are rendered inside each pane.
-	topH, botH := splitHeight(m.height, 0.35, 6)
+	topH, botH := splitHeight(contentH, 0.35, 6)
 	if topH > 14 {
 		topH = 14
-		botH = m.height - topH
+		botH = contentH - topH
 	}
 
 	top := m.viewJobList(m.width, topH)
 	bot := m.viewLogPane(m.width, botH)
 
-	content := lipgloss.JoinVertical(lipgloss.Left, top, bot)
+	content := lipgloss.JoinVertical(lipgloss.Left, topBar, "", top, bot)
 
 	// Render overlays on top if open.
 	if m.helpOpen {
@@ -147,6 +152,7 @@ func (m Model) viewJobList(width, height int) string {
 				{Key: "e", Desc: "edit"},
 				{Key: "d", Desc: "delete"},
 				{Key: "enter/r", Desc: "run now"},
+				{Key: "p", Desc: "pipeline"},
 				{Key: "/", Desc: "search"},
 			}
 		}

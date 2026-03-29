@@ -355,3 +355,30 @@ func ansiFromCol(s string, n int) string {
 	}
 	return ""
 }
+
+// TopBar renders a full-terminal-width title bar with accent background and
+// BG-colored text — used by Switchboard and Cron TUI as their top header row.
+// title is used as-is (callers may pass it through translations before calling).
+// Dracula purple/bg are used as fallbacks when bundle is nil.
+func TopBar(bundle *themes.Bundle, title string, width int) string {
+	if width <= 0 {
+		width = 120
+	}
+	bgColor := "#bd93f9" // Dracula purple fallback
+	fgColor := "#282a36" // Dracula bg fallback
+	if bundle != nil {
+		if bundle.Palette.Accent != "" {
+			bgColor = bundle.Palette.Accent
+		}
+		if bundle.Palette.BG != "" {
+			fgColor = bundle.Palette.BG
+		}
+	}
+	return lipgloss.NewStyle().
+		Width(width).
+		Align(lipgloss.Center).
+		Background(lipgloss.Color(bgColor)).
+		Foreground(lipgloss.Color(fgColor)).
+		Bold(true).
+		Render(title)
+}

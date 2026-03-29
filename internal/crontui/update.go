@@ -1,15 +1,21 @@
 package crontui
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	"gopkg.in/yaml.v3"
 
+	"github.com/adam-stokes/orcai/internal/busd"
+	"github.com/adam-stokes/orcai/internal/busd/topics"
 	"github.com/adam-stokes/orcai/internal/cron"
 	"github.com/adam-stokes/orcai/internal/themes"
 	"github.com/adam-stokes/orcai/internal/tuikit"
 )
+
 
 // Update handles all incoming messages and key events.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -212,8 +218,73 @@ func (m Model) handleJobPaneKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.scheduler.RunNow(entry)
 		m.appendLog("INFO: triggered run for " + entry.Name)
 		return m, nil
+
+	case "p":
+		if len(m.filtered) == 0 {
+			return m, nil
+		}
+		entry := m.filtered[m.selectedIdx]
+		if entry.Kind != "pipeline" {
+			return m, nil
+		}
+		path := resolvePipelinePath(entry.Target)
+		editor := os.Getenv("EDITOR")
+		if editor == "" {
+			editor = "vi"
+		}
+		return m, tea.ExecProcess(exec.Command(editor, path), nil)
 	}
 	return m, nil
+}
+
+// resolvePipelinePath returns the filesystem path for a pipeline target name.
+// It tries ~/.config/orcai/pipelines/<target>.yaml and <target>.pipeline.yaml
+// variants, falling back to the raw target string if nothing resolves.
+func resolvePipelinePath(target string) string {
+	home, err := os.UserHomeDir()
+	if err == nil {
+		candidates := []string{
+			filepath.Join(home, ".config", "orcai", "pipelines", target+".yaml"),
+			filepath.Join(home, ".config", "orcai", "pipelines", target+".pipeline.yaml"),
+			filepath.Join(home, ".config", "orcai", "pipelines", target),
+		}
+		for _, c := range candidates {
+			if _, err := os.Stat(c); err == nil {
+				return c
+			}
+		}
+	}
+	return target
+}
+
+// updatePipelineYAMLName reads the pipeline YAML at the path for target,
+// updates the top-level "name" field to newName, and writes the file back.
+// Only the name field is changed; all other content is preserved.
+func updatePipelineYAMLName(target, newName string) error {
+	path := resolvePipelinePath(target)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return err
+	}
+	// Walk the mapping node to find and update the "name" key.
+	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
+		mapping := doc.Content[0]
+		for i := 0; i+1 < len(mapping.Content); i += 2 {
+			if mapping.Content[i].Value == "name" {
+				mapping.Content[i+1].Value = newName
+				break
+			}
+		}
+	}
+	out, err := yaml.Marshal(&doc)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, 0644)
 }
 
 // handleFilteringKey handles keys when the filter input is active.
@@ -335,6 +406,22 @@ func (m Model) confirmEdit() (tea.Model, tea.Cmd) {
 	}
 
 	m.editOverlay = nil
+
+	// If a pipeline entry was renamed, update the pipeline YAML name field.
+	if updated.Kind == "pipeline" && ov.original.Name != updated.Name {
+		_ = updatePipelineYAMLName(updated.Target, updated.Name)
+	}
+
+	// Publish rename event so switchboard and other consumers can react.
+	if ov.original.Name != "" && ov.original.Name != updated.Name {
+		if sockPath, err := busd.SocketPath(); err == nil {
+			_ = busd.PublishEvent(sockPath, topics.CronEntryUpdated, map[string]string{
+				"old_name": ov.original.Name,
+				"new_name": updated.Name,
+			})
+		}
+	}
+
 	// Reload entries immediately.
 	entries, _ := cron.LoadConfig()
 	m.entries = entries

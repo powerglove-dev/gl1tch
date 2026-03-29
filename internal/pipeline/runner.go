@@ -436,6 +436,8 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 	var wg sync.WaitGroup
 	var lastOutput string
 	var lastOutputMu sync.Mutex
+	var firstStepErr error
+	var firstStepErrMu sync.Mutex
 
 	// quit signals the dispatcher to stop.
 	quit := make(chan struct{})
@@ -545,6 +547,13 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 				st.mu.Unlock()
 				ec.Set("step."+res.id+".state", "failed")
 
+				// Capture first step error to propagate as run-level failure.
+				firstStepErrMu.Lock()
+				if firstStepErr == nil {
+					firstStepErr = fmt.Errorf("pipeline: step %q: %w", res.id, res.err)
+				}
+				firstStepErrMu.Unlock()
+
 				// Record step failure in store.
 				if cfg.store != nil {
 					rec := store.StepRecord{
@@ -636,7 +645,7 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 	stopDispatcher()
 	wg.Wait()
 
-	return lastOutput, nil
+	return lastOutput, firstStepErr
 }
 
 // skipTransitive marks all transitive dependents of failedID as skipped.

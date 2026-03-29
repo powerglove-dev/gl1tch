@@ -21,6 +21,7 @@ func viewThemePicker(m Model) string {
 func (m Model) handleThemePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if m.registry == nil {
 		m.themePicker.Open = false
+		m.previewBundle = nil
 		return m, nil
 	}
 	dark := m.registry.BundlesByMode("dark")
@@ -29,6 +30,7 @@ func (m Model) handleThemePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 	m.themePicker = newPicker
 	if close {
 		m.themePicker.Open = false
+		m.previewBundle = nil // restore registry-backed active bundle
 	}
 	return m, cmd
 }

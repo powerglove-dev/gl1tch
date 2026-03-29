@@ -153,7 +153,7 @@ func tryPipelineBusSubscribeCmd() tea.Cmd {
 		}
 		reg, _ := json.Marshal(map[string]any{
 			"name":      "switchboard",
-			"subscribe": []string{"pipeline.run.*", "pipeline.step.*", "cron.job.*"},
+			"subscribe": []string{"pipeline.run.*", "pipeline.step.*", "cron.job.*", "cron.entry.*"},
 		})
 		if _, err := conn.Write(append(reg, '\n')); err != nil {
 			conn.Close()
@@ -333,6 +333,27 @@ func (m Model) handlePipelineBusEvent(msg pipelineBusEventMsg) Model {
 		}
 		if json.Unmarshal(msg.payload, &payload) == nil {
 			m = m.upsertCronFeedEntry(payload.Job, payload.ExitStatus)
+		}
+
+	// ── cron.entry.* ──────────────────────────────────────────────────────
+
+	case topics.CronEntryUpdated:
+		// A cron entry was renamed. Update any in-memory feed/signal entries
+		// that still carry the old name so they reflect the rename immediately.
+		// The cron panel itself reads LoadConfig() on each render and self-heals.
+		var payload struct {
+			OldName string `json:"old_name"`
+			NewName string `json:"new_name"`
+		}
+		if json.Unmarshal(msg.payload, &payload) == nil && payload.OldName != "" && payload.NewName != "" {
+			oldCronTitle := "cron: " + payload.OldName
+			newCronTitle := "cron: " + payload.NewName
+			// Signal board reads from m.feed; updating feed entries updates both.
+			for i := range m.feed {
+				if m.feed[i].title == oldCronTitle {
+					m.feed[i].title = newCronTitle
+				}
+			}
 		}
 	}
 	return m

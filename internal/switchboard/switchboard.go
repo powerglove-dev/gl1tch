@@ -279,7 +279,8 @@ type Model struct {
 	helpOpen              bool
 	registry              *themes.Registry
 	themeState            tuikit.ThemeState
-	themePicker tuikit.ThemePicker
+	themePicker           tuikit.ThemePicker
+	previewBundle         *themes.Bundle // non-nil while theme picker is open (live preview)
 	// CWD / dir picker
 	launchCWD           string         // CWD at orcai startup (immutable after New())
 	agentCWD            string         // current agent session CWD (user-editable)
@@ -618,7 +619,12 @@ func (m Model) AddFeedEntryWithTmux(id, title string, status FeedStatus, tmuxWin
 // ── Theme helpers ─────────────────────────────────────────────────────────────
 
 // activeBundle returns the currently active theme bundle, or nil if no registry.
+// During theme picker navigation, previewBundle overrides the registry value so
+// panels update in real time without persisting the selection.
 func (m Model) activeBundle() *themes.Bundle {
+	if m.previewBundle != nil {
+		return m.previewBundle
+	}
 	if m.registry == nil {
 		return nil
 	}
@@ -818,8 +824,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Theme change from another process (e.g. cron TUI) ────────────────────
 	if ts, cmd, ok := m.themeState.Handle(msg); ok {
 		m.themeState = ts
-		if m.registry != nil {
-			m.registry.RefreshActive()
+		if m.themePicker.Open {
+			// Theme picker is navigating — use the bundle from ThemeState for
+			// live preview without writing to disk or updating the registry.
+			m.previewBundle = ts.Bundle()
+		} else {
+			m.previewBundle = nil
+			if m.registry != nil {
+				m.registry.RefreshActive()
+			}
 		}
 		return m, cmd
 	}
@@ -2711,7 +2724,7 @@ func (m Model) View() string {
 
 	leftW := m.leftColWidth() - 1
 	feedW := max(w-leftW-2, 20)
-	contentH := max(h-1, 5) // reserve one line for top bar; hint bars live inside each panel
+	contentH := max(h-2, 5) // reserve 1 line for top bar + 1 for padding row; hint bars live inside each panel
 
 	// Signal board: grows with entries up to 40% of screen height.
 	// Minimum 5 rows so the box is always visible (header+border).
@@ -2753,7 +2766,8 @@ func (m Model) View() string {
 	}
 
 	body := strings.Join(rows, "\n")
-	topBar := m.viewTopBar(w)
+	// topBar includes the padding row so all join sites below are consistent.
+	topBar := m.viewTopBar(w) + "\n"
 
 	// Dir picker overlay — highest priority, shown on top of everything.
 	if m.dirPickerOpen {
@@ -3210,40 +3224,13 @@ func (m Model) buildBanner(w int) string {
 	return logo + sep + sub
 }
 
-// viewTopBar renders a full-terminal-width header bar with the ORCAI title
-// centered. Uses theme accent as background (matching panel headers) and the
-// theme BG color for text. Respects the translations.KeySwitchboardHeader key.
+// viewTopBar renders the full-width ORCAI header bar for the Switchboard.
 func (m Model) viewTopBar(w int) string {
-	if w <= 0 {
-		w = 120
-	}
-
 	title := "░▒▓ ORCAI — ABBS Switchboard ▓▒░"
 	if p := translations.GlobalProvider(); p != nil {
 		title = p.T(translations.KeySwitchboardHeader, title)
 	}
-
-	// Accent as background, BG color as text — same as panel header title rows.
-	bgColor := "#bd93f9" // Dracula purple fallback
-	fgColor := "#282a36" // Dracula bg fallback
-
-	if b := m.activeBundle(); b != nil {
-		if b.Palette.Accent != "" {
-			bgColor = b.Palette.Accent
-		}
-		if b.Palette.BG != "" {
-			fgColor = b.Palette.BG
-		}
-	}
-
-	titleStyle := lipgloss.NewStyle().
-		Width(w).
-		Align(lipgloss.Center).
-		Background(lipgloss.Color(bgColor)).
-		Foreground(lipgloss.Color(fgColor)).
-		Bold(true)
-
-	return titleStyle.Render(title)
+	return TopBar(m.activeBundle(), title, w)
 }
 
 // buildLauncherSection renders the Pipeline Launcher box.
@@ -3446,28 +3433,30 @@ func (m Model) buildInboxSection(w, height int) []string {
 			default:
 				dot = aRed + "●" + aRst
 			}
+			// ⚠ attention marker for failed runs.
+			warn := ""
+			warnVis := 0
+			if run.ExitStatus != nil && *run.ExitStatus != 0 {
+				warn = " " + aRed + "⚠" + aRst
+				warnVis = 2 // " ⚠" = 2 visible columns
+			}
 			ts := time.UnixMilli(run.StartedAt).Format("1/2 3:04 PM")
 			tsVis := len(ts) + 1
-			maxNameLen := max(w-7-tsVis, 1)
+			maxNameLen := max(w-7-tsVis-warnVis, 1)
 			name := run.Name
 			if len(name) > maxNameLen {
 				name = name[:maxNameLen-1] + "…"
 			}
 			inner := w - 2
 			focused := m.inboxPanel.focused
-			var prefixVis int
-			if i == sel && focused {
-				prefixVis = 2 + 1 + 1 + len(name)
-			} else {
-				prefixVis = 2 + 1 + 1 + len(name)
-			}
+			prefixVis := 2 + 1 + 1 + len(name) + warnVis
 			pad := max(inner-prefixVis-tsVis, 0)
 			dimTS := pal.Dim + strings.Repeat(" ", pad) + ts + aRst
 			var content string
 			if i == sel && focused {
-				content = pal.Accent + "> " + aRst + dot + " " + pal.FG + name + aRst + dimTS
+				content = pal.Accent + "> " + aRst + dot + " " + pal.FG + name + aRst + warn + dimTS
 			} else {
-				content = "  " + dot + " " + pal.Dim + name + aRst + dimTS
+				content = "  " + dot + " " + pal.Dim + name + aRst + warn + dimTS
 			}
 			rows = append(rows, boxRow(content, w, borderColor))
 			shown++
