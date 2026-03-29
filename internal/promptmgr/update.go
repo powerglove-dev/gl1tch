@@ -396,6 +396,16 @@ func (m *Model) updateEditorPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 3:
 			m.dirPickerActive = true
 			return m, modal.DirPickerInit()
+		default:
+			// title or body: delegate so textarea/textinput handle Enter normally.
+			var cmd tea.Cmd
+			switch m.editorSubFocus {
+			case 0:
+				m.titleInput, cmd = m.titleInput.Update(msg)
+			case 1:
+				m.bodyInput, cmd = m.bodyInput.Update(msg)
+			}
+			return m, cmd
 		}
 
 	case "tab":
