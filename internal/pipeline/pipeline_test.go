@@ -67,7 +67,7 @@ func TestLoad_MissingName(t *testing.T) {
 }
 
 func TestLoadRejectsDbStepType(t *testing.T) {
-	yaml := `
+	input := `
 name: db-pipeline
 version: "1.0"
 steps:
@@ -77,7 +77,7 @@ steps:
       op: query
       sql: "SELECT 1"
 `
-	_, err := pipeline.Load(strings.NewReader(yaml))
+	_, err := pipeline.Load(strings.NewReader(input))
 	if err == nil {
 		t.Fatal("expected error for db step type, got nil")
 	}
