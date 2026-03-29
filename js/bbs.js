@@ -7,7 +7,7 @@
 var KeyboardRouter = (function() {
   var activeScreen = 'home';
   var screenHandlers = {};
-  var screenOrder = ['home','about','getting-started','plugins','pipelines','changelog','themes'];
+  var screenOrder = ['home','about','getting-started','plugins','pipelines','changelog','themes','labs','docs'];
 
   function switchScreen(id) {
     document.querySelectorAll('.screen').forEach(function(el) { el.classList.remove('active'); });
@@ -257,57 +257,137 @@ function fallbackCopy(text) {
   document.body.removeChild(ta);
 }
 
-// ── Pipeline YAML typewriter demo ──────────────────────────────
-var PIPELINE_YAML = [
-  'name: code-review-pipeline',
-  'description: Review code changes with Claude',
-  '',
-  'steps:',
-  '  - id: summarize',
-  '    provider: claude',
-  '    model: claude-sonnet-4-6',
-  '    input:',
-  '      type: object',
-  '      properties:',
-  '        diff: { type: string }',
-  '    output:',
-  '      type: string',
-  '    prompt: |',
-  '      Review this diff and summarize key changes:',
-  '      {{diff}}',
-  '',
-  '  - id: extract-issues',
-  '    plugin: jq',
-  '    input:',
-  '      type: string',
-  '    output:',
-  '      type: array',
-  '    args: ["[.issues[]? | select(.severity==\"high\")]"]',
-  '',
-  '  - id: write-report',
-  '    plugin: write',
-  '    input:',
-  '      type: array',
-  '    output:',
-  '      type: string',
-  '    args: ["./reports/review-{{date}}.json"]'
-].join('\n');
+// ── Pipeline example switcher ──────────────────────────────────
+var PipelineExamples = (function() {
+  var current = 0;
 
-function initPipelineTypewriter() {
-  var el = document.getElementById('pipeline-demo');
-  if (!el) return;
-  el.textContent = '';
-  var i = 0;
-  var text = PIPELINE_YAML;
-  function tick() {
-    if (i < text.length) {
-      el.textContent = text.slice(0, i + 1);
-      i++;
-      setTimeout(tick, i % 40 === 0 ? 120 : 18);
+  var examples = [
+    // 0: code-review
+    [
+      '# code-review — diff summarizer + issue extractor',
+      '# runs on every PR: claude reads the diff, jq filters',
+      '# high-severity issues, writes a timestamped report.',
+      '',
+      'name: code-review',
+      'description: Summarize a PR diff and extract high-severity issues',
+      '',
+      'steps:',
+      '  - id: summarize',
+      '    executor: claude',
+      '    model: claude-sonnet-4-6',
+      '    prompt: |',
+      '      You are a senior engineer reviewing a pull request.',
+      '      Summarize the key changes, flag any risks, and note',
+      '      anything that needs a second look.',
+      '      Diff: {{diff}}',
+      '',
+      '  - id: extract-issues',
+      '    plugin: jq',
+      '    vars:',
+      '      filter: "[.issues[]? | select(.severity==\"high\")]"',
+      '',
+      '  - id: write-report',
+      '    plugin: write',
+      '    vars:',
+      '      path: "./reports/review-{{date}}.json"'
+    ].join('\n'),
+
+    // 1: brain-feedback-loop
+    [
+      '# brain-feedback-loop — local → cloud knowledge chain',
+      '# qwen2.5 analyzes cheaply and writes an insight note.',
+      '# claude reads that note and synthesizes a recommendation.',
+      '',
+      'name: brain-feedback-loop',
+      'description: Local model builds context, cloud model acts on it',
+      '',
+      'use_brain: true',
+      '',
+      'steps:',
+      '  - id: analyze',
+      '    executor: ollama',
+      '    model: qwen2.5-coder:latest',
+      '    write_brain: true',
+      '    prompt: |',
+      '      Analyze the codebase in ./src. Identify the single',
+      '      most important architectural insight. Be specific.',
+      '      Start your response with "INSIGHT:"',
+      '',
+      '  - id: synthesize',
+      '    executor: claude',
+      '    model: claude-haiku-4-5-20251001',
+      '    use_brain: true',
+      '    prompt: |',
+      '      Given the architectural insight above, write a',
+      '      concrete refactor plan. Include file names.',
+      '      Keep it under 200 words.'
+    ].join('\n'),
+
+    // 2: gh-triage
+    [
+      '# gh-triage — automated issue triage + weekly digest',
+      '# fetches open issues from GitHub, runs local analysis,',
+      '# saves a prioritized markdown report to disk.',
+      '',
+      'name: gh-triage',
+      'description: Weekly issue triage with Ollama + brain context',
+      '',
+      'steps:',
+      '  - id: fetch-issues',
+      '    plugin: gh',
+      '    vars:',
+      '      args: "issue list --json number,title,body,labels --limit 30"',
+      '',
+      '  - id: fetch-recent-prs',
+      '    plugin: gh',
+      '    vars:',
+      '      args: "pr list --state merged --json number,title --limit 10"',
+      '',
+      '  - id: triage',
+      '    executor: ollama',
+      '    model: llama3.2:latest',
+      '    write_brain: true',
+      '    prompt: |',
+      '      Issues: {{steps.fetch-issues.output}}',
+      '      Recent merged PRs: {{steps.fetch-recent-prs.output}}',
+      '      Rank the top 5 open issues by impact. Explain briefly.',
+      '',
+      '  - id: save',
+      '    plugin: write',
+      '    vars:',
+      '      path: "./triage/{{date}}.md"'
+    ].join('\n')
+  ];
+
+  var twTimer = null;
+
+  function show(idx) {
+    current = idx;
+    var el = document.getElementById('pipeline-example');
+    if (!el) return;
+    // update tab active state
+    document.querySelectorAll('.pipeline-tab').forEach(function(btn, i) {
+      btn.classList.toggle('active', i === idx);
+    });
+    // typewriter animation
+    if (twTimer) clearTimeout(twTimer);
+    el.textContent = '';
+    var text = examples[idx];
+    var i = 0;
+    function tick() {
+      if (i < text.length) {
+        el.textContent = text.slice(0, i + 1);
+        i++;
+        twTimer = setTimeout(tick, i % 40 === 0 ? 100 : 14);
+      }
     }
+    tick();
   }
-  tick();
-}
+
+  function next() { show((current + 1) % examples.length); }
+
+  return { show: show, next: next, current: function() { return current; } };
+})();
 
 // ── Boot ───────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
@@ -329,9 +409,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Register pipelines screen handler
   KeyboardRouter.register('pipelines', {
-    'r': function() { initPipelineTypewriter(); },
-    'R': function() { initPipelineTypewriter(); },
-    _onEnter: function() { initPipelineTypewriter(); }
+    'Tab': function(e) { e.preventDefault(); PipelineExamples.next(); },
+    'r':   function() { PipelineExamples.show(PipelineExamples.current()); },
+    'R':   function() { PipelineExamples.show(PipelineExamples.current()); },
+    _onEnter: function() { PipelineExamples.show(0); }
   });
 
   // keyboard router
