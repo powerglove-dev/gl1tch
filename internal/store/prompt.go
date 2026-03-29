@@ -9,12 +9,13 @@ import (
 
 // Prompt is a saved prompt stored in the prompts table.
 type Prompt struct {
-	ID        int64
-	Title     string
-	Body      string
-	ModelSlug string
-	CreatedAt int64 // Unix timestamp
-	UpdatedAt int64 // Unix timestamp
+	ID           int64
+	Title        string
+	Body         string
+	ModelSlug    string
+	LastResponse string
+	CreatedAt    int64 // Unix timestamp
+	UpdatedAt    int64 // Unix timestamp
 }
 
 // InsertPrompt inserts a new prompt and returns the generated ID.
@@ -84,7 +85,7 @@ func (s *Store) DeletePrompt(_ context.Context, id int64) error {
 // Returns a non-nil empty slice when there are no prompts.
 func (s *Store) ListPrompts(ctx context.Context) ([]Prompt, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, title, body, model_slug, created_at, updated_at
+		`SELECT id, title, body, model_slug, last_response, created_at, updated_at
 		   FROM prompts
 		  ORDER BY updated_at DESC, id DESC`,
 	)
@@ -96,7 +97,7 @@ func (s *Store) ListPrompts(ctx context.Context) ([]Prompt, error) {
 	prompts := []Prompt{}
 	for rows.Next() {
 		var p Prompt
-		if err := rows.Scan(&p.ID, &p.Title, &p.Body, &p.ModelSlug, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Title, &p.Body, &p.ModelSlug, &p.LastResponse, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("store: list prompts scan: %w", err)
 		}
 		prompts = append(prompts, p)
@@ -112,7 +113,7 @@ func (s *Store) ListPrompts(ctx context.Context) ([]Prompt, error) {
 func (s *Store) SearchPrompts(ctx context.Context, query string) ([]Prompt, error) {
 	pattern := "%" + query + "%"
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, title, body, model_slug, created_at, updated_at
+		`SELECT id, title, body, model_slug, last_response, created_at, updated_at
 		   FROM prompts
 		  WHERE title LIKE ? OR body LIKE ?
 		  ORDER BY updated_at DESC, id DESC`,
@@ -126,7 +127,7 @@ func (s *Store) SearchPrompts(ctx context.Context, query string) ([]Prompt, erro
 	prompts := []Prompt{}
 	for rows.Next() {
 		var p Prompt
-		if err := rows.Scan(&p.ID, &p.Title, &p.Body, &p.ModelSlug, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Title, &p.Body, &p.ModelSlug, &p.LastResponse, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("store: search prompts scan: %w", err)
 		}
 		prompts = append(prompts, p)
@@ -137,15 +138,38 @@ func (s *Store) SearchPrompts(ctx context.Context, query string) ([]Prompt, erro
 	return prompts, nil
 }
 
+// SavePromptResponse updates the last_response and updated_at fields for the
+// prompt with the given ID. Returns an error if no row was affected.
+func (s *Store) SavePromptResponse(_ context.Context, id int64, response string) error {
+	now := time.Now().Unix()
+	return s.writer.send(func(db *sql.DB) error {
+		res, err := db.Exec(
+			`UPDATE prompts SET last_response = ?, updated_at = ? WHERE id = ?`,
+			response, now, id,
+		)
+		if err != nil {
+			return fmt.Errorf("store: save prompt response: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("store: save prompt response rows affected: %w", err)
+		}
+		if n == 0 {
+			return fmt.Errorf("store: save prompt response: no prompt with id %d", id)
+		}
+		return nil
+	})
+}
+
 // GetPrompt returns a prompt by ID. Returns sql.ErrNoRows if not found.
 func (s *Store) GetPrompt(ctx context.Context, id int64) (Prompt, error) {
 	var p Prompt
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, title, body, model_slug, created_at, updated_at
+		`SELECT id, title, body, model_slug, last_response, created_at, updated_at
 		   FROM prompts
 		  WHERE id = ?`,
 		id,
-	).Scan(&p.ID, &p.Title, &p.Body, &p.ModelSlug, &p.CreatedAt, &p.UpdatedAt)
+	).Scan(&p.ID, &p.Title, &p.Body, &p.ModelSlug, &p.LastResponse, &p.CreatedAt, &p.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return Prompt{}, sql.ErrNoRows
 	}

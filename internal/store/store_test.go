@@ -789,6 +789,49 @@ func TestSearchPrompts(t *testing.T) {
 	}
 }
 
+func TestSavePromptResponse(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	id, err := s.InsertPrompt(ctx, Prompt{Title: "Runner", Body: "Run this", ModelSlug: "gpt-4"})
+	if err != nil {
+		t.Fatalf("InsertPrompt: %v", err)
+	}
+
+	t.Run("saves response for existing id", func(t *testing.T) {
+		if err := s.SavePromptResponse(ctx, id, "hello world"); err != nil {
+			t.Fatalf("SavePromptResponse: %v", err)
+		}
+		got, err := s.GetPrompt(ctx, id)
+		if err != nil {
+			t.Fatalf("GetPrompt: %v", err)
+		}
+		if got.LastResponse != "hello world" {
+			t.Errorf("LastResponse: want %q, got %q", "hello world", got.LastResponse)
+		}
+	})
+
+	t.Run("overwrites previous response", func(t *testing.T) {
+		if err := s.SavePromptResponse(ctx, id, "updated response"); err != nil {
+			t.Fatalf("SavePromptResponse: %v", err)
+		}
+		got, err := s.GetPrompt(ctx, id)
+		if err != nil {
+			t.Fatalf("GetPrompt: %v", err)
+		}
+		if got.LastResponse != "updated response" {
+			t.Errorf("LastResponse: want %q, got %q", "updated response", got.LastResponse)
+		}
+	})
+
+	t.Run("returns error on missing id", func(t *testing.T) {
+		err := s.SavePromptResponse(ctx, 99999, "ghost")
+		if err == nil {
+			t.Fatal("want error for unknown id, got nil")
+		}
+	})
+}
+
 func TestGetPrompt(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
