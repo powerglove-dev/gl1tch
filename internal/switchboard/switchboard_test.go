@@ -310,6 +310,7 @@ func TestSignalBoard_FilterAll(t *testing.T) {
 	m3 = m3.AddFeedEntry("j1", "running job", switchboard.FeedRunning, nil)
 	m3 = m3.AddFeedEntry("j2", "done job", switchboard.FeedDone, nil)
 	m3 = m3.AddFeedEntry("j3", "failed job", switchboard.FeedFailed, nil)
+	m3 = m3.SetSignalBoardFilter("all") // default is now "running"; set explicitly for this test
 
 	sb := m3.BuildSignalBoard(12, 60)
 	rendered := strings.Join(sb, "\n")
@@ -346,24 +347,24 @@ func TestSignalBoard_HeaderContainsFilter(t *testing.T) {
 	m2, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m3 := m2.(switchboard.Model)
 
-	// Default state: "all" filter is active but not displayed (filter line hidden).
+	// Default state: "running" filter is active — filter line IS shown.
 	sb := m3.BuildSignalBoard(8, 60)
 	rendered := strings.Join(sb, "\n")
 	if !strings.Contains(rendered, "SIGNAL BOARD") {
 		t.Errorf("signal board missing 'SIGNAL BOARD' header: %s", rendered)
 	}
-	if strings.Contains(rendered, "filter:") {
-		t.Errorf("signal board should not show filter line when filter is 'all': %s", rendered)
+	if !strings.Contains(rendered, "filter:") {
+		t.Errorf("signal board should show filter line when filter is 'running': %s", rendered)
 	}
 
-	// After pressing f with signal board focused (cycle to "running"), the filter line should appear.
+	// After pressing f to cycle to "all", the filter line should be hidden.
 	m3f := m3.SetSignalBoardFocused(true)
 	m4, _ := m3f.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
 	m5 := m4.(switchboard.Model)
 	sb2 := m5.BuildSignalBoard(8, 60)
 	rendered2 := strings.Join(sb2, "\n")
-	if !strings.Contains(rendered2, "filter:") {
-		t.Errorf("signal board should show filter line after pressing f: %s", rendered2)
+	if strings.Contains(rendered2, "filter:") {
+		t.Errorf("signal board should not show filter line when filter is 'all': %s", rendered2)
 	}
 }
 
@@ -1095,3 +1096,123 @@ func TestPipelineScheduleInput_InvalidCronShowsError(t *testing.T) {
 	}
 }
 
+
+// ── Kill and Archive (signal-board-kill-and-archive) ──────────────────────────
+
+func TestSignalBoard_KillRunningEntry(t *testing.T) {
+	cancelled := false
+	_, cancel := context.WithCancel(context.Background())
+	wrappedCancel := context.CancelFunc(func() { cancelled = true; cancel() })
+
+	m := switchboard.New()
+	m = m.AddFeedEntry("job1", "pipeline: kill-me", switchboard.FeedRunning, nil)
+	m = m.AddActiveJobWithCancel("job1", wrappedCancel)
+	m = m.SetSignalBoardFocused(true)
+
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	result := m2.(switchboard.Model)
+
+	if !cancelled {
+		t.Error("expected cancel to be called on kill")
+	}
+	status, found := result.FeedEntryStatus("job1")
+	if !found {
+		t.Fatal("feed entry not found after kill")
+	}
+	if status != switchboard.FeedFailed {
+		t.Errorf("expected FeedFailed after kill, got %v", status)
+	}
+	if result.ActiveJobsCount() != 0 {
+		t.Errorf("expected activeJobs to be empty after kill, got %d", result.ActiveJobsCount())
+	}
+}
+
+func TestSignalBoard_KillNonRunningEntry_NoOp(t *testing.T) {
+	m := switchboard.New()
+	m = m.AddFeedEntry("job1", "done job", switchboard.FeedDone, nil)
+	m = m.SetSignalBoardFocused(true)
+	// Set filter to all so the done entry is visible
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	m3, _ := m2.(switchboard.Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	result := m3.(switchboard.Model)
+
+	status, found := result.FeedEntryStatus("job1")
+	if !found {
+		t.Fatal("feed entry not found")
+	}
+	if status != switchboard.FeedDone {
+		t.Errorf("expected status to remain FeedDone, got %v", status)
+	}
+}
+
+func TestSignalBoard_ArchiveEntry(t *testing.T) {
+	m := switchboard.New()
+	m = m.AddFeedEntry("job1", "pipeline: done", switchboard.FeedDone, nil)
+	m = m.SetSignalBoardFocused(true)
+	// Switch to "all" filter so the done entry is visible (default is "running")
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	m3, _ := m2.(switchboard.Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	result := m3.(switchboard.Model)
+
+	archived, found := result.FeedEntryArchived("job1")
+	if !found {
+		t.Fatal("feed entry not found after archive")
+	}
+	if !archived {
+		t.Error("expected entry to be archived")
+	}
+
+	// Entry should not appear in "all" filter
+	sb := result.BuildSignalBoard(12, 80)
+	rendered := strings.Join(sb, "\n")
+	if strings.Contains(rendered, "pipeline: done") {
+		t.Error("archived entry should not appear in 'all' filter view")
+	}
+}
+
+func TestSignalBoard_ArchivedFilter_ShowsArchivedEntries(t *testing.T) {
+	m := switchboard.New()
+	m = m.AddFeedEntry("job1", "pipeline: done", switchboard.FeedDone, nil)
+	m = m.SetSignalBoardFocused(true)
+	// Switch to "all" to see the entry, then archive it
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	m3, _ := m2.(switchboard.Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+
+	// Cycle to "archived" filter: all→done→failed→archived (3 presses from "all")
+	cur := m3.(switchboard.Model)
+	for i := 0; i < 3; i++ {
+		nx, _ := cur.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+		cur = nx.(switchboard.Model)
+	}
+
+	if cur.SignalBoardActiveFilter() != "archived" {
+		t.Errorf("expected filter 'archived', got %q", cur.SignalBoardActiveFilter())
+	}
+	sb := cur.BuildSignalBoard(12, 80)
+	rendered := strings.Join(sb, "\n")
+	if !strings.Contains(rendered, "pipeline: done") {
+		t.Errorf("expected archived entry to appear in archived filter:\n%s", rendered)
+	}
+}
+
+func TestSignalBoard_FilterCycleOrder(t *testing.T) {
+	m := switchboard.New()
+	m = m.SetSignalBoardFocused(true)
+
+	expected := []string{"all", "done", "failed", "archived", "running"}
+	cur := m
+	for _, want := range expected {
+		nx, _ := cur.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+		cur = nx.(switchboard.Model)
+		if got := cur.SignalBoardActiveFilter(); got != want {
+			t.Errorf("expected filter %q, got %q", want, got)
+		}
+	}
+}
+
+func TestSignalBoard_DefaultFilter_IsRunning(t *testing.T) {
+	m := switchboard.New()
+	if got := m.SignalBoardActiveFilter(); got != "running" {
+		t.Errorf("expected default filter 'running', got %q", got)
+	}
+}

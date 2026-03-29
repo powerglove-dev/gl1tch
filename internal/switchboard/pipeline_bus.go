@@ -251,6 +251,27 @@ func (m Model) handlePipelineBusEvent(msg pipelineBusEventMsg) Model {
 
 	// ── cron.job.* ────────────────────────────────────────────────────────
 
+	case topics.CronJobStarted:
+		var payload struct {
+			Job string `json:"job"`
+		}
+		if json.Unmarshal(msg.payload, &payload) == nil {
+			id := "cron-" + payload.Job
+			// Only add if not already present (avoid duplicate running entries).
+			for _, e := range m.feed {
+				if e.id == id {
+					return m
+				}
+			}
+			entry := feedEntry{
+				id:     id,
+				title:  "cron: " + payload.Job,
+				status: FeedRunning,
+				ts:     time.Now(),
+			}
+			m = m.prependFeedEntry(entry)
+		}
+
 	case topics.CronJobCompleted:
 		// The cron panel is rendered live from orcaicron.LoadConfig() so there
 		// is no in-memory state to update. A tick refresh is sufficient; the

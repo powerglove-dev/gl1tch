@@ -101,6 +101,7 @@ type feedEntry struct {
 	tmuxWindow string // fully-qualified target "session:orcai-<feedID>", empty if no window
 	logFile    string // /tmp/orcai-<feedID>.log
 	doneFile   string // non-empty for window-mode jobs; written by the shell when the command exits
+	archived   bool   // true when the user has dismissed this entry from the board
 }
 
 // ── Section types ─────────────────────────────────────────────────────────────
@@ -333,7 +334,7 @@ func NewWithStore(s *store.Store) Model {
 		},
 		agentSchedule:         schedTA,
 		pipelineScheduleInput: pipeSchedTA,
-		signalBoard:           SignalBoard{activeFilter: "all"},
+		signalBoard:           SignalBoard{activeFilter: "running"},
 		activeJobs:            make(map[string]*jobHandle),
 		launchCWD:             cwd,
 		agentCWD:              cwd,
@@ -464,6 +465,16 @@ func (m Model) AddActiveJob(id string) Model {
 	return m
 }
 
+// AddActiveJobWithCancel injects a job handle with a real cancel function —
+// used in kill tests to verify the cancel was called.
+func (m Model) AddActiveJobWithCancel(id string, cancel context.CancelFunc) Model {
+	if m.activeJobs == nil {
+		m.activeJobs = make(map[string]*jobHandle)
+	}
+	m.activeJobs[id] = &jobHandle{id: id, cancel: cancel}
+	return m
+}
+
 // MaxParallelJobs returns the parallel job cap constant — used in tests.
 func MaxParallelJobs() int { return maxParallelJobs }
 
@@ -483,6 +494,26 @@ func (m Model) FeedEntryStatus(id string) (FeedStatus, bool) {
 		}
 	}
 	return 0, false
+}
+
+// FeedEntryArchived returns whether the entry with the given id is archived, and
+// whether it was found. Used in tests.
+func (m Model) FeedEntryArchived(id string) (bool, bool) {
+	for _, e := range m.feed {
+		if e.id == id {
+			return e.archived, true
+		}
+	}
+	return false, false
+}
+
+// SignalBoardActiveFilter returns the current active filter — used in tests.
+func (m Model) SignalBoardActiveFilter() string { return m.signalBoard.activeFilter }
+
+// SetSignalBoardFilter sets the active filter directly — used in tests.
+func (m Model) SetSignalBoardFilter(f string) Model {
+	m.signalBoard.activeFilter = f
+	return m
 }
 
 // SignalBoardFocused returns the signal board focus state — used in tests.
@@ -1487,7 +1518,47 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m.handleEditPipeline()
 		}
 
+	case "x":
+		if m.signalBoardFocused {
+			filtered := fuzzyFeed(m.signalBoard.query, m.filteredFeed())
+			if m.signalBoard.selectedIdx < len(filtered) {
+				entry := filtered[m.signalBoard.selectedIdx]
+				if entry.status == FeedRunning {
+					if jh, ok := m.activeJobs[entry.id]; ok {
+						jh.cancel()
+						if jh.tmuxWindow != "" {
+							exec.Command("tmux", "kill-window", "-t", jh.tmuxWindow).Run() //nolint:errcheck
+						}
+						delete(m.activeJobs, entry.id)
+					}
+					m = m.setFeedStatus(entry.id, FeedFailed)
+				}
+			}
+			return m, nil
+		}
+
 	case "d":
+		if m.signalBoardFocused {
+			filtered := fuzzyFeed(m.signalBoard.query, m.filteredFeed())
+			if m.signalBoard.selectedIdx < len(filtered) {
+				entry := filtered[m.signalBoard.selectedIdx]
+				for i := range m.feed {
+					if m.feed[i].id == entry.id {
+						m.feed[i].archived = true
+						break
+					}
+				}
+				// Clamp cursor so it doesn't point at the now-hidden row.
+				newFiltered := fuzzyFeed(m.signalBoard.query, m.filteredFeed())
+				if m.signalBoard.selectedIdx >= len(newFiltered) && m.signalBoard.selectedIdx > 0 {
+					m.signalBoard.selectedIdx = len(newFiltered) - 1
+				}
+				if m.signalBoard.selectedIdx < 0 {
+					m.signalBoard.selectedIdx = 0
+				}
+			}
+			return m, nil
+		}
 		if m.launcher.focused && len(m.launcher.pipelines) > 0 {
 			m.confirmDelete = true
 			m.pendingDeletePipeline = m.launcher.pipelines[m.launcher.selected]
@@ -2266,14 +2337,27 @@ func (m *Model) clampFeedScroll() {
 }
 
 // filteredFeed returns feed entries matching the current signal board filter.
+// Archived entries are only shown when filter == "archived"; they are excluded
+// from all other views including "all".
 func (m Model) filteredFeed() []feedEntry {
 	filter := m.signalBoard.activeFilter
-	if filter == "all" || filter == "" {
-		return m.feed
+	if filter == "archived" {
+		var out []feedEntry
+		for _, e := range m.feed {
+			if e.archived {
+				out = append(out, e)
+			}
+		}
+		return out
 	}
 	var out []feedEntry
 	for _, e := range m.feed {
+		if e.archived {
+			continue
+		}
 		switch filter {
+		case "all", "":
+			out = append(out, e)
 		case "running":
 			if e.status == FeedRunning {
 				out = append(out, e)

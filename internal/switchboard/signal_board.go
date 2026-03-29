@@ -18,7 +18,7 @@ type SignalBoard struct {
 	scrollOffset int    // first visible row index into filtered+fuzzy results
 }
 
-var filterCycle = []string{"all", "running", "done", "failed"}
+var filterCycle = []string{"running", "all", "done", "failed", "archived"}
 
 // cycleFilter advances the activeFilter to the next in the cycle.
 func (sb *SignalBoard) cycleFilter() {
@@ -258,6 +258,12 @@ func (m Model) buildSignalBoard(height, width int) []string {
 				{Key: "/", Desc: "search"},
 				{Key: "f", Desc: "filter"},
 				{Key: "enter", Desc: "go to window"},
+			}
+			if len(filtered) > 0 {
+				sbHints = append(sbHints, panelrender.Hint{Key: "d", Desc: "archive"})
+				if m.signalBoard.selectedIdx < len(filtered) && filtered[m.signalBoard.selectedIdx].status == FeedRunning {
+					sbHints = append(sbHints, panelrender.Hint{Key: "x", Desc: "kill"})
+				}
 			}
 		}
 	}
