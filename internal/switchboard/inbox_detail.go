@@ -119,7 +119,25 @@ func buildRunContent(run store.Run, pal styles.ANSIPalette, markdownMode bool, i
 			}
 			sb.WriteString("  " + dim(connector) + badge + " " + fg(step.ID) + dur + model + "\n")
 
-		// Per-step output: last 5 lines beneath the badge
+		indent := "     " // align under step ID (connector + badge + space)
+
+		// Per-step prompt: up to 3 lines, dimmed.
+		if step.Prompt != "" {
+			promptLines := strings.Split(strings.TrimSpace(step.Prompt), "\n")
+			limit := 3
+			if len(promptLines) < limit {
+				limit = len(promptLines)
+			}
+			sb.WriteString(dim(indent+"prompt:") + "\n")
+			for _, pl := range promptLines[:limit] {
+				sb.WriteString(dim(indent+"  "+pl) + "\n")
+			}
+			if len(promptLines) > 3 {
+				sb.WriteString(dim(fmt.Sprintf("%s  … (%d more lines)", indent, len(promptLines)-3)) + "\n")
+			}
+		}
+
+		// Per-step output: last 5 lines beneath the badge.
 		if v, ok := step.Output["value"]; ok {
 			raw := fmt.Sprintf("%v", v)
 			if raw != "" {
@@ -128,7 +146,6 @@ func buildRunContent(run store.Run, pal styles.ANSIPalette, markdownMode bool, i
 				if len(outLines) > 5 {
 					start = len(outLines) - 5
 				}
-				indent := "     " // align under step ID (connector + badge + space)
 				for _, ol := range outLines[start:] {
 					sb.WriteString(dim(indent+ol) + "\n")
 				}

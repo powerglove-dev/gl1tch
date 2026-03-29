@@ -140,7 +140,7 @@ func TestBrainReadInjection_AbsentWhenFlagOff(t *testing.T) {
 func TestBrainWriteInsertion_NoteInserted(t *testing.T) {
 	s := openTestStore(t)
 	mgr := plugin.NewManager()
-	brainOutput := `I analyzed the data. <brain tags="test,analysis">Key insight: X is important</brain> Done.`
+	brainOutput := `I analyzed the data. <brain_notes>Key insight: X is important</brain_notes> Done.`
 	capturePlugin(t, mgr, "writer", brainOutput, nil)
 
 	p := &pipeline.Pipeline{
@@ -176,8 +176,8 @@ func TestBrainWriteInsertion_NoteInserted(t *testing.T) {
 	if note.Body != "Key insight: X is important" {
 		t.Errorf("Body: want %q, got %q", "Key insight: X is important", note.Body)
 	}
-	if note.Tags != "test,analysis" {
-		t.Errorf("Tags: want %q, got %q", "test,analysis", note.Tags)
+	if note.Tags != "" {
+		t.Errorf("Tags: want empty, got %q", note.Tags)
 	}
 }
 
@@ -188,7 +188,7 @@ func TestBrainFeedbackLoop(t *testing.T) {
 	mgr := plugin.NewManager()
 
 	// Step A: outputs a brain note.
-	writerOutput := `Analysis complete. <brain tags="loop">Loop insight from step A</brain>`
+	writerOutput := `Analysis complete. <brain_notes>Loop insight from step A</brain_notes>`
 	if err := mgr.Register(&plugin.StubPlugin{
 		PluginName: "writer",
 		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
@@ -364,7 +364,7 @@ func TestBrainWriteInsertion_MalformedBrainBlock(t *testing.T) {
 func TestBrainWriteInsertion_NoTagsAttribute(t *testing.T) {
 	s := openTestStore(t)
 	mgr := plugin.NewManager()
-	capturePlugin(t, mgr, "emit-notags", "<brain>plain note with no tags</brain>", nil)
+	capturePlugin(t, mgr, "emit-notags", "<brain_notes>plain note with no tags</brain_notes>", nil)
 
 	p := &pipeline.Pipeline{
 		Name:       "no-tags-brain-block",
@@ -412,7 +412,7 @@ func TestBrainWriteInsertion_DAGPath(t *testing.T) {
 	if err := mgr.Register(&plugin.StubPlugin{
 		PluginName: "dag-writer",
 		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
-			_, err := w.Write([]byte(`<brain tags="dag">insight from dag</brain>`))
+			_, err := w.Write([]byte(`<brain_notes>insight from dag</brain_notes>`))
 			return err
 		},
 	}); err != nil {
@@ -451,8 +451,8 @@ func TestBrainWriteInsertion_DAGPath(t *testing.T) {
 	if note.Body != "insight from dag" {
 		t.Errorf("Body: want %q, got %q", "insight from dag", note.Body)
 	}
-	if note.Tags != "dag" {
-		t.Errorf("Tags: want %q, got %q", "dag", note.Tags)
+	if note.Tags != "" {
+		t.Errorf("Tags: want empty, got %q", note.Tags)
 	}
 }
 
@@ -472,7 +472,7 @@ func TestBrainWriteInsertion_NoStoreConfigured(t *testing.T) {
 	_ = mgr.Register(&plugin.StubPlugin{
 		PluginName: "emit-brain",
 		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
-			_, err := w.Write([]byte(`<brain tags="t">note</brain>`))
+			_, err := w.Write([]byte(`<brain_notes>note</brain_notes>`))
 			return err
 		},
 	})

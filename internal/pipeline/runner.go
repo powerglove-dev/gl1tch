@@ -78,6 +78,7 @@ type stepResult struct {
 	skipped    bool      // true when the step was skipped due to a dependency failure
 	startedAt  time.Time // when the step goroutine started executing
 	durationMs int64     // execution duration in milliseconds
+	prompt     string    // resolved (pre-brain-injection) prompt sent to the plugin
 }
 
 // Run executes a pipeline against the given plugin manager.
@@ -251,6 +252,10 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 				_ = cfg.publisher.Publish(ctx, topics.StepStarted, payload)
 			}
 
+			// Resolve the configured prompt for inbox display (pre-brain-injection).
+			legacySnap := ec.Snapshot()
+			rawPrompt := Interpolate(step.Prompt+step.Input, legacySnap)
+
 			stepStart := time.Now()
 			output, err := executePluginStep(ctx, step, ec, mgr, lastOutput, p)
 			stepDurationMs := time.Since(stepStart).Milliseconds()
@@ -272,6 +277,7 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 						ID:         step.ID,
 						Status:     "failed",
 						Model:      step.Model,
+						Prompt:     rawPrompt,
 						StartedAt:  stepStart.Format(time.RFC3339),
 						FinishedAt: time.Now().Format(time.RFC3339),
 						DurationMs: stepDurationMs,
@@ -307,6 +313,7 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 					ID:         step.ID,
 					Status:     "done",
 					Model:      step.Model,
+					Prompt:     rawPrompt,
 					StartedAt:  stepStart.Format(time.RFC3339),
 					FinishedAt: time.Now().Format(time.RFC3339),
 					DurationMs: stepDurationMs,
@@ -496,6 +503,9 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 				args["item"] = itemVal
 			}
 
+			// Resolve the configured prompt for inbox display (pre-brain-injection).
+			rawPrompt := Interpolate(step.Prompt+step.Input, snap)
+
 			stepStart := time.Now()
 			out, execErr := dispatchStep(ctx, step, args, snap, ec, mgr, cfg.runID, cfg.pipeName, cfg.publisher, p)
 			stepDurationMs := time.Since(stepStart).Milliseconds()
@@ -510,7 +520,7 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 				}
 			}
 
-			completedCh <- stepResult{id: id, output: out, err: execErr, startedAt: stepStart, durationMs: stepDurationMs}
+			completedCh <- stepResult{id: id, output: out, err: execErr, startedAt: stepStart, durationMs: stepDurationMs, prompt: rawPrompt}
 		}()
 	}
 
@@ -579,6 +589,7 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 						ID:         res.id,
 						Status:     "failed",
 						Model:      step.Model,
+						Prompt:     res.prompt,
 						StartedAt:  res.startedAt.Format(time.RFC3339),
 						FinishedAt: time.Now().Format(time.RFC3339),
 						DurationMs: res.durationMs,
@@ -640,6 +651,7 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 						ID:         res.id,
 						Status:     "done",
 						Model:      step.Model,
+						Prompt:     res.prompt,
 						StartedAt:  res.startedAt.Format(time.RFC3339),
 						FinishedAt: time.Now().Format(time.RFC3339),
 						DurationMs: res.durationMs,
@@ -905,6 +917,14 @@ func dispatchStep(ctx context.Context, step *Step, args map[string]any, snap map
 done:
 	stepDurationMs := time.Since(stepStart).Milliseconds()
 	cleanupErr := executor.Cleanup(ctx)
+	// Parse <brain_notes> from any output (including partial on failure).
+	// Best-effort: called regardless of step success/failure.
+	if stepUseBrain(p, step) || stepWriteBrain(p, step) {
+		if valueStr, ok := extractOutputValue(out); ok && valueStr != "" {
+			parseBrainBlock(ctx, valueStr, step.ID, ec)
+		}
+	}
+
 	if execErr != nil {
 		fmt.Printf(StepStatusLineFormat+"\n", step.ID, "failed")
 		// Publish step.failed.
@@ -934,13 +954,6 @@ done:
 		return nil, cleanupErr
 	}
 	fmt.Printf(StepStatusLineFormat+"\n", step.ID, "done")
-
-	// Brain write: parse <brain> block from output and persist to store.
-	if stepWriteBrain(p, step) {
-		if valueStr, ok := extractOutputValue(out); ok && valueStr != "" {
-			parseBrainBlock(ctx, valueStr, step.ID, ec)
-		}
-	}
 
 	// Publish step.done.
 	if payload, merr := json.Marshal(map[string]any{
@@ -1053,15 +1066,14 @@ func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mg
 	}
 
 	var buf bytes.Buffer
-	if err := pl.Execute(ctx, promptOrInput, stepVars, &buf); err != nil {
-		return "", err
-	}
+	execErr := pl.Execute(ctx, promptOrInput, stepVars, &buf)
 	output := buf.String()
-	// Brain write: parse <brain> block from output and persist to store.
-	if stepWriteBrain(p, step) {
+	// Parse <brain_notes> from output whenever the step is brain-aware,
+	// even on failure (best-effort from any partial output).
+	if stepUseBrain(p, step) || stepWriteBrain(p, step) {
 		parseBrainBlock(ctx, output, step.ID, ec)
 	}
-	return output, nil
+	return output, execErr
 }
 
 // extractOutputValue extracts the "value" string from a step output map.
