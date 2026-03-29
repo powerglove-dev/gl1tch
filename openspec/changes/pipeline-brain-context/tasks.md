@@ -10,11 +10,11 @@
 
 ## 2. Pipeline: BrainInjector Interface and Default Implementation
 
-- [ ] 2.1 Create `internal/pipeline/brain.go` defining the `BrainInjector` interface with `ReadContext(ctx context.Context, runID int64) (string, error)`
-- [ ] 2.2 Implement `StoreBrainInjector` struct that holds a `*store.Store` reference
-- [ ] 2.3 Implement `StoreBrainInjector.ReadContext`: fetch schema summary (hardcoded), call `RecentBrainNotes` capped at 10, truncate each note body at 500 chars, assemble preamble with `## Brain Notes (this run)` section header
-- [ ] 2.4 Write unit tests for `StoreBrainInjector.ReadContext` covering: no notes (schema-only preamble), with notes (header present), 15-note cap to 10, 800-char body truncation with marker
-- [ ] 2.5 Add `WithBrainInjector(BrainInjector) RunOption` to the pipeline run options in `runner.go`
+- [x] 2.1 Create `internal/pipeline/brain.go` defining the `BrainInjector` interface with `ReadContext(ctx context.Context, runID int64) (string, error)`
+- [x] 2.2 Implement `StoreBrainInjector` struct that holds a `*store.Store` reference
+- [x] 2.3 Implement `StoreBrainInjector.ReadContext`: fetch schema summary (hardcoded), call `RecentBrainNotes` capped at 10, truncate each note body at 500 chars, assemble preamble with `## Brain Notes (this run)` section header
+- [x] 2.4 Write unit tests for `StoreBrainInjector.ReadContext` covering: no notes (schema-only preamble), with notes (header present), 15-note cap to 10, 800-char body truncation with marker
+- [x] 2.5 Add `WithBrainInjector(BrainInjector) RunOption` to the pipeline run options in `runner.go`
 
 ## 3. Pipeline: Struct Extensions for use_brain and write_brain
 
@@ -26,31 +26,31 @@
 
 ## 4. ExecutionContext: Brain Injector Integration
 
-- [ ] 4.1 Add `injector BrainInjector` and `runID int64` fields to `ExecutionContext` struct in `context.go`
-- [ ] 4.2 Add `SetBrainInjector(injector BrainInjector, runID int64)` method on `ExecutionContext`
-- [ ] 4.3 Store the `BrainInjector` on `runConfig` (parallel to how `WithRunStore` stores a `*store.Store`) so the option is available at `ec` creation time; transfer it to `ec` via `SetBrainInjector` when `ec` is first constructed inside `runLegacy`/`runDAG` — the `RunOption` cannot call `ec.SetBrainInjector` directly since `ec` does not exist yet at option-application time
-- [ ] 4.4 Add `BrainInjector() BrainInjector` accessor on `ExecutionContext`
-- [ ] 4.5 Write unit tests for tri-state resolution: pipeline true + step nil = true, pipeline true + step false = false, pipeline false + step true = true
+- [x] 4.1 Add `injector BrainInjector` and `runID int64` fields to `ExecutionContext` struct in `context.go`
+- [x] 4.2 Add `SetBrainInjector(injector BrainInjector, runID int64)` method on `ExecutionContext`
+- [x] 4.3 Store the `BrainInjector` on `runConfig` (parallel to how `WithRunStore` stores a `*store.Store`) so the option is available at `ec` creation time; transfer it to `ec` via `SetBrainInjector` when `ec` is first constructed inside `runLegacy`/`runDAG` — the `RunOption` cannot call `ec.SetBrainInjector` directly since `ec` does not exist yet at option-application time
+- [x] 4.4 Add `BrainInjector() BrainInjector` accessor on `ExecutionContext`
+- [x] 4.5 Write unit tests for tri-state resolution: pipeline true + step nil = true, pipeline true + step false = false, pipeline false + step true = true
 
 ## 5. Runner: Brain Pre-Context Injection (Read Path)
 
-- [ ] 5.1 In `runner.go` prompt-building path, after interpolating the prompt string, call `stepUseBrain` to check if injection is active
-- [ ] 5.2 If active and `ec.BrainInjector() != nil`, call `ReadContext` and prepend preamble to the prompt string
-- [ ] 5.3 If `BrainInjector` is nil but `use_brain` is true on a step, emit a debug log and continue without injection (silent no-op)
-- [ ] 5.4 If `ReadContext` returns an error, log at debug level and continue with original prompt
-- [ ] 5.5 Apply the same brain read injection to the **legacy runner path** (`executePluginStep` in `runLegacy`): after interpolating `promptOrInput`, check `stepUseBrain` and prepend preamble if active — the DAG path injection in `resolveExecutor` alone will not cover legacy pipelines
-- [ ] 5.6 Write integration tests: preamble present when injector provided + use_brain, preamble absent when injector nil, preamble absent when use_brain false; include one test using a legacy-format pipeline (no `needs` fields) to verify the legacy path injects correctly
+- [x] 5.1 In `runner.go` prompt-building path, after interpolating the prompt string, call `stepUseBrain` to check if injection is active
+- [x] 5.2 If active and `ec.BrainInjector() != nil`, call `ReadContext` and prepend preamble to the prompt string
+- [x] 5.3 If `BrainInjector` is nil but `use_brain` is true on a step, emit a debug log and continue without injection (silent no-op)
+- [x] 5.4 If `ReadContext` returns an error, log at debug level and continue with original prompt
+- [x] 5.5 Apply the same brain read injection to the **legacy runner path** (`executePluginStep` in `runLegacy`): after interpolating `promptOrInput`, check `stepUseBrain` and prepend preamble if active — the DAG path injection in `resolveExecutor` alone will not cover legacy pipelines
+- [x] 5.6 Write integration tests: preamble present when injector provided + use_brain, preamble absent when injector nil, preamble absent when use_brain false; include one test using a legacy-format pipeline (no `needs` fields) to verify the legacy path injects correctly
 
 ## 6. Runner: Brain Write Injection and Response Parsing
 
-- [ ] 6.1 After the read preamble (if any), check `stepWriteBrain`; if active, append the write-context instruction block to the prompt
-- [ ] 6.2 After step execution completes (output captured), check `stepWriteBrain`; if active, scan output string for `<brain ...>...</brain>` pattern using a simple regex
-- [ ] 6.3 If a brain block is found, extract `tags` attribute (empty string if absent) and body text; call `store.InsertBrainNote` via the store attached to `ExecutionContext`
-- [ ] 6.4 If brain block is found but XML is malformed, log debug message; do not fail the step
-- [ ] 6.5 If no brain block is found on a write_brain step, log a debug message; do not fail the step
-- [ ] 6.6 Write unit tests for brain block parsing: valid with tags, valid without tags, malformed (unclosed), no block present
-- [ ] 6.7 Apply the same write injection and `<brain>` response parsing to the **legacy runner path** (`executePluginStep` / `runLegacy`) — same gap as the read path; both paths must be updated
-- [ ] 6.8 Document the known limitation that `<brain>` XML blocks remain visible in the step's output string (as surfaced in the feed/inbox UI); add a TODO comment in the runner code noting that a future `strip_brain_output: true` pipeline flag could strip the block from user-visible output before it is published
+- [x] 6.1 After the read preamble (if any), check `stepWriteBrain`; if active, append the write-context instruction block to the prompt
+- [x] 6.2 After step execution completes (output captured), check `stepWriteBrain`; if active, scan output string for `<brain ...>...</brain>` pattern using a simple regex
+- [x] 6.3 If a brain block is found, extract `tags` attribute (empty string if absent) and body text; call `store.InsertBrainNote` via the store attached to `ExecutionContext`
+- [x] 6.4 If brain block is found but XML is malformed, log debug message; do not fail the step
+- [x] 6.5 If no brain block is found on a write_brain step, log a debug message; do not fail the step
+- [x] 6.6 Write unit tests for brain block parsing: valid with tags, valid without tags, malformed (unclosed), no block present
+- [x] 6.7 Apply the same write injection and `<brain>` response parsing to the **legacy runner path** (`executePluginStep` / `runLegacy`) — same gap as the read path; both paths must be updated
+- [x] 6.8 Document the known limitation that `<brain>` XML blocks remain visible in the step's output string (as surfaced in the feed/inbox UI); add a TODO comment in the runner code noting that a future `strip_brain_output: true` pipeline flag could strip the block from user-visible output before it is published
 
 ## 7. Remove db Step Type
 
@@ -62,10 +62,10 @@
 
 ## 8. End-to-End Integration Test
 
-- [ ] 8.1 Write an integration test with a mock plugin that records its input; assert the brain preamble appears in the prompt when `use_brain: true` and a `StoreBrainInjector` is provided
-- [ ] 8.2 Write an integration test where step A has `write_brain: true` and emits `<brain tags="t">insight</brain>` in output; assert `brain_notes` row is inserted with correct fields
-- [ ] 8.3 Write an integration test for the feedback loop: step A writes a brain note; step B (later in same pipeline, `use_brain: true`) receives that note in its preamble
-- [ ] 8.4 Write an integration test asserting that step B in a different pipeline run does NOT receive step A's notes (run isolation)
+- [x] 8.1 Write an integration test with a mock plugin that records its input; assert the brain preamble appears in the prompt when `use_brain: true` and a `StoreBrainInjector` is provided
+- [x] 8.2 Write an integration test where step A has `write_brain: true` and emits `<brain tags="t">insight</brain>` in output; assert `brain_notes` row is inserted with correct fields
+- [x] 8.3 Write an integration test for the feedback loop: step A writes a brain note; step B (later in same pipeline, `use_brain: true`) receives that note in its preamble
+- [x] 8.4 Write an integration test asserting that step B in a different pipeline run does NOT receive step A's notes (run isolation)
 
 ## 9. Pipeline YAML Validation and Documentation
 

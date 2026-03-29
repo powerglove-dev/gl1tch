@@ -252,7 +252,7 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 			}
 
 			stepStart := time.Now()
-			output, err := executePluginStep(ctx, step, ec, mgr, lastOutput)
+			output, err := executePluginStep(ctx, step, ec, mgr, lastOutput, p)
 			stepDurationMs := time.Since(stepStart).Milliseconds()
 
 			if err != nil {
@@ -490,7 +490,7 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 			}
 
 			stepStart := time.Now()
-			out, execErr := dispatchStep(ctx, step, args, snap, ec, mgr, cfg.runID, cfg.pipeName, cfg.publisher)
+			out, execErr := dispatchStep(ctx, step, args, snap, ec, mgr, cfg.runID, cfg.pipeName, cfg.publisher, p)
 			stepDurationMs := time.Since(stepStart).Milliseconds()
 
 			if execErr == nil {
@@ -808,8 +808,8 @@ func interpolateArgs(args map[string]any, vars map[string]any) map[string]any {
 
 // dispatchStep determines the executor for a step and runs it (with retries).
 // runID and pipeName are used to populate event payloads; pub receives the events.
-func dispatchStep(ctx context.Context, step *Step, args map[string]any, snap map[string]any, ec *ExecutionContext, mgr *plugin.Manager, runID int64, pipeName string, pub EventPublisher) (map[string]any, error) {
-	executor, err := resolveExecutor(step, args, snap, ec, mgr)
+func dispatchStep(ctx context.Context, step *Step, args map[string]any, snap map[string]any, ec *ExecutionContext, mgr *plugin.Manager, runID int64, pipeName string, pub EventPublisher, p *Pipeline) (map[string]any, error) {
+	executor, err := resolveExecutor(ctx, step, args, snap, ec, mgr, p)
 	if err != nil {
 		return nil, err
 	}
@@ -898,6 +898,13 @@ done:
 	}
 	fmt.Printf(StepStatusLineFormat+"\n", step.ID, "done")
 
+	// Brain write: parse <brain> block from output and persist to store.
+	if stepWriteBrain(p, step) {
+		if valueStr, ok := extractOutputValue(out); ok && valueStr != "" {
+			parseBrainBlock(ctx, valueStr, step.ID, ec)
+		}
+	}
+
 	// Publish step.done.
 	if payload, merr := json.Marshal(map[string]any{
 		"run_id":      runID,
@@ -921,7 +928,7 @@ done:
 }
 
 // resolveExecutor builds the appropriate StepExecutor for a step.
-func resolveExecutor(step *Step, args map[string]any, snap map[string]any, ec *ExecutionContext, mgr *plugin.Manager) (StepExecutor, error) {
+func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap map[string]any, ec *ExecutionContext, mgr *plugin.Manager, p *Pipeline) (StepExecutor, error) {
 	// Determine the type/executor name: Executor takes precedence over Type, then Plugin.
 	typeName := step.Executor
 	if typeName == "" {
@@ -956,6 +963,24 @@ func resolveExecutor(step *Step, args map[string]any, snap map[string]any, ec *E
 	}
 	promptOrInput := Interpolate(raw, snap)
 
+	// Brain read injection: prepend preamble if use_brain is active.
+	if stepUseBrain(p, step) {
+		if inj := ec.GetBrainInjector(); inj != nil {
+			if preamble, err := inj.ReadContext(ctx, ec.RunID()); err == nil && preamble != "" {
+				promptOrInput = preamble + "\n\n" + promptOrInput
+			} else if err != nil {
+				fmt.Fprintf(os.Stderr, "[debug] brain read context error for step %q: %v\n", step.ID, err)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "[debug] use_brain active for step %q but no BrainInjector configured\n", step.ID)
+		}
+	}
+
+	// Brain write injection: append write instruction if write_brain is active.
+	if stepWriteBrain(p, step) {
+		promptOrInput = promptOrInput + brainWriteInstruction
+	}
+
 	stepVars := ec.FlatStrings()
 	stepVars["model"] = step.Model
 	for k, v := range step.Vars {
@@ -979,7 +1004,7 @@ func (b *builtinExecutor) Cleanup(_ context.Context) error { return nil }
 
 // executePluginStep runs a single plugin step and returns its string output.
 // This is used by the legacy runner only.
-func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mgr *plugin.Manager, defaultInput string) (string, error) {
+func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mgr *plugin.Manager, defaultInput string, p *Pipeline) (string, error) {
 	pluginName := step.Executor
 	if pluginName == "" {
 		pluginName = step.Plugin
@@ -998,6 +1023,24 @@ func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mg
 	}
 	promptOrInput := Interpolate(raw, snap)
 
+	// Brain read injection: prepend preamble if use_brain is active.
+	if stepUseBrain(p, step) {
+		if inj := ec.GetBrainInjector(); inj != nil {
+			if preamble, err := inj.ReadContext(ctx, ec.RunID()); err == nil && preamble != "" {
+				promptOrInput = preamble + "\n\n" + promptOrInput
+			} else if err != nil {
+				fmt.Fprintf(os.Stderr, "[debug] brain read context error for step %q: %v\n", step.ID, err)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "[debug] use_brain active for step %q but no BrainInjector configured\n", step.ID)
+		}
+	}
+
+	// Brain write injection: append write instruction if write_brain is active.
+	if stepWriteBrain(p, step) {
+		promptOrInput = promptOrInput + brainWriteInstruction
+	}
+
 	stepVars := ec.FlatStrings()
 	stepVars["model"] = step.Model
 	for k, v := range step.Vars {
@@ -1008,7 +1051,25 @@ func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mg
 	if err := pl.Execute(ctx, promptOrInput, stepVars, &buf); err != nil {
 		return "", err
 	}
-	return buf.String(), nil
+	output := buf.String()
+	// Brain write: parse <brain> block from output and persist to store.
+	if stepWriteBrain(p, step) {
+		parseBrainBlock(ctx, output, step.ID, ec)
+	}
+	return output, nil
+}
+
+// extractOutputValue extracts the "value" string from a step output map.
+func extractOutputValue(out map[string]any) (string, bool) {
+	if out == nil {
+		return "", false
+	}
+	if v, ok := out["value"]; ok {
+		if s, ok := v.(string); ok {
+			return s, true
+		}
+	}
+	return "", false
 }
 
 // filterOut removes a single value from a slice (used by legacy runner).
