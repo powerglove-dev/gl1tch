@@ -191,6 +191,8 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 	if cfg.injector != nil {
 		ec.SetBrainInjector(cfg.injector, cfg.runID)
 	}
+	// Note: if use_brain is active on a step but no BrainInjector was provided,
+	// the runner will log at debug level and proceed without injection (spec: silent no-op).
 
 	// Expose the process working directory so pipeline steps can use {{cwd}}.
 	if cwd, err := os.Getwd(); err == nil {
@@ -365,6 +367,8 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 	if cfg.injector != nil {
 		ec.SetBrainInjector(cfg.injector, cfg.runID)
 	}
+	// Note: if use_brain is active on a step but no BrainInjector was provided,
+	// the runner will log at debug level and proceed without injection (spec: silent no-op).
 	// Expose the process working directory so pipeline steps can use {{cwd}}.
 	if cwd, err := os.Getwd(); err == nil {
 		ec.Set("cwd", cwd)

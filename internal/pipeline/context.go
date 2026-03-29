@@ -44,16 +44,26 @@ func (c *ExecutionContext) DB() *store.Store { return c.db }
 // context. Called by the runner after ec creation when a brain injector is
 // configured for the run.
 func (c *ExecutionContext) SetBrainInjector(injector BrainInjector, runID int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.injector = injector
 	c.runID = runID
 }
 
 // GetBrainInjector returns the attached BrainInjector, or nil if none was set.
-func (c *ExecutionContext) GetBrainInjector() BrainInjector { return c.injector }
+func (c *ExecutionContext) GetBrainInjector() BrainInjector {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.injector
+}
 
 // RunID returns the store run ID associated with this execution context.
 // Returns 0 if the store was not configured or the run record was not created.
-func (c *ExecutionContext) RunID() int64 { return c.runID }
+func (c *ExecutionContext) RunID() int64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.runID
+}
 
 // Get retrieves the value at the dot-separated path. Returns (nil, false) if
 // any segment of the path is missing or not a map.
