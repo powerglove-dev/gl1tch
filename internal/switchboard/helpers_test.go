@@ -39,7 +39,7 @@ func TestRunMetadataJSON(t *testing.T) {
 		{`path with "quotes"`, "", false, map[string]string{"pipeline_file": `path with "quotes"`}},
 	}
 	for _, tc := range cases {
-		got := runMetadataJSON(tc.pipelineFile, tc.cwd)
+		got := runMetadataJSON(tc.pipelineFile, tc.cwd, "")
 		if tc.wantEmpty {
 			if got != "" {
 				t.Errorf("runMetadataJSON(%q, %q) = %q, want empty", tc.pipelineFile, tc.cwd, got)

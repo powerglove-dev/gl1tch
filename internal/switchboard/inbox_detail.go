@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/wrap"
 
 	"github.com/adam-stokes/orcai/internal/panelrender"
 	"github.com/adam-stokes/orcai/internal/store"
@@ -18,6 +19,7 @@ import (
 type runMeta struct {
 	PipelineFile string `json:"pipeline_file"`
 	CWD          string `json:"cwd"`
+	Model        string `json:"model"`
 }
 
 func parseRunMetadata(raw string) runMeta {
@@ -75,13 +77,48 @@ func buildRunContent(run store.Run, pal styles.ANSIPalette, markdownMode bool, i
 	}
 	sb.WriteString("\n")
 
-	// Metadata: pipeline file and cwd
+	// Metadata: pipeline file, cwd, model
 	meta := parseRunMetadata(run.Metadata)
 	if meta.PipelineFile != "" {
 		sb.WriteString(dim("pipeline: ") + fg(collapseTilde(meta.PipelineFile)) + "\n")
 	}
 	if meta.CWD != "" {
 		sb.WriteString(dim("cwd:      ") + fg(collapseTilde(meta.CWD)) + "\n")
+	}
+	if meta.Model != "" {
+		sb.WriteString(dim("model:    ") + fg(meta.Model) + "\n")
+	}
+
+	// Steps section (if any recorded)
+	if len(run.Steps) > 0 {
+		sb.WriteString(dim(strings.Repeat("─", 40)) + "\n")
+		sb.WriteString(dim("steps:") + "\n")
+		lastIdx := len(run.Steps) - 1
+		for i, step := range run.Steps {
+			connector := "├ "
+			if i == lastIdx {
+				connector = "└ "
+			}
+			var badge string
+			switch step.Status {
+			case "done":
+				badge = pal.Success + "✓" + aRst
+			case "failed":
+				badge = pal.Error + "✗" + aRst
+			default:
+				badge = pal.Warn + "·" + aRst
+			}
+			dur := ""
+			if step.DurationMs > 0 {
+				d := time.Duration(step.DurationMs) * time.Millisecond
+				dur = "  " + dim(d.Round(time.Second).String())
+			}
+			model := ""
+			if step.Model != "" {
+				model = "  " + dim(step.Model)
+			}
+			sb.WriteString("  " + dim(connector) + badge + " " + fg(step.ID) + dur + model + "\n")
+		}
 	}
 
 	// Separator
@@ -99,6 +136,8 @@ func buildRunContent(run store.Run, pal styles.ANSIPalette, markdownMode bool, i
 					stdout = rendered
 				}
 			}
+		} else {
+			stdout = wrapContent(run.Stdout, innerW)
 		}
 		sb.WriteString(stdout)
 		if !strings.HasSuffix(stdout, "\n") {
@@ -112,7 +151,7 @@ func buildRunContent(run store.Run, pal styles.ANSIPalette, markdownMode bool, i
 	if run.Stderr != "" {
 		sb.WriteString(dim(strings.Repeat("─", 40)) + "\n")
 		sb.WriteString(bad("stderr:") + "\n")
-		sb.WriteString(run.Stderr)
+		sb.WriteString(wrapContent(run.Stderr, innerW))
 		if !strings.HasSuffix(run.Stderr, "\n") {
 			sb.WriteString("\n")
 		}
@@ -216,16 +255,42 @@ func (m Model) viewInboxDetail(w, h int, markdownMode bool) string {
 	} else {
 		dispatchHint = panelrender.Hint{Key: "r", Desc: "dispatch"}
 	}
-	hints := panelrender.HintBar([]panelrender.Hint{
+	markDesc := "mark"
+	switch m.inboxMarkMode {
+	case MarkModeActive:
+		markDesc = "pause"
+	case MarkModePaused:
+		markDesc = "resume"
+	}
+	hintList := []panelrender.Hint{
 		{Key: "j/k", Desc: "scroll"},
 		{Key: "n/p", Desc: "next/prev"},
-		{Key: "m", Desc: "mark"},
-		dispatchHint,
-		{Key: "M", Desc: "md"},
-		{Key: "q", Desc: "close"},
-	}, boxW-2, pal)
+		{Key: "m", Desc: markDesc},
+	}
+	if m.inboxMarkMode != MarkModeOff {
+		hintList = append(hintList, panelrender.Hint{Key: "A", Desc: "mark all"})
+		hintList = append(hintList, panelrender.Hint{Key: "D", Desc: "clear"})
+	}
+	hintList = append(hintList, dispatchHint, panelrender.Hint{Key: "M", Desc: "md"}, panelrender.Hint{Key: "q", Desc: "close"})
+	hints := panelrender.HintBar(hintList, boxW-2, pal)
 	rows = append(rows, boxRow(hints, boxW, pal.Border))
 	rows = append(rows, boxBot(boxW, pal.Border))
 
 	return strings.Join(rows, "\n")
+}
+
+// wrapContent wraps each line in text to maxWidth, preserving existing newlines.
+// ANSI sequences are stripped before wrapping so escape codes don't count toward width.
+func wrapContent(text string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return text
+	}
+	var out strings.Builder
+	for i, line := range strings.Split(text, "\n") {
+		if i > 0 {
+			out.WriteByte('\n')
+		}
+		out.WriteString(wrap.String(stripANSI(line), maxWidth))
+	}
+	return out.String()
 }

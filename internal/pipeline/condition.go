@@ -26,6 +26,8 @@ func EvalCondition(expr string, vars map[string]any) bool {
 	switch {
 	case expr == "always":
 		return true
+	case expr == "not_empty":
+		return strings.TrimSpace(output) != ""
 	case strings.HasPrefix(expr, "contains:"):
 		sub := strings.TrimPrefix(expr, "contains:")
 		return strings.Contains(output, sub)

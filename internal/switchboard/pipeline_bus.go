@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -275,11 +276,18 @@ func (m Model) handlePipelineBusEvent(msg pipelineBusEventMsg) Model {
 
 	case topics.StepDone:
 		var payload struct {
-			RunID int64  `json:"run_id"`
-			Step  string `json:"step"`
+			RunID  int64  `json:"run_id"`
+			Step   string `json:"step"`
+			Output struct {
+				Value string `json:"value"`
+			} `json:"output"`
 		}
 		if json.Unmarshal(msg.payload, &payload) == nil {
-			m = m.updateFeedEntryStep(fmt.Sprintf("run-%d", payload.RunID), payload.Step, "done")
+			entryID := fmt.Sprintf("run-%d", payload.RunID)
+			m = m.updateFeedEntryStep(entryID, payload.Step, "done")
+			if lines := splitStepOutput(payload.Output.Value); len(lines) > 0 {
+				m = m.appendStepLines(entryID, payload.Step, lines)
+			}
 		}
 
 	case topics.StepFailed:
@@ -421,4 +429,38 @@ func (m Model) upsertCronFeedEntry(job string, exitStatus int) Model {
 		ts:     time.Now(),
 	}
 	return m.prependFeedEntry(entry)
+}
+
+// splitStepOutput splits a step output value into trimmed non-empty lines,
+// capping at the last maxStepOutputLines lines.
+func splitStepOutput(value string) []string {
+	const maxStepOutputLines = 5
+	raw := strings.Split(value, "\n")
+	var lines []string
+	for _, l := range raw {
+		if t := strings.TrimSpace(l); t != "" {
+			lines = append(lines, t)
+		}
+	}
+	if len(lines) > maxStepOutputLines {
+		lines = lines[len(lines)-maxStepOutputLines:]
+	}
+	return lines
+}
+
+// appendStepLines stores output lines into the matching step within the feed
+// entry identified by entryID. If the step is not found, the call is a no-op.
+func (m Model) appendStepLines(entryID, stepID string, lines []string) Model {
+	for i := range m.feed {
+		if m.feed[i].id == entryID {
+			for j := range m.feed[i].steps {
+				if m.feed[i].steps[j].id == stepID {
+					m.feed[i].steps[j].lines = append(m.feed[i].steps[j].lines, lines...)
+					return m
+				}
+			}
+			return m
+		}
+	}
+	return m
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -751,16 +752,17 @@ func TestStepBadges_GlyphsPresent(t *testing.T) {
 	for _, tc := range []struct {
 		id     string
 		status string
-		glyph  string
 	}{
-		{"step-pending", "pending", "·"},
-		{"step-running", "running", "»"},
-		{"step-done", "done", "°"},
-		{"step-failed", "failed", "×"},
+		{"step-pending", "pending"},
+		{"step-running", "running"},
+		{"step-done", "done"},
+		{"step-failed", "failed"},
 	} {
 		m3x, _ := m3.Update(switchboard.StepStatusMsg{FeedID: "job1", StepID: tc.id, Status: tc.status})
 		m3 = m3x.(switchboard.Model)
 	}
+	// Done steps with no output are suppressed; add output so the done glyph appears.
+	m3 = m3.AddStepLines("job1", "step-done", []string{"ok"})
 	view := m3.View()
 	for _, glyph := range []string{"·", "»", "°", "×"} {
 		if !strings.Contains(view, glyph) {
@@ -776,7 +778,8 @@ func TestStepBadges_SingleRowFewSteps(t *testing.T) {
 	m3 = m3.AddFeedEntry("job1", "pipeline: test", switchboard.FeedRunning, nil)
 	for i := range 3 {
 		id := fmt.Sprintf("step-%d", i)
-		m3x, _ := m3.Update(switchboard.StepStatusMsg{FeedID: "job1", StepID: id, Status: "done"})
+		// Use "running" so steps are not suppressed (done+no-output steps are hidden).
+		m3x, _ := m3.Update(switchboard.StepStatusMsg{FeedID: "job1", StepID: id, Status: "running"})
 		m3 = m3x.(switchboard.Model)
 	}
 	view := m3.View()
@@ -797,9 +800,10 @@ func TestStepBadges_WrapsOnNarrowTerminal(t *testing.T) {
 	m3 := m2.(switchboard.Model)
 	m3 = m3.AddFeedEntry("job1", "pipeline: test", switchboard.FeedRunning, nil)
 	// Add enough steps to force wrapping at width 40.
+	// Use "running" so steps are not suppressed (done+no-output steps are hidden).
 	for i := range 6 {
 		id := fmt.Sprintf("step-with-long-name-%d", i)
-		m3x, _ := m3.Update(switchboard.StepStatusMsg{FeedID: "job1", StepID: id, Status: "done"})
+		m3x, _ := m3.Update(switchboard.StepStatusMsg{FeedID: "job1", StepID: id, Status: "running"})
 		m3 = m3x.(switchboard.Model)
 	}
 	view := m3.View()
@@ -1226,18 +1230,35 @@ func TestFeed_MarkToggle(t *testing.T) {
 	m = m.AddFeedEntry("job1", "pipeline: alpha", switchboard.FeedDone, nil)
 	m = m.SetFeedFocused(true)
 
-	// Press m to mark line 0 (title line).
+	// Press m to enter active mark mode (does not mark yet).
 	m3, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
-	afterMark := m3.(switchboard.Model)
-	if !afterMark.FeedMarkedAt(0) {
-		t.Error("expected line 0 to be marked after pressing m")
+	afterMode := m3.(switchboard.Model)
+	if afterMode.FeedMarkMode() != switchboard.MarkModeActive {
+		t.Error("expected mark mode to be active after pressing m")
+	}
+	if afterMode.FeedMarkedAt(0) {
+		t.Error("expected no marks immediately after entering mark mode")
 	}
 
-	// Press m again to unmark.
-	m4, _ := afterMark.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
-	afterUnmark := m4.(switchboard.Model)
-	if afterUnmark.FeedMarkedAt(0) {
-		t.Error("expected line 0 to be unmarked after pressing m twice")
+	// Press j to mark line 0 and advance cursor.
+	m4, _ := afterMode.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	afterMark := m4.(switchboard.Model)
+	if !afterMark.FeedMarkedAt(0) {
+		t.Error("expected line 0 to be marked after j in active mark mode")
+	}
+
+	// Press m again to pause mark mode; j should navigate without marking.
+	m5, _ := afterMark.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+	afterPause := m5.(switchboard.Model)
+	if afterPause.FeedMarkMode() != switchboard.MarkModePaused {
+		t.Error("expected mark mode to be paused after second m press")
+	}
+
+	// Press m again to exit mark mode entirely.
+	m6, _ := afterPause.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+	afterExit := m6.(switchboard.Model)
+	if afterExit.FeedMarkMode() != switchboard.MarkModeOff {
+		t.Error("expected mark mode to be off after third m press")
 	}
 }
 
@@ -1248,13 +1269,15 @@ func TestFeed_RKeyWithMarks_OpensModalWithPrompt(t *testing.T) {
 	m = m.AddFeedEntry("job1", "pipeline: alpha", switchboard.FeedDone, nil)
 	m = m.SetFeedFocused(true)
 
-	// Mark the current line.
+	// Enter mark mode, then press j to mark line 0.
 	m3, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
 	m = m3.(switchboard.Model)
+	m4, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = m4.(switchboard.Model)
 
 	// Press r — should open modal with prompt populated.
-	m4, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
-	result := m4.(switchboard.Model)
+	m5, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	result := m5.(switchboard.Model)
 
 	if !result.AgentModalOpen() {
 		t.Fatal("expected agent modal to be open after pressing r with marked feed lines")
@@ -1341,8 +1364,9 @@ func TestFeedStepDisplay_Vertical(t *testing.T) {
 	m2, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m3 := m2.(switchboard.Model)
 	m3 = m3.AddFeedEntry("job1", "pipeline: test", switchboard.FeedRunning, nil)
+	// Use "running" status so steps are not suppressed (done+no-output steps are hidden).
 	for _, id := range []string{"step-a", "step-b", "step-c"} {
-		mx, _ := m3.Update(switchboard.StepStatusMsg{FeedID: "job1", StepID: id, Status: "done"})
+		mx, _ := m3.Update(switchboard.StepStatusMsg{FeedID: "job1", StepID: id, Status: "running"})
 		m3 = mx.(switchboard.Model)
 	}
 	view := m3.View()
@@ -1355,5 +1379,189 @@ func TestFeedStepDisplay_Vertical(t *testing.T) {
 	// With vertical layout the · separator should NOT appear between step badges.
 	if strings.Contains(view, "  ·  ") {
 		t.Error("View() contains horizontal '·' separator — expected vertical layout")
+	}
+	// Tree connectors should appear.
+	if !strings.Contains(view, "├") && !strings.Contains(view, "└") {
+		t.Error("expected tree connectors (├ or └) in step display")
+	}
+}
+
+// ── Mark mode state machine ───────────────────────────────────────────────────
+
+func TestFeed_MarkMode_CyclesOffActivePausedOff(t *testing.T) {
+	m := switchboard.New()
+	m2, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = m2.(switchboard.Model)
+	m = m.AddFeedEntry("job1", "pipeline: alpha", switchboard.FeedDone, nil)
+	m = m.SetFeedFocused(true)
+
+	if m.FeedMarkMode() != switchboard.MarkModeOff {
+		t.Error("expected MarkModeOff initially")
+	}
+	// First m → active.
+	m3, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+	m = m3.(switchboard.Model)
+	if m.FeedMarkMode() != switchboard.MarkModeActive {
+		t.Error("expected MarkModeActive after first m")
+	}
+	// Second m → paused.
+	m4, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+	m = m4.(switchboard.Model)
+	if m.FeedMarkMode() != switchboard.MarkModePaused {
+		t.Error("expected MarkModePaused after second m")
+	}
+	// Third m → off (exit mark mode).
+	m5, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+	m = m5.(switchboard.Model)
+	if m.FeedMarkMode() != switchboard.MarkModeOff {
+		t.Error("expected MarkModeOff after third m")
+	}
+}
+
+func TestFeed_MarkMode_JMarksCurrentLineAndAdvances(t *testing.T) {
+	m := switchboard.New()
+	m2, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = m2.(switchboard.Model)
+	m = m.AddFeedEntry("job1", "pipeline: alpha", switchboard.FeedDone, nil)
+	m = m.AddFeedEntry("job2", "pipeline: beta", switchboard.FeedDone, nil)
+	m = m.SetFeedFocused(true)
+
+	// Cursor starts at 0.
+	// Enter mark mode.
+	m3, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+	m = m3.(switchboard.Model)
+	// Press j — should mark line 0, advance to line 1.
+	m4, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = m4.(switchboard.Model)
+	if !m.FeedMarkedAt(0) {
+		t.Error("expected line 0 to be marked after j in active mark mode")
+	}
+	if m.FeedCursor() != 1 {
+		t.Errorf("expected cursor at 1 after j, got %d", m.FeedCursor())
+	}
+}
+
+func TestFeed_MarkMode_JInPausedModeAdvancesWithoutMarking(t *testing.T) {
+	m := switchboard.New()
+	m2, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = m2.(switchboard.Model)
+	m = m.AddFeedEntry("job1", "pipeline: alpha", switchboard.FeedDone, nil)
+	m = m.AddFeedEntry("job2", "pipeline: beta", switchboard.FeedDone, nil)
+	m = m.SetFeedFocused(true)
+
+	// Enter mark mode then pause.
+	m3, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+	m = m3.(switchboard.Model)
+	m4, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+	m = m4.(switchboard.Model)
+	if m.FeedMarkMode() != switchboard.MarkModePaused {
+		t.Fatal("expected paused mode")
+	}
+	// Press j — cursor advances but no mark.
+	m5, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = m5.(switchboard.Model)
+	if m.FeedMarkedAt(0) {
+		t.Error("expected line 0 NOT to be marked when j pressed in paused mode")
+	}
+	if m.FeedCursor() != 1 {
+		t.Errorf("expected cursor at 1 after j in paused mode, got %d", m.FeedCursor())
+	}
+}
+
+func TestFeed_MarkMode_ResetOnFocusLoss(t *testing.T) {
+	m := switchboard.New()
+	m2, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = m2.(switchboard.Model)
+	m = m.AddFeedEntry("job1", "pipeline: alpha", switchboard.FeedDone, nil)
+	m = m.SetFeedFocused(true)
+
+	// Enter mark mode, mark a line.
+	m3, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+	m = m3.(switchboard.Model)
+	m4, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = m4.(switchboard.Model)
+	if !m.FeedHasMarks() {
+		t.Fatal("expected marks before focus loss")
+	}
+
+	// Switch focus away (press 'a' for agent).
+	m5, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	m = m5.(switchboard.Model)
+	if m.FeedMarkMode() != switchboard.MarkModeOff {
+		t.Error("expected mark mode reset to Off after losing feed focus")
+	}
+	if m.FeedHasMarks() {
+		t.Error("expected marks cleared after losing feed focus")
+	}
+}
+
+// ── Step suppression ─────────────────────────────────────────────────────────
+
+func TestFeedStep_DoneWithNoOutput_NotRendered(t *testing.T) {
+	m := switchboard.New()
+	m2, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = m2.(switchboard.Model)
+	m = m.AddFeedEntry("job1", "pipeline: test", switchboard.FeedRunning, nil)
+	mx, _ := m.Update(switchboard.StepStatusMsg{FeedID: "job1", StepID: "my-done-step", Status: "done"})
+	m = mx.(switchboard.Model)
+	view := m.View()
+	if strings.Contains(view, "my-done-step") {
+		t.Error("expected done step with no output to be suppressed from feed view")
+	}
+}
+
+func TestFeedStep_DoneWithOutput_IsRendered(t *testing.T) {
+	m := switchboard.New()
+	m2, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = m2.(switchboard.Model)
+	m = m.AddFeedEntry("job1", "pipeline: test", switchboard.FeedRunning, nil)
+	// Add step and inject output lines.
+	mx, _ := m.Update(switchboard.StepStatusMsg{FeedID: "job1", StepID: "result-step", Status: "done"})
+	m = mx.(switchboard.Model)
+	m = m.AddStepLines("job1", "result-step", []string{"output here"})
+	view := m.View()
+	if !strings.Contains(view, "result-step") {
+		t.Error("expected done step WITH output to appear in feed view")
+	}
+	if !strings.Contains(view, "output here") {
+		t.Error("expected step output line to appear in feed view")
+	}
+}
+
+// ── Cursor overlay ────────────────────────────────────────────────────────────
+
+var ansiEscapeRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+func stripTestANSI(s string) string { return ansiEscapeRe.ReplaceAllString(s, "") }
+
+func TestFeed_CursorRow_SameWidthAsNonCursorRow(t *testing.T) {
+	m := switchboard.New()
+	m2, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = m2.(switchboard.Model)
+	m = m.AddFeedEntry("job1", "pipeline: alpha", switchboard.FeedDone, nil)
+	m = m.AddFeedEntry("job2", "pipeline: beta", switchboard.FeedDone, nil)
+	m = m.SetFeedFocused(true)
+
+	// The cursor is at line 0. Get the feed's raw view to isolate feed rows.
+	// We use ViewActivityFeed to inspect just the feed panel rows.
+	view := m.ViewActivityFeed(40, 60)
+	lines := strings.Split(view, "\n")
+	// Collect widths of content rows (│...│) from the feed panel.
+	var rowWidths []int
+	for _, line := range lines {
+		plain := stripTestANSI(line)
+		runes := []rune(plain)
+		if len(runes) > 2 && runes[0] == '│' && runes[len(runes)-1] == '│' {
+			rowWidths = append(rowWidths, len(runes))
+		}
+	}
+	if len(rowWidths) < 2 {
+		t.Skip("not enough box rows to compare widths")
+	}
+	first := rowWidths[0]
+	for i, w := range rowWidths {
+		if w != first {
+			t.Errorf("row %d width %d differs from row 0 width %d (cursor causes layout shift)", i, w, first)
+		}
 	}
 }

@@ -128,6 +128,7 @@ type ANSIPalette struct {
 	Dim     string
 	Success string
 	Error   string
+	Warn    string
 	FG      string
 	BG      string
 	Border  string
@@ -151,6 +152,7 @@ func BundleANSI(b *themes.Bundle) ANSIPalette {
 		Dim:     toFG(p.Dim),
 		Success: toFG(p.Success),
 		Error:   toFG(p.Error),
+		Warn:    toFG(p.FG),
 		FG:      toFG(p.FG),
 		BG:      toFG(p.BG),
 		Border:  toFG(p.Border),

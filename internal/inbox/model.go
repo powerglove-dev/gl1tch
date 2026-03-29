@@ -71,15 +71,21 @@ func (i item) Title() string {
 	return badge + " " + i.run.Name
 }
 
-// Description returns elapsed/finished time, a status indicator, and an
-// optional step-count badge.
+// Description returns elapsed/finished time, a status indicator, an optional
+// step-count badge, and a ⚠ attention marker for failed runs.
 func (i item) Description() string {
 	base := statusIndicator(i.run, i.bundle) + "  " + elapsedStr(i.run)
 	if n := len(i.run.Steps); n > 0 {
 		badge := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(i.bundle.Palette.Dim)).
 			Render(fmt.Sprintf("  %d steps", n))
-		return base + badge
+		base += badge
+	}
+	if i.run.ExitStatus != nil && *i.run.ExitStatus != 0 {
+		attention := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(i.bundle.Palette.Error)).
+			Render("  ⚠ needs attention")
+		base += attention
 	}
 	return base
 }

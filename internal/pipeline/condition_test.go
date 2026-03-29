@@ -51,6 +51,28 @@ func TestEvalCondition_Unknown(t *testing.T) {
 	}
 }
 
+func TestEvalCondition_NotEmpty(t *testing.T) {
+	cases := []struct {
+		name   string
+		value  string
+		want   bool
+	}{
+		{"non-empty value passes", "some text", true},
+		{"empty string fails", "", false},
+		{"whitespace-only fails", "   ", false},
+		{"newline-only fails", "\n", false},
+		{"content with spaces passes", "  hello  ", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := pipeline.EvalCondition("not_empty", condVars(tc.value))
+			if got != tc.want {
+				t.Errorf("EvalCondition(not_empty, %q) = %v, want %v", tc.value, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestEvalCondition_EmptyVars(t *testing.T) {
 	// No _output key — all exprs should evaluate against empty string.
 	if pipeline.EvalCondition("contains:x", map[string]any{}) {

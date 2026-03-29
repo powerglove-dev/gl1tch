@@ -16,6 +16,7 @@ import (
 type StepRecord struct {
 	ID         string         `json:"id"`
 	Status     string         `json:"status"`
+	Model      string         `json:"model,omitempty"`
 	StartedAt  string         `json:"started_at,omitempty"`  // RFC3339
 	FinishedAt string         `json:"finished_at,omitempty"` // RFC3339
 	DurationMs int64          `json:"duration_ms,omitempty"`

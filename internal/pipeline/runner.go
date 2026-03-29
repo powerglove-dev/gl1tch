@@ -91,7 +91,13 @@ func Run(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput string
 	// Record run start in the store (nil-safe).
 	startedAt := time.Now()
 	if cfg.store != nil {
-		id, err := cfg.store.RecordRunStart("pipeline", p.Name, "")
+		meta := ""
+		if cwd, err := os.Getwd(); err == nil && cwd != "" {
+			if b, err := json.Marshal(map[string]string{"cwd": cwd}); err == nil {
+				meta = string(b)
+			}
+		}
+		id, err := cfg.store.RecordRunStart("pipeline", p.Name, meta)
 		if err == nil {
 			cfg.runID = id
 		}
@@ -253,6 +259,7 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 					rec := store.StepRecord{
 						ID:         step.ID,
 						Status:     "failed",
+						Model:      step.Model,
 						StartedAt:  stepStart.Format(time.RFC3339),
 						FinishedAt: time.Now().Format(time.RFC3339),
 						DurationMs: stepDurationMs,
@@ -287,6 +294,7 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 				rec := store.StepRecord{
 					ID:         step.ID,
 					Status:     "done",
+					Model:      step.Model,
 					StartedAt:  stepStart.Format(time.RFC3339),
 					FinishedAt: time.Now().Format(time.RFC3339),
 					DurationMs: stepDurationMs,
@@ -542,6 +550,7 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 					rec := store.StepRecord{
 						ID:         res.id,
 						Status:     "failed",
+						Model:      step.Model,
 						StartedAt:  res.startedAt.Format(time.RFC3339),
 						FinishedAt: time.Now().Format(time.RFC3339),
 						DurationMs: res.durationMs,
@@ -584,6 +593,7 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 					rec := store.StepRecord{
 						ID:         res.id,
 						Status:     "done",
+						Model:      step.Model,
 						StartedAt:  res.startedAt.Format(time.RFC3339),
 						FinishedAt: time.Now().Format(time.RFC3339),
 						DurationMs: res.durationMs,

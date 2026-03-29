@@ -21,7 +21,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/reflow/truncate"
+	"github.com/muesli/reflow/wrap"
 	robfigcron "github.com/robfig/cron/v3"
 
 	orcaicron "github.com/adam-stokes/orcai/internal/cron"
@@ -70,6 +70,15 @@ const (
 	FeedRunning FeedStatus = iota
 	FeedDone
 	FeedFailed
+)
+
+// MarkModeState represents the mark mode cycle for the activity feed.
+type MarkModeState int
+
+const (
+	MarkModeOff    MarkModeState = iota // normal navigation
+	MarkModeActive                      // j/k marks/unmarks lines while navigating
+	MarkModePaused                      // j/k navigates without marking
 )
 
 // agentInnerHeight is the fixed number of body rows inside the AGENT RUNNER box.
@@ -257,6 +266,7 @@ type Model struct {
 	feedFocused           bool
 	feedMarked        map[int]bool   // marked absolute line indices
 	feedMarkedContent map[int]string // ANSI-stripped content at each marked index
+	feedMarkMode      MarkModeState
 	signalBoard           SignalBoard
 	signalBoardFocused    bool
 	confirmDelete         bool
@@ -294,6 +304,7 @@ type Model struct {
 	inboxDetailCursor       int            // absolute line index within current run content
 	inboxDetailMarked       map[int]bool   // marked absolute line indices
 	inboxDetailMarkedLines  map[int]string // content at each marked line
+	inboxMarkMode           MarkModeState
 	// Cron panel
 	cronPanel CronPanel
 	// Pipeline bus subscription (tasks 7.2–7.8)
@@ -457,6 +468,9 @@ func (m Model) ViewAgentModalBox(w, h int) string { return m.viewAgentModalBox(w
 // BuildCronSection is an exported wrapper for tests.
 func (m Model) BuildCronSection(w int) []string { return m.buildCronSection(w, 10) }
 
+// ViewActivityFeed renders the activity feed panel — used in tests.
+func (m Model) ViewActivityFeed(h, w int) string { return m.viewActivityFeed(h, w) }
+
 // CronPanelFocused returns whether the cron panel is focused — used in tests.
 func (m Model) CronPanelFocused() bool { return m.cronPanel.focused }
 
@@ -526,6 +540,9 @@ func (m Model) FeedHasMarks() bool { return len(m.feedMarked) > 0 }
 // FeedMarkedAt returns whether the given absolute line index is marked — used in tests.
 func (m Model) FeedMarkedAt(idx int) bool { return m.feedMarked[idx] }
 
+// FeedMarkMode returns the current feed mark mode — used in tests.
+func (m Model) FeedMarkMode() MarkModeState { return m.feedMarkMode }
+
 // AgentPromptValue returns the current agent prompt textarea value — used in tests.
 func (m Model) AgentPromptValue() string { return m.agent.prompt.Value() }
 
@@ -576,6 +593,11 @@ func (m Model) AddFeedEntry(id, title string, status FeedStatus, lines []string)
 	return m
 }
 
+// AddStepLines appends output lines to a step within a feed entry — used in tests.
+func (m Model) AddStepLines(feedID, stepID string, lines []string) Model {
+	return m.appendStepLines(feedID, stepID, lines)
+}
+
 // AddFeedEntryWithTmux adds a feed entry with a tmux window — used in tests.
 func (m Model) AddFeedEntryWithTmux(id, title string, status FeedStatus, tmuxWindow string) Model {
 	entry := feedEntry{
@@ -609,6 +631,7 @@ func (m Model) ansiPalette() styles.ANSIPalette {
 			Dim:     "\x1b[2m",
 			Success: "\x1b[32m",
 			Error:   "\x1b[31m",
+			Warn:    "\x1b[33m",
 			FG:      "\x1b[97m",
 			BG:      "\x1b[40m",
 			Border:  "\x1b[36m",
@@ -1103,6 +1126,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		switch key {
 		case "q", "esc":
 			m.inboxDetailOpen = false
+			m.inboxMarkMode = MarkModeOff
 			m.inboxDetailMarked = nil
 			m.inboxDetailMarkedLines = nil
 		case "n":
@@ -1110,6 +1134,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.inboxDetailIdx = (m.inboxDetailIdx + 1) % len(runs)
 				m.inboxDetailScroll = 0
 				m.inboxDetailCursor = 0
+				m.inboxMarkMode = MarkModeOff
 				m.inboxDetailMarked = nil
 				m.inboxDetailMarkedLines = nil
 			}
@@ -1118,13 +1143,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.inboxDetailIdx = (m.inboxDetailIdx - 1 + len(runs)) % len(runs)
 				m.inboxDetailScroll = 0
 				m.inboxDetailCursor = 0
+				m.inboxMarkMode = MarkModeOff
 				m.inboxDetailMarked = nil
 				m.inboxDetailMarkedLines = nil
 			}
 		case "j", "down":
+			if m.inboxMarkMode == MarkModeActive {
+				m = m.inboxDetailToggleMark()
+			}
 			m.inboxDetailCursor++
 			m.inboxDetailScroll = m.inboxDetailCursor
 		case "k", "up":
+			if m.inboxMarkMode == MarkModeActive {
+				m = m.inboxDetailToggleMark()
+			}
 			if m.inboxDetailCursor > 0 {
 				m.inboxDetailCursor--
 			}
@@ -1146,26 +1178,42 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.inboxDetailCursor = 0
 			return m, nil
 		case "m":
-			// Mark/unmark the current line.
-			if m.inboxDetailMarked == nil {
-				m.inboxDetailMarked = make(map[int]bool)
-				m.inboxDetailMarkedLines = make(map[int]string)
+			// Cycle mark mode: off → active → paused → off (exits and clears marks).
+			switch m.inboxMarkMode {
+			case MarkModeOff:
+				m.inboxMarkMode = MarkModeActive
+			case MarkModeActive:
+				m.inboxMarkMode = MarkModePaused
+			case MarkModePaused:
+				m.inboxMarkMode = MarkModeOff
+				m.inboxDetailMarked = nil
+				m.inboxDetailMarkedLines = nil
 			}
-			if idx := m.inboxDetailIdx; idx >= 0 && idx < len(runs) {
-				run := runs[idx]
-				pal := m.ansiPalette()
-				content := buildRunContent(run, pal, false, 80)
-				lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
-				cursor := m.inboxDetailCursor
-				if cursor < len(lines) {
-					if m.inboxDetailMarked[cursor] {
-						delete(m.inboxDetailMarked, cursor)
-						delete(m.inboxDetailMarkedLines, cursor)
-					} else {
-						m.inboxDetailMarked[cursor] = true
-						m.inboxDetailMarkedLines[cursor] = strings.TrimSpace(stripANSI(lines[cursor]))
+			return m, nil
+		case "A":
+			// Mark all lines in the current run (available while in mark mode).
+			if m.inboxMarkMode != MarkModeOff {
+				if idx := m.inboxDetailIdx; idx >= 0 && idx < len(runs) {
+					run := runs[idx]
+					pal := m.ansiPalette()
+					content := buildRunContent(run, pal, false, 80)
+					lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+					if m.inboxDetailMarked == nil {
+						m.inboxDetailMarked = make(map[int]bool)
+						m.inboxDetailMarkedLines = make(map[int]string)
+					}
+					for i, line := range lines {
+						m.inboxDetailMarked[i] = true
+						m.inboxDetailMarkedLines[i] = strings.TrimSpace(stripANSI(line))
 					}
 				}
+			}
+			return m, nil
+		case "D":
+			// Clear all marks (available while in mark mode).
+			if m.inboxMarkMode != MarkModeOff {
+				m.inboxDetailMarked = nil
+				m.inboxDetailMarkedLines = nil
 			}
 			return m, nil
 		case "r":
@@ -1424,6 +1472,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	// Global focus shortcuts — p focuses pipelines.
 	switch key {
 	case "p":
+		m = m.clearFeedMarkMode()
 		m.launcher.focused = true
 		m.agent.focused = false
 		m.feedFocused = false
@@ -1431,6 +1480,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.cronPanel.focused = false
 		return m, nil
 	case "c":
+		m = m.clearFeedMarkMode()
 		m.launcher.focused = false
 		m.agent.focused = false
 		m.feedFocused = false
@@ -1457,6 +1507,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.launcher.focused = true
 		} else if m.feedFocused {
 			// feed → cron
+			m = m.clearFeedMarkMode()
 			m.feedFocused = false
 			m.cronPanel.focused = true
 		} else if m.inboxPanel.focused {
@@ -1493,17 +1544,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.launcher.focused = false
 			m.agent.focused = false
 			m.signalBoardFocused = false
+			if m.feedFocused {
+				m = m.clearFeedMarkMode()
+			}
 			m.feedFocused = !m.feedFocused
 		}
 		return m, nil
 
 	case "a":
+		m = m.clearFeedMarkMode()
 		m.launcher.focused = false
 		m.agent.focused = true
 		m.feedFocused = false
 		return m, nil
 
 	case "s":
+		m = m.clearFeedMarkMode()
 		m.launcher.focused = false
 		m.agent.focused = false
 		m.feedFocused = false
@@ -1513,6 +1569,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case "i":
+		m = m.clearFeedMarkMode()
 		m.launcher.focused = false
 		m.agent.focused = false
 		m.feedFocused = false
@@ -1568,7 +1625,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "pgdown", "]":
 		if m.feedFocused {
-			total := totalFeedLines(m.feed)
+			if m.feedMarkMode == MarkModeActive {
+				m = m.feedToggleMark(m.feedCursor)
+			}
+			total := totalFeedLines(m.feed, m.feedPanelWidth())
 			step := m.feedVisibleHeight()
 			m.feedCursor = min(m.feedCursor+step, max(0, total-1))
 			m.feedScrollOffset = m.feedCursor
@@ -1585,6 +1645,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "pgup", "[":
 		if m.feedFocused {
+			if m.feedMarkMode == MarkModeActive {
+				m = m.feedToggleMark(m.feedCursor)
+			}
 			step := m.feedVisibleHeight()
 			m.feedCursor = max(m.feedCursor-step, 0)
 			m.feedScrollOffset = m.feedCursor
@@ -1607,7 +1670,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "G":
 		if m.feedFocused {
-			total := totalFeedLines(m.feed)
+			total := totalFeedLines(m.feed, m.feedPanelWidth())
 			m.feedCursor = max(0, total-1)
 			m.feedScrollOffset = m.feedCursor
 			m.clampFeedScroll()
@@ -1695,22 +1758,40 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "m":
 		if m.feedFocused {
-			rawLines := m.feedRawLines(m.width)
+			switch m.feedMarkMode {
+			case MarkModeOff:
+				m.feedMarkMode = MarkModeActive
+			case MarkModeActive:
+				m.feedMarkMode = MarkModePaused
+			case MarkModePaused:
+				// Third press exits mark mode entirely and clears marks.
+				m = m.clearFeedMarkMode()
+			}
+			return m, nil
+		}
+
+	case "A":
+		// Mark all feed lines (available while in mark mode).
+		if m.feedFocused && m.feedMarkMode != MarkModeOff {
+			rawLines := m.feedRawLines(m.feedPanelWidth())
 			if m.feedMarked == nil {
 				m.feedMarked = make(map[int]bool)
 			}
 			if m.feedMarkedContent == nil {
 				m.feedMarkedContent = make(map[int]string)
 			}
-			if m.feedMarked[m.feedCursor] {
-				delete(m.feedMarked, m.feedCursor)
-				delete(m.feedMarkedContent, m.feedCursor)
-			} else {
-				m.feedMarked[m.feedCursor] = true
-				if m.feedCursor < len(rawLines) {
-					m.feedMarkedContent[m.feedCursor] = rawLines[m.feedCursor]
-				}
+			for i, line := range rawLines {
+				m.feedMarked[i] = true
+				m.feedMarkedContent[i] = line
 			}
+			return m, nil
+		}
+
+	case "D":
+		// Clear all feed marks (available while in mark mode).
+		if m.feedFocused && m.feedMarkMode != MarkModeOff {
+			m.feedMarked = nil
+			m.feedMarkedContent = nil
 			return m, nil
 		}
 
@@ -1734,9 +1815,69 @@ func (m Model) feedVisibleHeight() int {
 	return v
 }
 
+// clearFeedMarkMode resets mark mode to off and clears all feed marks.
+// Call whenever the feed loses focus.
+func (m Model) clearFeedMarkMode() Model {
+	m.feedMarkMode = MarkModeOff
+	m.feedMarked = nil
+	m.feedMarkedContent = nil
+	return m
+}
+
+// feedToggleMark toggles the mark state of the given absolute line index.
+func (m Model) feedToggleMark(idx int) Model {
+	rawLines := m.feedRawLines(m.feedPanelWidth())
+	if m.feedMarked == nil {
+		m.feedMarked = make(map[int]bool)
+	}
+	if m.feedMarkedContent == nil {
+		m.feedMarkedContent = make(map[int]string)
+	}
+	if m.feedMarked[idx] {
+		delete(m.feedMarked, idx)
+		delete(m.feedMarkedContent, idx)
+	} else {
+		m.feedMarked[idx] = true
+		if idx < len(rawLines) {
+			m.feedMarkedContent[idx] = rawLines[idx]
+		}
+	}
+	return m
+}
+
+// inboxDetailToggleMark toggles the mark state of the inbox detail cursor line.
+func (m Model) inboxDetailToggleMark() Model {
+	runs := m.filteredInboxRuns()
+	if m.inboxDetailMarked == nil {
+		m.inboxDetailMarked = make(map[int]bool)
+		m.inboxDetailMarkedLines = make(map[int]string)
+	}
+	idx := m.inboxDetailIdx
+	if idx >= 0 && idx < len(runs) {
+		run := runs[idx]
+		pal := m.ansiPalette()
+		content := buildRunContent(run, pal, false, 80)
+		lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+		cursor := m.inboxDetailCursor
+		if cursor < len(lines) {
+			if m.inboxDetailMarked[cursor] {
+				delete(m.inboxDetailMarked, cursor)
+				delete(m.inboxDetailMarkedLines, cursor)
+			} else {
+				m.inboxDetailMarked[cursor] = true
+				m.inboxDetailMarkedLines[cursor] = strings.TrimSpace(stripANSI(lines[cursor]))
+			}
+		}
+	}
+	return m
+}
+
 func (m Model) handleDown() Model {
 	if m.feedFocused {
-		total := totalFeedLines(m.feed)
+		if m.feedMarkMode == MarkModeActive {
+			m = m.feedToggleMark(m.feedCursor)
+		}
+		total := totalFeedLines(m.feed, m.feedPanelWidth())
 		m.feedCursor = min(m.feedCursor+1, max(0, total-1))
 		m.feedScrollOffset = m.feedCursor
 		m.clampFeedScroll()
@@ -1766,6 +1907,9 @@ func (m Model) handleDown() Model {
 
 func (m Model) handleUp() Model {
 	if m.feedFocused {
+		if m.feedMarkMode == MarkModeActive {
+			m = m.feedToggleMark(m.feedCursor)
+		}
 		m.feedCursor = max(m.feedCursor-1, 0)
 		m.feedScrollOffset = m.feedCursor
 		m.clampFeedScroll()
@@ -2141,17 +2285,20 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 }
 
 // runMetadataJSON returns a compact JSON blob for run metadata.
-// Empty fields are omitted. Returns "" when both are empty.
-func runMetadataJSON(pipelineFile, cwd string) string {
-	if pipelineFile == "" && cwd == "" {
+// Empty fields are omitted. Returns "" when all are empty.
+func runMetadataJSON(pipelineFile, cwd, model string) string {
+	if pipelineFile == "" && cwd == "" && model == "" {
 		return ""
 	}
-	m := make(map[string]string, 2)
+	m := make(map[string]string, 3)
 	if pipelineFile != "" {
 		m["pipeline_file"] = pipelineFile
 	}
 	if cwd != "" {
 		m["cwd"] = cwd
+	}
+	if model != "" {
+		m["model"] = model
 	}
 	b, err := json.Marshal(m)
 	if err != nil {
@@ -2339,7 +2486,7 @@ func (m Model) submitAgentJob() (Model, tea.Cmd) {
 	_, cancel := context.WithCancel(context.Background())
 	jh := &jobHandle{id: feedID, cancel: cancel, ch: ch, tmuxWindow: windowName, logFile: logFile}
 	if m.store != nil {
-		if runID, err := m.store.RecordRunStart("agent", title, runMetadataJSON("", cwd)); err == nil {
+		if runID, err := m.store.RecordRunStart("agent", title, runMetadataJSON("", cwd, modelID)); err == nil {
 			jh.storeRunID = runID
 		}
 	}
@@ -2454,7 +2601,7 @@ func (m *Model) clampFeedScroll() {
 	if visibleH <= 0 {
 		visibleH = 1
 	}
-	total := totalFeedLines(m.feed)
+	total := totalFeedLines(m.feed, m.feedPanelWidth())
 	maxOffset := max(0, total-visibleH)
 	if m.feedScrollOffset > maxOffset {
 		m.feedScrollOffset = maxOffset
@@ -3330,15 +3477,28 @@ func (m Model) buildInboxSection(w, height int) []string {
 	return rows
 }
 
+// feedPanelWidth returns the actual rendered width of the activity feed panel,
+// matching the feedW calculation in View(). Used for consistent line-count math.
+func (m Model) feedPanelWidth() int {
+	w := m.width
+	if w <= 0 {
+		w = 120
+	}
+	return max(w-m.leftColWidth()-2, 20)
+}
+
 // totalFeedLines computes the total number of content lines the renderer will
-// actually produce for a feed. It mirrors the line-building logic in
-// viewActivityFeed so that navigation bounds match the visible output exactly.
-func totalFeedLines(feed []feedEntry) int {
+// actually produce for a feed, including lines created by word-wrapping long
+// output. It mirrors the line-building logic in viewActivityFeed so that
+// navigation bounds match the visible output exactly.
+func totalFeedLines(feed []feedEntry, width int) int {
 	if len(feed) == 0 {
 		return 1 // "no activity yet"
 	}
 	const feedLinesPerEntry = 10
 	const maxStepOutputLines = 5
+	stepMaxLen := max(width-10, 1)
+	entryMaxLen := max(width-6, 1)
 	n := 0
 	for _, entry := range feed {
 		n++ // title line
@@ -3346,19 +3506,39 @@ func totalFeedLines(feed []feedEntry) int {
 			n++ // cwd line
 		}
 		for _, step := range entry.steps {
-			n++ // step badge line
-			stepOut := len(step.lines)
-			if stepOut > maxStepOutputLines {
-				stepOut = maxStepOutputLines
+			// Mirror suppression logic from viewActivityFeed.
+			if step.status == "done" && len(step.lines) == 0 {
+				continue
 			}
-			n += stepOut
+			n++ // step badge line
+			stepLines := step.lines
+			if len(stepLines) > maxStepOutputLines {
+				stepLines = stepLines[len(stepLines)-maxStepOutputLines:]
+			}
+			for _, sl := range stepLines {
+				for _, wl := range strings.Split(wrap.String(sl, stepMaxLen), "\n") {
+					if wl != "" {
+						n++
+					}
+				}
+			}
 		}
-		out := len(entry.lines)
-		if out > feedLinesPerEntry {
+		entryLines := entry.lines
+		skipped := 0
+		if len(entryLines) > feedLinesPerEntry {
+			skipped = len(entryLines) - feedLinesPerEntry
+			entryLines = entryLines[skipped:]
+		}
+		if skipped > 0 {
 			n++ // "… N earlier lines" message
-			out = feedLinesPerEntry
 		}
-		n += out
+		for _, outLine := range entryLines {
+			for _, wl := range strings.Split(wrap.String(stripANSI(outLine), entryMaxLen), "\n") {
+				if wl != "" {
+					n++
+				}
+			}
+		}
 	}
 	return n
 }
@@ -3393,14 +3573,22 @@ func (m Model) feedRawLines(width int) []string {
 		}
 
 		if len(entry.steps) > 0 {
-			const stepIndent = "  "
-			const outputIndent = "    "
 			const maxStepOutputLines = 5
-			for _, step := range entry.steps {
+			lastVisible := -1
+			for i, step := range entry.steps {
+				if !(step.status == "done" && len(step.lines) == 0) {
+					lastVisible = i
+				}
+			}
+			for i, step := range entry.steps {
+				if step.status == "done" && len(step.lines) == 0 {
+					continue
+				}
+				isLast := i == lastVisible
 				var col string
 				switch step.status {
 				case "running":
-					col = aYlw
+					col = pal.Warn
 				case "done":
 					col = pal.Success
 				case "failed":
@@ -3408,13 +3596,22 @@ func (m Model) feedRawLines(width int) []string {
 				default:
 					col = pal.Dim
 				}
-				add(stepIndent + col + stepGlyph(step.status) + " " + step.id + aRst)
+				connector := "├ "
+				if isLast {
+					connector = "└ "
+				}
+				add("  " + connector + col + stepGlyph(step.status) + " " + step.id + aRst)
 				stepLines := step.lines
 				if len(stepLines) > maxStepOutputLines {
 					stepLines = stepLines[len(stepLines)-maxStepOutputLines:]
 				}
+				stepMaxLen := max(width-10, 1)
 				for _, sl := range stepLines {
-					add(outputIndent + pal.Dim + sl + aRst)
+					for _, wl := range strings.Split(wrap.String(sl, stepMaxLen), "\n") {
+						if wl != "" {
+							add("    " + pal.Dim + wl + aRst)
+						}
+					}
 				}
 			}
 		}
@@ -3429,8 +3626,13 @@ func (m Model) feedRawLines(width int) []string {
 		if skipped > 0 {
 			add(pal.Dim + fmt.Sprintf("    … %d earlier lines (press f to scroll)", skipped) + aRst)
 		}
+		entryMaxLen := max(width-6, 1)
 		for _, outLine := range entryLines {
-			add(pal.Dim + "    " + stripANSI(outLine) + aRst)
+			for _, wl := range strings.Split(wrap.String(stripANSI(outLine), entryMaxLen), "\n") {
+				if wl != "" {
+					add(pal.Dim + "    " + wl + aRst)
+				}
+			}
 		}
 	}
 	return lines
@@ -3455,14 +3657,24 @@ func (m Model) viewActivityFeed(height, width int) string {
 	// feedRowAt appends a content row, applying cursor and/or mark highlights.
 	appendRow := func(lines *[]string, content string) {
 		idx := len(*lines)
+		isMarked := m.feedMarked[idx]
+		isCursor := m.feedFocused && idx == m.feedCursor
 		var row string
-		if m.feedFocused && idx == m.feedCursor {
+		switch {
+		case isCursor && isMarked:
+			// Cursor dominates visually; add mark indicator to content.
+			row = boxRowCursorColor(pal.Success+"●"+aRst+content, width, borderColor)
+		case isCursor:
 			row = boxRowCursorColor(content, width, borderColor)
-		} else {
+		case isMarked:
+			// Marked: ● (success color, no bg) + content (green bg), matching inbox detail style.
+			markPrefix := pal.Success + "●" + aRst
+			markContent := lipgloss.NewStyle().
+				Background(lipgloss.Color("#2d4a35")).
+				Render(stripANSI(content))
+			row = boxRow(markPrefix+markContent, width, borderColor)
+		default:
 			row = boxRow(content, width, borderColor)
-		}
-		if m.feedMarked[idx] {
-			row = pal.SelBG + row + aRst
 		}
 		*lines = append(*lines, row)
 	}
@@ -3491,12 +3703,22 @@ func (m Model) viewActivityFeed(height, width int) string {
 				appendRow(&allLines, fmt.Sprintf("  %s  %s%s", pal.Dim, cwdDisplay, aRst))
 			}
 
-			// Render per-step status badges vertically: one line per step, output beneath.
+			// Render per-step status badges with tree connectors; suppress done steps with no output.
 			if len(entry.steps) > 0 {
-				const stepIndent = "  "
-				const outputIndent = "    "
 				const maxStepOutputLines = 5
-				for _, step := range entry.steps {
+				// Find the last visible step (non-suppressed) index.
+				lastVisible := -1
+				for i, step := range entry.steps {
+					if !(step.status == "done" && len(step.lines) == 0) {
+						lastVisible = i
+					}
+				}
+				for i, step := range entry.steps {
+					// Suppress done steps that produced no output — they add no information.
+					if step.status == "done" && len(step.lines) == 0 {
+						continue
+					}
+					isLast := i == lastVisible
 					var col string
 					switch step.status {
 					case "running":
@@ -3508,15 +3730,32 @@ func (m Model) viewActivityFeed(height, width int) string {
 					default:
 						col = pal.Dim
 					}
-					badge := stepIndent + col + stepGlyph(step.status) + " " + step.id + aRst
+					connector := pal.Dim + "├ " + aRst
+					if isLast {
+						connector = pal.Dim + "└ " + aRst
+					}
+					badge := "  " + connector + col + stepGlyph(step.status) + " " + step.id + aRst
 					appendRow(&allLines, badge)
 					// Per-step output lines (last maxStepOutputLines).
 					stepLines := step.lines
 					if len(stepLines) > maxStepOutputLines {
 						stepLines = stepLines[len(stepLines)-maxStepOutputLines:]
 					}
+					// Output lines use a tree continuation connector for non-final steps.
+					var outPrefix string
+					if isLast {
+						outPrefix = "      " // 6-char plain indent aligns with step content
+					} else {
+						outPrefix = "  " + pal.Dim + "│   " + aRst
+					}
+					stepMaxLen := max(width-10, 1)
 					for _, sl := range stepLines {
-						appendRow(&allLines, outputIndent+pal.Dim+sl+aRst)
+						wlines := strings.Split(wrap.String(sl, stepMaxLen), "\n")
+						for _, wl := range wlines {
+							if wl != "" {
+								appendRow(&allLines, outPrefix+pal.Dim+wl+aRst)
+							}
+						}
 					}
 				}
 			}
@@ -3537,10 +3776,12 @@ func (m Model) viewActivityFeed(height, width int) string {
 				// Strip ANSI codes — feed renders with its own dim style.
 				outLine = stripANSI(outLine)
 				maxLen := max(width-6, 1)
-				if len(outLine) > maxLen {
-					outLine = outLine[:maxLen-1] + "…"
+				wrapped := strings.Split(wrap.String(outLine, maxLen), "\n")
+				for _, wl := range wrapped {
+					if wl != "" {
+						appendRow(&allLines, pal.Dim+"    "+wl+aRst)
+					}
 				}
-				appendRow(&allLines, pal.Dim+"    "+outLine+aRst)
 			}
 		}
 	}
@@ -3592,16 +3833,27 @@ func (m Model) viewActivityFeed(height, width int) string {
 	// Hint footer row — always present; shows hints when focused, blank when not.
 	var feedHints []panelrender.Hint
 	if m.feedFocused {
+		markDesc := "mark"
+		switch m.feedMarkMode {
+		case MarkModeActive:
+			markDesc = "pause"
+		case MarkModePaused:
+			markDesc = "resume"
+		}
 		feedHints = []panelrender.Hint{
 			{Key: "j/k", Desc: "nav"},
 			{Key: "[", Desc: "page up"},
 			{Key: "]", Desc: "page down"},
 			{Key: "g", Desc: "top"},
 			{Key: "G", Desc: "bottom"},
-			{Key: "m", Desc: "mark"},
+			{Key: "m", Desc: markDesc},
 		}
-		if len(m.feedMarked) > 0 {
-			feedHints = append(feedHints, panelrender.Hint{Key: "r", Desc: "run"})
+		if m.feedMarkMode != MarkModeOff {
+			feedHints = append(feedHints, panelrender.Hint{Key: "A", Desc: "mark all"})
+			feedHints = append(feedHints, panelrender.Hint{Key: "D", Desc: "clear"})
+		}
+		if markCount := len(m.feedMarked); markCount > 0 {
+			feedHints = append(feedHints, panelrender.Hint{Key: "r", Desc: fmt.Sprintf("run (%d)", markCount)})
 		}
 	}
 	lines = append(lines, boxRow(panelrender.HintBar(feedHints, width-2, pal), width, borderColor))
@@ -3636,24 +3888,24 @@ func boxRowCursor(content string, w int) string {
 }
 
 // boxRowCursorColor is the color-aware version of boxRowCursor.
+// The cursor indicator overlays the first 2 visible columns of content so that
+// row width is identical to a non-cursor boxRow — no layout shift occurs.
+// borderColor is used for both the box borders and the "> " cursor mark color,
+// so it matches the active theme accent when the feed is focused.
 func boxRowCursorColor(content string, w int, borderColor string) string {
-	cursorMark := aBrC + "> " + aRst
-	// The cursor mark occupies 2 visible columns; reduce available content width
-	// accordingly so the overall row width stays at w.
 	inner := w - 2
-	cursorMarkVis := 2
-	contentWidth := lipgloss.Width(content)
-	// Trim content if it would overflow.
-	availForContent := inner - cursorMarkVis
-	if availForContent < 0 {
-		availForContent = 0
+	// Work in plain text (strip ANSI) to overlay the first 2 visible columns.
+	plain := stripANSI(content)
+	runes := []rune(plain)
+	var rest string
+	if len(runes) > 2 {
+		rest = string(runes[2:])
 	}
-	if contentWidth > availForContent {
-		content = truncate.String(stripANSI(content), uint(availForContent))
-		contentWidth = lipgloss.Width(content)
-	}
-	pad := max(availForContent-contentWidth, 0)
-	return borderColor + "│" + aRst + cursorMark + content + strings.Repeat(" ", pad) + borderColor + "│" + aRst
+	// "> " occupies exactly 2 visible columns; pad remainder to fill inner width.
+	used := 2 + lipgloss.Width(rest)
+	pad := max(inner-used, 0)
+	cursorMark := borderColor + "> " + aRst
+	return borderColor + "│" + aRst + cursorMark + rest + strings.Repeat(" ", pad) + borderColor + "│" + aRst
 }
 
 // stepGlyph returns the extended-ASCII glyph for a step status string.
