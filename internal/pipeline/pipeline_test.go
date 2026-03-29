@@ -66,6 +66,26 @@ func TestLoad_MissingName(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsDbStepType(t *testing.T) {
+	yaml := `
+name: db-pipeline
+version: "1.0"
+steps:
+  - id: my_query
+    type: db
+    args:
+      op: query
+      sql: "SELECT 1"
+`
+	_, err := pipeline.Load(strings.NewReader(yaml))
+	if err == nil {
+		t.Fatal("expected error for db step type, got nil")
+	}
+	if !strings.Contains(err.Error(), "db step type has been removed") {
+		t.Errorf("expected error to contain %q, got: %v", "db step type has been removed", err)
+	}
+}
+
 func TestInterpolate_Simple(t *testing.T) {
 	vars := map[string]any{"step1.out": "golang plugins"}
 	result := pipeline.Interpolate("Summarize: {{step1.out}}", vars)

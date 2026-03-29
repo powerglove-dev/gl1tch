@@ -19,12 +19,33 @@ const createSchema = `CREATE TABLE IF NOT EXISTS runs (
 // runs table that was created before this column existed.
 const addStepsColumn = `ALTER TABLE runs ADD COLUMN steps TEXT DEFAULT '[]'`
 
+// createBrainNotesSchema is the DDL for the brain_notes table.
+const createBrainNotesSchema = `CREATE TABLE IF NOT EXISTS brain_notes (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id      INTEGER NOT NULL,
+  step_id     TEXT NOT NULL,
+  created_at  INTEGER NOT NULL,
+  tags        TEXT DEFAULT '',
+  body        TEXT NOT NULL
+);`
+
 // applySchema runs the schema migration against db.
 func applySchema(db *sql.DB) error {
 	if _, err := db.Exec(createSchema); err != nil {
 		return err
 	}
-	return applyStepsColumnMigration(db)
+	if err := applyStepsColumnMigration(db); err != nil {
+		return err
+	}
+	return applyBrainNotesTableMigration(db)
+}
+
+// applyBrainNotesTableMigration creates the brain_notes table if it does not
+// already exist. CREATE TABLE IF NOT EXISTS is idempotent, so this is safe to
+// run on every startup.
+func applyBrainNotesTableMigration(db *sql.DB) error {
+	_, err := db.Exec(createBrainNotesSchema)
+	return err
 }
 
 // applyStepsColumnMigration adds the steps column if it does not already exist.

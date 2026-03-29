@@ -914,11 +914,6 @@ func resolveExecutor(step *Step, args map[string]any, snap map[string]any, ec *E
 		typeName = step.Plugin
 	}
 
-	// db is a built-in step type for querying/writing the result store.
-	if typeName == "db" {
-		return &dbExecutor{ec: ec}, nil
-	}
-
 	// Check builtin registry first.
 	if fn, ok := builtinRegistry[typeName]; ok {
 		return &builtinExecutor{fn: fn, w: nil}, nil

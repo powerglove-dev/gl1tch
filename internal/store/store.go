@@ -93,6 +93,66 @@ func OpenAt(path string) (*Store, error) {
 	return s, nil
 }
 
+// BrainNote is a single note written to the brain_notes table during a pipeline run.
+type BrainNote struct {
+	ID        int64
+	RunID     int64
+	StepID    string
+	CreatedAt int64
+	Tags      string
+	Body      string
+}
+
+// InsertBrainNote inserts a brain note into the brain_notes table and returns
+// the new row's ID.
+func (s *Store) InsertBrainNote(ctx context.Context, note BrainNote) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO brain_notes (run_id, step_id, created_at, tags, body) VALUES (?, ?, ?, ?, ?)`,
+		note.RunID, note.StepID, note.CreatedAt, note.Tags, note.Body,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("store: insert brain note: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("store: insert brain note last id: %w", err)
+	}
+	return id, nil
+}
+
+// RecentBrainNotes returns up to limit brain notes for runID, ordered by
+// created_at descending (most recent first).
+func (s *Store) RecentBrainNotes(ctx context.Context, runID int64, limit int) ([]BrainNote, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, run_id, step_id, created_at, tags, body
+		   FROM brain_notes
+		  WHERE run_id = ?
+		  ORDER BY created_at DESC
+		  LIMIT ?`,
+		runID, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: recent brain notes: %w", err)
+	}
+	defer rows.Close()
+
+	var notes []BrainNote
+	for rows.Next() {
+		var n BrainNote
+		if err := rows.Scan(&n.ID, &n.RunID, &n.StepID, &n.CreatedAt, &n.Tags, &n.Body); err != nil {
+			return nil, fmt.Errorf("store: recent brain notes scan: %w", err)
+		}
+		notes = append(notes, n)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: recent brain notes rows: %w", err)
+	}
+	if notes == nil {
+		notes = []BrainNote{}
+	}
+	return notes, nil
+}
+
 // DB returns the underlying *sql.DB for direct read queries.
 // Write operations should go through RecordRunStart/RecordRunComplete
 // to benefit from the serialized write queue.

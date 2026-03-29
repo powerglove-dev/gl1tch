@@ -15,6 +15,8 @@ type Pipeline struct {
 	Steps       []Step         `yaml:"steps"`
 	Vars        map[string]any `yaml:"vars"` // Pipeline-level seed context available to all steps.
 	MaxParallel int            `yaml:"max_parallel"` // Maximum concurrent steps; defaults to 8 when zero.
+	UseBrain    bool           `yaml:"use_brain"`
+	WriteBrain  bool           `yaml:"write_brain"`
 }
 
 // Step is one unit of work in a pipeline.
@@ -45,6 +47,13 @@ type Step struct {
 	// ForEach is a template expression or newline-separated list of items.
 	// When set, the step is expanded into N cloned steps, one per item.
 	ForEach string `yaml:"for_each"`
+
+	// UseBrain controls brain read injection for this step.
+	// Pointer for tri-state: nil = inherit pipeline setting, true = force on, false = force off.
+	UseBrain *bool `yaml:"use_brain"`
+	// WriteBrain controls brain write injection for this step.
+	// Pointer for tri-state: nil = inherit pipeline setting, true = force on, false = force off.
+	WriteBrain *bool `yaml:"write_brain"`
 }
 
 // RetryPolicy specifies how a step should be retried on failure.
@@ -85,6 +94,12 @@ func Load(r io.Reader) (*Pipeline, error) {
 	}
 	if p.Name == "" {
 		return nil, fmt.Errorf("pipeline yaml: name is required")
+	}
+	// Reject removed step types.
+	for _, s := range p.Steps {
+		if s.Type == "db" {
+			return nil, fmt.Errorf("pipeline yaml: db step type has been removed (step %q)", s.ID)
+		}
 	}
 	// Validate DAG — detect cycles before execution.
 	if _, err := buildDAG(p.Steps); err != nil {
