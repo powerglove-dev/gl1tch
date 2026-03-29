@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sahilm/fuzzy"
@@ -321,9 +322,11 @@ func (m *Model) updateEditorPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.runnerErrMsg = "no model selected"
 			return m, nil
 		}
-		p, ok := m.pluginMgr.Get(slug)
+		// Slug is "providerID/modelID" — split and look up by provider ID.
+		providerID, modelID, _ := strings.Cut(slug, "/")
+		p, ok := m.pluginMgr.Get(providerID)
 		if !ok {
-			m.runnerErrMsg = fmt.Sprintf("plugin %q not found", slug)
+			m.runnerErrMsg = fmt.Sprintf("plugin %q not found", providerID)
 			return m, nil
 		}
 		ctx, cancel := context.WithCancel(context.Background())
@@ -332,7 +335,7 @@ func (m *Model) updateEditorPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.runnerOutput = ""
 		m.runnerErrMsg = ""
 		m.runnerScrollOffset = 0
-		return m, runPluginCmd(ctx, p, body, m.editingPrompt.CWD)
+		return m, runPluginCmd(ctx, p, body, m.editingPrompt.CWD, modelID)
 
 	case "enter":
 		switch m.editorSubFocus {
@@ -415,12 +418,15 @@ func (m *Model) updateRunnerPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // runPluginCmd executes the plugin with input and returns a runDoneMsg or runErrMsg.
-func runPluginCmd(ctx context.Context, p plugin.Plugin, input, cwd string) tea.Cmd {
+func runPluginCmd(ctx context.Context, p plugin.Plugin, input, cwd, modelID string) tea.Cmd {
 	return func() tea.Msg {
 		pr, pw := io.Pipe()
-		var vars map[string]string
+		vars := map[string]string{}
 		if cwd != "" {
-			vars = map[string]string{"cwd": cwd}
+			vars["cwd"] = cwd
+		}
+		if modelID != "" {
+			vars["model"] = modelID
 		}
 		go func() {
 			err := p.Execute(ctx, input, vars, pw)

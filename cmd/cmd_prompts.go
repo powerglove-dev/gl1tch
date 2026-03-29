@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
+	"github.com/adam-stokes/orcai/internal/picker"
 	"github.com/adam-stokes/orcai/internal/plugin"
 	"github.com/adam-stokes/orcai/internal/promptmgr"
 	"github.com/adam-stokes/orcai/internal/store"
@@ -55,6 +56,14 @@ var promptsTuiCmd = &cobra.Command{
 		home2, _ := os.UserHomeDir()
 		pluginDir := filepath.Join(home2, ".config", "orcai", "plugins")
 		pluginMgr.LoadWrappersFromDir(pluginDir)
+		// Register provider CLI adapters so the test runner can execute them.
+		for _, prov := range picker.BuildProviders() {
+			binary := prov.Command
+			if binary == "" {
+				binary = prov.ID
+			}
+			_ = pluginMgr.Register(plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", binary, prov.PipelineArgs...))
+		}
 
 		m := promptmgr.New(st, pluginMgr, bundle)
 		p := tea.NewProgram(m, tea.WithAltScreen())
