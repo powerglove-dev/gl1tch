@@ -1,9 +1,13 @@
 package modal
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/adam-stokes/orcai/internal/panelrender"
 	"github.com/adam-stokes/orcai/internal/picker"
+	"github.com/adam-stokes/orcai/internal/styles"
 )
 
 const agentPickerWindow = 4
@@ -147,4 +151,107 @@ func (m AgentPickerModel) clampModelScroll() AgentPickerModel {
 		m.modelScrollOffset = m.selectedModel - agentPickerWindow + 1
 	}
 	return m
+}
+
+// ViewRows returns ANSI-rendered rows for embedding into any panel.
+// innerW is the available content width (no borders). Each row is a plain string
+// that callers wrap in panelrender.BoxRow when embedding inline.
+func (m AgentPickerModel) ViewRows(innerW int, pal styles.ANSIPalette) []string {
+	rst := panelrender.RST
+	bld := panelrender.BLD
+	var rows []string
+
+	// ── PROVIDER section ─────────────────────────────────────────────────────
+	if m.focus == 0 {
+		rows = append(rows, pal.Accent+bld+"  PROVIDER"+rst)
+	} else {
+		rows = append(rows, pal.Dim+"  PROVIDER"+rst)
+	}
+
+	if len(m.providers) == 0 {
+		rows = append(rows, pal.Dim+"  no providers"+rst)
+	} else {
+		start := m.provScrollOffset
+		end := start + agentPickerWindow
+		if end > len(m.providers) {
+			end = len(m.providers)
+		}
+		for i := start; i < end; i++ {
+			p := m.providers[i]
+			lbl := p.Label
+			if lbl == "" {
+				lbl = p.ID
+			}
+			if i == m.selectedProvider {
+				if m.focus == 0 {
+					rows = append(rows, pal.SelBG+"\x1b[97m"+"  > "+lbl+rst)
+				} else {
+					rows = append(rows, pal.Accent+"  > "+lbl+rst)
+				}
+			} else {
+				rows = append(rows, pal.Dim+"    "+pal.FG+lbl+rst)
+			}
+		}
+	}
+
+	rows = append(rows, "")
+
+	// ── MODEL section ─────────────────────────────────────────────────────────
+	if m.focus == 1 {
+		rows = append(rows, pal.Accent+bld+"  MODEL"+rst)
+	} else {
+		rows = append(rows, pal.Dim+"  MODEL"+rst)
+	}
+
+	models := m.currentModels()
+	if len(models) == 0 {
+		rows = append(rows, pal.Dim+"  no models"+rst)
+	} else {
+		start := m.modelScrollOffset
+		end := start + agentPickerWindow
+		if end > len(models) {
+			end = len(models)
+		}
+		for i := start; i < end; i++ {
+			mo := models[i]
+			lbl := mo.Label
+			if lbl == "" {
+				lbl = mo.ID
+			}
+			if i == m.selectedModel {
+				if m.focus == 1 {
+					rows = append(rows, pal.SelBG+"\x1b[97m"+"  > "+lbl+rst)
+				} else {
+					rows = append(rows, pal.Accent+"  > "+lbl+rst)
+				}
+			} else {
+				rows = append(rows, pal.Dim+"    "+pal.FG+lbl+rst)
+			}
+		}
+	}
+
+	rows = append(rows, "")
+	rows = append(rows, panelrender.HintBar([]panelrender.Hint{
+		{Key: "j/k", Desc: "nav"},
+		{Key: "tab", Desc: "switch"},
+		{Key: "enter", Desc: "confirm"},
+		{Key: "esc", Desc: "cancel"},
+	}, innerW, pal))
+
+	return rows
+}
+
+// ViewBox renders the picker as a standalone bordered overlay box suitable for
+// use with panelrender.OverlayCenter.
+func (m AgentPickerModel) ViewBox(boxW int, pal styles.ANSIPalette) string {
+	rows := []string{
+		panelrender.BoxTop(boxW, "AGENT / MODEL", pal.Border, pal.Accent),
+		panelrender.BoxRow("", boxW, pal.Border),
+	}
+	for _, r := range m.ViewRows(boxW-4, pal) {
+		rows = append(rows, panelrender.BoxRow("  "+r, boxW, pal.Border))
+	}
+	rows = append(rows, panelrender.BoxRow("", boxW, pal.Border))
+	rows = append(rows, panelrender.BoxBot(boxW, pal.Border))
+	return strings.Join(rows, "\n")
 }

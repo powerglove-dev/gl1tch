@@ -2,12 +2,14 @@ package modal_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/adam-stokes/orcai/internal/modal"
 	"github.com/adam-stokes/orcai/internal/picker"
+	"github.com/adam-stokes/orcai/internal/styles"
 )
 
 func testProviders() []picker.ProviderDef {
@@ -132,5 +134,36 @@ func TestAgentPickerUpdate_ScrollClamps(t *testing.T) {
 	}
 	if m.SelectedProviderID() != "p5" {
 		t.Errorf("want p5, got %q", m.SelectedProviderID())
+	}
+}
+
+func TestAgentPickerViewRows_ContainsProviderAndModel(t *testing.T) {
+	m := modal.NewAgentPickerModel(testProviders())
+	pal := styles.ANSIPalette{Accent: "", Dim: "", FG: "", SelBG: "", Border: ""}
+	rows := m.ViewRows(60, pal)
+	joined := strings.Join(rows, "\n")
+	if !strings.Contains(joined, "PROVIDER") {
+		t.Error("ViewRows missing PROVIDER label")
+	}
+	if !strings.Contains(joined, "MODEL") {
+		t.Error("ViewRows missing MODEL label")
+	}
+	if !strings.Contains(joined, "Claude") {
+		t.Error("ViewRows missing provider label Claude")
+	}
+	if !strings.Contains(joined, "Sonnet") {
+		t.Error("ViewRows missing model label Sonnet")
+	}
+}
+
+func TestAgentPickerViewBox_HasBorders(t *testing.T) {
+	m := modal.NewAgentPickerModel(testProviders())
+	pal := styles.ANSIPalette{}
+	box := m.ViewBox(60, pal)
+	if !strings.Contains(box, "AGENT / MODEL") {
+		t.Error("ViewBox missing title")
+	}
+	if !strings.Contains(box, "┌") || !strings.Contains(box, "└") {
+		t.Error("ViewBox missing box-drawing borders")
 	}
 }
