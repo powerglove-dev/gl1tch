@@ -200,7 +200,7 @@ func (m *Model) buildEditorRows(w, h int) []string {
 	// BODY section — reserve rows for model/cwd/hints/bot.
 	bodyActive := m.focusPanel == 1 && m.editorSubFocus == 1
 	rows = append(rows, panelrender.BoxRow("  "+sectionLabel("BODY", bodyActive), w, borderColor))
-	const reservedTail = 6 // model row + cwd row + blank + hint + boxBot + blank-before-tail
+	const reservedTail = 5 // model row + cwd row + blank + hint + boxBot
 	bodyMaxLines := h - len(rows) - reservedTail
 	if bodyMaxLines < 1 {
 		bodyMaxLines = 1
@@ -342,6 +342,7 @@ func (m *Model) buildRunnerRows(w, h int) []string {
 			hints = []panelrender.Hint{
 				{Key: "ctrl+r", Desc: "run"},
 				{Key: "r", Desc: "reply"},
+				{Key: "p", Desc: "promote to body"},
 				{Key: "j/k", Desc: "scroll"},
 			}
 		}

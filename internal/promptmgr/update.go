@@ -30,6 +30,27 @@ type runnerTurn struct {
 	content string
 }
 
+// promptBuilderPrefix is injected before the user's body on every run.
+// It primes the AI to act as a prompt engineering assistant that expands
+// bare requirements into precise, LLM-ready prompts.
+const promptBuilderPrefix = `You are a prompt engineering assistant. Your job is to take a user's rough intention and transform it into a precise, well-structured prompt that AI/LLM agents can execute effectively.
+
+OUTPUT FORMAT:
+1. Output the expanded prompt directly — no preamble, no "here is your prompt". Markdown is fine and encouraged for structure (headings, bullet points, code blocks).
+2. After the prompt, add a blank line then "---" followed by 2-3 bullets explaining what makes it effective. Keep that section under 60 words.
+3. Nothing else.
+
+A good expanded prompt:
+- States the full context (who the AI is, what it knows, what it's doing)
+- Breaks the task into clear steps or sections
+- Specifies output format, length, and tone constraints
+- Eliminates ambiguity so the AI cannot misinterpret
+
+If the requirement is unclear, ask ONE targeted clarifying question instead of guessing.
+
+User requirement:
+`
+
 type spinnerTickMsg struct{}
 
 var spinnerFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
@@ -166,6 +187,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// Resize body textarea to fill available editor height.
+		// Mirror the layout math from buildEditorRows:
+		// contentH=height-2, editorH=contentH/2
+		// reserved: boxTop+titleLabel+titleInput+blank+bodyLabel = 5
+		// tail: modelRow+cwdRow+blank+hint+boxBot = 5
+		contentH := m.height - 2
+		editorH := contentH / 2
+		bodyH := editorH - 5 - 5
+		if bodyH < 2 {
+			bodyH = 2
+		}
+		m.bodyInput.SetHeight(bodyH)
 
 	case tea.KeyMsg:
 		// When agent picker overlay is active, route all keys through it.
@@ -357,8 +390,10 @@ func (m *Model) updateEditorPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.runnerErrMsg = fmt.Sprintf("plugin %q not found", providerID)
 			return m, nil
 		}
+		// Inject the prompt-builder system context before the user's body.
+		input := promptBuilderPrefix + body
 		// Fresh run: clear conversation history, seed with user turn.
-		m.runnerTurns = []runnerTurn{{role: "user", content: body}}
+		m.runnerTurns = []runnerTurn{{role: "user", content: input}}
 		m.followUpActive = false
 		m.followUpInput.SetValue("")
 		ctx, cancel := context.WithCancel(context.Background())
@@ -368,7 +403,7 @@ func (m *Model) updateEditorPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.runnerOutput = ""
 		m.runnerErrMsg = ""
 		m.runnerScrollOffset = 0
-		return m, tea.Batch(runPluginCmd(ctx, p, body, m.editingPrompt.CWD, modelID), spinnerTickCmd())
+		return m, tea.Batch(runPluginCmd(ctx, p, input, m.editingPrompt.CWD, modelID), spinnerTickCmd())
 
 	case "enter":
 		switch m.editorSubFocus {
@@ -499,6 +534,15 @@ func (m *Model) updateRunnerPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.runnerOutput != "" && !m.runnerStreaming {
 			m.followUpActive = true
 			m.followUpInput.Focus()
+		}
+	case "p":
+		// Promote last response into the body editor for review/editing/saving.
+		if m.runnerOutput != "" && !m.runnerStreaming {
+			m.bodyInput.SetValue(m.runnerOutput)
+			m.focusPanel = 1
+			m.editorSubFocus = 1
+			m.syncEditorFocus()
+			m.statusMsg = "response promoted to body — review and ctrl+s to save"
 		}
 	case "j", "down":
 		m.runnerScrollOffset++
