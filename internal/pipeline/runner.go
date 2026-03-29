@@ -456,6 +456,13 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 	var firstStepErr error
 	var firstStepErrMu sync.Mutex
 
+	// pendingFailures holds errors from steps that have an on_failure handler.
+	// If the handler succeeds the entry is deleted; if it fails (or there is no
+	// handler) the error is promoted to firstStepErr.
+	pendingFailures := make(map[string]error) // failed-step-ID → error
+	// onFailureFor maps a recovery step ID back to the step that triggered it.
+	onFailureFor := make(map[string]string) // recovery-step-ID → failed-step-ID
+
 	// quit signals the dispatcher to stop.
 	quit := make(chan struct{})
 	var quitOnce sync.Once
@@ -564,12 +571,7 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 				st.mu.Unlock()
 				ec.Set("step."+res.id+".state", "failed")
 
-				// Capture first step error to propagate as run-level failure.
-				firstStepErrMu.Lock()
-				if firstStepErr == nil {
-					firstStepErr = fmt.Errorf("pipeline: step %q: %w", res.id, res.err)
-				}
-				firstStepErrMu.Unlock()
+				stepErr := fmt.Errorf("pipeline: step %q: %w", res.id, res.err)
 
 				// Record step failure in store.
 				if cfg.store != nil {
@@ -600,13 +602,31 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 						if ofSt.status == statusSkipped {
 							ofSt.status = statusWaiting
 							ofSt.mu.Unlock()
+							// Hold this error pending recovery — promoted if handler fails.
+							firstStepErrMu.Lock()
+							pendingFailures[res.id] = stepErr
+							onFailureFor[ofID] = res.id
+							firstStepErrMu.Unlock()
 							// Add to expected since it's a new execution.
 							expected++
 							readyCh <- ofID
 						} else {
 							ofSt.mu.Unlock()
+							// Handler already running/done — treat as unhandled.
+							firstStepErrMu.Lock()
+							if firstStepErr == nil {
+								firstStepErr = stepErr
+							}
+							firstStepErrMu.Unlock()
 						}
 					}
+				} else {
+					// No on_failure handler — propagate immediately.
+					firstStepErrMu.Lock()
+					if firstStepErr == nil {
+						firstStepErr = stepErr
+					}
+					firstStepErrMu.Unlock()
 				}
 			} else {
 				st.mu.Lock()
@@ -638,6 +658,15 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 					ec.Set("step."+res.id+".state", "done")
 				}
 
+				// If this step was an on_failure recovery step and it succeeded,
+				// clear the pending failure for the original step.
+				firstStepErrMu.Lock()
+				if originID, ok := onFailureFor[res.id]; ok {
+					delete(pendingFailures, originID)
+					delete(onFailureFor, res.id)
+				}
+				firstStepErrMu.Unlock()
+
 				// Unblock dependents.
 				for _, dep := range dependents[res.id] {
 					depSt := states[dep]
@@ -661,6 +690,14 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 
 	stopDispatcher()
 	wg.Wait()
+
+	// Promote any pending failures whose recovery step never succeeded.
+	if firstStepErr == nil {
+		for _, err := range pendingFailures {
+			firstStepErr = err
+			break
+		}
+	}
 
 	return lastOutput, firstStepErr
 }
