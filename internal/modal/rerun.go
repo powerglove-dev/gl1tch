@@ -135,11 +135,7 @@ func (m RerunModal) ViewBox(w int, pal styles.ANSIPalette) string {
 	rst := panelrender.RST
 	bld := panelrender.BLD
 
-	// Truncate run name if needed.
 	title := "RE-RUN: " + m.run.Name
-	if len(title) > w-6 {
-		title = title[:w-9] + "..."
-	}
 
 	rows := []string{
 		panelrender.BoxTop(w, title, pal.Border, pal.Accent),
@@ -154,7 +150,7 @@ func (m RerunModal) ViewBox(w int, pal styles.ANSIPalette) string {
 	rows = append(rows, panelrender.BoxRow(ctxLabel, w, pal.Border))
 
 	// Textarea lines.
-	for _, line := range strings.Split(m.textarea.View(), "\n") {
+	for line := range strings.SplitSeq(m.textarea.View(), "\n") {
 		rows = append(rows, panelrender.BoxRow("  "+line, w, pal.Border))
 	}
 
