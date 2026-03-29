@@ -121,19 +121,21 @@ func buildRunContent(run store.Run, pal styles.ANSIPalette, markdownMode bool, i
 
 		indent := "     " // align under step ID (connector + badge + space)
 
-		// Per-step prompt: full text, dimmed.
+		// Per-step prompt: full text, wrapped and dimmed.
 		if step.Prompt != "" {
 			sb.WriteString(dim(indent+"prompt:") + "\n")
-			for _, pl := range strings.Split(strings.TrimSpace(step.Prompt), "\n") {
+			promptW := innerW - len(indent) - 2
+			for _, pl := range strings.Split(wrapContent(strings.TrimSpace(step.Prompt), promptW), "\n") {
 				sb.WriteString(dim(indent+"  "+pl) + "\n")
 			}
 		}
 
-		// Per-step output: full text, dimmed.
+		// Per-step output: full text, wrapped and dimmed.
 		if v, ok := step.Output["value"]; ok {
 			raw := fmt.Sprintf("%v", v)
 			if raw != "" {
-				for _, ol := range strings.Split(raw, "\n") {
+				outputW := innerW - len(indent)
+				for _, ol := range strings.Split(wrapContent(raw, outputW), "\n") {
 					sb.WriteString(dim(indent+ol) + "\n")
 				}
 			}
