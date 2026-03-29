@@ -22,11 +22,12 @@ import (
 
 // window is a single tmux window entry.
 type window struct {
-	index       string // tmux window index (string for display)
-	name        string // window name
-	id          string // window ID (@N)
-	switchboard bool   // synthetic entry that navigates to orcai session window 0
-	cronSession bool   // synthetic entry that switches to the orcai-cron session
+	index         string // tmux window index (string for display)
+	name          string // window name
+	id            string // window ID (@N)
+	switchboard   bool   // synthetic entry that navigates to orcai session window 0
+	cronSession   bool   // synthetic entry that switches to the orcai-cron session
+	promptsWindow bool   // synthetic entry that opens the prompt manager TUI
 }
 
 type model struct {
@@ -94,6 +95,7 @@ func newModel() model {
 		sysop = append(sysop, window{name: "cron", cronSession: true})
 		sysop = append(sysop, cronWins...)
 	}
+	sysop = append(sysop, window{name: "prompts", promptsWindow: true})
 	m.sysop = sysop
 	return m
 }
@@ -223,6 +225,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						exec.Command("tmux", "select-window", "-t", "orcai:0").Run() //nolint:errcheck
 					} else if w.cronSession {
 						exec.Command("tmux", "switch-client", "-t", "orcai-cron").Run() //nolint:errcheck
+					} else if w.promptsWindow {
+						self, _ := os.Executable()
+						self = filepath.Clean(self)
+						exec.Command("tmux", "new-window", "-n", "orcai-prompts", self+" prompts tui").Run() //nolint:errcheck
 					} else {
 						target := w.id
 						if target == "" {

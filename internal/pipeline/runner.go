@@ -257,7 +257,7 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 			rawPrompt := Interpolate(step.Prompt+step.Input, legacySnap)
 
 			stepStart := time.Now()
-			output, err := executePluginStep(ctx, step, ec, mgr, lastOutput, p)
+			output, err := executePluginStep(ctx, step, ec, mgr, lastOutput, p, cfg.store)
 			stepDurationMs := time.Since(stepStart).Milliseconds()
 
 			if err != nil {
@@ -507,7 +507,7 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 			rawPrompt := Interpolate(step.Prompt+step.Input, snap)
 
 			stepStart := time.Now()
-			out, execErr := dispatchStep(ctx, step, args, snap, ec, mgr, cfg.runID, cfg.pipeName, cfg.publisher, p)
+			out, execErr := dispatchStep(ctx, step, args, snap, ec, mgr, cfg.runID, cfg.pipeName, cfg.publisher, p, cfg.store)
 			stepDurationMs := time.Since(stepStart).Milliseconds()
 
 			if execErr == nil {
@@ -857,8 +857,8 @@ func interpolateArgs(args map[string]any, vars map[string]any) map[string]any {
 
 // dispatchStep determines the executor for a step and runs it (with retries).
 // runID and pipeName are used to populate event payloads; pub receives the events.
-func dispatchStep(ctx context.Context, step *Step, args map[string]any, snap map[string]any, ec *ExecutionContext, mgr *plugin.Manager, runID int64, pipeName string, pub EventPublisher, p *Pipeline) (map[string]any, error) {
-	executor, err := resolveExecutor(ctx, step, args, snap, ec, mgr, p)
+func dispatchStep(ctx context.Context, step *Step, args map[string]any, snap map[string]any, ec *ExecutionContext, mgr *plugin.Manager, runID int64, pipeName string, pub EventPublisher, p *Pipeline, st *store.Store) (map[string]any, error) {
+	executor, err := resolveExecutor(ctx, step, args, snap, ec, mgr, p, st)
 	if err != nil {
 		return nil, err
 	}
@@ -978,7 +978,7 @@ done:
 }
 
 // resolveExecutor builds the appropriate StepExecutor for a step.
-func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap map[string]any, ec *ExecutionContext, mgr *plugin.Manager, p *Pipeline) (StepExecutor, error) {
+func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap map[string]any, ec *ExecutionContext, mgr *plugin.Manager, p *Pipeline, st *store.Store) (StepExecutor, error) {
 	// Determine the type/executor name: Executor takes precedence over Type, then Plugin.
 	typeName := step.Executor
 	if typeName == "" {
@@ -1013,6 +1013,17 @@ func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap 
 	}
 	promptOrInput := Interpolate(raw, snap)
 
+	// Prepend saved prompt body if prompt_id is set.
+	if step.PromptID != "" {
+		if st != nil {
+			saved, err := st.GetPromptByTitle(ctx, step.PromptID)
+			if err != nil {
+				return nil, fmt.Errorf("pipeline: step %q: prompt %q not found in store", step.ID, step.PromptID)
+			}
+			promptOrInput = saved.Body + "\n\n" + promptOrInput
+		}
+	}
+
 	promptOrInput = injectBrainContext(ctx, promptOrInput, p, step, ec)
 
 	stepVars := ec.FlatStrings()
@@ -1038,7 +1049,7 @@ func (b *builtinExecutor) Cleanup(_ context.Context) error { return nil }
 
 // executePluginStep runs a single plugin step and returns its string output.
 // This is used by the legacy runner only.
-func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mgr *plugin.Manager, defaultInput string, p *Pipeline) (string, error) {
+func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mgr *plugin.Manager, defaultInput string, p *Pipeline, st *store.Store) (string, error) {
 	pluginName := step.Executor
 	if pluginName == "" {
 		pluginName = step.Plugin
@@ -1056,6 +1067,17 @@ func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mg
 		raw = defaultInput
 	}
 	promptOrInput := Interpolate(raw, snap)
+
+	// Prepend saved prompt body if prompt_id is set.
+	if step.PromptID != "" {
+		if st != nil {
+			saved, err := st.GetPromptByTitle(ctx, step.PromptID)
+			if err != nil {
+				return "", fmt.Errorf("pipeline: step %q: prompt %q not found in store", step.ID, step.PromptID)
+			}
+			promptOrInput = saved.Body + "\n\n" + promptOrInput
+		}
+	}
 
 	promptOrInput = injectBrainContext(ctx, promptOrInput, p, step, ec)
 

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -520,5 +521,426 @@ func TestQueryRuns_StepsPopulated(t *testing.T) {
 		if got.DurationMs != w.DurationMs {
 			t.Errorf("[%d] DurationMs: want %d, got %d", i, w.DurationMs, got.DurationMs)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Prompt CRUD tests
+// ---------------------------------------------------------------------------
+
+func TestInsertPrompt(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	cases := []struct {
+		name    string
+		prompt  Prompt
+		wantErr bool
+	}{
+		{
+			name:   "basic insert returns positive id",
+			prompt: Prompt{Title: "Hello", Body: "Say hello", ModelSlug: "gpt-4"},
+		},
+		{
+			name:   "empty model_slug allowed",
+			prompt: Prompt{Title: "No model", Body: "No model body", ModelSlug: ""},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			before := time.Now().Unix()
+			id, err := s.InsertPrompt(ctx, tc.prompt)
+			after := time.Now().Unix()
+
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("InsertPrompt() error = %v, wantErr = %v", err, tc.wantErr)
+			}
+			if tc.wantErr {
+				return
+			}
+			if id <= 0 {
+				t.Errorf("want id > 0, got %d", id)
+			}
+
+			// Verify timestamps were set.
+			got, err := s.GetPrompt(ctx, id)
+			if err != nil {
+				t.Fatalf("GetPrompt: %v", err)
+			}
+			if got.CreatedAt < before || got.CreatedAt > after {
+				t.Errorf("created_at %d not in [%d, %d]", got.CreatedAt, before, after)
+			}
+			if got.UpdatedAt < before || got.UpdatedAt > after {
+				t.Errorf("updated_at %d not in [%d, %d]", got.UpdatedAt, before, after)
+			}
+			if got.Title != tc.prompt.Title {
+				t.Errorf("title: want %q, got %q", tc.prompt.Title, got.Title)
+			}
+			if got.ModelSlug != tc.prompt.ModelSlug {
+				t.Errorf("model_slug: want %q, got %q", tc.prompt.ModelSlug, got.ModelSlug)
+			}
+		})
+	}
+}
+
+func TestUpdatePrompt(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	id, err := s.InsertPrompt(ctx, Prompt{Title: "Original", Body: "Original body", ModelSlug: "gpt-3"})
+	if err != nil {
+		t.Fatalf("InsertPrompt: %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		prompt  Prompt
+		wantErr bool
+	}{
+		{
+			name:   "updates existing prompt",
+			prompt: Prompt{ID: id, Title: "Updated", Body: "Updated body", ModelSlug: "gpt-4"},
+		},
+		{
+			name:    "error on missing id",
+			prompt:  Prompt{ID: 99999, Title: "Ghost", Body: "Ghost body", ModelSlug: ""},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			before := time.Now().Unix()
+			err := s.UpdatePrompt(ctx, tc.prompt)
+			after := time.Now().Unix()
+
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("UpdatePrompt() error = %v, wantErr = %v", err, tc.wantErr)
+			}
+			if tc.wantErr {
+				return
+			}
+
+			got, err := s.GetPrompt(ctx, tc.prompt.ID)
+			if err != nil {
+				t.Fatalf("GetPrompt after update: %v", err)
+			}
+			if got.Body != tc.prompt.Body {
+				t.Errorf("body: want %q, got %q", tc.prompt.Body, got.Body)
+			}
+			if got.UpdatedAt < before || got.UpdatedAt > after {
+				t.Errorf("updated_at %d not in [%d, %d]", got.UpdatedAt, before, after)
+			}
+		})
+	}
+}
+
+func TestDeletePrompt(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	id, err := s.InsertPrompt(ctx, Prompt{Title: "To Delete", Body: "Delete me", ModelSlug: ""})
+	if err != nil {
+		t.Fatalf("InsertPrompt: %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		id      int64
+		wantErr bool
+	}{
+		{
+			name: "deletes existing prompt",
+			id:   id,
+		},
+		{
+			name:    "error on missing id",
+			id:      99999,
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := s.DeletePrompt(ctx, tc.id)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("DeletePrompt() error = %v, wantErr = %v", err, tc.wantErr)
+			}
+			if tc.wantErr {
+				return
+			}
+
+			_, err = s.GetPrompt(ctx, tc.id)
+			if err != sql.ErrNoRows {
+				t.Errorf("GetPrompt after delete: want sql.ErrNoRows, got %v", err)
+			}
+		})
+	}
+}
+
+func TestListPrompts(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("empty slice on empty table", func(t *testing.T) {
+		s := openTestStore(t)
+		prompts, err := s.ListPrompts(ctx)
+		if err != nil {
+			t.Fatalf("ListPrompts: %v", err)
+		}
+		if prompts == nil {
+			t.Error("want non-nil empty slice, got nil")
+		}
+		if len(prompts) != 0 {
+			t.Errorf("want 0 prompts, got %d", len(prompts))
+		}
+	})
+
+	t.Run("returns newest-first by updated_at", func(t *testing.T) {
+		s := openTestStore(t)
+
+		// Insert three prompts; sleep briefly to ensure distinct updated_at.
+		names := []string{"first", "second", "third"}
+		for _, n := range names {
+			_, err := s.InsertPrompt(ctx, Prompt{Title: n, Body: n + " body", ModelSlug: ""})
+			if err != nil {
+				t.Fatalf("InsertPrompt(%s): %v", n, err)
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
+
+		prompts, err := s.ListPrompts(ctx)
+		if err != nil {
+			t.Fatalf("ListPrompts: %v", err)
+		}
+		if len(prompts) != 3 {
+			t.Fatalf("want 3 prompts, got %d", len(prompts))
+		}
+		if prompts[0].Title != "third" {
+			t.Errorf("want first result 'third', got %q", prompts[0].Title)
+		}
+		if prompts[2].Title != "first" {
+			t.Errorf("want last result 'first', got %q", prompts[2].Title)
+		}
+	})
+}
+
+func TestSearchPrompts(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	_, err := s.InsertPrompt(ctx, Prompt{Title: "Translate English to French", Body: "You are a translator.", ModelSlug: ""})
+	if err != nil {
+		t.Fatalf("InsertPrompt: %v", err)
+	}
+	_, err = s.InsertPrompt(ctx, Prompt{Title: "Code reviewer", Body: "Review the Python code carefully.", ModelSlug: "gpt-4"})
+	if err != nil {
+		t.Fatalf("InsertPrompt: %v", err)
+	}
+	_, err = s.InsertPrompt(ctx, Prompt{Title: "Summarizer", Body: "Summarize the following text.", ModelSlug: ""})
+	if err != nil {
+		t.Fatalf("InsertPrompt: %v", err)
+	}
+
+	cases := []struct {
+		name      string
+		query     string
+		wantCount int
+		wantTitle string // first result title if wantCount > 0
+	}{
+		{
+			name:      "matches by title",
+			query:     "translate",
+			wantCount: 1,
+			wantTitle: "Translate English to French",
+		},
+		{
+			name:      "matches by body",
+			query:     "python",
+			wantCount: 1,
+			wantTitle: "Code reviewer",
+		},
+		{
+			name:      "empty on no match",
+			query:     "xyzzy",
+			wantCount: 0,
+		},
+		{
+			name:      "case-insensitive match",
+			query:     "SUMMARIZE",
+			wantCount: 1,
+			wantTitle: "Summarizer",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			results, err := s.SearchPrompts(ctx, tc.query)
+			if err != nil {
+				t.Fatalf("SearchPrompts(%q): %v", tc.query, err)
+			}
+			if len(results) != tc.wantCount {
+				t.Errorf("want %d results, got %d", tc.wantCount, len(results))
+			}
+			if tc.wantCount > 0 && len(results) > 0 && results[0].Title != tc.wantTitle {
+				t.Errorf("want first title %q, got %q", tc.wantTitle, results[0].Title)
+			}
+		})
+	}
+}
+
+func TestSavePromptResponse(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	id, err := s.InsertPrompt(ctx, Prompt{Title: "Runner", Body: "Run this", ModelSlug: "gpt-4"})
+	if err != nil {
+		t.Fatalf("InsertPrompt: %v", err)
+	}
+
+	t.Run("saves response for existing id", func(t *testing.T) {
+		if err := s.SavePromptResponse(ctx, id, "hello world"); err != nil {
+			t.Fatalf("SavePromptResponse: %v", err)
+		}
+		got, err := s.GetPrompt(ctx, id)
+		if err != nil {
+			t.Fatalf("GetPrompt: %v", err)
+		}
+		if got.LastResponse != "hello world" {
+			t.Errorf("LastResponse: want %q, got %q", "hello world", got.LastResponse)
+		}
+	})
+
+	t.Run("overwrites previous response", func(t *testing.T) {
+		if err := s.SavePromptResponse(ctx, id, "updated response"); err != nil {
+			t.Fatalf("SavePromptResponse: %v", err)
+		}
+		got, err := s.GetPrompt(ctx, id)
+		if err != nil {
+			t.Fatalf("GetPrompt: %v", err)
+		}
+		if got.LastResponse != "updated response" {
+			t.Errorf("LastResponse: want %q, got %q", "updated response", got.LastResponse)
+		}
+	})
+
+	t.Run("returns error on missing id", func(t *testing.T) {
+		err := s.SavePromptResponse(ctx, 99999, "ghost")
+		if err == nil {
+			t.Fatal("want error for unknown id, got nil")
+		}
+	})
+}
+
+func TestPromptCWDRoundTrip(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	const wantCWD = "/home/user/projects/myapp"
+	id, err := s.InsertPrompt(ctx, Prompt{Title: "CWD Test", Body: "test body", ModelSlug: "gpt-4", CWD: wantCWD})
+	if err != nil {
+		t.Fatalf("InsertPrompt: %v", err)
+	}
+
+	got, err := s.GetPrompt(ctx, id)
+	if err != nil {
+		t.Fatalf("GetPrompt: %v", err)
+	}
+	if got.CWD != wantCWD {
+		t.Errorf("CWD: want %q, got %q", wantCWD, got.CWD)
+	}
+}
+
+func TestGetPromptByTitle(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	_, err := s.InsertPrompt(ctx, Prompt{Title: "My Summarizer", Body: "Summarize the text.", ModelSlug: "gpt-4"})
+	if err != nil {
+		t.Fatalf("InsertPrompt: %v", err)
+	}
+
+	t.Run("found by exact title", func(t *testing.T) {
+		got, err := s.GetPromptByTitle(ctx, "My Summarizer")
+		if err != nil {
+			t.Fatalf("GetPromptByTitle: %v", err)
+		}
+		if got.Title != "My Summarizer" {
+			t.Errorf("Title: want %q, got %q", "My Summarizer", got.Title)
+		}
+		if got.Body != "Summarize the text." {
+			t.Errorf("Body: want %q, got %q", "Summarize the text.", got.Body)
+		}
+	})
+
+	t.Run("found case-insensitively", func(t *testing.T) {
+		got, err := s.GetPromptByTitle(ctx, "MY SUMMARIZER")
+		if err != nil {
+			t.Fatalf("GetPromptByTitle case-insensitive: %v", err)
+		}
+		if got.Title != "My Summarizer" {
+			t.Errorf("Title: want %q, got %q", "My Summarizer", got.Title)
+		}
+	})
+
+	t.Run("error on missing title", func(t *testing.T) {
+		_, err := s.GetPromptByTitle(ctx, "nonexistent title")
+		if err != sql.ErrNoRows {
+			t.Errorf("want sql.ErrNoRows, got %v", err)
+		}
+	})
+}
+
+func TestGetPrompt(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	inserted := Prompt{Title: "Fetch me", Body: "Full body text", ModelSlug: "claude-3"}
+	id, err := s.InsertPrompt(ctx, inserted)
+	if err != nil {
+		t.Fatalf("InsertPrompt: %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		id      int64
+		wantErr error
+	}{
+		{
+			name: "returns full struct",
+			id:   id,
+		},
+		{
+			name:    "error on missing id",
+			id:      99999,
+			wantErr: sql.ErrNoRows,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := s.GetPrompt(ctx, tc.id)
+			if tc.wantErr != nil {
+				if err != tc.wantErr {
+					t.Fatalf("GetPrompt() error = %v, want %v", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("GetPrompt() unexpected error: %v", err)
+			}
+			if got.ID != id {
+				t.Errorf("ID: want %d, got %d", id, got.ID)
+			}
+			if got.Title != inserted.Title {
+				t.Errorf("Title: want %q, got %q", inserted.Title, got.Title)
+			}
+			if got.Body != inserted.Body {
+				t.Errorf("Body: want %q, got %q", inserted.Body, got.Body)
+			}
+			if got.ModelSlug != inserted.ModelSlug {
+				t.Errorf("ModelSlug: want %q, got %q", inserted.ModelSlug, got.ModelSlug)
+			}
+		})
 	}
 }
