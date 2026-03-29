@@ -11,6 +11,30 @@ import (
 	"github.com/adam-stokes/orcai/internal/store"
 )
 
+// injectBrainContext applies read and write brain pre-context modifications to a
+// prompt string. It is called by both the legacy and DAG execution paths before
+// dispatching to a plugin.
+//   - If use_brain is active and a BrainInjector is configured, the read preamble
+//     is prepended.
+//   - If write_brain is active, the write instruction is appended.
+func injectBrainContext(ctx context.Context, prompt string, p *Pipeline, step *Step, ec *ExecutionContext) string {
+	if stepUseBrain(p, step) {
+		if inj := ec.GetBrainInjector(); inj != nil {
+			if preamble, err := inj.ReadContext(ctx, ec.RunID()); err == nil && preamble != "" {
+				prompt = preamble + "\n\n" + prompt
+			} else if err != nil {
+				fmt.Fprintf(os.Stderr, "[debug] brain read context error for step %q: %v\n", step.ID, err)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "[debug] use_brain active for step %q but no BrainInjector configured\n", step.ID)
+		}
+	}
+	if stepWriteBrain(p, step) {
+		prompt = prompt + brainWriteInstruction
+	}
+	return prompt
+}
+
 // brainWriteInstruction is appended to the prompt of write_brain steps.
 const brainWriteInstruction = `
 
@@ -26,6 +50,9 @@ The brain note will be stored and made available to subsequent agent steps with 
 // block from the user-visible output string before it is published to the feed/inbox.
 // Currently the <brain> XML remains visible in step output.
 
+// brainBlockRe matches <brain> blocks in agent output. Only a single optional
+// tags attribute is recognized; other attributes are ignored. Tag values must
+// not contain embedded double quotes (LLM output does not generate escape sequences).
 var brainBlockRe = regexp.MustCompile(`(?s)<brain(?:\s+tags="([^"]*)")?\s*>(.*?)</brain>`)
 
 // parseBrainBlock scans output for a <brain> XML block and persists it to the store.

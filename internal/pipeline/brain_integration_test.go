@@ -456,6 +456,33 @@ func TestBrainWriteInsertion_DAGPath(t *testing.T) {
 	}
 }
 
+// TestBrainWriteInsertion_NoStoreConfigured verifies that a write_brain step runs
+// without panic or error when no store is configured (ec.DB() == nil).
+func TestBrainWriteInsertion_NoStoreConfigured(t *testing.T) {
+	// write_brain: true step runs without WithRunStore
+	// Assert: no panic, step succeeds, no error returned
+	p := &pipeline.Pipeline{
+		Name:       "no-store",
+		WriteBrain: true,
+		Steps: []pipeline.Step{
+			{ID: "s1", Plugin: "emit-brain"},
+		},
+	}
+	mgr := plugin.NewManager()
+	_ = mgr.Register(&plugin.StubPlugin{
+		PluginName: "emit-brain",
+		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
+			_, err := w.Write([]byte(`<brain tags="t">note</brain>`))
+			return err
+		},
+	})
+	// No WithRunStore — ec.DB() will be nil
+	_, err := pipeline.Run(context.Background(), p, mgr, "")
+	if err != nil {
+		t.Fatalf("expected no error when store not configured, got %v", err)
+	}
+}
+
 // TestBrainLegacyPath verifies that brain injection works on the legacy runner
 // (pipelines without `needs`, `retry`, `for_each`, or `on_failure`).
 func TestBrainLegacyPath(t *testing.T) {

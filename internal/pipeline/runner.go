@@ -963,23 +963,7 @@ func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap 
 	}
 	promptOrInput := Interpolate(raw, snap)
 
-	// Brain read injection: prepend preamble if use_brain is active.
-	if stepUseBrain(p, step) {
-		if inj := ec.GetBrainInjector(); inj != nil {
-			if preamble, err := inj.ReadContext(ctx, ec.RunID()); err == nil && preamble != "" {
-				promptOrInput = preamble + "\n\n" + promptOrInput
-			} else if err != nil {
-				fmt.Fprintf(os.Stderr, "[debug] brain read context error for step %q: %v\n", step.ID, err)
-			}
-		} else {
-			fmt.Fprintf(os.Stderr, "[debug] use_brain active for step %q but no BrainInjector configured\n", step.ID)
-		}
-	}
-
-	// Brain write injection: append write instruction if write_brain is active.
-	if stepWriteBrain(p, step) {
-		promptOrInput = promptOrInput + brainWriteInstruction
-	}
+	promptOrInput = injectBrainContext(ctx, promptOrInput, p, step, ec)
 
 	stepVars := ec.FlatStrings()
 	stepVars["model"] = step.Model
@@ -1023,23 +1007,7 @@ func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mg
 	}
 	promptOrInput := Interpolate(raw, snap)
 
-	// Brain read injection: prepend preamble if use_brain is active.
-	if stepUseBrain(p, step) {
-		if inj := ec.GetBrainInjector(); inj != nil {
-			if preamble, err := inj.ReadContext(ctx, ec.RunID()); err == nil && preamble != "" {
-				promptOrInput = preamble + "\n\n" + promptOrInput
-			} else if err != nil {
-				fmt.Fprintf(os.Stderr, "[debug] brain read context error for step %q: %v\n", step.ID, err)
-			}
-		} else {
-			fmt.Fprintf(os.Stderr, "[debug] use_brain active for step %q but no BrainInjector configured\n", step.ID)
-		}
-	}
-
-	// Brain write injection: append write instruction if write_brain is active.
-	if stepWriteBrain(p, step) {
-		promptOrInput = promptOrInput + brainWriteInstruction
-	}
+	promptOrInput = injectBrainContext(ctx, promptOrInput, p, step, ec)
 
 	stepVars := ec.FlatStrings()
 	stepVars["model"] = step.Model
