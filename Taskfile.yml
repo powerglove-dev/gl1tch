@@ -83,15 +83,16 @@ tasks:
       - |
         if [ -d ~/.config/orcai ]; then
           cp -r ~/.config/orcai ~/.config/orcai.bak.$(date +%Y%m%d%H%M%S)
-          ls -dt ~/.config/orcai.bak.* 2>/dev/null | tail -n +6 | xargs rm -rf
+          ls -dt ~/.config/orcai.bak.* 2>/dev/null | tail -n +6 | while IFS= read -r f; do rm -rf "$f"; done
         fi
       - |
         if [ -d ~/.local/share/orcai ]; then
           cp -r ~/.local/share/orcai ~/.local/share/orcai.bak.$(date +%Y%m%d%H%M%S)
-          ls -dt ~/.local/share/orcai.bak.* 2>/dev/null | tail -n +6 | xargs rm -rf
+          ls -dt ~/.local/share/orcai.bak.* 2>/dev/null | tail -n +6 | while IFS= read -r f; do rm -rf "$f"; done
         fi
       - rm -rf ~/.config/orcai ~/.local/share/orcai
       - rm -f bin/{{.BINARY}} bin/{{.BINARY}}-debug
+      - mkdir -p bin
       - go build -o bin/{{.BINARY}} .
       - ./bin/{{.BINARY}}
 
