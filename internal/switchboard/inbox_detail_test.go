@@ -12,16 +12,16 @@ func testPalette() styles.ANSIPalette {
 	return styles.ANSIPalette{}
 }
 
-func TestBuildRunContent_StepOutputLastFiveLines(t *testing.T) {
+func TestBuildRunContent_StepOutputAllLinesShown(t *testing.T) {
 	lines := []string{
-		"TRUNCATED-LINE-ONE",
-		"TRUNCATED-LINE-TWO",
-		"TRUNCATED-LINE-THREE",
-		"VISIBLE-LINE-FOUR",
-		"VISIBLE-LINE-FIVE",
-		"VISIBLE-LINE-SIX",
-		"VISIBLE-LINE-SEVEN",
-		"VISIBLE-LINE-EIGHT",
+		"LINE-ONE",
+		"LINE-TWO",
+		"LINE-THREE",
+		"LINE-FOUR",
+		"LINE-FIVE",
+		"LINE-SIX",
+		"LINE-SEVEN",
+		"LINE-EIGHT",
 	}
 	output := strings.Join(lines, "\n")
 	run := store.Run{
@@ -31,13 +31,8 @@ func TestBuildRunContent_StepOutputLastFiveLines(t *testing.T) {
 		},
 	}
 	got := buildRunContent(run, testPalette(), false, 80)
-	// Only last 5 lines should appear
-	for _, line := range lines[:3] {
-		if strings.Contains(got, line) {
-			t.Errorf("expected line %q to be truncated but found in output", line)
-		}
-	}
-	for _, line := range lines[3:] {
+	// All lines should appear — truncation was removed in favour of showing full step output.
+	for _, line := range lines {
 		if !strings.Contains(got, line) {
 			t.Errorf("expected line %q in output but not found", line)
 		}
