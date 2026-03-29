@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate site changelog
+        env:
+          ACTOR: ${{ github.actor }}
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG#v}
+          CHANGELOG_FILE="site/src/content/changelog/${TAG}.md"
+
+          if [ -f "${CHANGELOG_FILE}" ]; then
+            echo "Changelog ${CHANGELOG_FILE} already exists — skipping."
+            exit 0
+          fi
+
+          # Read dist/CHANGELOG.md if it exists, otherwise use a placeholder
+          if [ -f "dist/CHANGELOG.md" ]; then
+            GORELEASER_CHANGELOG="dist/CHANGELOG.md"
+          else
+            echo "dist/CHANGELOG.md not found — using placeholder."
+            GORELEASER_CHANGELOG=""
+          fi
+
+          # Extract feat/fix lines as YAML list items for highlights
+          if [ -n "${GORELEASER_CHANGELOG}" ]; then
+            HIGHLIGHTS=$(grep -E '^[*-] (feat|fix):' "${GORELEASER_CHANGELOG}" | sed 's/^[*-] //' | while IFS= read -r line; do
+              printf '  - "%s"\n' "${line//\"/\\\"}"
+            done)
+          fi
+
+          if [ -z "${HIGHLIGHTS}" ]; then
+            HIGHLIGHTS='  - "Initial release"'
+          fi
+
+          TODAY=$(date +%Y-%m-%d)
+
+          mkdir -p "site/src/content/changelog"
+
+          cat > "${CHANGELOG_FILE}" << EOF
+          ---
+          version: "${VERSION}"
+          date: "${TODAY}"
+          highlights:
+          ${HIGHLIGHTS}
+          breaking: false
+          ---
+          EOF
+
+          # Normalize indentation (remove leading spaces from heredoc)
+          sed -i 's/^          //' "${CHANGELOG_FILE}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "${ACTOR}@users.noreply.github.com"
+          git add "${CHANGELOG_FILE}"
+
+          if git diff --cached --quiet; then
+            echo "Nothing to commit."
+          else
+            git commit -m "chore: add changelog for ${TAG}"
+            git push origin HEAD:main
+          fi

@@ -14,9 +14,19 @@ import (
 	"github.com/adam-stokes/orcai/internal/promptbuilder"
 )
 
+// Build-time variables injected by GoReleaser via -ldflags.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "--version", "-v":
+			fmt.Printf("orcai %s (commit %s, built %s)\n", version, commit, date)
+			return
 		case "_welcome":
 			// Launch the orcai-welcome widget binary. Look it up in PATH first;
 			// fall back to the same directory as the orcai binary.

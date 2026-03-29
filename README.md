@@ -71,3 +71,15 @@ orcai
 ```
 
 If a session is already running, this reattaches. Your jobs keep running while detached.
+
+## Releasing
+
+Use the `/release` skill in Claude Code to cut a new release:
+
+```
+/release
+```
+
+The skill guides you through the full flow: branch → PR → merge to protected main → changelog curation → semver tag → GitHub Actions release build.
+
+Requires: `gh` CLI authenticated, `goreleaser` installed, `task` installed.

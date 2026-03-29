@@ -1,4 +1,38 @@
 ---
+import { getCollection } from 'astro:content';
+
+const entries = await getCollection('changelog');
+
+// Sort by version descending (semver: major.minor.patch as numbers)
+entries.sort((a, b) => {
+  const parse = (v: string) => v.split('.').map(Number) as [number, number, number];
+  const [aMaj, aMin, aPat] = parse(a.data.version);
+  const [bMaj, bMin, bPat] = parse(b.data.version);
+  if (bMaj !== aMaj) return bMaj - aMaj;
+  if (bMin !== aMin) return bMin - aMin;
+  return bPat - aPat;
+});
+
+const DIVIDER = '─'.repeat(63);
+
+function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+const lines: string[] = [];
+for (const entry of entries) {
+  lines.push(`<span class="fg-comment">${DIVIDER}</span>`);
+  const breakingBadge = entry.data.breaking
+    ? ` <span class="fg-red">[BREAKING]</span>`
+    : '';
+  lines.push(`<span class="fg-cyan">[v${esc(entry.data.version)}]</span> <span class="fg-comment">${esc(entry.data.date)}</span>${breakingBadge}`);
+  for (const h of (entry.data.highlights ?? [])) {
+    lines.push(`             <span class="fg-green">&#9654; feat:</span> ${esc(h)}`);
+  }
+}
+lines.push(`<span class="fg-comment">${DIVIDER}</span>`);
+
+const preContent = lines.join('\n');
 ---
 <div class="term-pane-header">
   <div class="tui-panel-header"><span>CHANGELOG</span></div>
@@ -6,50 +40,7 @@
 <div class="term-pane" style="overflow-y:auto">
   <h2 class="section-header fg-yellow">// release log //</h2>
 
-  <pre style="color:var(--fg);font-size:12px;line-height:1.8">
-<span class="fg-comment">&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;</span>
-<span class="fg-cyan">[2026-03-29]</span> <span class="fg-green">&#9654; feat:</span> brain system — use_brain / write_brain pipeline fields
-             <span class="fg-green">&#9654; feat:</span> switchboard — use_brain checkbox in agent modal
-             <span class="fg-green">&#9654; feat:</span> switchboard — brain context injection on immediate run
-             <span class="fg-green">&#9654; feat:</span> brain — brain_notes tag, write instruction, prompt in inbox
-             <span class="fg-green">&#9654; feat:</span> brain — 4000-char note truncation, full step data in detail
-             <span class="fg-green">&#9654; feat:</span> pipeline — BrainInjector interface, StoreBrainInjector
-             <span class="fg-green">&#9654; feat:</span> pipeline — brain read/write injection, runner integration
-             <span class="fg-green">&#9654; feat:</span> pipeline — on_failure recovery step suppresses run-level error
-             <span class="fg-green">&#9654; feat:</span> cmd — wire WithBrainInjector into CLI pipeline runner
-             <span class="fg-green">&#9654; feat:</span> inbox — step output and prompt in detail view
-             <span class="fg-green">&#9654; feat:</span> feed — collapsible JSON output, feedline parsers, mark mode
-             <span class="fg-yellow">&#9654; fix:</span>  inbox — wrap step prompt and output to panel width
-             <span class="fg-yellow">&#9654; fix:</span>  switchboard — route agent run-now through pipeline runner
-             <span class="fg-yellow">&#9654; fix:</span>  panelrender — clamp overlay startRow, clip rows at height
-             <span class="fg-yellow">&#9654; fix:</span>  cron — simplify hint bar, drop tab/esc hints
-<span class="fg-comment">&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;</span>
-<span class="fg-cyan">[2026-03-28]</span> <span class="fg-green">&#9654; feat:</span> themes — 55-theme library, tabbed 2-column picker, live preview
-             <span class="fg-green">&#9654; feat:</span> inbox — cursor, mark, dispatch in detail modal
-             <span class="fg-green">&#9654; feat:</span> inbox — agent/pipeline/cron bus signals, stale read fix
-             <span class="fg-green">&#9654; feat:</span> activity feed — line marking, agent runner injection, vertical steps
-             <span class="fg-green">&#9654; feat:</span> jumpwindow — two-column layout, tab focus, scoped search
-             <span class="fg-green">&#9654; feat:</span> pipeline runner — authoritative source of truth via busd
-             <span class="fg-green">&#9654; feat:</span> switchboard — single-line box panel headers, bidirectional theme sync
-             <span class="fg-green">&#9654; feat:</span> switchboard — ANSI box style for modals and pipeline overlay
-             <span class="fg-yellow">&#9654; fix:</span>  jumpwindow — duplicate session listing, sysop ordering
-             <span class="fg-yellow">&#9654; fix:</span>  signal board — busd as sole source for pipeline feed entries
-             <span class="fg-yellow">&#9654; fix:</span>  crontui — edit overlay uses panelrender box headers
-<span class="fg-comment">&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;</span>
-<span class="fg-cyan">[2026-03-26]</span> <span class="fg-green">&#9654; feat:</span> switchboard — pipeline CRUD keys, floating modal overlay system
-             <span class="fg-green">&#9654; feat:</span> switchboard — signal board, jump window popup, feed scroll
-             <span class="fg-green">&#9654; feat:</span> plugins — plugin-driven provider discovery, sidecar kind + models
-             <span class="fg-yellow">&#9654; fix:</span>  picker — propagate SidecarPath, prevent double-registration
-             <span class="fg-yellow">&#9654; fix:</span>  switchboard — ANSI-aware vis lengths, feed bleeding, model IDs
-<span class="fg-comment">&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;</span>
-<span class="fg-cyan">[2026-03-25]</span> <span class="fg-green">&#9654; feat:</span> ABBS rebrand — Agentic Bulletin Board System
-             <span class="fg-green">&#9654; feat:</span> site — terminal emulator website, full keyboard navigation
-             <span class="fg-green">&#9654; feat:</span> switchboard — unified sysop + welcome TUI, full-screen layout
-             <span class="fg-green">&#9654; feat:</span> picker — plugin-aware provider discovery, pipeline session launch
-             <span class="fg-green">&#9654; feat:</span> pipeline builder — accordion UI, dropdowns, step/name editing
-             <span class="fg-green">&#9654; feat:</span> core plugins as PATH-override subcommands
-<span class="fg-comment">&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;</span>
-  </pre>
+  <pre style="color:var(--fg);font-size:12px;line-height:1.8" set:html={preContent}></pre>
 
   <p style="color:var(--comment);font-size:11px;margin-top:4px">
     <span class="fg-yellow">&rarr;</span> Press <span class="fg-yellow">1</span> for home &nbsp;&middot;&nbsp; <span class="fg-yellow">5</span> for pipelines &nbsp;&middot;&nbsp; <span class="fg-yellow">9</span> for docs

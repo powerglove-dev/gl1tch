@@ -1,0 +1,123 @@
+# Taskfile.yml — ORCAI task runner
+#
+# Prerequisites:
+#   Task v3:      go install github.com/go-task/task/v3/cmd/task@latest
+#   GoReleaser:   go install github.com/goreleaser/goreleaser/v2@latest
+#                 (or: brew install goreleaser)
+#
+# Usage:
+#   task --list          show all available tasks
+#   task build           compile binary to bin/orcai
+#   task install         build and install to GOPATH/bin + ~/.local/bin symlink
+#   task run             start orcai (non-destructive, assumes already installed)
+#   task run:clean       wipe db/config, kill tmux sessions, then start orcai
+#   task release:tag VERSION=v1.2.3   create signed git tag for release
+
+version: "3"
+
+vars:
+  BINARY: orcai
+
+tasks:
+  # ---------------------------------------------------------------------------
+  # Core build tasks
+  # ---------------------------------------------------------------------------
+
+  build:
+    desc: "Compile the orcai binary to bin/orcai"
+    cmds:
+      - go build -o bin/{{.BINARY}} .
+
+  install:
+    desc: "Build and install orcai to GOPATH/bin; symlink into ~/.local/bin"
+    deps: [build]
+    cmds:
+      - go install .
+      - |
+        if [ ! -L ~/.local/bin/{{.BINARY}} ]; then
+          rm -f ~/.local/bin/{{.BINARY}}
+          ln -sf $(go env GOPATH)/bin/{{.BINARY}} ~/.local/bin/{{.BINARY}}
+        fi
+
+  test:
+    desc: "Run all Go tests"
+    cmds:
+      - go test ./...
+
+  clean:
+    desc: "Remove compiled binaries from bin/"
+    cmds:
+      - rm -f bin/{{.BINARY}} bin/{{.BINARY}}-debug
+
+  # ---------------------------------------------------------------------------
+  # Run tasks
+  # ---------------------------------------------------------------------------
+
+  run:
+    desc: "Start orcai (non-destructive — does NOT wipe db or config)"
+    cmds:
+      - "{{.BINARY}}"
+
+  run:clean:
+    desc: "Wipe db/config, kill tmux sessions (orcai, orcai-cron), then start orcai (mirrors old 'make run')"
+    cmds:
+      - -tmux detach-client -s orcai 2>/dev/null
+      - -tmux kill-session -t orcai 2>/dev/null
+      - -tmux kill-session -t orcai-cron 2>/dev/null
+      - rm -f ~/.config/orcai/layout.yaml ~/.config/orcai/keybindings.yaml
+      - |
+        if [ -f ~/.local/share/orcai/orcai.db ]; then
+          cp ~/.local/share/orcai/orcai.db ~/.local/share/orcai/orcai.db.bak.$(date +%Y%m%d%H%M%S)
+          ls -t ~/.local/share/orcai/orcai.db.bak.* 2>/dev/null | tail -n +6 | xargs rm -f
+        fi
+      - rm -f ~/.local/share/orcai/orcai.db
+      - rm -f ~/.config/orcai/inbox-read.json
+      - "{{.BINARY}}"
+
+  # ---------------------------------------------------------------------------
+  # Debug tasks
+  # ---------------------------------------------------------------------------
+
+  debug-build:
+    desc: "Compile orcai with debug symbols (no optimisation) to bin/orcai-debug"
+    cmds:
+      - go build -gcflags="all=-N -l" -o bin/{{.BINARY}}-debug .
+
+  debug:
+    desc: "Build debug binary and start Delve headless on :2345"
+    deps: [debug-build]
+    cmds:
+      - |
+        echo "Delve listening on :2345 — connect with: task debug:connect"
+        dlv exec --headless --listen=:2345 --api-version=2 ./bin/{{.BINARY}}-debug
+
+  debug:connect:
+    desc: "Connect to a running Delve session on :2345"
+    cmds:
+      - dlv connect :2345
+
+  debug:tmux:
+    desc: "Build debug binary and launch the debug tmux layout via scripts/debug-tmux.sh"
+    deps: [debug-build]
+    cmds:
+      - bash {{.ROOT_DIR}}/scripts/debug-tmux.sh
+
+  # ---------------------------------------------------------------------------
+  # Release tasks
+  # ---------------------------------------------------------------------------
+
+  release:snapshot:
+    desc: "Build a local snapshot release with GoReleaser (no git tag required)"
+    cmds:
+      - goreleaser release --snapshot --clean
+
+  release:tag:
+    desc: "Create a signed annotated git tag for release. Usage: task release:tag VERSION=v1.2.3"
+    preconditions:
+      - sh: '[ -n "{{.VERSION}}" ]'
+        msg: "VERSION is required. Usage: task release:tag VERSION=v1.2.3"
+    cmds:
+      - git tag -s -a {{.VERSION}} -m "Release {{.VERSION}}"
+      - echo ""
+      - echo "Tag '{{.VERSION}}' created. Push it to trigger the release workflow:"
+      - echo "  git push origin {{.VERSION}}"
