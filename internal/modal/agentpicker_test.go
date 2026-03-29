@@ -167,3 +167,14 @@ func TestAgentPickerViewBox_HasBorders(t *testing.T) {
 		t.Error("ViewBox missing box-drawing borders")
 	}
 }
+
+func TestAgentPickerModel_FocusAccessor(t *testing.T) {
+	m := modal.NewAgentPickerModel(testProviders())
+	if m.Focus() != 0 {
+		t.Errorf("want focus 0 initially, got %d", m.Focus())
+	}
+	m2, _ := m.Update(keySpecial(tea.KeyTab))
+	if m2.Focus() != 1 {
+		t.Errorf("want focus 1 after tab, got %d", m2.Focus())
+	}
+}
