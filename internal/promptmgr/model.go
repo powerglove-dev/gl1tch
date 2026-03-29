@@ -37,13 +37,15 @@ type Model struct {
 	filterInput textinput.Model
 	titleInput  textinput.Model
 	bodyInput   textarea.Model
+	cwdInput    textinput.Model
 
 	// Model selector
 	modelSlugs []string // available model slugs
 	modelIdx   int      // selected model index
 
 	// Editor state
-	editingPrompt store.Prompt // prompt currently being edited (zero value = new)
+	editingPrompt  store.Prompt // prompt currently being edited (zero value = new)
+	editorSubFocus int          // 0=title, 1=body, 2=cwd
 
 	// Panel focus: 0=list, 1=editor, 2=runner
 	focusPanel int
@@ -72,6 +74,10 @@ func New(st *store.Store, pluginMgr *plugin.Manager, bundle *themes.Bundle) *Mod
 	bi := textarea.New()
 	bi.Placeholder = "Prompt body..."
 
+	ci := textinput.New()
+	ci.Placeholder = "Working directory (optional)..."
+	ci.CharLimit = 512
+
 	return &Model{
 		store:       st,
 		pluginMgr:   pluginMgr,
@@ -79,6 +85,7 @@ func New(st *store.Store, pluginMgr *plugin.Manager, bundle *themes.Bundle) *Mod
 		filterInput: fi,
 		titleInput:  ti,
 		bodyInput:   bi,
+		cwdInput:    ci,
 	}
 }
 

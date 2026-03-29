@@ -43,6 +43,10 @@ const createPromptsSchema = `CREATE TABLE IF NOT EXISTS prompts (
 // prompts table for databases created before this column existed.
 const addPromptLastResponseColumn = `ALTER TABLE prompts ADD COLUMN last_response TEXT DEFAULT ''`
 
+// addPromptCWDColumn is the migration that adds cwd to the prompts table for
+// databases created before this column existed.
+const addPromptCWDColumn = `ALTER TABLE prompts ADD COLUMN cwd TEXT DEFAULT ''`
+
 // applySchema runs the schema migration against db.
 func applySchema(db *sql.DB) error {
 	if _, err := db.Exec(createSchema); err != nil {
@@ -57,7 +61,10 @@ func applySchema(db *sql.DB) error {
 	if err := applyPromptsTableMigration(db); err != nil {
 		return err
 	}
-	return applyPromptLastResponseMigration(db)
+	if err := applyPromptLastResponseMigration(db); err != nil {
+		return err
+	}
+	return applyPromptCWDMigration(db)
 }
 
 // applyPromptsTableMigration creates the prompts table if it does not already
@@ -87,6 +94,23 @@ func applyPromptLastResponseMigration(db *sql.DB) error {
 	}
 	if count == 0 {
 		if _, err := db.Exec(addPromptLastResponseColumn); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyPromptCWDMigration adds the cwd column to the prompts table if it does
+// not already exist. modernc.org/sqlite does not support ALTER TABLE ... ADD
+// COLUMN IF NOT EXISTS, so we probe pragma_table_info first.
+func applyPromptCWDMigration(db *sql.DB) error {
+	var count int
+	row := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('prompts') WHERE name='cwd'`)
+	if err := row.Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		if _, err := db.Exec(addPromptCWDColumn); err != nil {
 			return err
 		}
 	}

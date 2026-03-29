@@ -832,6 +832,25 @@ func TestSavePromptResponse(t *testing.T) {
 	})
 }
 
+func TestPromptCWDRoundTrip(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	const wantCWD = "/home/user/projects/myapp"
+	id, err := s.InsertPrompt(ctx, Prompt{Title: "CWD Test", Body: "test body", ModelSlug: "gpt-4", CWD: wantCWD})
+	if err != nil {
+		t.Fatalf("InsertPrompt: %v", err)
+	}
+
+	got, err := s.GetPrompt(ctx, id)
+	if err != nil {
+		t.Fatalf("GetPrompt: %v", err)
+	}
+	if got.CWD != wantCWD {
+		t.Errorf("CWD: want %q, got %q", wantCWD, got.CWD)
+	}
+}
+
 func TestGetPrompt(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
