@@ -30,15 +30,17 @@ type window struct {
 }
 
 type model struct {
-	windows    []window
-	filtered   []window
-	sysop      []window
-	selected   int
-	input      textinput.Model
-	width      int
-	height     int
-	err        string
-	themeState tuikit.ThemeState
+	windows       []window
+	filtered      []window
+	sysop         []window
+	selectedSysop int // cursor within the sysop (left) column
+	selectedJob   int // cursor within the active jobs (right) column
+	focusCol      int // 0 = left (sysop), 1 = right (active jobs)
+	input         textinput.Model
+	width         int
+	height        int
+	err           string
+	themeState    tuikit.ThemeState
 }
 
 func newModel() model {
@@ -70,7 +72,7 @@ func newModel() model {
 	}
 
 	ti := textinput.New()
-	ti.Placeholder = "search windows..."
+	ti.Placeholder = "search active jobs..."
 	ti.Focus()
 	ti.PromptStyle = lipgloss.NewStyle().Foreground(accent)
 	ti.TextStyle = lipgloss.NewStyle().Foreground(fg)
@@ -78,15 +80,18 @@ func newModel() model {
 	ti.Prompt = "> "
 
 	m := model{
-		input:      ti,
-		themeState: tuikit.NewThemeState(bundle),
+		input:         ti,
+		themeState:    tuikit.NewThemeState(bundle),
+		selectedSysop: 0,
+		selectedJob:   0,
+		focusCol:      0,
 	}
 	m.windows = listWindows()
 	m.filtered = m.windows
 	sysop := []window{{name: "switchboard", switchboard: true}}
 	cronWins := listSysopWindows()
 	if cronWins != nil {
-		sysop = append(sysop, window{name: "orcai-cron", cronSession: true})
+		sysop = append(sysop, window{name: "cron", cronSession: true})
 		sysop = append(sysop, cronWins...)
 	}
 	m.sysop = sysop
@@ -104,7 +109,7 @@ func listWindows() []window {
 		return nil
 	}
 	var wins []window
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
 			continue
 		}
@@ -137,7 +142,7 @@ func listSysopWindows() []window {
 		return nil // session doesn't exist or tmux unavailable
 	}
 	var wins []window
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
 			continue
 		}
@@ -179,40 +184,55 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc", "ctrl+c":
 			return m, tea.Quit
 
+		case "tab":
+			m.focusCol = 1 - m.focusCol
+			return m, nil
+
 		case "up", "k":
-			if m.selected > 0 {
-				m.selected--
+			if m.focusCol == 0 {
+				if m.selectedSysop > 0 {
+					m.selectedSysop--
+				}
+			} else {
+				if m.selectedJob > 0 {
+					m.selectedJob--
+				}
 			}
 			return m, nil
 
 		case "down", "j":
-			total := len(m.filtered) + len(m.sysop)
-			if m.selected < total-1 {
-				m.selected++
+			if m.focusCol == 0 {
+				if m.selectedSysop < len(m.sysop)-1 {
+					m.selectedSysop++
+				}
+			} else {
+				if m.selectedJob < len(m.filtered)-1 {
+					m.selectedJob++
+				}
 			}
 			return m, nil
 
 		case "enter":
-			totalSysop := len(m.sysop)
-			if m.selected < totalSysop {
-				w := m.sysop[m.selected]
-				if w.switchboard {
-					exec.Command("tmux", "switch-client", "-t", "orcai").Run()   //nolint:errcheck
-					exec.Command("tmux", "select-window", "-t", "orcai:0").Run() //nolint:errcheck
-				} else if w.cronSession {
-					exec.Command("tmux", "switch-client", "-t", "orcai-cron").Run() //nolint:errcheck
-				} else {
-					target := w.id
-					if target == "" {
-						target = "orcai-cron:" + w.index
+			if m.focusCol == 0 {
+				if m.selectedSysop < len(m.sysop) {
+					w := m.sysop[m.selectedSysop]
+					if w.switchboard {
+						exec.Command("tmux", "switch-client", "-t", "orcai").Run()   //nolint:errcheck
+						exec.Command("tmux", "select-window", "-t", "orcai:0").Run() //nolint:errcheck
+					} else if w.cronSession {
+						exec.Command("tmux", "switch-client", "-t", "orcai-cron").Run() //nolint:errcheck
+					} else {
+						target := w.id
+						if target == "" {
+							target = "orcai-cron:" + w.index
+						}
+						exec.Command("tmux", "switch-client", "-t", "orcai-cron").Run() //nolint:errcheck
+						exec.Command("tmux", "select-window", "-t", target).Run()       //nolint:errcheck
 					}
-					exec.Command("tmux", "switch-client", "-t", "orcai-cron").Run() //nolint:errcheck
-					exec.Command("tmux", "select-window", "-t", target).Run()       //nolint:errcheck
 				}
 			} else {
-				filteredIdx := m.selected - totalSysop
-				if filteredIdx < len(m.filtered) {
-					w := m.filtered[filteredIdx]
+				if m.selectedJob < len(m.filtered) {
+					w := m.filtered[m.selectedJob]
 					target := w.id
 					if target == "" {
 						target = w.index
@@ -223,12 +243,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "e":
-			totalSysop := len(m.sysop)
-			if m.selected >= totalSysop {
-				filteredIdx := m.selected - totalSysop
-				if filteredIdx < len(m.filtered) {
-					openPipelineInEditor(m.filtered[filteredIdx].name)
-				}
+			if m.focusCol == 1 && m.selectedJob < len(m.filtered) {
+				openPipelineInEditor(m.filtered[m.selectedJob].name)
 			}
 			return m, tea.Quit
 		}
@@ -245,26 +261,19 @@ func (m *model) applyFilter() {
 	q := strings.ToLower(m.input.Value())
 	if q == "" {
 		m.filtered = m.windows
-		total := len(m.filtered) + len(m.sysop)
-		if total == 0 {
-			m.selected = 0
-		} else if m.selected >= total {
-			m.selected = total - 1
+	} else {
+		var out []window
+		for _, w := range m.windows {
+			if strings.Contains(strings.ToLower(w.name), q) {
+				out = append(out, w)
+			}
 		}
-		return
+		m.filtered = out
 	}
-	var out []window
-	for _, w := range m.windows {
-		if strings.Contains(strings.ToLower(w.name), q) {
-			out = append(out, w)
-		}
-	}
-	m.filtered = out
-	total := len(m.filtered) + len(m.sysop)
-	if total == 0 {
-		m.selected = 0
-	} else if m.selected >= total {
-		m.selected = total - 1
+	if len(m.filtered) == 0 {
+		m.selectedJob = 0
+	} else if m.selectedJob >= len(m.filtered) {
+		m.selectedJob = len(m.filtered) - 1
 	}
 }
 
@@ -291,7 +300,6 @@ func (m model) View() string {
 		}
 	}
 
-	// Build rows using ANSI box drawing to match switchboard panels.
 	var rows []string
 
 	// Header — sprite or dynamic panel header.
@@ -306,13 +314,41 @@ func (m model) View() string {
 	rows = append(rows, panelrender.BoxRow(inputContent, w, apal.Border))
 	rows = append(rows, panelrender.BoxRow("", w, apal.Border))
 
-	// Section: sysop (orcai-cron session windows) — shown first.
-	// Sysop items occupy indices 0..len(sysop)-1.
+	// Body: two-column layout or narrow fallback.
+	// Fixed overhead: header(1)+search(1)+blank(1)+hints(1)+botborder(1) = 5.
+	// Body rows must fill the remaining height so the box spans the full popup.
+	bodyTarget := max(m.height-5, 2) // minimum: col-headers + 1 item
+	if w < 40 {
+		rows = append(rows, m.viewNarrow(w, bodyTarget, apal)...)
+	} else {
+		rows = append(rows, m.viewTwoCol(w, bodyTarget, apal)...)
+	}
+
+	// Hint bar (no "e edit" — feature still works via key, just not advertised).
+	hints := panelrender.HintBar([]panelrender.Hint{
+		{Key: "tab", Desc: "switch col"},
+		{Key: "j/k", Desc: "nav"},
+		{Key: "enter", Desc: "select"},
+		{Key: "esc", Desc: "cancel"},
+	}, w-2, apal)
+	rows = append(rows,
+		panelrender.BoxRow(hints, w, apal.Border),
+		panelrender.BoxBot(w, apal.Border),
+	)
+
+	return strings.Join(rows, "\n")
+}
+
+// viewNarrow renders a single-column layout for terminals narrower than 40 cols.
+// bodyTarget is the total number of rows this function should return to fill the popup.
+func (m model) viewNarrow(w, bodyTarget int, apal styles.ANSIPalette) []string {
+	var rows []string
+
 	if len(m.sysop) > 0 {
 		rows = append(rows, panelrender.BoxRow("   "+apal.Dim+"— sysop —"+panelrender.RST, w, apal.Border))
 		for i, win := range m.sysop {
 			label := win.name
-			if m.selected == i {
+			if m.focusCol == 0 && m.selectedSysop == i {
 				rows = append(rows, panelrender.BoxRow(apal.Accent+"   > "+label+panelrender.RST, w, apal.Border))
 			} else {
 				rows = append(rows, panelrender.BoxRow(apal.Dim+"     "+label+panelrender.RST, w, apal.Border))
@@ -320,16 +356,13 @@ func (m model) View() string {
 		}
 	}
 
-	// Section: active jobs.
-	// Filtered items occupy indices len(sysop)..len(sysop)+len(filtered)-1.
 	rows = append(rows, panelrender.BoxRow("   "+apal.Accent+"— active jobs —"+panelrender.RST, w, apal.Border))
-
 	if len(m.filtered) == 0 {
 		rows = append(rows, panelrender.BoxRow(apal.Dim+"     no windows found"+panelrender.RST, w, apal.Border))
 	} else {
 		for i, win := range m.filtered {
 			label := win.name
-			if len(m.sysop)+i == m.selected {
+			if m.focusCol == 1 && m.selectedJob == i {
 				rows = append(rows, panelrender.BoxRow(apal.Accent+"   > "+label+panelrender.RST, w, apal.Border))
 			} else {
 				rows = append(rows, panelrender.BoxRow(apal.FG+"     "+label+panelrender.RST, w, apal.Border))
@@ -337,31 +370,84 @@ func (m model) View() string {
 		}
 	}
 
-	// Hint bar row (accent keys, dim descriptions).
-	hint := func(key, desc string) string {
-		return apal.Accent + key + apal.Dim + " " + desc + panelrender.RST
+	// Pad with blank rows to fill the popup height.
+	for len(rows) < bodyTarget {
+		rows = append(rows, panelrender.BoxRow("", w, apal.Border))
 	}
-	sep := apal.Dim + " · " + panelrender.RST
-	hintContent := strings.Join([]string{
-		hint("j/k", "nav"),
-		hint("enter", "select"),
-		hint("e", "edit"),
-		hint("esc", "cancel"),
-	}, sep)
-	rows = append(rows,
-		panelrender.BoxRow("", w, apal.Border),
-		panelrender.BoxRow(hintContent, w, apal.Border),
-		panelrender.BoxBot(w, apal.Border),
-	)
 
-	return strings.Join(rows, "\n")
+	return rows
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
+// viewTwoCol renders the two-column sysop/active-jobs layout.
+// bodyTarget is the total number of rows this function should return to fill the popup.
+func (m model) viewTwoCol(w, bodyTarget int, apal styles.ANSIPalette) []string {
+	leftW := (w - 3) / 2
+	rightW := w - 3 - leftW
+
+	var rows []string
+
+	// Column headers row (counts as 1 body row).
+	leftHdr := padToWidth(apal.Dim+"  — sysop —"+panelrender.RST, leftW)
+	rightHdr := padToWidth(apal.Accent+"  — active jobs —"+panelrender.RST, rightW)
+	rows = append(rows, panelrender.BoxRow(leftHdr+apal.Border+"│"+panelrender.RST+rightHdr, w, apal.Border))
+
+	// Item rows: render actual content, then pad to fill remaining body rows.
+	itemTarget := max(bodyTarget-1, 1) // subtract the col-headers row
+
+	rightCount := max(len(m.filtered), 1) // at least 1 for placeholder
+	contentRows := max(len(m.sysop), rightCount)
+	renderRows := max(contentRows, itemTarget)
+
+	for i := range renderRows {
+		var leftCell, rightCell string
+
+		if i < len(m.sysop) {
+			leftCell = buildCell(m.sysop[i].name, m.selectedSysop == i, m.focusCol == 0, leftW, apal)
+		} else {
+			leftCell = strings.Repeat(" ", leftW)
+		}
+
+		switch {
+		case len(m.filtered) == 0 && i == 0:
+			rightCell = padToWidth(apal.Dim+"  no windows found"+panelrender.RST, rightW)
+		case i < len(m.filtered):
+			rightCell = buildCell(m.filtered[i].name, m.selectedJob == i, m.focusCol == 1, rightW, apal)
+		default:
+			rightCell = strings.Repeat(" ", rightW)
+		}
+
+		rows = append(rows, panelrender.BoxRow(leftCell+apal.Border+"│"+panelrender.RST+rightCell, w, apal.Border))
 	}
-	return b
+
+	return rows
+}
+
+// buildCell renders an item label for a column cell, padded to visibleW visible chars.
+// selected: whether this item is under the cursor.
+// focused: whether this column currently has keyboard focus.
+func buildCell(label string, selected, focused bool, visibleW int, apal styles.ANSIPalette) string {
+	const cursorPfx = "  > "
+	const blankPfx = "    "
+	var s string
+	if selected {
+		if focused {
+			s = apal.Accent + cursorPfx + label + panelrender.RST
+		} else {
+			s = apal.Dim + cursorPfx + label + panelrender.RST
+		}
+	} else {
+		s = apal.FG + blankPfx + label + panelrender.RST
+	}
+	return padToWidth(s, visibleW)
+}
+
+// padToWidth appends spaces to s until its lipgloss visible width equals visibleW.
+func padToWidth(s string, visibleW int) string {
+	cur := lipgloss.Width(s)
+	if cur >= visibleW {
+		return s
+	}
+	return s + strings.Repeat(" ", visibleW-cur)
 }
 
 // openPipelineInEditor derives the pipeline YAML path from a display name like

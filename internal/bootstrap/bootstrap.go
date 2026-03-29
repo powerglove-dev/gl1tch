@@ -109,7 +109,7 @@ func buildTmuxConf(self string) string {
 		"bind-key -T orcai-chord o     { switch-client -T root ; display-popup -E -w 68 -h 24 \"" + self + " ollama\" }\n" +
 		"bind-key -T orcai-chord s     { switch-client -T root ; display-popup -E -w 44 -h 6 \"" + self + " _opsx\" }\n" +
 		"bind-key -T orcai-chord t     { switch-client -T root ; if-shell -F '#{==:#{session_name},orcai-cron}' { send-keys T } { switch-client -t orcai ; select-window -t orcai:0 ; send-keys -t orcai:0 T } }\n" +
-		"bind-key -T orcai-chord j     { switch-client -T root ; display-popup -E -B -w 70 -h 24 \"" + self + " _jump\" }\n" +
+		"bind-key -T orcai-chord j     { switch-client -T root ; display-popup -E -B -w 70 -h 14 \"" + self + " _jump\" }\n" +
 		// Window management
 		"bind-key -T orcai-chord c     { switch-client -T root ; new-window }\n" +
 		"bind-key -T orcai-chord [     { switch-client -T root ; previous-window }\n" +
