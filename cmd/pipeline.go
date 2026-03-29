@@ -117,6 +117,9 @@ var pipelineRunCmd = &cobra.Command{
 		if s, serr := store.Open(); serr == nil {
 			defer s.Close()
 			storeOpts = append(storeOpts, pipeline.WithRunStore(s))
+			// Wire brain context injection: use_brain / write_brain flags on pipeline
+			// steps will prepend DB context and parse <brain> notes from responses.
+			storeOpts = append(storeOpts, pipeline.WithBrainInjector(pipeline.NewStoreBrainInjector(s)))
 		} else {
 			fmt.Fprintf(os.Stderr, "pipeline: store unavailable: %v\n", serr)
 		}
