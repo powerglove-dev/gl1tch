@@ -372,38 +372,7 @@ func (m *Model) updateEditorPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(savePromptCmd(m.store, p), reloadPromptsCmd(m.store))
 
 	case "ctrl+r":
-		// Cancel any existing run.
-		if m.runCancel != nil {
-			m.runCancel()
-			m.runCancel = nil
-		}
-		body := m.bodyInput.Value()
-		slug := m.editingPrompt.ModelSlug
-		if slug == "" {
-			m.runnerErrMsg = "no model selected"
-			return m, nil
-		}
-		// Slug is "providerID/modelID" — split and look up by provider ID.
-		providerID, modelID, _ := strings.Cut(slug, "/")
-		p, ok := m.pluginMgr.Get(providerID)
-		if !ok {
-			m.runnerErrMsg = fmt.Sprintf("plugin %q not found", providerID)
-			return m, nil
-		}
-		// Inject the prompt-builder system context before the user's body.
-		input := promptBuilderPrefix + body
-		// Fresh run: clear conversation history, seed with user turn.
-		m.runnerTurns = []runnerTurn{{role: "user", content: input}}
-		m.followUpActive = false
-		m.followUpInput.SetValue("")
-		ctx, cancel := context.WithCancel(context.Background())
-		m.runCancel = cancel
-		m.runnerStreaming = true
-		m.spinnerIdx = 0
-		m.runnerOutput = ""
-		m.runnerErrMsg = ""
-		m.runnerScrollOffset = 0
-		return m, tea.Batch(runPluginCmd(ctx, p, input, m.editingPrompt.CWD, modelID), spinnerTickCmd())
+		return m.startFreshRun()
 
 	case "enter":
 		switch m.editorSubFocus {
@@ -521,6 +490,8 @@ func (m *Model) updateRunnerPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.String() {
+	case "ctrl+r":
+		return m.startFreshRun()
 	case "ctrl+c", "esc":
 		if m.runnerStreaming && m.runCancel != nil {
 			m.runCancel()
@@ -566,6 +537,41 @@ func (m *Model) updateRunnerPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // buildConversationContext constructs the full conversation string to send to the AI.
 // The first user turn is the original prompt body; subsequent turns are appended.
+// startFreshRun cancels any active run, injects the prompt-builder prefix, and
+// fires a new run from the current body + model. Safe to call from any panel.
+func (m *Model) startFreshRun() (tea.Model, tea.Cmd) {
+	if m.runCancel != nil {
+		m.runCancel()
+		m.runCancel = nil
+	}
+	body := m.bodyInput.Value()
+	slug := m.editingPrompt.ModelSlug
+	if slug == "" {
+		m.runnerErrMsg = "no model selected"
+		return m, nil
+	}
+	providerID, modelID, _ := strings.Cut(slug, "/")
+	p, ok := m.pluginMgr.Get(providerID)
+	if !ok {
+		m.runnerErrMsg = fmt.Sprintf("plugin %q not found", providerID)
+		return m, nil
+	}
+	input := promptBuilderPrefix + body
+	m.runnerTurns = []runnerTurn{{role: "user", content: input}}
+	m.followUpActive = false
+	m.followUpInput.SetValue("")
+	m.followUpInput.Blur()
+	ctx, cancel := context.WithCancel(context.Background())
+	m.runCancel = cancel
+	m.runnerStreaming = true
+	m.spinnerIdx = 0
+	m.runnerOutput = ""
+	m.runnerErrMsg = ""
+	m.runnerScrollOffset = 0
+	m.focusPanel = 2
+	return m, tea.Batch(runPluginCmd(ctx, p, input, m.editingPrompt.CWD, modelID), spinnerTickCmd())
+}
+
 func buildConversationContext(turns []runnerTurn) string {
 	if len(turns) == 0 {
 		return ""
