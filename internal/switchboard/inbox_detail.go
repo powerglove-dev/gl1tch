@@ -118,6 +118,22 @@ func buildRunContent(run store.Run, pal styles.ANSIPalette, markdownMode bool, i
 				model = "  " + dim(step.Model)
 			}
 			sb.WriteString("  " + dim(connector) + badge + " " + fg(step.ID) + dur + model + "\n")
+
+		// Per-step output: last 5 lines beneath the badge
+		if v, ok := step.Output["value"]; ok {
+			raw := fmt.Sprintf("%v", v)
+			if raw != "" {
+				outLines := strings.Split(raw, "\n")
+				start := 0
+				if len(outLines) > 5 {
+					start = len(outLines) - 5
+				}
+				indent := "     " // align under step ID (connector + badge + space)
+				for _, ol := range outLines[start:] {
+					sb.WriteString(dim(indent+ol) + "\n")
+				}
+			}
+		}
 		}
 	}
 
@@ -212,6 +228,15 @@ func (m Model) viewInboxDetail(w, h int, markdownMode bool) string {
 	}
 	visible := lines[offset:end]
 
+	// Render-time cursor clamp: ensure cursor highlight falls within visible rows.
+	renderCursor := m.inboxDetailCursor
+	if renderCursor < offset {
+		renderCursor = offset
+	}
+	if renderCursor >= offset+visibleH {
+		renderCursor = offset + visibleH - 1
+	}
+
 	var rows []string
 	rows = append(rows, boxTop(boxW, title, pal.Border, pal.Accent))
 	for i, line := range visible {
@@ -219,7 +244,7 @@ func (m Model) viewInboxDetail(w, h int, markdownMode bool) string {
 		prefix := " "
 		rendered := line
 
-		isCursor := absIdx == m.inboxDetailCursor
+		isCursor := absIdx == renderCursor
 		isMarked := m.inboxDetailMarked != nil && m.inboxDetailMarked[absIdx]
 
 		switch {
@@ -271,7 +296,7 @@ func (m Model) viewInboxDetail(w, h int, markdownMode bool) string {
 		hintList = append(hintList, panelrender.Hint{Key: "A", Desc: "mark all"})
 		hintList = append(hintList, panelrender.Hint{Key: "D", Desc: "clear"})
 	}
-	hintList = append(hintList, dispatchHint, panelrender.Hint{Key: "M", Desc: "md"}, panelrender.Hint{Key: "q", Desc: "close"})
+	hintList = append(hintList, dispatchHint, panelrender.Hint{Key: "e", Desc: "editor"}, panelrender.Hint{Key: "M", Desc: "md"}, panelrender.Hint{Key: "q", Desc: "close"})
 	hints := panelrender.HintBar(hintList, boxW-2, pal)
 	rows = append(rows, boxRow(hints, boxW, pal.Border))
 	rows = append(rows, boxBot(boxW, pal.Border))

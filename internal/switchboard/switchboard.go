@@ -191,6 +191,9 @@ type jobFailedMsg struct {
 
 type tickMsg time.Time
 
+// inboxEditorDoneMsg is dispatched when the $EDITOR process launched from the
+// inbox detail view exits.
+type inboxEditorDoneMsg struct{ err error }
 
 // ── Window / telemetry types (preserved from sidebar for backwards compat) ────
 
@@ -249,6 +252,21 @@ type InboxPanel struct {
 	scrollOffset int
 	filterQuery  string
 	filterActive bool
+	activeFilter string // "unread" | "read" | "attention" | "all"
+}
+
+// inboxFilterCycle returns the next filter in the rotation.
+func inboxFilterCycle(current string) string {
+	switch current {
+	case "unread":
+		return "read"
+	case "read":
+		return "attention"
+	case "attention":
+		return "all"
+	default:
+		return "unread"
+	}
 }
 
 // Model is the BubbleTea model for the Switchboard.
@@ -307,6 +325,9 @@ type Model struct {
 	inboxDetailMarked       map[int]bool   // marked absolute line indices
 	inboxDetailMarkedLines  map[int]string // content at each marked line
 	inboxMarkMode           MarkModeState
+	inboxEditorTempFile     string // path to temp file open in $EDITOR
+	inboxEditorClipSnapshot string // clipboard state before editor launch
+	inboxEditorOrigContent  string // original content written to temp file
 	// Cron panel
 	cronPanel CronPanel
 	// Pipeline bus subscription (tasks 7.2–7.8)
@@ -355,6 +376,7 @@ func NewWithStore(s *store.Store) Model {
 		agentSchedule:         schedTA,
 		pipelineScheduleInput: pipeSchedTA,
 		signalBoard:           SignalBoard{activeFilter: "running"},
+		inboxPanel:            InboxPanel{activeFilter: "unread"},
 		activeJobs:            make(map[string]*jobHandle),
 		launchCWD:             cwd,
 		agentCWD:              cwd,
@@ -882,6 +904,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
+		// Reclamp feed scroll so bounds stay accurate when entries are appended
+		// between navigation events (e.g. new steps arriving while idle).
+		m.clampFeedScroll()
 		return m, tickCmd()
 
 	case TelemetryMsg:
@@ -1074,6 +1099,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delete(m.activeJobs, msg.id)
 		return m, failCmd
 
+	case inboxEditorDoneMsg:
+		tmpFile := m.inboxEditorTempFile
+		origContent := m.inboxEditorOrigContent
+		snapClip := m.inboxEditorClipSnapshot
+		m.inboxEditorTempFile = ""
+		m.inboxEditorOrigContent = ""
+		m.inboxEditorClipSnapshot = ""
+
+		var injected string
+		// Prefer clipboard if it changed since before the editor launched.
+		if clip := readClipboard(); clip != "" && clip != snapClip {
+			injected = strings.TrimSpace(clip)
+		} else if tmpFile != "" {
+			// Fall back to saved file content if it differs from what we wrote.
+			if raw, err := os.ReadFile(tmpFile); err == nil {
+				if saved := strings.TrimSpace(string(raw)); saved != origContent && saved != "" {
+					injected = saved
+				}
+			}
+		}
+		// Clean up temp file regardless.
+		if tmpFile != "" {
+			_ = os.Remove(tmpFile)
+		}
+		if injected != "" {
+			m.inboxDetailOpen = false
+			m.agent.prompt.SetValue(injected)
+			m.agentModalOpen = true
+			m.agentModalFocus = 2
+			m.agent.prompt.Focus()
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		// These keys always go through handleKey regardless of which panel is focused.
 		switch msg.String() {
@@ -1170,7 +1228,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m = m.inboxDetailToggleMark()
 			}
 			m.inboxDetailCursor++
-			m.inboxDetailScroll = m.inboxDetailCursor
+			// Keep cursor in view: scroll down only if cursor exceeds bottom edge.
+			visibleH := max(m.height-4, 4)
+			if m.inboxDetailCursor >= m.inboxDetailScroll+visibleH {
+				m.inboxDetailScroll = m.inboxDetailCursor - visibleH + 1
+			}
 		case "k", "up":
 			if m.inboxMarkMode == MarkModeActive {
 				m = m.inboxDetailToggleMark()
@@ -1178,18 +1240,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			if m.inboxDetailCursor > 0 {
 				m.inboxDetailCursor--
 			}
-			m.inboxDetailScroll = m.inboxDetailCursor
-		case "pgup", "[":
-			if m.inboxDetailScroll > 10 {
-				m.inboxDetailScroll -= 10
-				m.inboxDetailCursor = m.inboxDetailScroll
-			} else {
-				m.inboxDetailScroll = 0
-				m.inboxDetailCursor = 0
+			// Keep cursor in view: scroll up only if cursor goes above top edge.
+			if m.inboxDetailCursor < m.inboxDetailScroll {
+				m.inboxDetailScroll = m.inboxDetailCursor
 			}
+		case "pgup", "[":
+			step := max(m.height-4, 4)
+			m.inboxDetailCursor = max(m.inboxDetailCursor-step, 0)
+			m.inboxDetailScroll = max(m.inboxDetailScroll-step, 0)
 		case "pgdown", "]":
-			m.inboxDetailScroll += 10
-			m.inboxDetailCursor = m.inboxDetailScroll
+			step := max(m.height-4, 4)
+			m.inboxDetailCursor += step
+			m.inboxDetailScroll += step
 		case "M":
 			m.inboxMarkdownMode = !m.inboxMarkdownMode
 			m.inboxDetailScroll = 0
@@ -1232,6 +1294,32 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			if m.inboxMarkMode != MarkModeOff {
 				m.inboxDetailMarked = nil
 				m.inboxDetailMarkedLines = nil
+			}
+			return m, nil
+		case "e":
+			// Open run content in $EDITOR; inject yanked/clipboard text into agent runner on return.
+			editor, ok := editorCmd()
+			if !ok {
+				m = m.AddFeedEntry("inbox-editor-err", "set $EDITOR to use the editor feature", FeedDone, nil)
+				return m, nil
+			}
+			runs := m.filteredInboxRuns()
+			if idx := m.inboxDetailIdx; idx >= 0 && idx < len(runs) {
+				run := runs[idx]
+				pal := m.ansiPalette()
+				plain := stripANSI(buildRunContent(run, pal, false, 80))
+				tmp, err := os.CreateTemp("", "orcai-inbox-*.txt")
+				if err == nil {
+					_, _ = tmp.WriteString(plain)
+					_ = tmp.Close()
+					m.inboxEditorTempFile = tmp.Name()
+					m.inboxEditorOrigContent = plain
+					m.inboxEditorClipSnapshot = clipboardSnapshot()
+					cmd := exec.Command(editor, tmp.Name()) //nolint:gosec
+					return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+						return inboxEditorDoneMsg{err: err}
+					})
+				}
 			}
 			return m, nil
 		case "r":
@@ -1441,6 +1529,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case "/":
 			m.inboxPanel.filterActive = true
 			return m, nil
+		case "f":
+			m.inboxPanel.activeFilter = inboxFilterCycle(m.inboxPanel.activeFilter)
+			m.inboxPanel.selectedIdx = 0
+			m.inboxPanel.scrollOffset = 0
+			return m, nil
 		case "j", "down":
 			if m.inboxPanel.selectedIdx < len(runs)-1 {
 				m.inboxPanel.selectedIdx++
@@ -1649,7 +1742,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			total := m.feedLineCount()
 			step := m.feedVisibleHeight()
 			m.feedCursor = min(m.feedCursor+step, max(0, total-1))
-			m.feedScrollOffset = m.feedCursor
+			m.feedScrollOffset += step
 			m.clampFeedScroll()
 			return m, nil
 		}
@@ -1668,7 +1761,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 			step := m.feedVisibleHeight()
 			m.feedCursor = max(m.feedCursor-step, 0)
-			m.feedScrollOffset = m.feedCursor
+			m.feedScrollOffset -= step
 			m.clampFeedScroll()
 			return m, nil
 		}
@@ -1690,7 +1783,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if m.feedFocused {
 			total := m.feedLineCount()
 			m.feedCursor = max(0, total-1)
-			m.feedScrollOffset = m.feedCursor
+			visibleH := m.feedVisibleHeight()
+			m.feedScrollOffset = max(0, m.feedCursor-visibleH+1)
 			m.clampFeedScroll()
 			return m, nil
 		}
@@ -1820,13 +1914,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// feedVisibleHeight returns an approximation of the number of visible lines in the feed panel.
+// feedVisibleHeight returns the number of visible lines in the feed panel,
+// using the same formula as clampFeedScroll and View().
 func (m Model) feedVisibleHeight() int {
 	h := m.height
 	if h <= 0 {
 		h = 40
 	}
-	v := h/2 - 4
+	contentH := max(h-2, 5)
+	sbH := m.signalBoardPanelHeight(contentH)
+	feedH := max(contentH-sbH, 3)
+	v := feedH - 2
 	if v < 1 {
 		v = 1
 	}
@@ -1897,7 +1995,11 @@ func (m Model) handleDown() Model {
 		}
 		total := m.feedLineCount()
 		m.feedCursor = min(m.feedCursor+1, max(0, total-1))
-		m.feedScrollOffset = m.feedCursor
+		// Keep cursor in view: scroll down only if cursor moves below the bottom edge.
+		visibleH := m.feedVisibleHeight()
+		if m.feedCursor >= m.feedScrollOffset+visibleH {
+			m.feedScrollOffset = m.feedCursor - visibleH + 1
+		}
 		m.clampFeedScroll()
 		return m
 	}
@@ -1929,7 +2031,10 @@ func (m Model) handleUp() Model {
 			m = m.feedToggleMark(m.feedCursor)
 		}
 		m.feedCursor = max(m.feedCursor-1, 0)
-		m.feedScrollOffset = m.feedCursor
+		// Keep cursor in view: scroll up only if cursor moves above the top edge.
+		if m.feedCursor < m.feedScrollOffset {
+			m.feedScrollOffset = m.feedCursor
+		}
 		m.clampFeedScroll()
 		return m
 	}
@@ -2620,20 +2725,15 @@ func (m Model) setFeedStatus(id string, status FeedStatus) Model {
 }
 
 // clampFeedScroll clamps feedScrollOffset to valid range.
+// Uses the same height formula as View() via signalBoardPanelHeight to avoid
+// scroll-bound drift that lets the cursor escape the visible viewport.
 func (m *Model) clampFeedScroll() {
 	h := m.height
 	if h <= 0 {
 		h = 40
 	}
-	contentH := max(h-1, 5)
-	maxSBClamp := max(contentH*40/100, 8)
-	sbHeight := min(len(m.feed)+6, maxSBClamp)
-	if sbHeight < 5 {
-		sbHeight = 5
-	}
-	if sbHeight > contentH-3 {
-		sbHeight = max(contentH-3, 5)
-	}
+	contentH := max(h-2, 5) // match View(): reserve 1 for topBar + 1 for padding
+	sbHeight := m.signalBoardPanelHeight(contentH)
 	feedH := max(contentH-sbHeight, 3)
 	visibleH := feedH - 2
 	if visibleH <= 0 {
@@ -2726,17 +2826,7 @@ func (m Model) View() string {
 	feedW := max(w-leftW-2, 20)
 	contentH := max(h-2, 5) // reserve 1 line for top bar + 1 for padding row; hint bars live inside each panel
 
-	// Signal board: grows with entries up to 40% of screen height.
-	// Minimum 5 rows so the box is always visible (header+border).
-	maxSB := max(contentH*40/100, 10)
-	sbHeight := min(len(m.feed)+9, maxSB)
-	if sbHeight < 8 {
-		sbHeight = 8
-	}
-	// Clamp sbHeight so feedH is at least 3.
-	if sbHeight > contentH-3 {
-		sbHeight = max(contentH-3, 8)
-	}
+	sbHeight := m.signalBoardPanelHeight(contentH)
 	feedH := max(contentH-sbHeight, 3)
 
 	left := m.viewLeftColumn(contentH, leftW)
@@ -3366,10 +3456,33 @@ func (m Model) buildAgentSection(w int) []string {
 func (m Model) filteredInboxRuns() []store.Run {
 	all := m.inboxModel.Runs()
 	query := strings.ToLower(m.inboxPanel.filterQuery)
+	filter := m.inboxPanel.activeFilter
+	if filter == "" {
+		filter = "unread"
+	}
 	var out []store.Run
 	for _, r := range all {
-		if m.inboxReadIDs[r.ID] {
-			continue
+		isRead := m.inboxReadIDs[r.ID]
+		needsAttention := r.ExitStatus != nil && *r.ExitStatus != 0
+		switch filter {
+		case "unread":
+			if isRead {
+				continue
+			}
+		case "read":
+			if !isRead {
+				continue
+			}
+		case "attention":
+			if !needsAttention {
+				continue
+			}
+		case "all":
+			// no exclusion
+		default:
+			if isRead {
+				continue
+			}
 		}
 		if query != "" && !strings.Contains(strings.ToLower(r.Name), query) {
 			continue
@@ -3403,6 +3516,20 @@ func (m Model) buildInboxSection(w, height int) []string {
 	maxRows := height - len(rows) - 2
 	if maxRows < 0 {
 		maxRows = 0
+	}
+
+	// Active filter label row (shown whenever filter is not the default "unread").
+	activeFilter := m.inboxPanel.activeFilter
+	if activeFilter == "" {
+		activeFilter = "unread"
+	}
+	if activeFilter != "unread" {
+		label := fmt.Sprintf("  %sfilter:%s %s%s%s", pal.Dim, aRst, pal.Accent, activeFilter, aRst)
+		rows = append(rows, boxRow(label, w, borderColor))
+		maxRows--
+		if maxRows < 0 {
+			maxRows = 0
+		}
 	}
 
 	// Search prompt row.
@@ -3476,10 +3603,15 @@ func (m Model) buildInboxSection(w, height int) []string {
 				{Key: "backspace", Desc: "delete"},
 			}
 		} else {
+			filterLabel := m.inboxPanel.activeFilter
+			if filterLabel == "" {
+				filterLabel = "unread"
+			}
 			inboxHints = []panelrender.Hint{
 				{Key: "enter", Desc: "open"},
 				{Key: "x", Desc: "mark read"},
 				{Key: "/", Desc: "search"},
+				{Key: "f", Desc: "filter:" + filterLabel},
 			}
 		}
 	}

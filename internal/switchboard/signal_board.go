@@ -73,6 +73,33 @@ func (sb *SignalBoard) clampScroll(visibleRows int) {
 	}
 }
 
+// sbFixedBodyRows is the fixed number of visible body rows in the signal board.
+// Sized to accommodate at least 20 running agents.
+const sbFixedBodyRows = 10
+
+// signalBoardPanelHeight returns the total rendered height (in lines) of the
+// signal board panel for the given contentH. Used consistently by View(),
+// clampFeedScroll(), and signalBoardVisibleRows() to prevent height drift.
+func (m Model) signalBoardPanelHeight(contentH int) int {
+	// Count rendered header lines (same logic as buildSignalBoard).
+	headerLines := 1 // boxTop
+	if PanelHeader(m.activeBundle(), "signal_board", 80, "", "") != nil {
+		headerLines = 3 // sprite
+	}
+	if m.signalBoard.activeFilter != "" && m.signalBoard.activeFilter != "all" {
+		headerLines++ // filter line
+	}
+	if m.signalBoard.searching || m.signalBoard.query != "" {
+		headerLines++ // search input line
+	}
+	// +2: hint footer row + boxBot row
+	sbH := headerLines + sbFixedBodyRows + 2
+	if sbH > contentH-3 {
+		sbH = max(contentH-3, 8)
+	}
+	return sbH
+}
+
 // signalBoardVisibleRows computes the number of visible body rows using the
 // same height formula as the View() layout and buildSignalBoard header count.
 func (m Model) signalBoardVisibleRows() int {
@@ -80,15 +107,8 @@ func (m Model) signalBoardVisibleRows() int {
 	if h <= 0 {
 		h = 40
 	}
-	contentH := max(h-1, 5)
-	maxSB := max(contentH*40/100, 10)
-	sbHeight := min(len(m.feed)+9, maxSB)
-	if sbHeight < 8 {
-		sbHeight = 8
-	}
-	if sbHeight > contentH-3 {
-		sbHeight = max(contentH-3, 8)
-	}
+	contentH := max(h-2, 5) // match View(): reserve 1 for topBar + 1 for padding
+	sbHeight := m.signalBoardPanelHeight(contentH)
 
 	// Mirror header line count from buildSignalBoard:
 	// sprite path: 3 sprite lines; else boxTop = 1 line.
