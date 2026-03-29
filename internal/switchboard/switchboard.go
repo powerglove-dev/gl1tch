@@ -3752,7 +3752,7 @@ func (m Model) buildInboxSection(w, height int) []string {
 				{Key: "enter", Desc: "open"},
 				{Key: "x", Desc: "mark read"},
 				{Key: "/", Desc: "search"},
-				{Key: "f", Desc: "filter:" + filterLabel},
+				{Key: "r", Desc: "re-run"},
 			}
 		}
 	}
