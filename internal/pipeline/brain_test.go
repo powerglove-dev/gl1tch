@@ -126,7 +126,7 @@ func TestStoreBrainInjector_TruncateAt500(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	longBody := strings.Repeat("x", 800)
+	longBody := strings.Repeat("x", 5000)
 	_, err = s.InsertBrainNote(ctx, store.BrainNote{
 		RunID:     runID,
 		StepID:    "step-trunc",

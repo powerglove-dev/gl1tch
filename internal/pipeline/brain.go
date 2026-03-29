@@ -143,8 +143,8 @@ func (s *StoreBrainInjector) ReadContext(ctx context.Context, runID int64) (stri
 		for _, n := range notes {
 			body := n.Body
 			runes := []rune(body)
-			if len(runes) > 500 {
-				body = string(runes[:500]) + "...[truncated]"
+			if len(runes) > 4000 {
+				body = string(runes[:4000]) + "...[truncated]"
 			}
 			sb.WriteString(fmt.Sprintf("[%s] %s\n", n.StepID, body))
 		}
