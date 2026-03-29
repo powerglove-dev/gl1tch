@@ -1,7 +1,10 @@
 package modal_test
 
 import (
+	"fmt"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/adam-stokes/orcai/internal/modal"
 	"github.com/adam-stokes/orcai/internal/picker"
@@ -56,5 +59,78 @@ func TestAgentPickerModel_ProviderWithNoModels(t *testing.T) {
 	}
 	if m.SelectedModelID() != "" {
 		t.Errorf("want empty model, got %q", m.SelectedModelID())
+	}
+}
+
+func key(k string) tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
+}
+
+func keySpecial(t tea.KeyType) tea.KeyMsg {
+	return tea.KeyMsg{Type: t}
+}
+
+func TestAgentPickerUpdate_MoveDown(t *testing.T) {
+	m := modal.NewAgentPickerModel(testProviders())
+	m2, ev := m.Update(key("j"))
+	if ev != modal.AgentPickerNone {
+		t.Errorf("want None, got %v", ev)
+	}
+	if m2.SelectedProviderID() != "ollama" {
+		t.Errorf("want ollama after j, got %q", m2.SelectedProviderID())
+	}
+	if m2.SelectedModelID() != "llama3" {
+		t.Errorf("want llama3, got %q", m2.SelectedModelID())
+	}
+}
+
+func TestAgentPickerUpdate_MoveUpAtTop(t *testing.T) {
+	m := modal.NewAgentPickerModel(testProviders())
+	m2, _ := m.Update(key("k"))
+	if m2.SelectedProviderID() != "claude" {
+		t.Errorf("want claude (clamped), got %q", m2.SelectedProviderID())
+	}
+}
+
+func TestAgentPickerUpdate_TabSwitchesFocus(t *testing.T) {
+	m := modal.NewAgentPickerModel(testProviders())
+	m2, _ := m.Update(keySpecial(tea.KeyTab))
+	// now in model focus; j moves model selection
+	m3, _ := m2.Update(key("j"))
+	if m3.SelectedModelID() != "opus" {
+		t.Errorf("want opus, got %q", m3.SelectedModelID())
+	}
+	if m3.SelectedProviderID() != "claude" {
+		t.Errorf("provider should not change in model focus, got %q", m3.SelectedProviderID())
+	}
+}
+
+func TestAgentPickerUpdate_EnterConfirms(t *testing.T) {
+	m := modal.NewAgentPickerModel(testProviders())
+	_, ev := m.Update(keySpecial(tea.KeyEnter))
+	if ev != modal.AgentPickerConfirmed {
+		t.Errorf("want Confirmed, got %v", ev)
+	}
+}
+
+func TestAgentPickerUpdate_EscCancels(t *testing.T) {
+	m := modal.NewAgentPickerModel(testProviders())
+	_, ev := m.Update(keySpecial(tea.KeyEsc))
+	if ev != modal.AgentPickerCancelled {
+		t.Errorf("want Cancelled, got %v", ev)
+	}
+}
+
+func TestAgentPickerUpdate_ScrollClamps(t *testing.T) {
+	providers := make([]picker.ProviderDef, 6)
+	for i := range providers {
+		providers[i] = picker.ProviderDef{ID: fmt.Sprintf("p%d", i), Label: fmt.Sprintf("P%d", i)}
+	}
+	m := modal.NewAgentPickerModel(providers)
+	for range 5 {
+		m, _ = m.Update(key("j"))
+	}
+	if m.SelectedProviderID() != "p5" {
+		t.Errorf("want p5, got %q", m.SelectedProviderID())
 	}
 }

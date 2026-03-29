@@ -1,6 +1,8 @@
 package modal
 
 import (
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/adam-stokes/orcai/internal/picker"
 )
 
@@ -81,4 +83,68 @@ func agentPickerFilterModels(models []picker.ModelOption) []picker.ModelOption {
 		}
 	}
 	return out
+}
+
+// Update handles key input and returns the updated model plus an event signal.
+func (m AgentPickerModel) Update(msg tea.KeyMsg) (AgentPickerModel, AgentPickerEvent) {
+	switch msg.String() {
+	case "enter":
+		return m, AgentPickerConfirmed
+	case "esc":
+		return m, AgentPickerCancelled
+	case "tab":
+		m.focus = 1 - m.focus
+	case "j", "down":
+		if m.focus == 0 {
+			if m.selectedProvider < len(m.providers)-1 {
+				m.selectedProvider++
+				m.selectedModel = 0
+				m.modelScrollOffset = 0
+			}
+			m = m.clampProvScroll()
+		} else {
+			models := m.currentModels()
+			if m.selectedModel < len(models)-1 {
+				m.selectedModel++
+			}
+			m = m.clampModelScroll()
+		}
+	case "k", "up":
+		if m.focus == 0 {
+			if m.selectedProvider > 0 {
+				m.selectedProvider--
+				m.selectedModel = 0
+				m.modelScrollOffset = 0
+			}
+			m = m.clampProvScroll()
+		} else {
+			if m.selectedModel > 0 {
+				m.selectedModel--
+			}
+			m = m.clampModelScroll()
+		}
+	}
+	return m, AgentPickerNone
+}
+
+// clampProvScroll adjusts provScrollOffset so selectedProvider stays in the window.
+func (m AgentPickerModel) clampProvScroll() AgentPickerModel {
+	if m.selectedProvider < m.provScrollOffset {
+		m.provScrollOffset = m.selectedProvider
+	}
+	if m.selectedProvider >= m.provScrollOffset+agentPickerWindow {
+		m.provScrollOffset = m.selectedProvider - agentPickerWindow + 1
+	}
+	return m
+}
+
+// clampModelScroll adjusts modelScrollOffset so selectedModel stays in the window.
+func (m AgentPickerModel) clampModelScroll() AgentPickerModel {
+	if m.selectedModel < m.modelScrollOffset {
+		m.modelScrollOffset = m.selectedModel
+	}
+	if m.selectedModel >= m.modelScrollOffset+agentPickerWindow {
+		m.modelScrollOffset = m.selectedModel - agentPickerWindow + 1
+	}
+	return m
 }
