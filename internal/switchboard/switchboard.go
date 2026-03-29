@@ -291,6 +291,8 @@ type Model struct {
 	pendingDeletePipeline string
 	agentModalOpen  bool
 	agentModalFocus int // 0=provider, 1=model, 2=prompt, 3=use_brain, 4=cwd, 5=schedule (within modal)
+	agentPrompts    []store.Prompt // loaded from store when modal opens
+	agentPromptIdx  int            // selected saved-prompt index; 0 = none
 	agentSchedule         textarea.Model
 	agentScheduleErr      string
 	agentUseBrain         bool
@@ -870,6 +872,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 
+	// ── Agent prompt pre-selection ────────────────────────────────────────────
+
+	case agentPromptsLoadedMsg:
+		m.agentPrompts = msg.prompts
+		return m, nil
+
 	// ── Dir picker messages ───────────────────────────────────────────────────
 
 	case dirWalkResultMsg:
@@ -1137,7 +1145,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.agent.prompt.SetValue(injected)
 			m.agentModalOpen = true
 			m.agentModalFocus = 2
+			m.agentPromptIdx = 0
 			m.agent.prompt.Focus()
+			return m, loadAgentPromptsCmd(m.store)
 		}
 		return m, nil
 
@@ -1351,7 +1361,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.agent.prompt.SetValue(strings.Join(parts, "\n"))
 				m.agentModalOpen = true
 				m.agentModalFocus = 2
+				m.agentPromptIdx = 0
 				m.agent.prompt.Focus()
+				return m, loadAgentPromptsCmd(m.store)
 			}
 			return m, nil
 		default:
@@ -1717,8 +1729,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.agent.prompt.SetValue(strings.Join(parts, "\n"))
 			m.agentModalOpen = true
 			m.agentModalFocus = 2
+			m.agentPromptIdx = 0
 			m.agent.prompt.Focus()
-			return m, nil
+			return m, loadAgentPromptsCmd(m.store)
 		}
 		// Global refresh: reload pipelines and providers.
 		m.launcher.pipelines = ScanPipelines(pipelinesDir())
@@ -2068,6 +2081,21 @@ func (m Model) handleUp() Model {
 	return m
 }
 
+// agentPromptsLoadedMsg carries the result of loading saved prompts for the agent modal.
+type agentPromptsLoadedMsg struct{ prompts []store.Prompt }
+
+// loadAgentPromptsCmd loads all saved prompts from the store asynchronously.
+// Used when the agent modal opens so the user can pick a saved prompt.
+func loadAgentPromptsCmd(st *store.Store) tea.Cmd {
+	if st == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		prompts, _ := st.ListPrompts(context.Background())
+		return agentPromptsLoadedMsg{prompts: prompts}
+	}
+}
+
 // handleAgentModal routes key events when the agent modal overlay is open.
 func (m Model) handleAgentModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 	key := msg.String()
@@ -2151,6 +2179,21 @@ func (m Model) handleAgentModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	default:
+	}
+
+	// Saved prompt picker: [ and ] cycle through saved prompts (available at any focus).
+	// When focus is on the prompt textarea (2) let [ and ] still cycle, but only
+	// if the key is not otherwise consumed by the textarea (it won't be, since
+	// textarea doesn't use bracket keys for navigation).
+	if key == "[" {
+		total := len(m.agentPrompts) + 1 // +1 for the "(none)" slot
+		m.agentPromptIdx = (m.agentPromptIdx - 1 + total) % total
+		return m, nil
+	}
+	if key == "]" {
+		total := len(m.agentPrompts) + 1
+		m.agentPromptIdx = (m.agentPromptIdx + 1) % total
+		return m, nil
 	}
 
 	// USE BRAIN toggle: space or enter toggles the flag.
@@ -2436,7 +2479,9 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 		if m.width >= 62 {
 			m.agentModalOpen = true
 			m.agentModalFocus = 0 // start at provider so user confirms selection
+			m.agentPromptIdx = 0
 			m.agent.prompt.Blur()
+			return m, loadAgentPromptsCmd(m.store)
 		}
 		return m, nil
 	}
@@ -2501,6 +2546,11 @@ func (m Model) submitAgentJob() (Model, tea.Cmd) {
 	input := strings.TrimSpace(m.agent.prompt.Value())
 	if input == "" {
 		return m, nil
+	}
+	// Prepend the selected saved prompt body, if any.
+	if m.agentPromptIdx > 0 && m.agentPromptIdx-1 < len(m.agentPrompts) {
+		p := m.agentPrompts[m.agentPromptIdx-1]
+		input = p.Body + "\n\n" + input
 	}
 	prov := m.currentProvider()
 	if prov == nil {
@@ -2571,6 +2621,7 @@ func (m Model) submitAgentJob() (Model, tea.Cmd) {
 		m.agentSchedule.SetValue("")
 		m.agentSchedule.Blur()
 		m.agentScheduleErr = ""
+		m.agentPromptIdx = 0
 		return m, nil
 	}
 
@@ -2634,6 +2685,7 @@ func (m Model) submitAgentJob() (Model, tea.Cmd) {
 	m.agentSchedule.SetValue("")
 	m.agentSchedule.Blur()
 	m.agentScheduleErr = ""
+	m.agentPromptIdx = 0
 
 	return m.launchPendingPipeline(cwd)
 }
@@ -2829,7 +2881,7 @@ func (m Model) View() string {
 	// Dir picker overlay — highest priority, shown on top of everything.
 	if m.dirPickerOpen {
 		base := topBar + "\n" + body
-		return overlayCenter(base, m.dirPicker.viewDirPickerBox(w, m.ansiPalette()), w, h)
+		return overlayCenter(base, m.dirPicker.ViewDirPickerBox(w, m.ansiPalette()), w, h)
 	}
 
 	if m.helpOpen {
@@ -3012,8 +3064,8 @@ func (m Model) viewAgentModalBox(w, h int) string {
 	// Full-screen height: topBar takes 1 row; box top+hints+bot = 3.
 	// Fixed overhead: boxTop(1)+provHdr(1)+4prov(4)+blank(1)+modelHdr(1)+4model(4)+
 	// blank(1)+promptHdr(1)+blank(1)+useBrain(1)+blank(1)+cwdHdr(1)+cwd(1)+
-	// blank(1)+schedHdr(1)+schedTA(1)+3cronHints(3)+blank(1)+hintStr(1)+boxBot(1) = 29
-	const fixedOverhead = 29
+	// blank(1)+savedPromptRow(1)+blank(1)+schedHdr(1)+schedTA(1)+3cronHints(3)+blank(1)+hintStr(1)+boxBot(1) = 31
+	const fixedOverhead = 31
 	const minPromptH = 4
 	modalH := max(h-1, 24)
 	promptH := max(modalH-fixedOverhead, minPromptH)
@@ -3126,6 +3178,15 @@ func (m Model) viewAgentModalBox(w, h int) string {
 			}
 		}
 	}
+
+	// ── SAVED PROMPT picker ───────────────────────────────────────────────────
+	rows = append(rows, boxRow("", modalW, modalBorderColor))
+	savedPromptLabel := "(none)"
+	if m.agentPromptIdx > 0 && m.agentPromptIdx-1 < len(m.agentPrompts) {
+		savedPromptLabel = m.agentPrompts[m.agentPromptIdx-1].Title
+	}
+	savedPromptRow := "  " + pal.Dim + "Saved Prompt  " + aRst + pal.Accent + "◀ " + aRst + savedPromptLabel + pal.Accent + " ▶" + aRst + pal.Dim + "  [ / ]" + aRst
+	rows = append(rows, boxRow(savedPromptRow, modalW, modalBorderColor))
 
 	// ── PROMPT section ────────────────────────────────────────────────────────
 	rows = append(rows, boxRow("", modalW, modalBorderColor))

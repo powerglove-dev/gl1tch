@@ -162,6 +162,25 @@ func (s *Store) SavePromptResponse(_ context.Context, id int64, response string)
 	})
 }
 
+// GetPromptByTitle returns a prompt by title (case-insensitive exact match).
+// Returns sql.ErrNoRows if not found.
+func (s *Store) GetPromptByTitle(ctx context.Context, title string) (Prompt, error) {
+	var p Prompt
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, title, body, model_slug, last_response, cwd, created_at, updated_at
+		   FROM prompts
+		  WHERE lower(title) = lower(?) LIMIT 1`,
+		title,
+	).Scan(&p.ID, &p.Title, &p.Body, &p.ModelSlug, &p.LastResponse, &p.CWD, &p.CreatedAt, &p.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return Prompt{}, sql.ErrNoRows
+	}
+	if err != nil {
+		return Prompt{}, fmt.Errorf("store: get prompt by title: %w", err)
+	}
+	return p, nil
+}
+
 // GetPrompt returns a prompt by ID. Returns sql.ErrNoRows if not found.
 func (s *Store) GetPrompt(ctx context.Context, id int64) (Prompt, error) {
 	var p Prompt

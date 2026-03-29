@@ -851,6 +851,46 @@ func TestPromptCWDRoundTrip(t *testing.T) {
 	}
 }
 
+func TestGetPromptByTitle(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	_, err := s.InsertPrompt(ctx, Prompt{Title: "My Summarizer", Body: "Summarize the text.", ModelSlug: "gpt-4"})
+	if err != nil {
+		t.Fatalf("InsertPrompt: %v", err)
+	}
+
+	t.Run("found by exact title", func(t *testing.T) {
+		got, err := s.GetPromptByTitle(ctx, "My Summarizer")
+		if err != nil {
+			t.Fatalf("GetPromptByTitle: %v", err)
+		}
+		if got.Title != "My Summarizer" {
+			t.Errorf("Title: want %q, got %q", "My Summarizer", got.Title)
+		}
+		if got.Body != "Summarize the text." {
+			t.Errorf("Body: want %q, got %q", "Summarize the text.", got.Body)
+		}
+	})
+
+	t.Run("found case-insensitively", func(t *testing.T) {
+		got, err := s.GetPromptByTitle(ctx, "MY SUMMARIZER")
+		if err != nil {
+			t.Fatalf("GetPromptByTitle case-insensitive: %v", err)
+		}
+		if got.Title != "My Summarizer" {
+			t.Errorf("Title: want %q, got %q", "My Summarizer", got.Title)
+		}
+	})
+
+	t.Run("error on missing title", func(t *testing.T) {
+		_, err := s.GetPromptByTitle(ctx, "nonexistent title")
+		if err != sql.ErrNoRows {
+			t.Errorf("want sql.ErrNoRows, got %v", err)
+		}
+	})
+}
+
 func TestGetPrompt(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()

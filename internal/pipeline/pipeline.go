@@ -54,6 +54,10 @@ type Step struct {
 	// WriteBrain controls brain write injection for this step.
 	// Pointer for tri-state: nil = inherit pipeline setting, true = force on, false = force off.
 	WriteBrain *bool `yaml:"write_brain"`
+	// PromptID is the title of a saved prompt in the store. When set, the prompt
+	// body is prepended (with a blank line separator) to the step's input before
+	// execution. Uses case-insensitive title matching.
+	PromptID string `yaml:"prompt_id,omitempty"`
 }
 
 // RetryPolicy specifies how a step should be retried on failure.
