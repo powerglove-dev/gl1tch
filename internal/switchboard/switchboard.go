@@ -3061,6 +3061,12 @@ func (m Model) View() string {
 		return topBar + "\n" + m.viewAgentModalBox(w, h)
 	}
 
+	// Re-run modal — floating overlay on top of the switchboard.
+	if m.showRerun {
+		base := topBar + "\n" + body
+		return overlayCenter(base, m.rerunModal.ViewBox(w, m.ansiPalette()), w, h)
+	}
+
 	// Delete confirmation — floating overlay on top of the switchboard.
 	if m.confirmDelete {
 		base := topBar + "\n" + body
