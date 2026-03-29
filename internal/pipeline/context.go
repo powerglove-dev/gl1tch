@@ -12,9 +12,11 @@ import (
 // It provides concurrent-safe access to a nested map[string]any, addressable
 // via dot-separated path expressions (e.g. "step.fetch.data.url").
 type ExecutionContext struct {
-	mu   sync.RWMutex
-	data map[string]any
-	db   *store.Store
+	mu       sync.RWMutex
+	data     map[string]any
+	db       *store.Store
+	injector BrainInjector
+	runID    int64
 }
 
 // ExecutionContextOption configures an ExecutionContext at construction time.
@@ -37,6 +39,21 @@ func NewExecutionContext(opts ...ExecutionContextOption) *ExecutionContext {
 
 // DB returns the attached result store, or nil if none was configured.
 func (c *ExecutionContext) DB() *store.Store { return c.db }
+
+// SetBrainInjector attaches a BrainInjector and the current run ID to the
+// context. Called by the runner after ec creation when a brain injector is
+// configured for the run.
+func (c *ExecutionContext) SetBrainInjector(injector BrainInjector, runID int64) {
+	c.injector = injector
+	c.runID = runID
+}
+
+// GetBrainInjector returns the attached BrainInjector, or nil if none was set.
+func (c *ExecutionContext) GetBrainInjector() BrainInjector { return c.injector }
+
+// RunID returns the store run ID associated with this execution context.
+// Returns 0 if the store was not configured or the run record was not created.
+func (c *ExecutionContext) RunID() int64 { return c.runID }
 
 // Get retrieves the value at the dot-separated path. Returns (nil, false) if
 // any segment of the path is missing or not a map.

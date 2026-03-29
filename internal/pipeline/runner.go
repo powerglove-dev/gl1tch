@@ -188,6 +188,9 @@ func isLegacyPipeline(p *Pipeline) bool {
 // It handles "input"/"output" step types and condition branches.
 func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput string, cfg *runConfig) (string, error) {
 	ec := NewExecutionContext(WithStore(cfg.store))
+	if cfg.injector != nil {
+		ec.SetBrainInjector(cfg.injector, cfg.runID)
+	}
 
 	// Expose the process working directory so pipeline steps can use {{cwd}}.
 	if cwd, err := os.Getwd(); err == nil {
@@ -359,6 +362,9 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 
 	// Set up shared execution context.
 	ec := NewExecutionContext(WithStore(cfg.store))
+	if cfg.injector != nil {
+		ec.SetBrainInjector(cfg.injector, cfg.runID)
+	}
 	// Expose the process working directory so pipeline steps can use {{cwd}}.
 	if cwd, err := os.Getwd(); err == nil {
 		ec.Set("cwd", cwd)
