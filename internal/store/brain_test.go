@@ -111,7 +111,7 @@ func TestBrainNotes_LimitCap(t *testing.T) {
 	ctx := context.Background()
 	runID := int64(42)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		_, err := s.InsertBrainNote(ctx, BrainNote{
 			RunID:     runID,
 			StepID:    "step-loop",
@@ -129,6 +129,15 @@ func TestBrainNotes_LimitCap(t *testing.T) {
 	}
 	if len(notes) != 3 {
 		t.Errorf("want exactly 3 notes (limit), got %d", len(notes))
+	}
+
+	// Verify reverse-chronological ordering: each note must be at least as
+	// recent as the one that follows it.
+	for i := range len(notes) - 1 {
+		if notes[i].CreatedAt < notes[i+1].CreatedAt {
+			t.Errorf("ordering: notes[%d].CreatedAt (%d) < notes[%d].CreatedAt (%d); want descending order",
+				i, notes[i].CreatedAt, i+1, notes[i+1].CreatedAt)
+		}
 	}
 }
 
