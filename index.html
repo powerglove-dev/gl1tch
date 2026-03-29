@@ -111,6 +111,18 @@ args:
 <span class="fg-yellow" data-astro-cid-us2xbpar>9</span> for brain/docs &nbsp;&middot;&nbsp;
 <span class="fg-yellow" data-astro-cid-us2xbpar>tab</span> to cycle &nbsp;&middot;&nbsp; <span class="fg-yellow" data-astro-cid-us2xbpar>r</span> to replay
 </p> </div> </div> </section> <section data-screen="changelog" class="screen"> <div class="term-pane-header"> <div class="tui-panel-header"><span>CHANGELOG</span></div> </div> <div class="term-pane" style="overflow-y:auto"> <h2 class="section-header fg-yellow">// release log //</h2> <pre style="color:var(--fg);font-size:12px;line-height:1.8"><span class="fg-comment">───────────────────────────────────────────────────────────────</span>
+<span class="fg-cyan">[v0.3.0]</span> <span class="fg-comment">2026-03-29</span>
+             <span class="fg-green">&#9654; feat:</span> feat: brain system — pipelines can read/write persistent agent memory via use_brain/write_brain fields
+             <span class="fg-green">&#9654; feat:</span> feat: prompt manager — full CRUD UI, test runner with live output, follow-up conversation mode
+             <span class="fg-green">&#9654; feat:</span> feat: AgentPickerModel — fuzzy inline picker for provider and model selection across all modals
+             <span class="fg-green">&#9654; feat:</span> feat: 55-theme library — tabbed 2-column picker with live preview, Dracula/Nord/Catppuccin and more
+             <span class="fg-green">&#9654; feat:</span> feat: pipeline BrainInjector interface — inject context from brain store into any pipeline step
+             <span class="fg-green">&#9654; feat:</span> feat: activity feed — mark mode, collapsible JSON output, step nesting, agent runner injection
+             <span class="fg-green">&#9654; feat:</span> feat: release pipeline — Taskfile + GoReleaser + GitHub Actions; multi-platform binaries on every tag
+             <span class="fg-green">&#9654; feat:</span> feat: inbox — cursor/mark/dispatch in detail modal; step output and prompt rendered inline
+             <span class="fg-green">&#9654; feat:</span> feat: jumpwindow — two-column layout with scoped fuzzy search and tab focus
+             <span class="fg-green">&#9654; feat:</span> fix: pipeline runner — on_failure recovery step suppresses run-level error on success
+<span class="fg-comment">───────────────────────────────────────────────────────────────</span>
 <span class="fg-cyan">[v0.1.0]</span> <span class="fg-comment">2025-01-01</span>
              <span class="fg-green">&#9654; feat:</span> Go BubbleTea TUI with tmux session manager
              <span class="fg-green">&#9654; feat:</span> gRPC plugin system (Tier 1 native, Tier 2 sidecar YAML)
