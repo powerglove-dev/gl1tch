@@ -1,7 +1,10 @@
 package modal
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/adam-stokes/orcai/internal/styles"
 )
 
 func TestFuzzyScore_EmptyQuery(t *testing.T) {
@@ -88,5 +91,37 @@ func TestDirPickerModel_CursorResetOnFilterChange(t *testing.T) {
 	m.applyFilter()
 	if m.cursor != 0 {
 		t.Errorf("cursor should reset to 0 after filter change, got %d", m.cursor)
+	}
+}
+
+func TestDirPickerModel_ViewInline_NonEmpty(t *testing.T) {
+	m := NewDirPickerModel()
+	m.allDirs = []string{"/home/user/projects", "/home/user/documents"}
+	m.walking = false
+	m.applyFilter()
+	pal := styles.ANSIPalette{
+		Accent: "\x1b[35m",
+		Dim:    "\x1b[2m",
+		FG:     "\x1b[97m",
+		Border: "\x1b[36m",
+	}
+	view := m.ViewInline(80, pal)
+	if view == "" {
+		t.Fatal("ViewInline should return non-empty string when dirs are loaded")
+	}
+	if !strings.Contains(view, "projects") {
+		t.Error("ViewInline should contain 'projects' from the dir list")
+	}
+}
+
+func TestDirPickerModel_ViewInline_WhileWalking(t *testing.T) {
+	m := NewDirPickerModel() // walking = true by default
+	pal := styles.ANSIPalette{
+		Dim:    "\x1b[2m",
+		Border: "\x1b[36m",
+	}
+	view := m.ViewInline(80, pal)
+	if !strings.Contains(view, "scanning") {
+		t.Error("ViewInline should show 'scanning' placeholder while walking")
 	}
 }

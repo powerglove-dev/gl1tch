@@ -96,37 +96,6 @@ func walkHomeCmd() tea.Cmd {
 	}
 }
 
-// fuzzyScore returns a relevance score for how well query matches the path s.
-// Returns 0 if there is no match. Higher scores are better.
-func fuzzyScore(s, query string) int {
-	if query == "" {
-		return 1
-	}
-	sLow := strings.ToLower(s)
-	qLow := strings.ToLower(query)
-
-	// Contiguous match in the base name gets the highest score.
-	base := strings.ToLower(filepath.Base(s))
-	if idx := strings.Index(base, qLow); idx >= 0 {
-		return 2000 + len(qLow)*10 - idx
-	}
-	// Contiguous match anywhere in the full path.
-	if idx := strings.Index(sLow, qLow); idx >= 0 {
-		return 1000 + len(qLow)*5 - idx/10
-	}
-	// Fuzzy: all query chars appear in order anywhere in the path.
-	qi := 0
-	for _, c := range sLow {
-		if qi < len(qLow) && c == rune(qLow[qi]) {
-			qi++
-		}
-	}
-	if qi == len(qLow) {
-		return 1
-	}
-	return 0
-}
-
 // applyFilter recomputes m.shown from m.allDirs based on the current query.
 func (m *DirPickerModel) applyFilter() {
 	query := m.input.Value()
@@ -272,6 +241,66 @@ func (m DirPickerModel) ViewDirPickerBox(w int, pal styles.ANSIPalette) string {
 	hint := "  " + accent + "↑↓" + dim + " nav · " + dpARst + accent + "enter" + dim + " select · " + dpARst + accent + "esc" + dim + " cancel" + dpARst
 	rows = append(rows, panelrender.BoxRow(hint, modalW, borderColor))
 	rows = append(rows, panelrender.BoxBot(modalW, borderColor))
+
+	return strings.Join(rows, "\n")
+}
+
+// ViewInline renders the dir picker as inline rows suitable for embedding within
+// a parent panel layout (no centering padding, no box top/bot border).
+// w is the available width; pal provides theme colors.
+func (m DirPickerModel) ViewInline(w int, pal styles.ANSIPalette) string {
+	borderColor := pal.Border
+	accent := pal.Accent
+	dim := pal.Dim
+	fg := pal.FG
+
+	var rows []string
+
+	// Query input row.
+	inputView := "  " + m.input.View()
+	rows = append(rows, panelrender.BoxRow(inputView, w, borderColor))
+	rows = append(rows, panelrender.BoxRow("", w, borderColor))
+
+	if m.walking && len(m.allDirs) == 0 {
+		rows = append(rows, panelrender.BoxRow(dim+"  scanning directories…"+dpARst, w, borderColor))
+	} else if len(m.shown) == 0 {
+		rows = append(rows, panelrender.BoxRow(dim+"  no matches"+dpARst, w, borderColor))
+	} else {
+		const visWindow = 10
+		offset := m.cursor - visWindow + 1
+		if offset < 0 {
+			offset = 0
+		}
+		if m.cursor < offset {
+			offset = m.cursor
+		}
+		end := min(offset+visWindow, len(m.shown))
+
+		for i := offset; i < end; i++ {
+			d := m.shown[i]
+			home, _ := os.UserHomeDir()
+			display := d
+			if home != "" && strings.HasPrefix(d, home) {
+				display = "~" + d[len(home):]
+			}
+			maxLen := w - 6
+			if len(display) > maxLen {
+				display = "…" + display[len(display)-maxLen+1:]
+			}
+			if i == m.cursor {
+				content := accent + dpABld + "  > " + dpARst + fg + display + dpARst
+				visLen := 4 + len(display)
+				rows = append(rows, borderColor+"│"+content+strings.Repeat(" ", max(w-2-visLen, 0))+borderColor+"│"+dpARst)
+			} else {
+				content := dim + "    " + dpARst + display
+				rows = append(rows, panelrender.BoxRow(content, w, borderColor))
+			}
+		}
+	}
+
+	rows = append(rows, panelrender.BoxRow("", w, borderColor))
+	hint := "  " + accent + "↑↓" + dim + " nav · " + dpARst + accent + "enter" + dim + " select · " + dpARst + accent + "esc" + dim + " cancel" + dpARst
+	rows = append(rows, panelrender.BoxRow(hint, w, borderColor))
 
 	return strings.Join(rows, "\n")
 }

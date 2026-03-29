@@ -287,10 +287,11 @@ type Model struct {
 	signalBoardFocused    bool
 	confirmDelete         bool
 	pendingDeletePipeline string
-	agentModalOpen  bool
-	agentModalFocus int // 0=provider, 1=model, 2=prompt, 3=use_brain, 4=cwd, 5=schedule (within modal)
-	agentPrompts    []store.Prompt // loaded from store when modal opens
-	agentPromptIdx  int            // selected saved-prompt index; 0 = none
+	agentModalOpen       bool
+	agentModalFocus      int                    // 0=provider/model, 1=saved-prompt, 2=prompt, 3=use_brain, 4=cwd, 5=schedule
+	agentPrompts         []store.Prompt         // loaded from store when modal opens
+	agentPromptIdx       int                    // selected saved-prompt index; 0 = none
+	savedPromptPicker    modal.FuzzyPickerModel // inline fuzzy picker for saved prompts
 	agentSchedule         textarea.Model
 	agentScheduleErr      string
 	agentUseBrain         bool
@@ -376,6 +377,7 @@ func NewWithStore(s *store.Store) Model {
 			prompt:      ta,
 		},
 		agentSchedule:         schedTA,
+		savedPromptPicker:     modal.NewFuzzyPickerModel(8),
 		pipelineScheduleInput: pipeSchedTA,
 		signalBoard:           SignalBoard{activeFilter: "running"},
 		inboxPanel:            InboxPanel{activeFilter: "unread"},
@@ -453,6 +455,24 @@ func (m Model) ThemePickerOpen() bool { return m.themePicker.Open }
 
 // AgentModalFocus returns the current agent modal focus slot — used in tests.
 func (m Model) AgentModalFocus() int { return m.agentModalFocus }
+
+// AgentPromptIdx returns the selected saved-prompt index — used in tests.
+func (m Model) AgentPromptIdx() int { return m.agentPromptIdx }
+
+// SavedPromptPickerOpen reports whether the saved-prompt inline picker is open — used in tests.
+func (m Model) SavedPromptPickerOpen() bool { return m.savedPromptPicker.IsOpen() }
+
+// DirPickerOpen reports whether the dir picker is open — used in tests.
+func (m Model) DirPickerOpen() bool { return m.dirPickerOpen }
+
+// DirPickerCtx returns the dir picker context string — used in tests.
+func (m Model) DirPickerCtx() string { return m.dirPickerCtx }
+
+// WithAgentPrompts returns a copy of the model with the given prompts loaded — used in tests.
+func (m Model) WithAgentPrompts(prompts []store.Prompt) Model {
+	m.agentPrompts = prompts
+	return m
+}
 
 // AgentScheduleErr returns the agent schedule error string — used in tests.
 func (m Model) AgentScheduleErr() string { return m.agentScheduleErr }
@@ -2097,11 +2117,12 @@ func loadAgentPromptsCmd(st *store.Store) tea.Cmd {
 }
 
 // agentModalNextFocus advances the agent modal focus slot forward.
-// Focus slots: 0=picker(provider+model), 2=prompt, 3=use_brain, 4=cwd, 5=schedule.
-// Slot 1 is reserved/skipped so the slot numbering stays compatible.
+// Focus slots: 0=picker(provider+model), 1=saved-prompt, 2=prompt, 3=use_brain, 4=cwd, 5=schedule.
 func agentModalNextFocus(cur int) int {
 	switch cur {
 	case 0:
+		return 1
+	case 1:
 		return 2
 	case 2:
 		return 3
@@ -2119,8 +2140,10 @@ func agentModalPrevFocus(cur int) int {
 	switch cur {
 	case 0:
 		return 5
-	case 2:
+	case 1:
 		return 0
+	case 2:
+		return 1
 	case 3:
 		return 2
 	case 4:
@@ -2133,6 +2156,20 @@ func agentModalPrevFocus(cur int) int {
 // handleAgentModal routes key events when the agent modal overlay is open.
 func (m Model) handleAgentModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 	key := msg.String()
+
+	// Saved prompt picker captures all keys when open.
+	if m.savedPromptPicker.IsOpen() {
+		newPicker, ev, cmd := m.savedPromptPicker.Update(msg)
+		m.savedPromptPicker = newPicker
+		switch ev {
+		case modal.FuzzyPickerConfirmed:
+			m.agentPromptIdx = m.savedPromptPicker.SelectedOriginalIdx()
+		case modal.FuzzyPickerCancelled:
+			// picker closed, agentPromptIdx unchanged
+		}
+		return m, cmd
+	}
+
 	switch key {
 	case "esc", "ctrl+c":
 		m.agentModalOpen = false
@@ -2146,10 +2183,10 @@ func (m Model) handleAgentModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "tab":
 		if m.agentModalFocus == 0 {
-			// If picker's internal focus is on model list, tab advances outer focus to prompt.
+			// If picker's internal focus is on model list, tab advances outer focus to saved-prompt.
 			if m.agent.agentPicker.Focus() == 1 {
-				m.agentModalFocus = 2
-				m.agent.prompt.Focus()
+				m.agentModalFocus = 1
+				m.agent.prompt.Blur()
 				m.agentSchedule.Blur()
 				return m, nil
 			}
@@ -2221,24 +2258,19 @@ func (m Model) handleAgentModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.agentModalFocus == 1 {
+			// Open inline fuzzy picker for saved prompts.
+			titles := make([]string, 0, len(m.agentPrompts)+1)
+			titles = append(titles, "(none)")
+			for _, p := range m.agentPrompts {
+				titles = append(titles, p.Title)
+			}
+			m.savedPromptPicker.Open(titles)
+			return m, nil
+		}
 		// fall through to default handling below
 
 	default:
-	}
-
-	// Saved prompt picker: [ and ] cycle through saved prompts (available at any focus).
-	// When focus is on the prompt textarea (2) let [ and ] still cycle, but only
-	// if the key is not otherwise consumed by the textarea (it won't be, since
-	// textarea doesn't use bracket keys for navigation).
-	if key == "[" {
-		total := len(m.agentPrompts) + 1 // +1 for the "(none)" slot
-		m.agentPromptIdx = (m.agentPromptIdx - 1 + total) % total
-		return m, nil
-	}
-	if key == "]" {
-		total := len(m.agentPrompts) + 1
-		m.agentPromptIdx = (m.agentPromptIdx + 1) % total
-		return m, nil
 	}
 
 	// USE BRAIN toggle: space or enter toggles the flag.
@@ -2908,8 +2940,9 @@ func (m Model) View() string {
 	// topBar includes the padding row so all join sites below are consistent.
 	topBar := m.viewTopBar(w) + "\n"
 
-	// Dir picker overlay — highest priority, shown on top of everything.
-	if m.dirPickerOpen {
+	// Dir picker overlay — used for pipeline context only.
+	// The agent context renders the dir picker inline within the agent modal.
+	if m.dirPickerOpen && m.dirPickerCtx != "agent" {
 		base := topBar + "\n" + body
 		return overlayCenter(base, m.dirPicker.ViewDirPickerBox(w, m.ansiPalette()), w, h)
 	}
@@ -3135,7 +3168,13 @@ func (m Model) viewAgentModalBox(w, h int) string {
 	if m.agentPromptIdx > 0 && m.agentPromptIdx-1 < len(m.agentPrompts) {
 		savedPromptLabel = m.agentPrompts[m.agentPromptIdx-1].Title
 	}
-	savedPromptRow := "  " + pal.Dim + "Saved Prompt  " + aRst + pal.Accent + "◀ " + aRst + savedPromptLabel + pal.Accent + " ▶" + aRst + pal.Dim + "  [ / ]" + aRst
+	spActive := m.agentModalFocus == 1
+	spLabelColor := pal.Dim
+	if spActive {
+		spLabelColor = pal.Accent + aBld
+	}
+	enterHint := pal.Dim + "  [enter to pick]" + aRst
+	savedPromptRow := "  " + spLabelColor + "Saved Prompt" + aRst + "  " + pal.FG + savedPromptLabel + aRst + enterHint
 	rows = append(rows, boxRow(savedPromptRow, modalW, modalBorderColor))
 
 	// ── PROMPT section ────────────────────────────────────────────────────────
@@ -3184,7 +3223,7 @@ func (m Model) viewAgentModalBox(w, h int) string {
 		cwdColor = pal.Accent
 	}
 	rows = append(rows, boxRow("  "+cwdColor+cwdDisplay+aRst, modalW, modalBorderColor))
-	if m.agentModalFocus == 4 {
+	if m.agentModalFocus == 4 && !m.dirPickerOpen {
 		rows = append(rows, boxRow(aDim+"  press enter to browse"+aRst, modalW, modalBorderColor))
 	}
 
@@ -3219,7 +3258,22 @@ func (m Model) viewAgentModalBox(w, h int) string {
 	rows = append(rows, boxRow(hintStr, modalW, modalBorderColor))
 	rows = append(rows, boxBot(modalW, modalBorderColor))
 
-	return strings.Join(rows, "\n")
+	base := strings.Join(rows, "\n")
+	modalH = len(rows)
+
+	// Saved prompt picker — floating overlay.
+	if m.savedPromptPicker.IsOpen() {
+		overlay := m.savedPromptPicker.ViewBox(modalW, pal)
+		return panelrender.OverlayCenter(base, overlay, modalW, modalH)
+	}
+
+	// Dir picker — floating overlay for agent context.
+	if m.dirPickerOpen && m.dirPickerCtx == "agent" {
+		overlay := m.dirPicker.ViewDirPickerBox(modalW, pal)
+		return panelrender.OverlayCenter(base, overlay, modalW, modalH)
+	}
+
+	return base
 }
 
 // sectionLabel returns a section header with focus indicator.

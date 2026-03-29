@@ -12,6 +12,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/adam-stokes/orcai/internal/store"
 	"github.com/adam-stokes/orcai/internal/switchboard"
 )
 
@@ -903,9 +904,9 @@ func TestAgentModal_TabCyclesToScheduleSlot(t *testing.T) {
 		t.Fatal("expected agent modal to be open")
 	}
 
-	// Tab five times: slot 0 → 1 → 2 → 3 → 4 → 5.
+	// Tab six times: slot 0(inner0) → 0(inner1) → 1 → 2 → 3 → 4 → 5.
 	cur := m6
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 6; i++ {
 		nx, _ := cur.Update(tea.KeyMsg{Type: tea.KeyTab})
 		cur = nx.(switchboard.Model)
 	}
@@ -928,9 +929,10 @@ func TestAgentModal_SubmitBlankSchedule(t *testing.T) {
 	m5, _ := m4.(switchboard.Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m6 := m5.(switchboard.Model)
 
-	// Tab to PROMPT (slot 2) and type a prompt.
+	// Tab to PROMPT (slot 2): 0(inner0)→0(inner1)→1(saved prompt)→2(prompt).
 	m7, _ := m6.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m8, _ := m7.(switchboard.Model).Update(tea.KeyMsg{Type: tea.KeyTab})
+	m8, _ = m8.(switchboard.Model).Update(tea.KeyMsg{Type: tea.KeyTab})
 	// Now at slot 2 — type some text.
 	for _, r := range "test prompt" {
 		nx, _ := m8.(switchboard.Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
@@ -961,9 +963,10 @@ func TestAgentModal_InvalidScheduleShowsError(t *testing.T) {
 	m5, _ := m4.(switchboard.Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m6 := m5.(switchboard.Model)
 
-	// Tab to PROMPT (slot 2) and enter a prompt.
+	// Tab to PROMPT (slot 2): 0(inner0)→0(inner1)→1→2.
 	m7, _ := m6.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m8, _ := m7.(switchboard.Model).Update(tea.KeyMsg{Type: tea.KeyTab})
+	m8, _ = m8.(switchboard.Model).Update(tea.KeyMsg{Type: tea.KeyTab})
 	for _, r := range "hello" {
 		nx, _ := m8.(switchboard.Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 		m8 = nx
@@ -1686,5 +1689,115 @@ func TestAgentUseBrain_DefaultFalse(t *testing.T) {
 	m := switchboard.New()
 	if m.AgentUseBrain() {
 		t.Error("agentUseBrain should default to false")
+	}
+}
+
+// ── Inline picker: saved prompt ───────────────────────────────────────────────
+
+// openAgentModal is a test helper that opens the agent modal with a wide terminal.
+func openAgentModal(t *testing.T) switchboard.Model {
+	t.Helper()
+	m := switchboard.NewWithTestProviders()
+	m2, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m3 := m2.(switchboard.Model)
+	m4, _ := m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	m5, _ := m4.(switchboard.Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
+	modal := m5.(switchboard.Model)
+	if !modal.AgentModalOpen() {
+		t.Fatal("agent modal did not open")
+	}
+	return modal
+}
+
+// tabToFocusSlot tabs from the initial agent modal state (outer slot 0, inner 0) to a target slot.
+// It assumes the test provider has one provider+one model (inner focus reaches 1 in 1 tab).
+func tabToFocusSlot(t *testing.T, m switchboard.Model, targetSlot int) switchboard.Model {
+	t.Helper()
+	tab := func(cur switchboard.Model) switchboard.Model {
+		nx, _ := cur.Update(tea.KeyMsg{Type: tea.KeyTab})
+		return nx.(switchboard.Model)
+	}
+	// First tab moves agentPicker internal focus 0→1.
+	m = tab(m)
+	// Subsequent tabs advance the outer slot.
+	for m.AgentModalFocus() != targetSlot {
+		m = tab(m)
+		if m.AgentModalFocus() == 0 {
+			t.Fatalf("wrapped around before reaching slot %d", targetSlot)
+		}
+	}
+	return m
+}
+
+func TestAgentModal_TabReachesSavedPromptSlot(t *testing.T) {
+	m := openAgentModal(t)
+	// Tab once: agentPicker inner 0→1. Tab again: outer 0→1 (saved prompt).
+	nx1, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m1 := nx1.(switchboard.Model)
+	nx2, _ := m1.Update(tea.KeyMsg{Type: tea.KeyTab})
+	result := nx2.(switchboard.Model)
+	if got := result.AgentModalFocus(); got != 1 {
+		t.Errorf("expected agentModalFocus == 1 (saved prompt), got %d", got)
+	}
+}
+
+func TestAgentModal_EnterOnSlot1_OpensSavedPromptPicker(t *testing.T) {
+	m := openAgentModal(t)
+	// Inject some prompts so the picker has items.
+	m = m.WithAgentPrompts([]store.Prompt{
+		{Title: "prompt-alpha"},
+		{Title: "prompt-beta"},
+	})
+	m = tabToFocusSlot(t, m, 1)
+
+	if m.SavedPromptPickerOpen() {
+		t.Fatal("picker should not be open before Enter")
+	}
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	result := m2.(switchboard.Model)
+	if !result.SavedPromptPickerOpen() {
+		t.Error("expected savedPromptPicker to be open after Enter on slot 1")
+	}
+}
+
+func TestAgentModal_BracketKeys_NoLongerCyclePrompts(t *testing.T) {
+	m := openAgentModal(t)
+	m = m.WithAgentPrompts([]store.Prompt{
+		{Title: "prompt-one"},
+		{Title: "prompt-two"},
+	})
+	initial := m.AgentPromptIdx()
+
+	// Press ] — should have no effect.
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("]")})
+	after := m2.(switchboard.Model).AgentPromptIdx()
+	if after != initial {
+		t.Errorf("] should no longer cycle prompts: idx went from %d to %d", initial, after)
+	}
+
+	// Press [ — should have no effect.
+	m3, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[")})
+	after2 := m3.(switchboard.Model).AgentPromptIdx()
+	if after2 != initial {
+		t.Errorf("[ should no longer cycle prompts: idx went from %d to %d", initial, after2)
+	}
+}
+
+// ── Inline picker: working directory ─────────────────────────────────────────
+
+func TestAgentModal_EnterOnCWDSlot_SetsInlineDirPicker(t *testing.T) {
+	m := openAgentModal(t)
+	m = tabToFocusSlot(t, m, 4)
+
+	if m.DirPickerOpen() {
+		t.Fatal("dir picker should not be open before Enter on CWD slot")
+	}
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	result := m2.(switchboard.Model)
+	if !result.DirPickerOpen() {
+		t.Error("expected dirPickerOpen=true after Enter on CWD slot")
+	}
+	if result.DirPickerCtx() != "agent" {
+		t.Errorf("expected dirPickerCtx=agent, got %q", result.DirPickerCtx())
 	}
 }
