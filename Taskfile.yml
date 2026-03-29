@@ -33,11 +33,7 @@ tasks:
     deps: [build]
     cmds:
       - go install .
-      - |
-        if [ ! -L ~/.local/bin/{{.BINARY}} ]; then
-          rm -f ~/.local/bin/{{.BINARY}}
-          ln -sf $(go env GOPATH)/bin/{{.BINARY}} ~/.local/bin/{{.BINARY}}
-        fi
+      - ln -sf $(go env GOPATH)/bin/{{.BINARY}} ~/.local/bin/{{.BINARY}}
 
   test:
     desc: "Run all Go tests"
@@ -100,11 +96,7 @@ tasks:
     desc: "Daily driver: install fresh build from source, run non-destructively (state preserved)"
     cmds:
       - go install .
-      - |
-        if [ ! -L ~/.local/bin/{{.BINARY}} ]; then
-          rm -f ~/.local/bin/{{.BINARY}}
-          ln -sf $(go env GOPATH)/bin/{{.BINARY}} ~/.local/bin/{{.BINARY}}
-        fi
+      - ln -sf $(go env GOPATH)/bin/{{.BINARY}} ~/.local/bin/{{.BINARY}}
       - "{{.BINARY}}"
 
   # ---------------------------------------------------------------------------
