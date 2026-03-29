@@ -10,7 +10,9 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/adam-stokes/orcai/internal/panelrender"
 	"github.com/adam-stokes/orcai/internal/store"
+	"github.com/adam-stokes/orcai/internal/styles"
 )
 
 type runMeta struct {
@@ -38,55 +40,52 @@ func collapseTilde(path string) string {
 	return path
 }
 
-// buildRunContent formats the full detail text for a run, mirroring the
-// content builder that was previously in internal/inbox/modal.go.
-func buildRunContent(run store.Run, mc modalColors, markdownMode bool, innerW int) string {
-	dim := lipgloss.NewStyle().Foreground(mc.dim)
-	fg := lipgloss.NewStyle().Foreground(mc.fg)
-	success := lipgloss.NewStyle().Foreground(lipgloss.Color("#50fa7b"))
-	errStyle := lipgloss.NewStyle().Foreground(mc.error)
+// buildRunContent formats the full detail text for a run using the ANSI palette.
+func buildRunContent(run store.Run, pal styles.ANSIPalette, markdownMode bool, innerW int) string {
+	dim := func(s string) string { return pal.Dim + s + aRst }
+	fg := func(s string) string { return pal.FG + s + aRst }
+	ok := func(s string) string { return pal.Success + s + aRst }
+	bad := func(s string) string { return pal.Error + s + aRst }
 
 	var sb strings.Builder
 
 	// Started / finished / duration / exit status
 	startedStr := time.UnixMilli(run.StartedAt).Format("2006-01-02 3:04:05 PM")
-	sb.WriteString(dim.Render("started:  ") + fg.Render(startedStr) + "\n")
+	sb.WriteString(dim("started:  ") + fg(startedStr) + "\n")
 
 	if run.FinishedAt != nil {
 		finishedStr := time.UnixMilli(*run.FinishedAt).Format("2006-01-02 3:04:05 PM")
-		sb.WriteString(dim.Render("finished: ") + fg.Render(finishedStr) + "\n")
-
+		sb.WriteString(dim("finished: ") + fg(finishedStr) + "\n")
 		dur := time.Duration((*run.FinishedAt - run.StartedAt) * int64(time.Millisecond))
-		durationStr := dur.Round(time.Second).String()
-		sb.WriteString(dim.Render("duration: ") + fg.Render(durationStr) + "  ")
+		sb.WriteString(dim("duration: ") + fg(dur.Round(time.Second).String()) + "  ")
 	} else {
-		sb.WriteString(dim.Render("finished: ") + fg.Render("(in progress)") + "\n")
+		sb.WriteString(dim("finished: ") + fg("(in progress)") + "\n")
 		dur := time.Since(time.UnixMilli(run.StartedAt))
-		sb.WriteString(dim.Render("duration: ") + fg.Render(dur.Round(time.Second).String()) + "  ")
+		sb.WriteString(dim("duration: ") + fg(dur.Round(time.Second).String()) + "  ")
 	}
 
 	if run.ExitStatus != nil {
 		if *run.ExitStatus == 0 {
-			sb.WriteString(dim.Render("exit: ") + success.Render("OK"))
+			sb.WriteString(dim("exit: ") + ok("OK"))
 		} else {
-			sb.WriteString(dim.Render("exit: ") + errStyle.Render(fmt.Sprintf("ERROR (%d)", *run.ExitStatus)))
+			sb.WriteString(dim("exit: ") + bad(fmt.Sprintf("ERROR (%d)", *run.ExitStatus)))
 		}
 	} else {
-		sb.WriteString(dim.Render("exit: ") + fg.Render("(running)"))
+		sb.WriteString(dim("exit: ") + fg("(running)"))
 	}
 	sb.WriteString("\n")
 
 	// Metadata: pipeline file and cwd
 	meta := parseRunMetadata(run.Metadata)
 	if meta.PipelineFile != "" {
-		sb.WriteString(dim.Render("pipeline: ") + fg.Render(collapseTilde(meta.PipelineFile)) + "\n")
+		sb.WriteString(dim("pipeline: ") + fg(collapseTilde(meta.PipelineFile)) + "\n")
 	}
 	if meta.CWD != "" {
-		sb.WriteString(dim.Render("cwd:      ") + fg.Render(collapseTilde(meta.CWD)) + "\n")
+		sb.WriteString(dim("cwd:      ") + fg(collapseTilde(meta.CWD)) + "\n")
 	}
 
 	// Separator
-	sb.WriteString(dim.Render(strings.Repeat("─", 40)) + "\n")
+	sb.WriteString(dim(strings.Repeat("─", 40)) + "\n")
 
 	// Stdout
 	if run.Stdout != "" {
@@ -106,13 +105,13 @@ func buildRunContent(run store.Run, mc modalColors, markdownMode bool, innerW in
 			sb.WriteString("\n")
 		}
 	} else {
-		sb.WriteString(dim.Render("(no stdout)") + "\n")
+		sb.WriteString(dim("(no stdout)") + "\n")
 	}
 
 	// Stderr section (only if non-empty)
 	if run.Stderr != "" {
-		sb.WriteString(dim.Render(strings.Repeat("─", 40)) + "\n")
-		sb.WriteString(errStyle.Render("stderr:") + "\n")
+		sb.WriteString(dim(strings.Repeat("─", 40)) + "\n")
+		sb.WriteString(bad("stderr:") + "\n")
 		sb.WriteString(run.Stderr)
 		if !strings.HasSuffix(run.Stderr, "\n") {
 			sb.WriteString("\n")
@@ -122,8 +121,7 @@ func buildRunContent(run store.Run, mc modalColors, markdownMode bool, innerW in
 	return sb.String()
 }
 
-// viewInboxDetail renders the inbox run detail as a centered overlay, following
-// the same pattern as viewHelpModal.
+// viewInboxDetail renders the inbox run detail as a full-screen ANSI box panel.
 func (m Model) viewInboxDetail(w, h int, markdownMode bool) string {
 	runs := m.inboxModel.Runs()
 	if len(runs) == 0 {
@@ -139,38 +137,32 @@ func (m Model) viewInboxDetail(w, h int, markdownMode bool) string {
 	}
 	run := runs[idx]
 
-	mc := m.resolveModalColors()
+	pal := m.ansiPalette()
+	boxW := w
+	innerW := boxW - 4 // inside borders (2) + one space padding each side (2)
 
-	innerW := w - 4 // full-width minus border (2) and margin (2)
-	if innerW < 40 {
-		innerW = 40
-	}
-	outerW := innerW + 2
-
-	headerStyle := lipgloss.NewStyle().
-		Background(mc.titleBG).
-		Foreground(mc.titleFG).
-		Bold(true).
-		Width(innerW).
-		Padding(0, 1)
-
-	// Header: "INBOX  [idx+1/total]  kind · name"
+	// Title: "INBOX  [n/total]  kind · name"
 	counter := fmt.Sprintf("[%d/%d]", idx+1, len(runs))
-	headerText := "INBOX  " +
-		lipgloss.NewStyle().Foreground(mc.dim).Render(counter) + "  " +
-		lipgloss.NewStyle().Foreground(mc.dim).Render(run.Kind) + " · " +
-		lipgloss.NewStyle().Foreground(mc.fg).Render(run.Name)
+	title := "INBOX  " + counter + "  " + run.Kind + " · " + run.Name
+	maxTitleW := boxW - 8
+	if lipgloss.Width(title) > maxTitleW {
+		title = title[:maxTitleW-1] + "…"
+	}
 
-	// Build scrollable body content.
-	content := buildRunContent(run, mc, markdownMode, innerW)
+	content := buildRunContent(run, pal, markdownMode, innerW)
 	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
-	visibleH := h - 6 // header + border + footer + some padding
+
+	// Height budget: topBar takes 1 row; box uses remainder.
+	// Fixed box rows: top(1) + hints(1) + bot(1) = 3.
+	visibleH := h - 1 - 3
 	if visibleH < 4 {
 		visibleH = 4
 	}
+
 	offset := m.inboxDetailScroll
-	if offset > len(lines)-visibleH {
-		offset = max(len(lines)-visibleH, 0)
+	maxOffset := max(len(lines)-visibleH, 0)
+	if offset > maxOffset {
+		offset = maxOffset
 	}
 	if offset < 0 {
 		offset = 0
@@ -181,42 +173,24 @@ func (m Model) viewInboxDetail(w, h int, markdownMode bool) string {
 	}
 	visible := lines[offset:end]
 
-	body := lipgloss.NewStyle().
-		Width(innerW).
-		Height(visibleH).
-		Padding(0, 1).
-		Render(strings.Join(visible, "\n"))
-
-	// Footer: scroll hint + key hints.
-	total := len(lines)
-	dimStyle := lipgloss.NewStyle().Foreground(mc.dim)
-	accentStyle := lipgloss.NewStyle().Foreground(mc.accent)
-	mdHint := "[m] md"
-	if markdownMode {
-		mdHint = "[m] raw"
+	var rows []string
+	rows = append(rows, boxTop(boxW, title, pal.Border, pal.Accent))
+	for _, line := range visible {
+		rows = append(rows, boxRow(" "+line, boxW, pal.Border))
 	}
-	var footer string
-	if total > visibleH {
-		scrollHint := accentStyle.Render("j/k  [/]") + dimStyle.Render(" scroll  ")
-		keyHints := dimStyle.Render("[n]ext  [p]rev  [q]uit  "+mdHint)
-		footer = lipgloss.NewStyle().Foreground(mc.dim).
-			Width(innerW).Padding(0, 1).
-			Render(scrollHint + keyHints)
-	} else {
-		footer = lipgloss.NewStyle().Foreground(mc.dim).
-			Width(innerW).Padding(0, 1).
-			Render("[n]ext  [p]rev  [q]uit  " + mdHint)
+	// Pad to fill the box height
+	for i := len(visible); i < visibleH; i++ {
+		rows = append(rows, boxRow("", boxW, pal.Border))
 	}
 
-	boxContent := strings.Join([]string{
-		headerStyle.Render(headerText),
-		body,
-		footer,
-	}, "\n")
+	hints := panelrender.HintBar([]panelrender.Hint{
+		{Key: "j/k", Desc: "scroll"},
+		{Key: "n/p", Desc: "next/prev"},
+		{Key: "m", Desc: "toggle md"},
+		{Key: "q", Desc: "close"},
+	}, boxW-2, pal)
+	rows = append(rows, boxRow(hints, boxW, pal.Border))
+	rows = append(rows, boxBot(boxW, pal.Border))
 
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(mc.border).
-		Width(outerW).
-		Render(boxContent)
+	return strings.Join(rows, "\n")
 }

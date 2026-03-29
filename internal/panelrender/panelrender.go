@@ -274,15 +274,16 @@ func QuitConfirmBox(pal styles.ANSIPalette, title, message string, screenW int) 
 	if message == "" {
 		message = "Are you sure?"
 	}
-	yesLabel := pal.Accent + BLD + "[y]" + RST + "es"
-	noLabel := pal.Dim + "[n]" + RST + "o / esc"
+	hints := HintBar([]Hint{
+		{Key: "y", Desc: "confirm quit"},
+		{Key: "n / esc", Desc: "cancel"},
+	}, boxW-2, pal)
 	rows := []string{
 		BoxTop(boxW, title, pal.Border, pal.Accent),
 		BoxRow("", boxW, pal.Border),
 		BoxRow(pal.FG+"  "+message+RST, boxW, pal.Border),
 		BoxRow("", boxW, pal.Border),
-		BoxRow("  "+yesLabel+"   "+noLabel, boxW, pal.Border),
-		BoxRow("", boxW, pal.Border),
+		BoxRow(hints, boxW, pal.Border),
 		BoxBot(boxW, pal.Border),
 	}
 	return strings.Join(rows, "\n")

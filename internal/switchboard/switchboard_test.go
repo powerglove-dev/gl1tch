@@ -345,13 +345,25 @@ func TestSignalBoard_HeaderContainsFilter(t *testing.T) {
 	m := switchboard.New()
 	m2, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m3 := m2.(switchboard.Model)
+
+	// Default state: "all" filter is active but not displayed (filter line hidden).
 	sb := m3.BuildSignalBoard(8, 60)
 	rendered := strings.Join(sb, "\n")
 	if !strings.Contains(rendered, "SIGNAL BOARD") {
 		t.Errorf("signal board missing 'SIGNAL BOARD' header: %s", rendered)
 	}
-	if !strings.Contains(rendered, "all") {
-		t.Errorf("signal board missing filter 'all' in header: %s", rendered)
+	if strings.Contains(rendered, "filter:") {
+		t.Errorf("signal board should not show filter line when filter is 'all': %s", rendered)
+	}
+
+	// After pressing f with signal board focused (cycle to "running"), the filter line should appear.
+	m3f := m3.SetSignalBoardFocused(true)
+	m4, _ := m3f.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	m5 := m4.(switchboard.Model)
+	sb2 := m5.BuildSignalBoard(8, 60)
+	rendered2 := strings.Join(sb2, "\n")
+	if !strings.Contains(rendered2, "filter:") {
+		t.Errorf("signal board should show filter line after pressing f: %s", rendered2)
 	}
 }
 
@@ -514,8 +526,8 @@ func TestDKey_ShowsConfirmation(t *testing.T) {
 	// Press d — confirmation modal should appear in view.
 	m3, _ := m2.(switchboard.Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	view := m3.(switchboard.Model).View()
-	if !strings.Contains(view, "Delete") {
-		t.Errorf("expected Delete confirmation in view after d key:\n%s", view)
+	if !strings.Contains(view, "delete pipeline") {
+		t.Errorf("expected delete pipeline confirmation in view after d key:\n%s", view)
 	}
 }
 
@@ -572,9 +584,9 @@ func TestFeedScrollIndicator_DownWhenContentBelow(t *testing.T) {
 		}
 	}
 	view := focusedModel.View()
-	// Feed hint footer shows "↑↓ nav" when focused — confirms footer is visible.
-	if !strings.Contains(view, "↑↓") {
-		t.Errorf("expected ↑↓ nav hint in feed footer when feed focused with overflowing content:\n%s", view)
+	// Feed hint footer shows page nav hints when focused — confirms footer is visible.
+	if !strings.Contains(view, "page up") {
+		t.Errorf("expected page nav hint in feed footer when feed focused with overflowing content:\n%s", view)
 	}
 }
 

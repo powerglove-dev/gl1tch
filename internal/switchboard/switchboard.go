@@ -25,7 +25,6 @@ import (
 
 	orcaicron "github.com/adam-stokes/orcai/internal/cron"
 	"github.com/adam-stokes/orcai/internal/inbox"
-	"github.com/adam-stokes/orcai/internal/modal"
 	"github.com/adam-stokes/orcai/internal/panelrender"
 	"github.com/adam-stokes/orcai/internal/picker"
 	"github.com/adam-stokes/orcai/internal/pipeline"
@@ -567,38 +566,11 @@ func (m Model) ansiPalette() styles.ANSIPalette {
 	return styles.BundleANSI(b)
 }
 
-// modalColors holds resolved lipgloss colors for modal overlays.
-// It mirrors modal.Colors but uses lipgloss.Color types for local convenience.
-type modalColors struct {
-	border  lipgloss.Color
-	titleBG lipgloss.Color
-	titleFG lipgloss.Color
-	fg      lipgloss.Color
-	accent  lipgloss.Color
-	dim     lipgloss.Color
-	error   lipgloss.Color
-}
-
 // looksLikeMarkdown returns true when s contains common markdown signals.
 func looksLikeMarkdown(s string) bool {
 	return strings.Contains(s, "# ") ||
 		strings.Contains(s, "**") ||
 		strings.Contains(s, "```")
-}
-
-// resolveModalColors is a thin wrapper around modal.ResolveColors that returns
-// the switchboard-local modalColors type.
-func (m Model) resolveModalColors() modalColors {
-	c := modal.ResolveColors(modal.Config{Bundle: m.activeBundle()})
-	return modalColors{
-		border:  lipgloss.Color(c.Border),
-		titleBG: lipgloss.Color(c.TitleBG),
-		titleFG: lipgloss.Color(c.TitleFG),
-		fg:      lipgloss.Color(c.FG),
-		accent:  lipgloss.Color(c.Accent),
-		dim:     lipgloss.Color(c.Dim),
-		error:   lipgloss.Color(c.Error),
-	}
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -2416,10 +2388,9 @@ func (m Model) View() string {
 		return overlayCenter(base, content, w, h)
 	}
 
-	// Inbox detail overlay — full-screen detail view for a run result.
+	// Inbox detail overlay — full-screen ANSI box panel for a run result.
 	if m.inboxDetailOpen && len(m.inboxModel.Runs()) > 0 {
-		base := topBar + "\n" + body
-		return overlayCenter(base, m.viewInboxDetail(w, h, m.inboxMarkdownMode), w, h)
+		return topBar + "\n" + m.viewInboxDetail(w, h, m.inboxMarkdownMode)
 	}
 
 	return topBar + "\n" + body
@@ -2455,47 +2426,29 @@ func (m Model) viewDeleteModalBox(w int) string {
 		displayPath = strings.Replace(fullPath, home, "~", 1)
 	}
 
-	// innerW = text content width (row Width). Rows are rendered at innerW,
-	// then Padding(0,1) adds 2, giving each row a total of innerW+2.
-	// The outer border uses Width(innerW+2) so it matches exactly.
-	innerW := max(len(displayPath)+4, 48)
-	if innerW > 68 {
-		innerW = 68
-	}
-	if innerW+4 > w { // +4 = 2 padding + 2 border
-		innerW = max(w-4, 10)
-	}
-	outerW := innerW + 2 // +2 for Padding(0,1) on each row
-
-	mc := m.resolveModalColors()
-
-	rowStyle := func(fg lipgloss.Color) lipgloss.Style {
-		return lipgloss.NewStyle().Foreground(fg).Width(innerW).Padding(0, 1)
+	boxW := max(min(lipgloss.Width(displayPath)+6, 68), 48)
+	if boxW+4 > w {
+		boxW = max(w-4, 20)
 	}
 
-	headerStyle := lipgloss.NewStyle().
-		Background(mc.titleBG).
-		Foreground(mc.titleFG).
-		Bold(true).
-		Width(innerW).
-		Padding(0, 1)
+	pal := m.ansiPalette()
+
+	hints := panelrender.HintBar([]panelrender.Hint{
+		{Key: "y", Desc: "confirm delete"},
+		{Key: "n / esc", Desc: "cancel"},
+	}, boxW-2, pal)
 
 	rows := []string{
-		headerStyle.Render("ORCAI  Delete Pipeline"),
-		rowStyle(mc.accent).Bold(true).Render(name),
-		rowStyle(mc.dim).Render(displayPath),
-		"",
-		rowStyle(mc.fg).Render(
-			lipgloss.NewStyle().Foreground(mc.accent).Render("[y]") + "es   " +
-				lipgloss.NewStyle().Foreground(mc.dim).Render("[n]") + "o / esc",
-		),
+		boxTop(boxW, "delete pipeline", pal.Border, pal.Accent),
+		boxRow("", boxW, pal.Border),
+		boxRow(pal.Accent+panelrender.BLD+"  "+name+aRst, boxW, pal.Border),
+		boxRow(pal.Dim+"  "+displayPath+aRst, boxW, pal.Border),
+		boxRow("", boxW, pal.Border),
+		boxRow(hints, boxW, pal.Border),
+		boxBot(boxW, pal.Border),
 	}
 
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(mc.border).
-		Width(outerW).
-		Render(strings.Join(rows, "\n"))
+	return strings.Join(rows, "\n")
 }
 
 // viewPipelineModeSelect renders the mode-select overlay for pipeline launch.
