@@ -27,7 +27,6 @@ import (
 	"github.com/adam-stokes/orcai/internal/inbox"
 	"github.com/adam-stokes/orcai/internal/panelrender"
 	"github.com/adam-stokes/orcai/internal/picker"
-	"github.com/adam-stokes/orcai/internal/pipeline"
 	"github.com/adam-stokes/orcai/internal/plugin"
 	"github.com/adam-stokes/orcai/internal/store"
 	"github.com/adam-stokes/orcai/internal/styles"
@@ -123,12 +122,13 @@ type agentSection struct {
 }
 
 type jobHandle struct {
-	id         string
-	cancel     context.CancelFunc
-	ch         chan tea.Msg
-	tmuxWindow string
-	logFile    string // /tmp/orcai-<feedID>.log — tailed in the tmux window
-	storeRunID int64  // non-zero when run was recorded in the result store
+	id           string
+	cancel       context.CancelFunc
+	ch           chan tea.Msg
+	tmuxWindow   string
+	logFile      string // /tmp/orcai-<feedID>.log — tailed in the tmux window
+	storeRunID   int64  // non-zero when run was recorded in the result store
+	pipelineName string // non-empty for pipeline jobs; matched against busd RunStarted payload
 }
 
 // ── Tea messages ──────────────────────────────────────────────────────────────
@@ -2024,43 +2024,15 @@ func (m Model) launchPendingPipeline(cwd string) (Model, tea.Cmd) {
 	}
 
 	feedID := fmt.Sprintf("pipe-%d", time.Now().UnixNano())
-	entry := feedEntry{
-		id:     feedID,
-		title:  "pipeline: " + name,
-		status: FeedRunning,
-		ts:     time.Now(),
-		cwd:    cwd,
-	}
-	// Load pipeline YAML to populate the initial step list.
-	if f, err := os.Open(yamlPath); err == nil {
-		if pl, err := pipeline.Load(f); err == nil {
-			for _, s := range pl.Steps {
-				if s.Type != "input" && s.Type != "output" {
-					entry.steps = append(entry.steps, StepInfo{id: s.ID, status: "pending"})
-				}
-			}
-		}
-		f.Close()
-	}
-	m.feed = append([]feedEntry{entry}, m.feed...)
-	if len(m.feed) > 200 {
-		m.feed = m.feed[:200]
-	}
-	m.feedSelected = 0
-	m.feedScrollOffset = 0
 
 	orcaiBin := orcaiBinaryPath()
 	shellCmd := orcaiBin + " pipeline run " + yamlPath
 	windowName, logFile, doneFile := createJobWindow(feedID, shellCmd, name, cwd)
-	entry.tmuxWindow = windowName
-	entry.logFile = logFile
-	entry.doneFile = doneFile
-	m.feed[0] = entry
 
 	ch := make(chan tea.Msg, 256)
 	_, cancel := context.WithCancel(context.Background())
-	jh := &jobHandle{id: feedID, cancel: cancel, ch: ch, tmuxWindow: windowName, logFile: logFile}
-	// Run recorded by the orcai pipeline CLI subprocess via WithRunStore — don't double-record here.
+	jh := &jobHandle{id: feedID, cancel: cancel, ch: ch, tmuxWindow: windowName, logFile: logFile, pipelineName: name}
+	// Feed entry created by the busd RunStarted event — don't create an eager duplicate here.
 	m.activeJobs[feedID] = jh
 
 	startLogWatcher(feedID, logFile, doneFile, ch)
