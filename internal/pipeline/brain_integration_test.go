@@ -295,6 +295,167 @@ func TestBrainRunIsolation(t *testing.T) {
 	}
 }
 
+// TestBrainWriteInsertion_NoBrainBlock verifies that when a write_brain step
+// emits output with no <brain> block, the step succeeds and no note is stored.
+func TestBrainWriteInsertion_NoBrainBlock(t *testing.T) {
+	s := openTestStore(t)
+	mgr := plugin.NewManager()
+	capturePlugin(t, mgr, "emit-text", "just some text, no brain block here", nil)
+
+	p := &pipeline.Pipeline{
+		Name:       "no-brain-block",
+		WriteBrain: true,
+		Steps: []pipeline.Step{
+			{ID: "s1", Plugin: "emit-text"},
+		},
+	}
+
+	_, err := pipeline.Run(context.Background(), p, mgr, "",
+		pipeline.WithRunStore(s),
+		pipeline.WithBrainInjector(pipeline.NewStoreBrainInjector(s)),
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	notes, err := s.RecentBrainNotes(context.Background(), 1, 10)
+	if err != nil {
+		t.Fatalf("RecentBrainNotes: %v", err)
+	}
+	if len(notes) != 0 {
+		t.Errorf("expected 0 brain notes, got %d", len(notes))
+	}
+}
+
+// TestBrainWriteInsertion_MalformedBrainBlock verifies that when a write_brain
+// step emits malformed <brain> XML, the step succeeds and no note is stored.
+func TestBrainWriteInsertion_MalformedBrainBlock(t *testing.T) {
+	s := openTestStore(t)
+	mgr := plugin.NewManager()
+	capturePlugin(t, mgr, "emit-bad", "<brain unclosed content", nil)
+
+	p := &pipeline.Pipeline{
+		Name:       "malformed-brain-block",
+		WriteBrain: true,
+		Steps: []pipeline.Step{
+			{ID: "s1", Plugin: "emit-bad"},
+		},
+	}
+
+	_, err := pipeline.Run(context.Background(), p, mgr, "",
+		pipeline.WithRunStore(s),
+		pipeline.WithBrainInjector(pipeline.NewStoreBrainInjector(s)),
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	notes, err := s.RecentBrainNotes(context.Background(), 1, 10)
+	if err != nil {
+		t.Fatalf("RecentBrainNotes: %v", err)
+	}
+	if len(notes) != 0 {
+		t.Errorf("expected 0 brain notes, got %d", len(notes))
+	}
+}
+
+// TestBrainWriteInsertion_NoTagsAttribute verifies that a <brain> block with no
+// tags attribute is stored with Tags == "".
+func TestBrainWriteInsertion_NoTagsAttribute(t *testing.T) {
+	s := openTestStore(t)
+	mgr := plugin.NewManager()
+	capturePlugin(t, mgr, "emit-notags", "<brain>plain note with no tags</brain>", nil)
+
+	p := &pipeline.Pipeline{
+		Name:       "no-tags-brain-block",
+		WriteBrain: true,
+		Steps: []pipeline.Step{
+			{ID: "s1", Plugin: "emit-notags"},
+		},
+	}
+
+	_, err := pipeline.Run(context.Background(), p, mgr, "",
+		pipeline.WithRunStore(s),
+		pipeline.WithBrainInjector(pipeline.NewStoreBrainInjector(s)),
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	notes, err := s.RecentBrainNotes(context.Background(), 1, 10)
+	if err != nil {
+		t.Fatalf("RecentBrainNotes: %v", err)
+	}
+	if len(notes) == 0 {
+		t.Fatal("expected at least one brain note, got none")
+	}
+	note := notes[0]
+	if note.Tags != "" {
+		t.Errorf("Tags: want %q, got %q", "", note.Tags)
+	}
+	if note.Body != "plain note with no tags" {
+		t.Errorf("Body: want %q, got %q", "plain note with no tags", note.Body)
+	}
+}
+
+// TestBrainWriteInsertion_DAGPath verifies that a write_brain step executed via
+// the DAG runner (step has Needs) persists a note with the correct fields.
+func TestBrainWriteInsertion_DAGPath(t *testing.T) {
+	s := openTestStore(t)
+	mgr := plugin.NewManager()
+
+	// Step A: plain step that just succeeds.
+	capturePlugin(t, mgr, "noop", "ok", nil)
+
+	// Step B: depends on A, emits a brain block.
+	trueVal := true
+	if err := mgr.Register(&plugin.StubPlugin{
+		PluginName: "dag-writer",
+		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
+			_, err := w.Write([]byte(`<brain tags="dag">insight from dag</brain>`))
+			return err
+		},
+	}); err != nil {
+		t.Fatalf("Register dag-writer: %v", err)
+	}
+
+	p := &pipeline.Pipeline{
+		Name: "dag-brain-write",
+		Steps: []pipeline.Step{
+			{ID: "step-a", Plugin: "noop"},
+			{
+				ID:         "step-b",
+				Plugin:     "dag-writer",
+				Needs:      []string{"step-a"},
+				WriteBrain: &trueVal,
+			},
+		},
+	}
+
+	_, err := pipeline.Run(context.Background(), p, mgr, "",
+		pipeline.WithRunStore(s),
+		pipeline.WithBrainInjector(pipeline.NewStoreBrainInjector(s)),
+	)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	notes, err := s.RecentBrainNotes(context.Background(), 1, 10)
+	if err != nil {
+		t.Fatalf("RecentBrainNotes: %v", err)
+	}
+	if len(notes) == 0 {
+		t.Fatal("expected at least one brain note, got none")
+	}
+	note := notes[0]
+	if note.Body != "insight from dag" {
+		t.Errorf("Body: want %q, got %q", "insight from dag", note.Body)
+	}
+	if note.Tags != "dag" {
+		t.Errorf("Tags: want %q, got %q", "dag", note.Tags)
+	}
+}
+
 // TestBrainLegacyPath verifies that brain injection works on the legacy runner
 // (pipelines without `needs`, `retry`, `for_each`, or `on_failure`).
 func TestBrainLegacyPath(t *testing.T) {
