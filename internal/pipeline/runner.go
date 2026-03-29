@@ -25,6 +25,7 @@ type runConfig struct {
 	publisher EventPublisher
 	runID     int64
 	pipeName  string
+	injector  BrainInjector // optional brain context injector
 }
 
 // WithRunStore attaches a result store to the run so results are persisted.
@@ -38,6 +39,12 @@ func WithRunStore(s *store.Store) RunOption {
 // lifecycle events during Run.  If not set, NoopPublisher{} is used.
 func WithEventPublisher(p EventPublisher) RunOption {
 	return func(c *runConfig) { c.publisher = p }
+}
+
+// WithBrainInjector attaches a BrainInjector to the run. When a step has
+// use_brain or write_brain active, the injector is used to assemble pre-context.
+func WithBrainInjector(inj BrainInjector) RunOption {
+	return func(c *runConfig) { c.injector = inj }
 }
 
 // StepStatusLineFormat is the format string for structured step-status log lines.
