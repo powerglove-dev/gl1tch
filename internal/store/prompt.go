@@ -19,57 +19,65 @@ type Prompt struct {
 
 // InsertPrompt inserts a new prompt and returns the generated ID.
 // created_at and updated_at are set to the current Unix timestamp.
-func (s *Store) InsertPrompt(ctx context.Context, p Prompt) (int64, error) {
+func (s *Store) InsertPrompt(_ context.Context, p Prompt) (int64, error) {
 	now := time.Now().Unix()
-	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO prompts (title, body, model_slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		p.Title, p.Body, p.ModelSlug, now, now,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("store: insert prompt: %w", err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return 0, fmt.Errorf("store: insert prompt last id: %w", err)
-	}
-	return id, nil
+	var id int64
+	err := s.writer.send(func(db *sql.DB) error {
+		res, err := db.Exec(
+			`INSERT INTO prompts (title, body, model_slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+			p.Title, p.Body, p.ModelSlug, now, now,
+		)
+		if err != nil {
+			return fmt.Errorf("store: insert prompt: %w", err)
+		}
+		id, err = res.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("store: insert prompt last id: %w", err)
+		}
+		return nil
+	})
+	return id, err
 }
 
 // UpdatePrompt updates the title, body, model_slug, and updated_at of an
 // existing prompt by ID. Returns an error if no row was affected.
-func (s *Store) UpdatePrompt(ctx context.Context, p Prompt) error {
+func (s *Store) UpdatePrompt(_ context.Context, p Prompt) error {
 	now := time.Now().Unix()
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE prompts SET title = ?, body = ?, model_slug = ?, updated_at = ? WHERE id = ?`,
-		p.Title, p.Body, p.ModelSlug, now, p.ID,
-	)
-	if err != nil {
-		return fmt.Errorf("store: update prompt: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("store: update prompt rows affected: %w", err)
-	}
-	if n == 0 {
-		return fmt.Errorf("store: update prompt: no prompt with id %d", p.ID)
-	}
-	return nil
+	return s.writer.send(func(db *sql.DB) error {
+		res, err := db.Exec(
+			`UPDATE prompts SET title = ?, body = ?, model_slug = ?, updated_at = ? WHERE id = ?`,
+			p.Title, p.Body, p.ModelSlug, now, p.ID,
+		)
+		if err != nil {
+			return fmt.Errorf("store: update prompt: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("store: update prompt rows affected: %w", err)
+		}
+		if n == 0 {
+			return fmt.Errorf("store: update prompt: no prompt with id %d", p.ID)
+		}
+		return nil
+	})
 }
 
 // DeletePrompt removes a prompt by ID. Returns an error if no row was affected.
-func (s *Store) DeletePrompt(ctx context.Context, id int64) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM prompts WHERE id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("store: delete prompt: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("store: delete prompt rows affected: %w", err)
-	}
-	if n == 0 {
-		return fmt.Errorf("store: delete prompt: no prompt with id %d", id)
-	}
-	return nil
+func (s *Store) DeletePrompt(_ context.Context, id int64) error {
+	return s.writer.send(func(db *sql.DB) error {
+		res, err := db.Exec(`DELETE FROM prompts WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("store: delete prompt: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("store: delete prompt rows affected: %w", err)
+		}
+		if n == 0 {
+			return fmt.Errorf("store: delete prompt: no prompt with id %d", id)
+		}
+		return nil
+	})
 }
 
 // ListPrompts returns all prompts ordered by updated_at DESC.
