@@ -903,6 +903,26 @@ var _ io.Writer = (*lineWriter)(nil)
 
 // Update handles tea.Msg values.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// ── Forward all messages to activity feed (handles its unexported msg types) ──
+	// Always forward so loadedMsg / newEventMsg (unexported) are processed.
+	// If the activity model returns a command (e.g. drainActivityChan after a
+	// newEventMsg), and the message isn't a common type the main switch also
+	// needs to handle, return immediately so the drain loop keeps running.
+	{
+		newAF, afCmd := m.activityFeed.Update(msg)
+		if af, ok := newAF.(activity.Model); ok {
+			m.activityFeed = af
+		}
+		if afCmd != nil {
+			switch msg.(type) {
+			case tea.KeyMsg, tea.WindowSizeMsg, tickMsg:
+				// shared messages: fall through to main switch, afCmd is nil for these
+			default:
+				return m, afCmd
+			}
+		}
+	}
+
 	// ── Theme change from another process (e.g. cron TUI) ────────────────────
 	if ts, cmd, ok := m.themeState.Handle(msg); ok {
 		m.themeState = ts
@@ -953,10 +973,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingPipelineYAML = ""
 		return m, nil
 
-	case activity.Model:
-		m.activityFeed = msg
-		return m, nil
-
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -964,11 +980,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.agent.prompt.SetWidth(max(leftW-4, 10))
 		m.inboxModel.SetSize(leftW, msg.Height)
 		m.clampFeedScroll()
-		if newAF, cmd := m.activityFeed.Update(msg); cmd == nil {
-			if af, ok := newAF.(activity.Model); ok {
-				m.activityFeed = af
-			}
-		}
 		return m, nil
 
 	case tickMsg:
