@@ -1999,6 +1999,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 						if jh.tmuxWindow != "" {
 							exec.Command("tmux", "kill-window", "-t", jh.tmuxWindow).Run() //nolint:errcheck
 						}
+						if jh.storeRunID != 0 && m.store != nil {
+							var out string
+							for _, e := range m.feed {
+								if e.id == entry.id {
+									out = strings.Join(e.lines, "\n")
+									break
+								}
+							}
+							_ = m.store.RecordRunComplete(jh.storeRunID, 1, out, "")
+						}
 						delete(m.activeJobs, entry.id)
 					}
 					m = m.setFeedStatus(entry.id, FeedFailed)
