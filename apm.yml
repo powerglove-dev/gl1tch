@@ -33,6 +33,14 @@ dependencies:
     # Uncomment when a local agent is added:
     # - ./apm/agents/orcai-sysop.agent.md
 
+    # ── glab sidecar wrappers ─────────────────────────────────────────────────
+    - ./.apm/agents/glab-mr.agent.md
+    - ./.apm/agents/glab-issue.agent.md
+    - ./.apm/agents/glab-ci.agent.md
+
+    # ── Google Workspace ──────────────────────────────────────────────────────
+    - ./.apm/agents/gws.agent.md
+
     # ── Skills (prompt templates) ─────────────────────────────────────────────
     # Uncomment to pull community skill packs:
     # - anthropics/skills/skills/frontend-design
