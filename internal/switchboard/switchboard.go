@@ -2880,6 +2880,12 @@ func (m Model) submitRerun(msg modal.RerunConfirmedMsg) (Model, tea.Cmd) {
 			yamlPath = filepath.Join(pipelinesDir(), run.Name+".pipeline.yaml")
 		}
 		if _, err := os.Stat(yamlPath); err != nil {
+			m = m.prependFeedEntry(feedEntry{
+				id:     fmt.Sprintf("err-%d", time.Now().UnixNano()),
+				title:  "rerun: pipeline file not found: " + run.Name,
+				status: FeedFailed,
+				ts:     time.Now(),
+			})
 			return m, nil
 		}
 		feedID := fmt.Sprintf("pipe-%d", time.Now().UnixNano())

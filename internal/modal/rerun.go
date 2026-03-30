@@ -105,14 +105,14 @@ func (m RerunModal) WithModelSlug(slug string) RerunModal {
 }
 
 // Update handles key input. Cycles focus with tab/shift+tab across all four
-// zones (context → cwd → provider → model → context). ctrl+r confirms from
-// any zone. esc cancels.
+// zones (context → cwd → provider → model → context). enter or ctrl+r
+// confirms from any zone. esc cancels.
 func (m RerunModal) Update(msg tea.KeyMsg) (RerunModal, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		return m, func() tea.Msg { return RerunCancelledMsg{} }
 
-	case "ctrl+r":
+	case "ctrl+r", "enter":
 		return m, m.confirmedCmd()
 
 	case "tab":
@@ -130,9 +130,6 @@ func (m RerunModal) Update(msg tea.KeyMsg) (RerunModal, tea.Cmd) {
 		return m, cmd
 
 	case rerunFocusCWD:
-		if msg.Type == tea.KeyEnter {
-			return m, m.confirmedCmd()
-		}
 		var cmd tea.Cmd
 		m.cwdInput, cmd = m.cwdInput.Update(msg)
 		return m, cmd
@@ -249,8 +246,7 @@ func (m RerunModal) ViewBox(w, h int, pal styles.ANSIPalette) string {
 	hint := panelrender.HintBar([]panelrender.Hint{
 		{Key: "tab", Desc: "next"},
 		{Key: "shift+tab", Desc: "prev"},
-		{Key: "ctrl+r", Desc: "run"},
-		{Key: "enter", Desc: "run (picker)"},
+		{Key: "enter", Desc: "run"},
 		{Key: "esc", Desc: "cancel"},
 	}, innerW, pal)
 
