@@ -738,6 +738,9 @@ func tickCmd() tea.Cmd {
 // ── Pipeline helpers ──────────────────────────────────────────────────────────
 
 func pipelinesDir() string {
+	if d := os.Getenv("ORCAI_PIPELINES_DIR"); d != "" {
+		return d
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
