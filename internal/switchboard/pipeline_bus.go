@@ -21,6 +21,20 @@ import (
 
 // ── agent run event publishing ────────────────────────────────────────────────
 
+// publishClarificationReplyCmd returns a tea.Cmd that publishes a
+// ClarificationReply event on the bus so the blocking AskClarification call in
+// the pipeline runner can unblock and resume execution.
+func publishClarificationReplyCmd(reply store.ClarificationReply) tea.Cmd {
+	return func() tea.Msg {
+		sockPath, err := busd.SocketPath()
+		if err != nil {
+			return nil
+		}
+		_ = busd.PublishEvent(sockPath, topics.ClarificationReply, reply)
+		return nil
+	}
+}
+
 // publishAgentEventCmd returns a tea.Cmd that publishes an agent run lifecycle
 // event to busd. Errors are silently ignored so the job lifecycle is unaffected
 // when the bus is unavailable.
@@ -153,7 +167,7 @@ func tryPipelineBusSubscribeCmd() tea.Cmd {
 		}
 		reg, _ := json.Marshal(map[string]any{
 			"name":      "switchboard",
-			"subscribe": []string{"pipeline.run.*", "pipeline.step.*", "cron.job.*", "cron.entry.*"},
+			"subscribe": []string{"pipeline.run.*", "pipeline.step.*", "cron.job.*", "cron.entry.*", topics.ClarificationRequested},
 		})
 		if _, err := conn.Write(append(reg, '\n')); err != nil {
 			conn.Close()

@@ -25,4 +25,8 @@ const (
 	AgentRunStarted   = "agent.run.started"
 	AgentRunCompleted = "agent.run.completed"
 	AgentRunFailed    = "agent.run.failed"
+
+	// Agent clarification request / reply
+	ClarificationRequested = "agent.run.clarification"
+	ClarificationReply     = "agent.run.clarification.reply"
 )

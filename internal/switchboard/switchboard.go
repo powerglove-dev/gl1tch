@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/reflow/wrap"
@@ -339,6 +340,10 @@ type Model struct {
 	cronPanel CronPanel
 	// Pipeline bus subscription (tasks 7.2–7.8)
 	pipelineBusCh chan pipelineBusEventMsg
+	// Inline clarification reply (agent.run.clarification)
+	pendingClarification *store.ClarificationRequest // non-nil when awaiting reply
+	clarifyInput         textinput.Model
+	clarifyActive        bool
 }
 
 // New creates a new Switchboard Model, discovering pipelines and providers.
@@ -371,6 +376,10 @@ func NewWithStore(s *store.Store) Model {
 
 	cwd, _ := os.Getwd()
 
+	clarifyTI := textinput.New()
+	clarifyTI.Placeholder = "type your answer…"
+	clarifyTI.CharLimit = 2000
+
 	agentProviders := picker.BuildProviders()
 	m := Model{
 		launcher: launcherSection{
@@ -390,8 +399,9 @@ func NewWithStore(s *store.Store) Model {
 		activeJobs:            make(map[string]*jobHandle),
 		launchCWD:             cwd,
 		agentCWD:              cwd,
-		inboxModel:            inbox.New(s, nil), // bundle set after registry loads
-		store:                 s,
+		inboxModel:   inbox.New(s, nil), // bundle set after registry loads
+		store:        s,
+		clarifyInput: clarifyTI,
 	}
 
 	// Initialize theme registry from user themes dir.
@@ -1033,6 +1043,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case pipelineBusEventMsg:
+		// Intercept clarification requests before the general event dispatcher.
+		if msg.topic == topics.ClarificationRequested {
+			var req store.ClarificationRequest
+			if json.Unmarshal(msg.payload, &req) == nil {
+				m.pendingClarification = &req
+				m.clarifyInput.Reset()
+				m.clarifyInput.Focus()
+				m.clarifyActive = true
+			}
+			if m.pipelineBusCh != nil {
+				return m, tea.Batch(textinput.Blink, waitForPipelineBusEvent(m.pipelineBusCh))
+			}
+			return m, textinput.Blink
+		}
 		m = m.handlePipelineBusEvent(msg)
 		if m.pipelineBusCh != nil {
 			return m, waitForPipelineBusEvent(m.pipelineBusCh)
@@ -1236,6 +1260,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	key := msg.String()
+
+	// Clarification reply input — capture all keys when active.
+	if m.clarifyActive {
+		switch key {
+		case "esc":
+			// Cancel without sending; the agent will time out on its end.
+			m.clarifyActive = false
+			m.pendingClarification = nil
+			m.clarifyInput.Blur()
+			m.clarifyInput.Reset()
+			return m, nil
+		case "enter":
+			answer := strings.TrimSpace(m.clarifyInput.Value())
+			if answer == "" {
+				return m, nil
+			}
+			runID := ""
+			if m.pendingClarification != nil {
+				runID = m.pendingClarification.RunID
+			}
+			m.clarifyActive = false
+			m.pendingClarification = nil
+			m.clarifyInput.Blur()
+			m.clarifyInput.Reset()
+			reply := store.ClarificationReply{RunID: runID, Answer: answer}
+			return m, publishClarificationReplyCmd(reply)
+		default:
+			var cmd tea.Cmd
+			m.clarifyInput, cmd = m.clarifyInput.Update(msg)
+			return m, cmd
+		}
+	}
 
 	// Dir picker overlay — capture all keys when open.
 	if m.dirPickerOpen {
@@ -3169,6 +3225,12 @@ func (m Model) View() string {
 	// Inbox detail overlay — full-screen ANSI box panel for a run result.
 	if m.inboxDetailOpen && len(m.inboxModel.Runs()) > 0 {
 		return topBar + "\n" + m.viewInboxDetail(w, h, m.inboxMarkdownMode)
+	}
+
+	// Clarification overlay — shown when an agent is waiting for user input.
+	if m.clarifyActive && m.pendingClarification != nil {
+		base := topBar + "\n" + body
+		return overlayCenter(base, m.viewClarificationBox(w), w, h)
 	}
 
 	return topBar + "\n" + body

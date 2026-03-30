@@ -310,6 +310,54 @@ func (m Model) viewInboxDetail(w, h int, markdownMode bool) string {
 	return strings.Join(rows, "\n")
 }
 
+// viewClarificationBox renders the inline clarification Q&A overlay.
+// Layout mirrors the test runner reply section in promptmgr/view.go lines 326–357.
+func (m Model) viewClarificationBox(w int) string {
+	if m.pendingClarification == nil {
+		return ""
+	}
+
+	pal := m.ansiPalette()
+	borderColor := pal.Accent
+	// Clamp overlay width so it fits in any terminal.
+	boxW := w - 8
+	if boxW < 40 {
+		boxW = 40
+	}
+	if boxW > 80 {
+		boxW = 80
+	}
+	innerW := boxW - 4
+
+	question := m.pendingClarification.Question
+	// Word-wrap the question to fit inside the box.
+	questionLines := strings.Split(wrapContent(question, innerW), "\n")
+
+	var rows []string
+	rows = append(rows, boxTop(boxW, "CLARIFICATION", borderColor, pal.Accent))
+
+	rows = append(rows, boxRow("", boxW, borderColor))
+	agentLabel := pal.Dim + "  agent asked:" + aRst
+	rows = append(rows, boxRow(agentLabel, boxW, borderColor))
+	for _, ql := range questionLines {
+		rows = append(rows, boxRow("  "+pal.FG+ql+aRst, boxW, borderColor))
+	}
+	rows = append(rows, boxRow("", boxW, borderColor))
+
+	replyLabel := pal.Accent + panelrender.BLD + "  REPLY  " + panelrender.RST
+	rows = append(rows, boxRow(replyLabel+m.clarifyInput.View(), boxW, borderColor))
+	rows = append(rows, boxRow("", boxW, borderColor))
+
+	hints := panelrender.HintBar([]panelrender.Hint{
+		{Key: "enter", Desc: "send"},
+		{Key: "esc", Desc: "cancel"},
+	}, boxW-2, pal)
+	rows = append(rows, boxRow(hints, boxW, borderColor))
+	rows = append(rows, boxBot(boxW, borderColor))
+
+	return strings.Join(rows, "\n")
+}
+
 // wrapContent wraps each line in text to maxWidth, preserving existing newlines.
 // ANSI sequences are stripped before wrapping so escape codes don't count toward width.
 func wrapContent(text string, maxWidth int) string {
