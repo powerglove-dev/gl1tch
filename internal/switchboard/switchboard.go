@@ -140,6 +140,8 @@ type jobHandle struct {
 	logFile      string // /tmp/orcai-<feedID>.log — tailed in the tmux window
 	storeRunID   int64  // non-zero when run was recorded in the result store
 	pipelineName string // non-empty for pipeline jobs; matched against busd RunStarted payload
+	actAgent     string // activity feed agent name; empty for non-agent jobs
+	actLabel     string // activity feed label (truncated prompt)
 }
 
 // ── Tea messages ──────────────────────────────────────────────────────────────
@@ -312,6 +314,8 @@ type Model struct {
 	dirPickerCtx        string         // "agent" or "pipeline"
 	pendingPipelineName string         // pipeline waiting for CWD selection
 	pendingPipelineYAML string         // YAML path for pendingPipelineName
+	pendingActAgent     string         // activity feed agent name for the next launch
+	pendingActLabel     string         // activity feed label for the next launch
 	// Pipeline mode-select overlay
 	pipelineLaunchMode   int          // plModeNone / plModeSelect / plScheduleInput
 	pipelineModeSelected int          // 0=Run now, 1=Schedule recurring
@@ -1118,10 +1122,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				exitCode = 1
 			}
 			doneCmd = publishAgentEventCmd(topics.AgentRunCompleted, map[string]any{
-				"run_id":      msg.id,
+				"run_id":       msg.id,
 				"store_run_id": jh.storeRunID,
-				"exit_status": exitCode,
+				"exit_status":  exitCode,
 			})
+			if jh.actAgent != "" {
+				doneCmd = tea.Batch(doneCmd, appendActivityCmd(jh.actAgent, jh.actLabel, "agent_run_finished", "done"))
+			}
 		}
 		delete(m.activeJobs, msg.id)
 		return m, doneCmd
@@ -1167,6 +1174,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"store_run_id": jh.storeRunID,
 				"exit_status":  1,
 			})
+			if jh.actAgent != "" {
+				failCmd = tea.Batch(failCmd, appendActivityCmd(jh.actAgent, jh.actLabel, "agent_run_failed", "failed"))
+			}
 		}
 		delete(m.activeJobs, msg.id)
 		return m, failCmd
@@ -2722,12 +2732,22 @@ func (m Model) launchPendingPipeline(cwd string) (Model, tea.Cmd) {
 
 	ch := make(chan tea.Msg, 256)
 	_, cancel := context.WithCancel(context.Background())
-	jh := &jobHandle{id: feedID, cancel: cancel, ch: ch, tmuxWindow: windowName, logFile: logFile, pipelineName: name}
+	jh := &jobHandle{
+		id: feedID, cancel: cancel, ch: ch,
+		tmuxWindow: windowName, logFile: logFile, pipelineName: name,
+		actAgent: m.pendingActAgent, actLabel: m.pendingActLabel,
+	}
+	m.pendingActAgent = ""
+	m.pendingActLabel = ""
 	// Feed entry created by the busd RunStarted event — don't create an eager duplicate here.
 	m.activeJobs[feedID] = jh
 
 	startLogWatcher(feedID, logFile, doneFile, ch)
-	return m, drainChan(ch)
+	var startedCmd tea.Cmd
+	if jh.actAgent != "" {
+		startedCmd = appendActivityCmd(jh.actAgent, jh.actLabel, "agent_run_started", "running")
+	}
+	return m, tea.Batch(drainChan(ch), startedCmd)
 }
 
 // submitAgentJob submits the agent job from the modal overlay.
@@ -2872,6 +2892,8 @@ func (m Model) submitAgentJob() (Model, tea.Cmd) {
 
 	m.pendingPipelineName = entryName
 	m.pendingPipelineYAML = pipelineFile
+	m.pendingActAgent = agentName
+	m.pendingActLabel = activityLabel(input)
 
 	// Close modal and reset prompt after submission.
 	m.agentModalOpen = false
@@ -2928,6 +2950,8 @@ func (m Model) submitRerun(msg modal.RerunConfirmedMsg) (Model, tea.Cmd) {
 		}
 		m.pendingPipelineName = entryName
 		m.pendingPipelineYAML = pipelineFile
+		m.pendingActAgent = msg.ProviderID + "/" + msg.ModelID
+		m.pendingActLabel = activityLabel(fullPrompt)
 		return m.launchPendingPipeline(cwd)
 
 	default: // "pipeline" and any future kinds

@@ -11,9 +11,11 @@ import (
 	"net"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/adam-stokes/orcai/internal/activity"
 	"github.com/adam-stokes/orcai/internal/busd"
 	"github.com/adam-stokes/orcai/internal/busd/topics"
 	"github.com/adam-stokes/orcai/internal/store"
@@ -47,6 +49,26 @@ func publishAgentEventCmd(topic string, payload any) tea.Cmd {
 		_ = busd.PublishEvent(sockPath, topic, payload)
 		return nil
 	}
+}
+
+// appendActivityCmd returns a tea.Cmd that appends an ActivityEvent to the
+// default JSONL path. Errors are silently ignored so the job lifecycle is
+// unaffected when the file system is unavailable.
+func appendActivityCmd(agent, label, kind, status string) tea.Cmd {
+	return func() tea.Msg {
+		_ = activity.AppendEvent(activity.DefaultPath(), activity.Now(kind, agent, label, status))
+		return nil
+	}
+}
+
+// activityLabel returns the first 60 runes of s, suitable as an activity label.
+func activityLabel(s string) string {
+	const max = 60
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:max-1]) + "…"
 }
 
 // ── feed cap ──────────────────────────────────────────────────────────────────

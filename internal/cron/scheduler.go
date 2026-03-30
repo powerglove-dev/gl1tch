@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/adam-stokes/orcai/internal/activity"
 	"github.com/adam-stokes/orcai/internal/busd/topics"
 	"github.com/charmbracelet/log"
 	"github.com/fsnotify/fsnotify"
@@ -183,6 +184,9 @@ func (s *Scheduler) runEntry(entry Entry) {
 		"triggered_at": startedAt.Format(time.RFC3339),
 	})
 	_ = s.publisher.Publish(context.Background(), topics.CronJobStarted, startPayload)
+	_ = activity.AppendEvent(activity.DefaultPath(), activity.Now(
+		"schedule_fired", entry.Name, entry.Target, "scheduled",
+	))
 
 	// Resolve the orcai binary (same binary as current process).
 	self, err := os.Executable()

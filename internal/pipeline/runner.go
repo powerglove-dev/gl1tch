@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/adam-stokes/orcai/internal/activity"
 	"github.com/adam-stokes/orcai/internal/busd/topics"
 	"github.com/adam-stokes/orcai/internal/plugin"
 	"github.com/adam-stokes/orcai/internal/store"
@@ -119,6 +120,9 @@ func Run(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput string
 	}); err == nil {
 		_ = cfg.publisher.Publish(ctx, topics.RunStarted, payload)
 	}
+	_ = activity.AppendEvent(activity.DefaultPath(), activity.Now(
+		"pipeline_started", p.Name, p.Name, "running",
+	))
 
 	var result string
 	var runErr error
@@ -162,6 +166,15 @@ func Run(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput string
 		"finished_at": finishedAt.Format(time.RFC3339),
 	}); err == nil {
 		_ = cfg.publisher.Publish(ctx, topic, payload)
+	}
+	if runErr != nil {
+		_ = activity.AppendEvent(activity.DefaultPath(), activity.Now(
+			"pipeline_failed", p.Name, p.Name, "failed",
+		))
+	} else {
+		_ = activity.AppendEvent(activity.DefaultPath(), activity.Now(
+			"pipeline_finished", p.Name, p.Name, "done",
+		))
 	}
 
 	return result, runErr
