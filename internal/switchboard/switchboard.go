@@ -25,6 +25,7 @@ import (
 	"github.com/muesli/reflow/wrap"
 	robfigcron "github.com/robfig/cron/v3"
 
+	"github.com/adam-stokes/orcai/internal/activity"
 	orcaicron "github.com/adam-stokes/orcai/internal/cron"
 	"github.com/adam-stokes/orcai/internal/busd/topics"
 	"github.com/adam-stokes/orcai/internal/inbox"
@@ -316,6 +317,7 @@ type Model struct {
 	pendingPipelineYAML string         // YAML path for pendingPipelineName
 	pendingActAgent     string         // activity feed agent name for the next launch
 	pendingActLabel     string         // activity feed label for the next launch
+	activityFeed        activity.Model // JSONL-backed activity timeline
 	// Pipeline mode-select overlay
 	pipelineLaunchMode   int          // plModeNone / plModeSelect / plScheduleInput
 	pipelineModeSelected int          // 0=Run now, 1=Schedule recurring
@@ -406,6 +408,7 @@ func NewWithStore(s *store.Store) Model {
 		inboxModel:   inbox.New(s, nil), // bundle set after registry loads
 		store:        s,
 		clarifyInput: clarifyTI,
+		activityFeed: activity.New(""),
 	}
 
 	// Initialize theme registry from user themes dir.
@@ -742,6 +745,7 @@ func (m Model) Init() tea.Cmd {
 		m.themeState.Init(),
 		tryPipelineBusSubscribeCmd(),
 		seedFeedFromStoreCmd(m.store),
+		m.activityFeed.Init(),
 	)
 }
 
@@ -949,6 +953,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingPipelineYAML = ""
 		return m, nil
 
+	case activity.Model:
+		m.activityFeed = msg
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -956,6 +964,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.agent.prompt.SetWidth(max(leftW-4, 10))
 		m.inboxModel.SetSize(leftW, msg.Height)
 		m.clampFeedScroll()
+		if newAF, cmd := m.activityFeed.Update(msg); cmd == nil {
+			if af, ok := newAF.(activity.Model); ok {
+				m.activityFeed = af
+			}
+		}
 		return m, nil
 
 	case tickMsg:
@@ -2178,6 +2191,11 @@ func (m Model) handleDown() Model {
 			m.feedScrollOffset = m.feedCursor - visibleH + 1
 		}
 		m.clampFeedScroll()
+		if newAF, _ := m.activityFeed.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}); newAF != nil {
+			if af, ok := newAF.(activity.Model); ok {
+				m.activityFeed = af
+			}
+		}
 		return m
 	}
 	if m.signalBoardFocused {
@@ -2212,6 +2230,11 @@ func (m Model) handleUp() Model {
 			m.feedScrollOffset = m.feedCursor
 		}
 		m.clampFeedScroll()
+		if newAF, _ := m.activityFeed.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}}); newAF != nil {
+			if af, ok := newAF.(activity.Model); ok {
+				m.activityFeed = af
+			}
+		}
 		return m
 	}
 	if m.signalBoardFocused {
@@ -4127,11 +4150,19 @@ func (m Model) viewActivityFeed(height, width int) string {
 		*lines = append(*lines, boxRow(content, width, borderColor))
 	}
 
-	// Flatten all feed entries into content lines.
+	// Render from the JSONL-backed activity model.
 	var allLines []string
-	if len(m.feed) == 0 {
+	actContent := strings.TrimRight(m.activityFeed.View(), "\n")
+	if actContent == "" || actContent == aDim+"  no activity yet"+aRst {
 		appendRow(&allLines, pal.Dim+"  no activity yet"+aRst)
 	} else {
+		for _, line := range strings.Split(actContent, "\n") {
+			appendRow(&allLines, line)
+		}
+	}
+
+	// Legacy feed entries (still rendered below activity cards for running jobs).
+	if false {
 		for _, entry := range m.feed {
 			badge, badgeColor := statusBadge(entry.status, pal)
 			ts := entry.ts.Format("15:04:05")
@@ -4244,7 +4275,7 @@ func (m Model) viewActivityFeed(height, width int) string {
 				}
 			}
 		}
-	}
+	} // end if false (legacy feed)
 
 	// Clamp offset and slice visible window.
 	// Convert logical feedScrollOffset to visual index using the logicalToVisual map.
