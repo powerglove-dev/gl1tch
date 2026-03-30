@@ -26,7 +26,6 @@ import (
 	robfigcron "github.com/robfig/cron/v3"
 
 	"github.com/adam-stokes/orcai/internal/activity"
-	"github.com/adam-stokes/orcai/internal/clarify"
 	orcaicron "github.com/adam-stokes/orcai/internal/cron"
 	"github.com/adam-stokes/orcai/internal/busd/topics"
 	"github.com/adam-stokes/orcai/internal/inbox"
@@ -146,7 +145,6 @@ type jobHandle struct {
 	actLabel     string // activity feed label (truncated prompt)
 	executorID   string // executor type ("claude", "opencode", etc.) — for clarification follow-up
 	modelID      string // model slug — for clarification follow-up
-	detector     clarify.Detector // nil = no clarification detection for this job
 }
 
 // ── Tea messages ──────────────────────────────────────────────────────────────
@@ -323,10 +321,6 @@ type Model struct {
 	pendingActLabel     string         // activity feed label for the next launch
 	pendingExecutorID   string         // executor ID for the next launch (for clarification wiring)
 	pendingModelID      string         // model ID for the next launch
-	// Reactive clarification state (log-line detected)
-	clarifyFeedID       string         // feedID of job that triggered log-detected clarification
-	clarifyExecutorID   string         // executor to use for the follow-up run
-	clarifyModelID      string         // model to use for the follow-up run
 	activityFeed        activity.Model // JSONL-backed activity timeline
 	// Pipeline mode-select overlay
 	pipelineLaunchMode   int          // plModeNone / plModeSelect / plScheduleInput
@@ -913,20 +907,18 @@ var _ io.Writer = (*lineWriter)(nil)
 
 // Update handles tea.Msg values.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// ── Forward all messages to activity feed (handles its unexported msg types) ──
-	// Always forward so loadedMsg / newEventMsg (unexported) are processed.
-	// If the activity model returns a command (e.g. drainActivityChan after a
-	// newEventMsg), and the message isn't a common type the main switch also
-	// needs to handle, return immediately so the drain loop keeps running.
-	{
+	// ── Forward non-key messages to activity feed (handles its unexported msg types) ──
+	// Skip KeyMsg — activity model navigation is driven explicitly via handleDown/handleUp
+	// when feedFocused. Forwarding all keys caused j/k in other panes to scroll the feed.
+	if _, isKey := msg.(tea.KeyMsg); !isKey {
 		newAF, afCmd := m.activityFeed.Update(msg)
 		if af, ok := newAF.(activity.Model); ok {
 			m.activityFeed = af
 		}
 		if afCmd != nil {
 			switch msg.(type) {
-			case tea.KeyMsg, tea.WindowSizeMsg, tickMsg:
-				// shared messages: fall through to main switch, afCmd is nil for these
+			case tea.WindowSizeMsg, tickMsg:
+				// shared messages: fall through to main switch
 			default:
 				return m, afCmd
 			}
@@ -1321,9 +1313,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.pendingClarification = nil
 			m.clarifyInput.Blur()
 			m.clarifyInput.Reset()
-			m.clarifyFeedID = ""
-			m.clarifyExecutorID = ""
-			m.clarifyModelID = ""
 			return m, nil
 		case "enter":
 			answer := strings.TrimSpace(m.clarifyInput.Value())
@@ -1339,32 +1328,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.clarifyInput.Blur()
 			m.clarifyInput.Reset()
 
-			if m.clarifyFeedID != "" {
-				// Log-detected clarification: launch a follow-up run with the answer.
-				executorID := m.clarifyExecutorID
-				modelID := m.clarifyModelID
-				m.clarifyFeedID = ""
-				m.clarifyExecutorID = ""
-				m.clarifyModelID = ""
-				entryName := fmt.Sprintf("agent-%s-%d", executorID, time.Now().UnixNano())
-				cwd := m.agentCWD
-				if cwd == "" {
-					cwd = m.launchCWD
-				}
-				if pipelineFile, err := WriteSingleStepPipeline(entryName, executorID, modelID, answer, true); err == nil {
-					m.pendingPipelineName = entryName
-					m.pendingPipelineYAML = pipelineFile
-					m.pendingActAgent = executorID + "/" + modelID
-					m.pendingActLabel = activityLabel(answer)
-					m.pendingExecutorID = executorID
-					m.pendingModelID = modelID
-					return m.launchPendingPipeline(cwd)
-				}
-				return m, nil
-			}
-
-			// busd-detected clarification: publish reply so the blocking pipeline
-			// step can unblock and continue execution.
+			// Publish reply so the blocking AskClarification call in the pipeline
+			// subprocess can unblock and continue execution with the user's answer.
 			reply := store.ClarificationReply{RunID: runID, Answer: answer}
 			return m, publishClarificationReplyCmd(reply)
 		default:
@@ -2828,7 +2793,6 @@ func (m Model) launchPendingPipeline(cwd string) (Model, tea.Cmd) {
 		tmuxWindow: windowName, logFile: logFile, pipelineName: name,
 		actAgent: m.pendingActAgent, actLabel: m.pendingActLabel,
 		executorID: m.pendingExecutorID, modelID: m.pendingModelID,
-		detector: clarify.Get(m.pendingExecutorID),
 	}
 	m.pendingActAgent = ""
 	m.pendingActLabel = ""
@@ -3158,25 +3122,6 @@ func (m Model) appendFeedLine(id, line string) Model {
 		if m.feed[i].id == id {
 			m.feed[i].lines = append(m.feed[i].lines, line)
 			break
-		}
-	}
-	// Reactive clarification: detect ORCAI_CLARIFY: marker in agent output.
-	// Only trigger when not already showing a clarification overlay.
-	if !m.clarifyActive {
-		if jh, ok := m.activeJobs[id]; ok && jh.detector != nil {
-			if question, found := jh.detector.Detect(line); found {
-				m.clarifyFeedID = id
-				m.clarifyExecutorID = jh.executorID
-				m.clarifyModelID = jh.modelID
-				m.pendingClarification = &store.ClarificationRequest{
-					RunID:   id,
-					Question: question,
-					AskedAt: time.Now(),
-				}
-				m.clarifyInput.Reset()
-				m.clarifyInput.Focus()
-				m.clarifyActive = true
-			}
 		}
 	}
 	return m
@@ -4198,207 +4143,26 @@ func (m Model) viewActivityFeed(height, width int) string {
 	}
 	visibleH := height - headerH - 2 // minus header, bottom border, and always-present hint footer
 
-	// logicalIdx tracks the cursor-navigable line index — matches feedRawLines indices.
-	// Incremented only by appendRow; appendExtra adds visual-only lines without advancing it.
-	// logicalToVisual maps each logical line index to its visual index in allLines.
-	logicalIdx := 0
-	var logicalToVisual []int
-	appendRow := func(lines *[]string, content string) {
-		logicalToVisual = append(logicalToVisual, len(*lines))
-		idx := logicalIdx
-		logicalIdx++
-		isMarked := m.feedMarked[idx]
-		isCursor := m.feedFocused && idx == m.feedCursor
-		var row string
-		switch {
-		case isCursor && isMarked:
-			// Cursor dominates visually; add mark indicator to content.
-			row = boxRowCursorColor(pal.Success+"●"+aRst+content, width, borderColor)
-		case isCursor:
-			row = boxRowCursorColor(content, width, borderColor)
-		case isMarked:
-			// Marked: ● (success color, no bg) + content (green bg), matching inbox detail style.
-			markPrefix := pal.Success + "●" + aRst
-			markContent := lipgloss.NewStyle().
-				Background(lipgloss.Color("#2d4a35")).
-				Render(stripANSI(content))
-			row = boxRow(markPrefix+markContent, width, borderColor)
-		default:
-			row = boxRow(content, width, borderColor)
-		}
-		*lines = append(*lines, row)
-	}
-	// appendExtra adds a visual-only box row without advancing logicalIdx.
-	appendExtra := func(lines *[]string, content string) {
-		*lines = append(*lines, boxRow(content, width, borderColor))
-	}
-
-	// Render from the JSONL-backed activity model.
+	// Render content from the JSONL-backed activity model.
+	// The model owns scrolling internally; we just wrap its lines in box rows.
 	var allLines []string
 	actContent := strings.TrimRight(m.activityFeed.View(), "\n")
 	if actContent == "" || actContent == aDim+"  no activity yet"+aRst {
-		appendRow(&allLines, pal.Dim+"  no activity yet"+aRst)
+		allLines = append(allLines, boxRow(pal.Dim+"  no activity yet"+aRst, width, borderColor))
 	} else {
 		for _, line := range strings.Split(actContent, "\n") {
-			appendRow(&allLines, line)
+			allLines = append(allLines, boxRow(line, width, borderColor))
 		}
 	}
 
-	// Legacy feed entries (still rendered below activity cards for running jobs).
-	if false {
-		for _, entry := range m.feed {
-			badge, badgeColor := statusBadge(entry.status, pal)
-			ts := entry.ts.Format("15:04:05")
-			titleLine := fmt.Sprintf("  %s%s%s %s%s%s  %s",
-				badgeColor, badge, aRst,
-				pal.Dim, ts, aRst,
-				pal.Accent+entry.title+aRst)
-			appendRow(&allLines, titleLine)
-
-			// Show the working directory below the title if set.
-			if entry.cwd != "" {
-				home, _ := os.UserHomeDir()
-				cwdDisplay := entry.cwd
-				if home != "" && strings.HasPrefix(cwdDisplay, home) {
-					cwdDisplay = "~" + cwdDisplay[len(home):]
-				}
-				appendRow(&allLines, fmt.Sprintf("  %s  %s%s", pal.Dim, cwdDisplay, aRst))
-			}
-
-			// Render per-step status badges with tree connectors; suppress done steps with no output.
-			if len(entry.steps) > 0 {
-				const maxStepOutputLines = 5
-				// Find the last visible step (non-suppressed) index.
-				lastVisible := -1
-				for i, step := range entry.steps {
-					if !(step.status == "done" && len(step.lines) == 0) {
-						lastVisible = i
-					}
-				}
-				for i, step := range entry.steps {
-					// Suppress done steps that produced no output — they add no information.
-					if step.status == "done" && len(step.lines) == 0 {
-						continue
-					}
-					isLast := i == lastVisible
-					var col string
-					switch step.status {
-					case "running":
-						col = aYlw
-					case "done":
-						col = pal.Success
-					case "failed":
-						col = pal.Error
-					default:
-						col = pal.Dim
-					}
-					connector := pal.Dim + "├ " + aRst
-					if isLast {
-						connector = pal.Dim + "└ " + aRst
-					}
-					badge := "  " + connector + col + stepGlyph(step.status) + " " + step.id + aRst
-					appendRow(&allLines, badge)
-					// Per-step output lines (last maxStepOutputLines).
-					stepLines := step.lines
-					if len(stepLines) > maxStepOutputLines {
-						stepLines = stepLines[len(stepLines)-maxStepOutputLines:]
-					}
-					// Output lines use a tree continuation connector for non-final steps.
-					var outPrefix string
-					if isLast {
-						outPrefix = "      " // 6-char plain indent aligns with step content
-					} else {
-						outPrefix = "  " + pal.Dim + "│   " + aRst
-					}
-					stepMaxLen := max(width-10, 1)
-					for _, sl := range stepLines {
-						sl = stripANSI(sl)
-						if pLines, ok := runFeedLineParsers(sl, stepMaxLen, pal, m.feedJSONExpanded[logicalIdx]); ok {
-							appendRow(&allLines, outPrefix+pLines[0])
-							for _, xl := range pLines[1:] {
-								appendExtra(&allLines, outPrefix+"  "+xl)
-							}
-						} else {
-							for _, wl := range strings.Split(wrap.String(sl, stepMaxLen), "\n") {
-								if wl != "" {
-									appendRow(&allLines, outPrefix+pal.Dim+wl+aRst)
-								}
-							}
-						}
-					}
-				}
-			}
-
-			// Cap output lines per entry: show the last feedLinesPerEntry lines only.
-			const feedLinesPerEntry = 10
-			entryLines := entry.lines
-			skipped := 0
-			if len(entryLines) > feedLinesPerEntry {
-				skipped = len(entryLines) - feedLinesPerEntry
-				entryLines = entryLines[skipped:]
-			}
-			if skipped > 0 {
-				skipMsg := fmt.Sprintf("    … %d earlier lines (press f to scroll)", skipped)
-				appendRow(&allLines, pal.Dim+skipMsg+aRst)
-			}
-			entryMaxLen := max(width-6, 1)
-			for _, outLine := range entryLines {
-				outLine = stripANSI(outLine)
-				if pLines, ok := runFeedLineParsers(outLine, entryMaxLen, pal, m.feedJSONExpanded[logicalIdx]); ok {
-					appendRow(&allLines, "    "+pLines[0])
-					for _, xl := range pLines[1:] {
-						appendExtra(&allLines, "      "+xl)
-					}
-				} else {
-					for _, wl := range strings.Split(wrap.String(outLine, entryMaxLen), "\n") {
-						if wl != "" {
-							appendRow(&allLines, pal.Dim+"    "+wl+aRst)
-						}
-					}
-				}
-			}
-		}
-	} // end if false (legacy feed)
-
-	// Clamp offset and slice visible window.
-	// Convert logical feedScrollOffset to visual index using the logicalToVisual map.
-	// This ensures the scroll position is correct even when JSON lines are expanded
-	// (expanded lines add visual rows without advancing the logical line index).
-	offset := 0
-	if m.feedScrollOffset < len(logicalToVisual) {
-		offset = logicalToVisual[m.feedScrollOffset]
-	} else if len(logicalToVisual) > 0 {
-		offset = logicalToVisual[len(logicalToVisual)-1]
-	}
-	total := len(allLines)
 	if visibleH <= 0 {
 		visibleH = 1
 	}
-	maxOffset := max(0, total-visibleH)
-	if offset > maxOffset {
-		offset = maxOffset
+	if len(allLines) > visibleH {
+		allLines = allLines[:visibleH]
 	}
-	if offset < 0 {
-		offset = 0
-	}
-	end := offset + visibleH
-	if end > total {
-		end = total
-	}
-	visible := allLines[offset:end]
-
-	// Compute scroll indicators.
-	hasAbove := offset > 0
-	hasBelow := end < total
+	visible := allLines
 	scrollSuffix := ""
-	switch {
-	case hasAbove && hasBelow:
-		scrollSuffix = " ↕"
-	case hasAbove:
-		scrollSuffix = " ↑"
-	case hasBelow:
-		scrollSuffix = " ↓"
-	}
 
 	var lines []string
 	if feedSprite != nil {
@@ -4415,39 +4179,9 @@ func (m Model) viewActivityFeed(height, width int) string {
 	// Hint footer row — always present; shows hints when focused, blank when not.
 	var feedHints []panelrender.Hint
 	if m.feedFocused {
-		markDesc := "mark"
-		switch m.feedMarkMode {
-		case MarkModeActive:
-			markDesc = "pause"
-		case MarkModePaused:
-			markDesc = "resume"
-		}
 		feedHints = []panelrender.Hint{
 			{Key: "j/k", Desc: "nav"},
-			{Key: "[", Desc: "page up"},
-			{Key: "]", Desc: "page down"},
-			{Key: "g", Desc: "top"},
-			{Key: "G", Desc: "bottom"},
-			{Key: "m", Desc: markDesc},
-		}
-		if m.feedMarkMode != MarkModeOff {
-			feedHints = append(feedHints, panelrender.Hint{Key: "A", Desc: "mark all"})
-			feedHints = append(feedHints, panelrender.Hint{Key: "D", Desc: "clear"})
-		}
-		if markCount := len(m.feedMarked); markCount > 0 {
-			feedHints = append(feedHints, panelrender.Hint{Key: "r", Desc: fmt.Sprintf("run (%d)", markCount)})
-		}
-		// Show enter hint when cursor is on an expandable JSON line.
-		rawLines := m.feedRawLines(m.feedPanelWidth())
-		if m.feedCursor < len(rawLines) {
-			cursorContent := strings.TrimSpace(stripANSI(rawLines[m.feedCursor]))
-			if strings.HasPrefix(cursorContent, jsonIndicator) {
-				if m.feedJSONExpanded[m.feedCursor] {
-					feedHints = append(feedHints, panelrender.Hint{Key: "enter", Desc: "collapse"})
-				} else {
-					feedHints = append(feedHints, panelrender.Hint{Key: "enter", Desc: "expand"})
-				}
-			}
+			{Key: "g/G", Desc: "top/bottom"},
 		}
 	}
 	lines = append(lines, boxRow(panelrender.HintBar(feedHints, width-2, pal), width, borderColor))

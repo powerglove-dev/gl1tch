@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -928,6 +929,44 @@ func dispatchStep(ctx context.Context, step *Step, args map[string]any, snap map
 		}
 	}
 
+	// Clarification: if the executor output contains ORCAI_CLARIFY: and the executor
+	// type is reactive, publish a ClarificationRequest via busd and block until the
+	// user answers via the TUI. Then re-run with the full conversation context.
+	if execErr == nil {
+		typeName := step.Executor
+		if typeName == "" {
+			typeName = step.Type
+		}
+		if typeName == "" {
+			typeName = step.Plugin
+		}
+		if clarify.IsReactive(typeName) {
+			valueStr, _ := extractOutputValue(out)
+			detector := clarify.Get(typeName)
+			for _, line := range strings.Split(valueStr, "\n") {
+				if q, found := detector.Detect(line); found {
+					answer, cerr := AskClarification(ctx, strconv.FormatInt(runID, 10), q)
+					if cerr == nil && answer != "" {
+						// Build follow-up: assistant response + user answer, then re-run.
+						followUp := buildClarificationFollowUp(valueStr, answer)
+						if pl, ok := mgr.Get(typeName); ok {
+							stepVars := ec.FlatStrings()
+							stepVars["model"] = step.Model
+							for k, v := range step.Vars {
+								stepVars[k] = Interpolate(v, snap)
+							}
+							fe := newPluginExecutor(pl, followUp, stepVars, nil)
+							if err2 := fe.Init(ctx); err2 == nil {
+								out, execErr = fe.Execute(ctx, args)
+							}
+						}
+					}
+					break
+				}
+			}
+		}
+	}
+
 done:
 	stepDurationMs := time.Since(stepStart).Milliseconds()
 	cleanupErr := executor.Cleanup(ctx)
@@ -1143,5 +1182,17 @@ func filterOut(ss []string, remove string) []string {
 		}
 	}
 	return out
+}
+
+// buildClarificationFollowUp builds the conversation context to send for the
+// follow-up execution after a clarification exchange. It appends the user's
+// answer after the assistant's response so the executor has full context.
+func buildClarificationFollowUp(assistantResponse, userAnswer string) string {
+	var sb strings.Builder
+	sb.WriteString(assistantResponse)
+	sb.WriteString("\n\n---\nUser: ")
+	sb.WriteString(userAnswer)
+	sb.WriteString("\n\nPlease continue with the task.")
+	return sb.String()
 }
 
