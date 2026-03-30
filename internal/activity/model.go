@@ -28,6 +28,8 @@ func statusANSI(status string) string {
 		return aGreen
 	case "running":
 		return aYellow
+	case "paused":
+		return aYellow
 	case "failed":
 		return aRed
 	default: // "scheduled" and anything else

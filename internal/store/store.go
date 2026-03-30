@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	_ "modernc.org/sqlite" // register the sqlite driver
 )
@@ -152,6 +153,42 @@ func (s *Store) RecentBrainNotes(ctx context.Context, runID int64, limit int) ([
 		notes = []BrainNote{}
 	}
 	return notes, nil
+}
+
+// RecoverOrphanedRuns finds runs with finished_at=NULL and exit_status=NULL
+// that do NOT have a pending (unanswered) clarification — those are legitimately
+// paused. It marks them as interrupted: exit_status=2, stderr="interrupted: orcai
+// closed while running". Returns the IDs of the rows that were updated.
+func (s *Store) RecoverOrphanedRuns() ([]int64, error) {
+	now := time.Now().UnixMilli()
+	_, err := s.db.Exec(`
+		UPDATE runs
+		SET finished_at = ?, exit_status = 2,
+		    stderr = 'interrupted: orcai closed while running'
+		WHERE finished_at IS NULL
+		  AND exit_status IS NULL
+		  AND id NOT IN (
+		      SELECT CAST(run_id AS INTEGER) FROM clarifications WHERE answer IS NULL
+		  )`, now)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Query(`
+		SELECT id FROM runs
+		WHERE exit_status = 2
+		  AND stderr = 'interrupted: orcai closed while running'
+		  AND finished_at = ?`, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		rows.Scan(&id) //nolint:errcheck
+		ids = append(ids, id)
+	}
+	return ids, nil
 }
 
 // DB returns the underlying *sql.DB for direct read queries.

@@ -71,6 +71,7 @@ type FeedStatus int
 
 const (
 	FeedRunning FeedStatus = iota
+	FeedPaused
 	FeedDone
 	FeedFailed
 )
@@ -355,6 +356,7 @@ type Model struct {
 	pendingClarificationOutput string                      // partial output up to the question
 	clarifyInput               textinput.Model
 	clarifyActive              bool
+	clarifyNeedsResume         bool // true only when loaded from DB on startup (subprocess may be dead)
 }
 
 // New creates a new Switchboard Model, discovering pipelines and providers.
@@ -745,12 +747,13 @@ func (m Model) Init() tea.Cmd {
 		go ensureCronDaemon()
 	}
 	return tea.Batch(
+		recoverOrphanedRunsCmd(m.store), // seed runs AFTER recovery completes
 		tickCmd(),
 		m.inboxModel.Init(),
 		m.themeState.Init(),
 		tryPipelineBusSubscribeCmd(),
-		seedFeedFromStoreCmd(m.store),
 		m.activityFeed.Init(),
+		loadPendingClarificationsCmd(m.store),
 	)
 }
 
@@ -950,6 +953,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.agentPrompts = msg.prompts
 		return m, nil
 
+	// ── Pending clarifications loaded from DB on startup ─────────────────────
+
+	case pendingClarificationsMsg:
+		if len(msg.reqs) > 0 {
+			m.pendingClarification = &msg.reqs[0]
+			m.pendingClarificationOutput = msg.reqs[0].Output
+			m.clarifyInput.Reset()
+			m.clarifyInput.Focus()
+			m.clarifyActive = true
+			m.clarifyNeedsResume = true // loaded from DB on startup; subprocess may be dead
+		}
+		return m, nil
+
 	// ── Dir picker messages ───────────────────────────────────────────────────
 
 	case dirWalkResultMsg:
@@ -1067,6 +1083,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	// ── orphan recovery ───────────────────────────────────────────────────
+
+	case orphanRecoveryMsg:
+		for _, id := range msg.recoveredIDs {
+			_ = activity.AppendEvent(activity.DefaultPath(), activity.ActivityEvent{
+				TS:     time.Now().Format(time.RFC3339),
+				Kind:   "pipeline_failed",
+				Agent:  fmt.Sprintf("run-%d", id),
+				Label:  "interrupted",
+				Status: "failed",
+			})
+		}
+		// Seed the signal board feed now that orphans are marked — ensures
+		// they appear as failed rather than running.
+		return m, seedFeedFromStoreCmd(m.store)
+
 	// ── pipeline busd events (tasks 7.2–7.8) ─────────────────────────────
 
 	case feedSeedMsg:
@@ -1091,8 +1123,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.clarifyInput.Reset()
 				m.clarifyInput.Focus()
 				m.clarifyActive = true
-				// Auto-navigate to inbox detail for the matching run.
-				m, _ = m.navigateToInboxRun(req.RunID)
+				m.clarifyNeedsResume = false // pipeline subprocess is alive; DB write is enough
+				// Update the signal board to show the run as paused.
+				if req.RunID != "" {
+					m = m.updateFeedEntryStatusByRunID(req.RunID, FeedPaused)
+				}
 			}
 			if m.pipelineBusCh != nil {
 				return m, tea.Batch(textinput.Blink, waitForPipelineBusEvent(m.pipelineBusCh))
@@ -1100,10 +1135,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 		}
 		m = m.handlePipelineBusEvent(msg)
+		// Also trigger an inbox refresh so new/updated runs appear immediately.
+		var inboxCmd tea.Cmd
+		m.inboxModel, inboxCmd = m.inboxModel.Update(inbox.RunCompletedMsg{})
 		if m.pipelineBusCh != nil {
-			return m, waitForPipelineBusEvent(m.pipelineBusCh)
+			return m, tea.Batch(inboxCmd, waitForPipelineBusEvent(m.pipelineBusCh))
 		}
-		return m, nil
+		return m, inboxCmd
 
 	case jobDoneMsg:
 		// Drain any remaining lines buffered in the channel before marking done.
@@ -1309,11 +1347,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	key := msg.String()
 
-	// Clarification reply input — capture all keys when active.
-	if m.clarifyActive {
+	// Clarification reply input — capture keys only when detail view is open
+	// for the pending run. When the user is navigating other panels, clarifyActive
+	// just drives the ? badge; it must not steal global navigation shortcuts.
+	if m.clarifyActive && m.inboxDetailOpen {
 		switch key {
 		case "esc":
 			m.clarifyActive = false
+			m.clarifyNeedsResume = false
 			m.pendingClarification = nil
 			m.clarifyInput.Blur()
 			m.clarifyInput.Reset()
@@ -1328,9 +1369,43 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				runID = m.pendingClarification.RunID
 			}
 			m.clarifyActive = false
+			m.clarifyNeedsResume = false
 			m.pendingClarification = nil
 			m.clarifyInput.Blur()
 			m.clarifyInput.Reset()
+
+			// Update the signal board to show the run as resuming.
+			if runID != "" {
+				m = m.updateFeedEntryStatusByRunID(runID, FeedRunning)
+			}
+
+			// Persist the answer to the DB so the polling pipeline subprocess
+			// can pick it up even if busd is not available.
+			if m.store != nil && runID != "" {
+				_ = m.store.AnswerClarification(runID, answer)
+			}
+
+			// Launch a resume job window only when the clarification was loaded
+			// from DB on startup (subprocess may be dead). When the pipeline is
+			// live (clarifyNeedsResume=false), the original subprocess is still
+			// polling the DB and will pick up the answer itself.
+			if runID != "" && m.clarifyNeedsResume {
+				cwd := ""
+				for _, r := range m.inboxModel.Runs() {
+					if strconv.FormatInt(r.ID, 10) == runID {
+						var rmeta struct {
+							CWD string `json:"cwd"`
+						}
+						_ = json.Unmarshal([]byte(r.Metadata), &rmeta)
+						cwd = rmeta.CWD
+						break
+					}
+				}
+				bin, _ := os.Executable()
+				shellCmd := fmt.Sprintf("%s pipeline resume --run-id %s", bin, runID)
+				feedID := "resume-" + runID
+				createJobWindow(feedID, shellCmd, "resume-"+runID, cwd)
+			}
 
 			// Publish reply so the blocking AskClarification call in the pipeline
 			// subprocess can unblock and continue execution with the user's answer.
@@ -3189,7 +3264,7 @@ func (m Model) filteredFeed() []feedEntry {
 		case "all", "":
 			out = append(out, e)
 		case "running":
-			if e.status == FeedRunning {
+			if e.status == FeedRunning || e.status == FeedPaused {
 				out = append(out, e)
 			}
 		case "done":
@@ -4289,6 +4364,8 @@ func statusBadge(s FeedStatus, pal styles.ANSIPalette) (string, string) {
 	switch s {
 	case FeedRunning:
 		return "▶ running", pal.Accent
+	case FeedPaused:
+		return "? awaiting reply", pal.Warn
 	case FeedDone:
 		return "✓ done", pal.Success
 	case FeedFailed:

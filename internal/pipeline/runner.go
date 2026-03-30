@@ -23,12 +23,22 @@ import (
 // RunOption configures a pipeline Run call.
 type RunOption func(*runConfig)
 
+// resumeFromConfig holds the data needed to resume a run from a checkpointed step.
+type resumeFromConfig struct {
+	runID  int64
+	stepID string
+	prompt string
+}
+
 type runConfig struct {
-	store     *store.Store
-	publisher EventPublisher
-	runID     int64
-	pipeName  string
-	injector  BrainInjector // optional brain context injector
+	store        *store.Store
+	publisher    EventPublisher
+	runID        int64
+	pipeName     string
+	injector     BrainInjector // optional brain context injector
+	resumeStepID string
+	resumePrompt string
+	resumeFrom   *resumeFromConfig
 }
 
 // WithRunStore attaches a result store to the run so results are persisted.
@@ -48,6 +58,16 @@ func WithEventPublisher(p EventPublisher) RunOption {
 // use_brain or write_brain active, the injector is used to assemble pre-context.
 func WithBrainInjector(inj BrainInjector) RunOption {
 	return func(c *runConfig) { c.injector = inj }
+}
+
+// WithResumeFrom instructs the runner to resume an existing run from a
+// checkpointed step. It skips RecordRunStart (using the original runID),
+// re-hydrates ExecutionContext from prior step checkpoints, and resumes
+// execution at stepID with followUpPrompt as the prompt.
+func WithResumeFrom(runID int64, stepID, followUpPrompt string) RunOption {
+	return func(c *runConfig) {
+		c.resumeFrom = &resumeFromConfig{runID: runID, stepID: stepID, prompt: followUpPrompt}
+	}
 }
 
 // StepStatusLineFormat is the format string for structured step-status log lines.
@@ -100,8 +120,14 @@ func Run(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput string
 	cfg.pipeName = p.Name
 
 	// Record run start in the store (nil-safe).
+	// When resuming an existing run, skip RecordRunStart and re-use the original runID.
 	startedAt := time.Now()
-	if cfg.store != nil {
+	if cfg.resumeFrom != nil {
+		// Resume path: inherit the original run ID and step/prompt from config.
+		cfg.runID = cfg.resumeFrom.runID
+		cfg.resumeStepID = cfg.resumeFrom.stepID
+		cfg.resumePrompt = cfg.resumeFrom.prompt
+	} else if cfg.store != nil {
 		meta := ""
 		if cwd, err := os.Getwd(); err == nil && cwd != "" {
 			if b, err := json.Marshal(map[string]string{"cwd": cwd}); err == nil {
@@ -219,6 +245,23 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 		ec.Set("param."+k, v)
 	}
 
+	// Re-hydrate ExecutionContext from completed step checkpoints when resuming.
+	// This restores all {{stepID.out}} interpolation values that were set by prior steps.
+	if cfg.resumeFrom != nil && cfg.store != nil {
+		checkpoints, _ := cfg.store.LoadStepCheckpoints(cfg.resumeFrom.runID)
+		for _, cp := range checkpoints {
+			if cp.Status != "done" {
+				continue
+			}
+			var vars map[string]string
+			if err := json.Unmarshal([]byte(cp.VarsJSON), &vars); err == nil {
+				for k, v := range vars {
+					ec.Set(k, v)
+				}
+			}
+		}
+	}
+
 	byID := make(map[string]*Step, len(p.Steps))
 	order := make([]string, 0, len(p.Steps))
 	for i := range p.Steps {
@@ -232,6 +275,14 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 	lastOutput := userInput
 	var lastPluginOutput string
 
+	// resumeStarted tracks whether we have reached the resume step yet.
+	// When cfg.resumeStepID is set, we skip all steps before the matching one.
+	resumeStarted := cfg.resumeStepID == ""
+	var forceInput string
+
+	// stepIdx counts plugin steps executed (used for checkpoint ordering).
+	stepIdx := 0
+
 	for len(queue) > 0 {
 		id := queue[0]
 		queue = queue[1:]
@@ -244,6 +295,15 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 		step, ok := byID[id]
 		if !ok {
 			return "", fmt.Errorf("pipeline: unknown step id %q", id)
+		}
+
+		// Resume support: skip steps before the target step.
+		if !resumeStarted {
+			if step.ID != cfg.resumeStepID {
+				continue
+			}
+			resumeStarted = true
+			forceInput = cfg.resumePrompt
 		}
 
 		switch step.Type {
@@ -271,8 +331,15 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 			legacySnap := ec.Snapshot()
 			rawPrompt := Interpolate(step.Prompt+step.Input, legacySnap)
 
+			// Write-ahead checkpoint before executing.
+			if cfg.store != nil {
+				_ = cfg.store.StartStepCheckpoint(cfg.runID, step.ID, stepIdx, rawPrompt, step.Model)
+			}
+			stepIdx++
+
 			stepStart := time.Now()
-			output, err := executePluginStep(ctx, step, ec, mgr, lastOutput, p, cfg.store, cfg.runID)
+			output, err := executePluginStep(ctx, step, ec, mgr, lastOutput, p, cfg.store, cfg.runID, forceInput)
+			forceInput = "" // only applies to the resume step
 			stepDurationMs := time.Since(stepStart).Milliseconds()
 
 			if err != nil {
@@ -298,6 +365,7 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 						DurationMs: stepDurationMs,
 					}
 					_ = cfg.store.RecordStepComplete(ctx, cfg.runID, rec)
+					_ = cfg.store.CompleteStepCheckpoint(cfg.runID, step.ID, "failed", "", nil, stepDurationMs)
 				}
 				return "", fmt.Errorf("pipeline: step %q: %w", step.ID, err)
 			}
@@ -335,6 +403,7 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 					Output:     outMap,
 				}
 				_ = cfg.store.RecordStepComplete(ctx, cfg.runID, rec)
+				_ = cfg.store.CompleteStepCheckpoint(cfg.runID, step.ID, "done", output, ec.FlatStrings(), stepDurationMs)
 			}
 
 			// publish_to: if the step has a publish_to topic, publish its output.
@@ -411,10 +480,12 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 
 	// Index steps and initialize state.
 	byID := make(map[string]*Step, len(steps))
+	stepIndexByID := make(map[string]int, len(steps))
 	states := make(map[string]*stepState, len(steps))
 	for i := range steps {
 		s := &steps[i]
 		byID[s.ID] = s
+		stepIndexByID[s.ID] = i
 		st := &stepState{status: statusWaiting}
 		st.pendingDeps.Store(int32(len(s.Needs)))
 		states[s.ID] = st
@@ -521,6 +592,11 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 			// Resolve the configured prompt for inbox display (pre-brain-injection).
 			rawPrompt := Interpolate(step.Prompt+step.Input, snap)
 
+			// Write-ahead checkpoint before executing.
+			if cfg.store != nil {
+				_ = cfg.store.StartStepCheckpoint(cfg.runID, step.ID, stepIndexByID[step.ID], rawPrompt, step.Model)
+			}
+
 			stepStart := time.Now()
 			out, execErr := dispatchStep(ctx, step, args, snap, ec, mgr, cfg.runID, cfg.pipeName, cfg.publisher, p, cfg.store)
 			stepDurationMs := time.Since(stepStart).Milliseconds()
@@ -610,6 +686,7 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 						DurationMs: res.durationMs,
 					}
 					_ = cfg.store.RecordStepComplete(ctx, cfg.runID, rec)
+					_ = cfg.store.CompleteStepCheckpoint(cfg.runID, res.id, "failed", "", nil, res.durationMs)
 				}
 
 				// Skip transitive dependents. Send synthetic completions for each
@@ -673,6 +750,13 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 						Output:     res.output,
 					}
 					_ = cfg.store.RecordStepComplete(ctx, cfg.runID, rec)
+					outStr := ""
+					if res.output != nil {
+						if v, ok := res.output["value"]; ok {
+							outStr = fmt.Sprint(v)
+						}
+					}
+					_ = cfg.store.CompleteStepCheckpoint(cfg.runID, res.id, "done", outStr, ec.FlatStrings(), res.durationMs)
 				}
 
 				if res.output != nil {
@@ -945,10 +1029,28 @@ func dispatchStep(ctx context.Context, step *Step, args map[string]any, snap map
 			detector := clarify.Get(typeName)
 			for _, line := range strings.Split(valueStr, "\n") {
 				if q, found := detector.Detect(line); found {
-					answer, cerr := AskClarification(ctx, strconv.FormatInt(runID, 10), q, valueStr)
+					// Mark the step as paused waiting for clarification.
+					if st != nil {
+						_ = st.PauseStepCheckpoint(runID, step.ID)
+					}
+					_ = activity.AppendEvent(activity.DefaultPath(), activity.ActivityEvent{
+						TS:     time.Now().Format(time.RFC3339),
+						Kind:   "pipeline_paused",
+						Agent:  step.ID,
+						Label:  "waiting for reply",
+						Status: "paused",
+					})
+					answer, cerr := AskClarification(ctx, strconv.FormatInt(runID, 10), step.ID, q, valueStr)
 					if cerr == nil && answer != "" {
+						_ = activity.AppendEvent(activity.DefaultPath(), activity.ActivityEvent{
+							TS:     time.Now().Format(time.RFC3339),
+							Kind:   "pipeline_running",
+							Agent:  step.ID,
+							Label:  "clarification answered — resuming",
+							Status: "running",
+						})
 						// Build follow-up: assistant response + user answer, then re-run.
-						followUp := buildClarificationFollowUp(valueStr, answer)
+						followUp := BuildClarificationFollowUp(valueStr, answer)
 						if pl, ok := mgr.Get(typeName); ok {
 							stepVars := ec.FlatStrings()
 							stepVars["model"] = step.Model
@@ -1108,7 +1210,9 @@ func (b *builtinExecutor) Cleanup(_ context.Context) error { return nil }
 
 // executePluginStep runs a single plugin step and returns its string output.
 // This is used by the legacy runner only.
-func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mgr *plugin.Manager, defaultInput string, p *Pipeline, st *store.Store, runID int64) (string, error) {
+// forceInput, when non-empty, overrides step.Prompt/step.Input completely
+// (used when resuming from a clarification answer).
+func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mgr *plugin.Manager, defaultInput string, p *Pipeline, st *store.Store, runID int64, forceInput string) (string, error) {
 	pluginName := step.Executor
 	if pluginName == "" {
 		pluginName = step.Plugin
@@ -1121,9 +1225,14 @@ func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mg
 
 	snap := ec.Snapshot()
 
-	raw := step.Prompt + step.Input
-	if raw == "" {
-		raw = defaultInput
+	var raw string
+	if forceInput != "" {
+		raw = forceInput
+	} else {
+		raw = step.Prompt + step.Input
+		if raw == "" {
+			raw = defaultInput
+		}
 	}
 	promptOrInput := Interpolate(raw, snap)
 
@@ -1162,9 +1271,27 @@ func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mg
 		detector := clarify.Get(pluginName)
 		for _, line := range strings.Split(output, "\n") {
 			if q, found := detector.Detect(line); found {
-				answer, cerr := AskClarification(ctx, strconv.FormatInt(runID, 10), q, output)
+				// Mark the step as paused waiting for clarification.
+				if st != nil {
+					_ = st.PauseStepCheckpoint(runID, step.ID)
+				}
+				_ = activity.AppendEvent(activity.DefaultPath(), activity.ActivityEvent{
+					TS:     time.Now().Format(time.RFC3339),
+					Kind:   "pipeline_paused",
+					Agent:  step.ID,
+					Label:  "waiting for reply",
+					Status: "paused",
+				})
+				answer, cerr := AskClarification(ctx, strconv.FormatInt(runID, 10), step.ID, q, output)
 				if cerr == nil && answer != "" {
-					followUp := buildClarificationFollowUp(output, answer)
+					_ = activity.AppendEvent(activity.DefaultPath(), activity.ActivityEvent{
+						TS:     time.Now().Format(time.RFC3339),
+						Kind:   "pipeline_running",
+						Agent:  step.ID,
+						Label:  "clarification answered — resuming",
+						Status: "running",
+					})
+					followUp := BuildClarificationFollowUp(output, answer)
 					var buf2 bytes.Buffer
 					execErr = pl.Execute(ctx, followUp, stepVars, &buf2)
 					output = buf2.String()
@@ -1209,10 +1336,10 @@ func filterOut(ss []string, remove string) []string {
 	return out
 }
 
-// buildClarificationFollowUp builds the conversation context to send for the
+// BuildClarificationFollowUp builds the conversation context to send for the
 // follow-up execution after a clarification exchange. It appends the user's
 // answer after the assistant's response so the executor has full context.
-func buildClarificationFollowUp(assistantResponse, userAnswer string) string {
+func BuildClarificationFollowUp(assistantResponse, userAnswer string) string {
 	var sb strings.Builder
 	sb.WriteString(assistantResponse)
 	sb.WriteString("\n\n---\nUser: ")

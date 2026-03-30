@@ -21,7 +21,43 @@ import (
 	"github.com/adam-stokes/orcai/internal/store"
 )
 
+// ── orphan recovery ───────────────────────────────────────────────────────────
+
+// orphanRecoveryMsg is returned by recoverOrphanedRunsCmd with the IDs of
+// runs that were marked interrupted on startup.
+type orphanRecoveryMsg struct{ recoveredIDs []int64 }
+
+// recoverOrphanedRunsCmd marks any runs that were left in-flight when orcai
+// last closed (finished_at=NULL, exit_status=NULL, no pending clarification)
+// as interrupted. Safe to call with a nil store.
+func recoverOrphanedRunsCmd(st *store.Store) tea.Cmd {
+	return func() tea.Msg {
+		if st == nil {
+			return orphanRecoveryMsg{}
+		}
+		ids, _ := st.RecoverOrphanedRuns()
+		return orphanRecoveryMsg{recoveredIDs: ids}
+	}
+}
+
 // ── agent run event publishing ────────────────────────────────────────────────
+
+// pendingClarificationsMsg carries pending clarification requests loaded from
+// the DB on TUI startup.
+type pendingClarificationsMsg struct{ reqs []store.ClarificationRequest }
+
+// loadPendingClarificationsCmd returns a tea.Cmd that queries the store for
+// any unanswered clarification requests and delivers them as a
+// pendingClarificationsMsg. Safe to call with a nil store.
+func loadPendingClarificationsCmd(st *store.Store) tea.Cmd {
+	if st == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		reqs, _ := st.LoadPendingClarifications()
+		return pendingClarificationsMsg{reqs: reqs}
+	}
+}
 
 // publishClarificationReplyCmd returns a tea.Cmd that publishes a
 // ClarificationReply event on the bus so the blocking AskClarification call in
@@ -83,9 +119,9 @@ func (m Model) evictFeedIfNeeded() Model {
 	if len(m.feed) <= feedMaxCap {
 		return m
 	}
-	// Walk from the oldest end (tail) looking for a non-running entry.
+	// Walk from the oldest end (tail) looking for a non-running/non-paused entry.
 	for i := len(m.feed) - 1; i >= 0; i-- {
-		if m.feed[i].status != FeedRunning {
+		if m.feed[i].status != FeedRunning && m.feed[i].status != FeedPaused {
 			m.feed = append(m.feed[:i], m.feed[i+1:]...)
 			return m
 		}
@@ -112,13 +148,28 @@ func seedFeedFromStoreCmd(s *store.Store) tea.Cmd {
 		if err != nil || len(runs) == 0 {
 			return nil
 		}
+
+		// Build a set of run IDs that have a pending (unanswered) clarification
+		// so we can seed them as FeedPaused instead of FeedRunning.
+		pausedRunIDs := make(map[string]struct{})
+		if pending, perr := s.LoadPendingClarifications(); perr == nil {
+			for _, req := range pending {
+				pausedRunIDs[req.RunID] = struct{}{}
+			}
+		}
+
 		entries := make([]feedEntry, 0, len(runs))
 		for _, r := range runs {
+			runIDStr := fmt.Sprintf("%d", r.ID)
 			status := FeedDone
 			if r.ExitStatus != nil && *r.ExitStatus != 0 {
 				status = FeedFailed
 			} else if r.ExitStatus == nil {
-				status = FeedRunning
+				if _, paused := pausedRunIDs[runIDStr]; paused {
+					status = FeedPaused
+				} else {
+					status = FeedRunning
+				}
 			}
 			e := feedEntry{
 				id:     fmt.Sprintf("run-%d", r.ID),
@@ -413,6 +464,13 @@ func (m Model) updateFeedEntryStatus(id string, status FeedStatus) Model {
 		}
 	}
 	return m
+}
+
+// updateFeedEntryStatusByRunID sets the FeedStatus of the entry whose id is
+// "run-<runID>". Useful when only the numeric run ID string is available (e.g.
+// from ClarificationRequested payloads).
+func (m Model) updateFeedEntryStatusByRunID(runID string, status FeedStatus) Model {
+	return m.updateFeedEntryStatus("run-"+runID, status)
 }
 
 // settleRunningSteps updates all steps in the feed entry that are still in

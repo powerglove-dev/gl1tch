@@ -279,30 +279,12 @@ func (m Model) viewInboxDetail(w, h int, markdownMode bool) string {
 		rows = append(rows, boxRow("", boxW, pal.Border))
 	}
 
-	markCount := len(m.inboxDetailMarked)
-	var dispatchHint panelrender.Hint
-	if markCount > 0 {
-		dispatchHint = panelrender.Hint{Key: "r", Desc: fmt.Sprintf("dispatch (%d)", markCount)}
-	} else {
-		dispatchHint = panelrender.Hint{Key: "r", Desc: "dispatch"}
-	}
-	markDesc := "mark"
-	switch m.inboxMarkMode {
-	case MarkModeActive:
-		markDesc = "pause"
-	case MarkModePaused:
-		markDesc = "resume"
-	}
 	hintList := []panelrender.Hint{
 		{Key: "j/k", Desc: "scroll"},
 		{Key: "n/p", Desc: "next/prev"},
-		{Key: "m", Desc: markDesc},
+		{Key: "e", Desc: "editor"},
+		{Key: "q", Desc: "close"},
 	}
-	if m.inboxMarkMode != MarkModeOff {
-		hintList = append(hintList, panelrender.Hint{Key: "A", Desc: "mark all"})
-		hintList = append(hintList, panelrender.Hint{Key: "D", Desc: "clear"})
-	}
-	hintList = append(hintList, dispatchHint, panelrender.Hint{Key: "e", Desc: "editor"}, panelrender.Hint{Key: "M", Desc: "md"}, panelrender.Hint{Key: "q", Desc: "close"})
 
 	// When this run has a pending clarification, append the reply section.
 	if m.clarifyActive && m.pendingClarification != nil {

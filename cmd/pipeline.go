@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -20,6 +22,9 @@ func init() {
 	rootCmd.AddCommand(pipelineCmd)
 	pipelineCmd.AddCommand(pipelineBuildCmd)
 	pipelineCmd.AddCommand(pipelineRunCmd)
+	pipelineCmd.AddCommand(pipelineResumeCmd)
+	pipelineResumeCmd.Flags().Int64Var(&pipelineResumeRunID, "run-id", 0, "Store run ID to resume")
+	_ = pipelineResumeCmd.MarkFlagRequired("run-id")
 }
 
 var pipelineCmd = &cobra.Command{
@@ -146,4 +151,102 @@ func orcaiConfigDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".config", "orcai"), nil
+}
+
+var pipelineResumeRunID int64
+
+var pipelineResumeCmd = &cobra.Command{
+	Use:   "resume",
+	Short: "Resume a pipeline that is paused waiting for a clarification answer",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		s, err := store.Open()
+		if err != nil {
+			return fmt.Errorf("resume: open store: %w", err)
+		}
+		defer s.Close()
+
+		runIDStr := strconv.FormatInt(pipelineResumeRunID, 10)
+		clarif, err := s.LoadClarificationForRun(runIDStr)
+		if err != nil {
+			return fmt.Errorf("resume: load clarification: %w", err)
+		}
+		if clarif == nil {
+			return fmt.Errorf("resume: no pending clarification found for run %d", pipelineResumeRunID)
+		}
+		if clarif.Answer == "" {
+			return fmt.Errorf("resume: clarification for run %d has no answer yet", pipelineResumeRunID)
+		}
+
+		run, err := s.GetRun(pipelineResumeRunID)
+		if err != nil {
+			return fmt.Errorf("resume: load run: %w", err)
+		}
+
+		// Parse pipeline_file and cwd from run metadata.
+		type runMeta struct {
+			PipelineFile string `json:"pipeline_file"`
+			CWD          string `json:"cwd"`
+		}
+		var meta runMeta
+		_ = json.Unmarshal([]byte(run.Metadata), &meta)
+		if meta.PipelineFile == "" {
+			return fmt.Errorf("resume: run %d has no pipeline_file in metadata", pipelineResumeRunID)
+		}
+
+		f, err := os.Open(meta.PipelineFile)
+		if err != nil {
+			return fmt.Errorf("resume: open pipeline %q: %w", meta.PipelineFile, err)
+		}
+		defer f.Close()
+
+		p, err := pipeline.Load(f)
+		if err != nil {
+			return fmt.Errorf("resume: load pipeline: %w", err)
+		}
+
+		// Build the executor manager (same as pipelineRunCmd).
+		runProviders := picker.BuildProviders()
+		mgr := plugin.NewManager()
+		for _, prov := range runProviders {
+			if prov.SidecarPath != "" {
+				continue
+			}
+			binary := prov.Command
+			if binary == "" {
+				binary = prov.ID
+			}
+			if err := mgr.Register(plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", binary, prov.PipelineArgs...)); err != nil {
+				fmt.Fprintf(os.Stderr, "resume: register provider %q: %v\n", prov.ID, err)
+			}
+		}
+		wrappersConfigDir, _ := orcaiConfigDir()
+		if wrappersConfigDir != "" {
+			if errs := mgr.LoadWrappersFromDir(filepath.Join(wrappersConfigDir, "wrappers")); len(errs) > 0 {
+				for _, e := range errs {
+					fmt.Fprintf(os.Stderr, "resume: sidecar load warning: %v\n", e)
+				}
+			}
+		}
+
+		followUp := pipeline.BuildClarificationFollowUp(clarif.Output, clarif.Answer)
+
+		// Delete clarification before running to prevent re-entrant resumes.
+		_ = s.DeleteClarification(runIDStr)
+
+		var runOpts []pipeline.RunOption
+		runOpts = append(runOpts, pipeline.WithRunStore(s))
+		runOpts = append(runOpts, pipeline.WithResumeFrom(pipelineResumeRunID, clarif.StepID, followUp))
+		if pub := newBusPublisher(); pub != nil {
+			runOpts = append(runOpts, pipeline.WithEventPublisher(pub))
+		}
+
+		fmt.Printf("[pipeline] resuming run %d from step %q\n", pipelineResumeRunID, clarif.StepID)
+		result, err := pipeline.Run(cmd.Context(), p, mgr, "", runOpts...)
+		if err != nil {
+			return err
+		}
+
+		fmt.Println(result)
+		return nil
+	},
 }

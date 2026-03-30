@@ -1,16 +1,13 @@
 package pipeline
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
-	"net"
 	"time"
 
 	"github.com/adam-stokes/orcai/internal/busd"
 	"github.com/adam-stokes/orcai/internal/busd/topics"
-	"github.com/adam-stokes/orcai/internal/store"
+	store "github.com/adam-stokes/orcai/internal/store"
 )
 
 // clarificationTimeout is the maximum time AskClarification will block before
@@ -18,86 +15,67 @@ import (
 // enough that a forgotten run does not hang indefinitely.
 const clarificationTimeout = 10 * time.Minute
 
-// AskClarification publishes a ClarificationRequest event on the bus, then
-// blocks until a matching ClarificationReply arrives or the context (or the
-// built-in clarificationTimeout) expires. The caller injects the returned
-// answer string into the conversation context and resumes execution.
+// AskClarification persists a ClarificationRequest to the DB, publishes a
+// best-effort live notification on busd, then polls the DB every 2 seconds
+// until the TUI writes an answer or the context (or clarificationTimeout) expires.
 //
 // runID must be the string representation of the store run ID so the TUI can
-// correlate the reply with the correct panel. output is the partial pipeline
-// output accumulated up to the point the question was detected.
-func AskClarification(ctx context.Context, runID, question, output string) (string, error) {
-	sockPath, err := busd.SocketPath()
+// correlate the reply with the correct panel. stepID identifies the pipeline
+// step that raised the question (used when resuming after a TUI restart).
+// output is the partial pipeline output accumulated up to the point the
+// question was detected.
+func AskClarification(ctx context.Context, runID, stepID, question, output string) (string, error) {
+	st, err := store.Open()
 	if err != nil {
-		return "", fmt.Errorf("clarification: resolve socket path: %w", err)
+		return "", fmt.Errorf("clarification: open store: %w", err)
+	}
+	defer st.Close()
+
+	// Persist the question so it survives TUI restarts.
+	if err := st.SaveClarification(runID, stepID, question, output); err != nil {
+		return "", fmt.Errorf("clarification: save clarification: %w", err)
 	}
 
-	// Publish the request so the TUI can surface it.
+	// Publish a live notification so the TUI can surface it immediately.
+	// This is best-effort — if busd is down we proceed with DB polling only.
 	req := store.ClarificationRequest{
 		RunID:    runID,
+		StepID:   stepID,
 		Question: question,
 		AskedAt:  time.Now(),
 		Output:   output,
 	}
-	if err := busd.PublishEvent(sockPath, topics.ClarificationRequested, req); err != nil {
-		return "", fmt.Errorf("clarification: publish request: %w", err)
+	if sockPath, sockErr := busd.SocketPath(); sockErr == nil {
+		_ = busd.PublishEvent(sockPath, topics.ClarificationRequested, req)
 	}
 
-	// Open a second connection to subscribe for the reply.
-	conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond)
-	if err != nil {
-		return "", fmt.Errorf("clarification: subscribe for reply: %w", err)
-	}
-	defer conn.Close()
-
-	reg, _ := json.Marshal(map[string]any{
-		"name":      fmt.Sprintf("clarification-waiter-%s", runID),
-		"subscribe": []string{topics.ClarificationReply},
-	})
-	if _, err := conn.Write(append(reg, '\n')); err != nil {
-		return "", fmt.Errorf("clarification: register subscription: %w", err)
-	}
-
-	// Apply a hard deadline so the connection is not open indefinitely.
+	// Poll the DB every 2 seconds for the answer.
 	deadline := time.Now().Add(clarificationTimeout)
 	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
 		deadline = dl
 	}
-	conn.SetReadDeadline(deadline) //nolint:errcheck
 
-	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
 		select {
 		case <-ctx.Done():
+			_ = st.DeleteClarification(runID)
 			return "", ctx.Err()
-		default:
+		case <-ticker.C:
+			if time.Now().After(deadline) {
+				_ = st.DeleteClarification(runID)
+				return "", fmt.Errorf("clarification: timed out waiting for user reply")
+			}
+			answer, found, pollErr := st.PollClarificationAnswer(runID)
+			if pollErr != nil {
+				return "", fmt.Errorf("clarification: poll error: %w", pollErr)
+			}
+			if found {
+				_ = st.DeleteClarification(runID)
+				return answer, nil
+			}
 		}
-
-		var frame struct {
-			Event   string          `json:"event"`
-			Payload json.RawMessage `json:"payload"`
-		}
-		if err := json.Unmarshal(scanner.Bytes(), &frame); err != nil {
-			continue
-		}
-		if frame.Event != topics.ClarificationReply {
-			continue
-		}
-		var reply store.ClarificationReply
-		if err := json.Unmarshal(frame.Payload, &reply); err != nil {
-			continue
-		}
-		if reply.RunID != runID {
-			continue
-		}
-		return reply.Answer, nil
 	}
-
-	if err := scanner.Err(); err != nil {
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			return "", fmt.Errorf("clarification: timed out waiting for user reply")
-		}
-		return "", fmt.Errorf("clarification: read error: %w", err)
-	}
-	return "", fmt.Errorf("clarification: connection closed before reply arrived")
 }

@@ -171,6 +171,7 @@ func New(s *store.Store, bundle *themes.Bundle) Model {
 // bus subscription.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
+		func() tea.Msg { return tickMsg{} }, // immediate initial load
 		tryBusSubscribeCmd(),
 		m.scheduleNextTick(),
 	)
@@ -272,7 +273,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case busConnectMsg:
 		m.busConnected = true
 		m.busCh = msg.ch
-		return m, waitForBusEvent(m.busCh)
+		m2, cmds := m.refreshRuns()
+		return m2, tea.Batch(cmds, waitForBusEvent(m2.busCh))
 
 	case busEventMsg:
 		// A pipeline.run.* event arrived — refresh immediately and re-arm.

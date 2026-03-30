@@ -224,6 +224,8 @@ func (m Model) buildSignalBoard(height, width int) []string {
 				} else {
 					led = pal.Dim + "●" + aRst
 				}
+			case FeedPaused:
+				led = pal.Warn + "?" + aRst
 			case FeedDone:
 				led = pal.Success + "●" + aRst
 			case FeedFailed:
@@ -236,6 +238,8 @@ func (m Model) buildSignalBoard(height, width int) []string {
 			switch entry.status {
 			case FeedRunning:
 				statusLabel = pal.Accent + "running" + aRst
+			case FeedPaused:
+				statusLabel = pal.Warn + "reply?" + aRst
 			case FeedDone:
 				statusLabel = pal.Success + "done" + aRst
 			case FeedFailed:
