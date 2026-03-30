@@ -73,7 +73,7 @@ tasks:
       - "{{.BINARY}}"
 
   dev:
-    desc: "New-user clean build: backup+wipe config/data/binaries, rebuild from source (run manually)"
+    desc: "New-user clean build: backup+wipe config/data/binaries, rebuild from source, fetch APM agents (run manually)"
     cmds:
       - tmux detach-client -s orcai 2>/dev/null || true
       - tmux kill-session -t orcai 2>/dev/null || true
@@ -92,6 +92,13 @@ tasks:
       - rm -f bin/{{.BINARY}} bin/{{.BINARY}}-debug
       - mkdir -p bin
       - go build -o bin/{{.BINARY}} .
+      - |
+        if command -v apm >/dev/null 2>&1 && [ -f apm.yml ]; then
+          echo "Fetching APM agents..."
+          apm install && apm compile
+        else
+          echo "APM not installed or apm.yml not found — skipping agent fetch (run: task apm:install && task apm:fetch)"
+        fi
 
   prod:
     desc: "Daily driver: install fresh build from source to GOPATH/bin and ~/.local/bin (run manually)"
@@ -126,6 +133,40 @@ tasks:
     deps: [debug-build]
     cmds:
       - bash {{.ROOT_DIR}}/scripts/debug-tmux.sh
+
+  # ---------------------------------------------------------------------------
+  # APM — Agent Package Manager tasks
+  # ---------------------------------------------------------------------------
+
+  apm:install:
+    desc: "Install APM CLI (curl installer; idempotent — skips if already at latest)"
+    cmds:
+      - |
+        if command -v apm >/dev/null 2>&1; then
+          echo "APM already installed: $(apm --version)"
+        else
+          echo "Installing APM CLI..."
+          curl -sSL https://aka.ms/apm-unix | sh
+          echo "APM installed: $(apm --version)"
+        fi
+
+  apm:update:
+    desc: "Update APM CLI to the latest version"
+    cmds:
+      - curl -sSL https://aka.ms/apm-unix | sh
+      - echo "APM updated: $(apm --version)"
+
+  apm:fetch:
+    desc: "Install all agent dependencies from apm.yml and compile tool-native files"
+    cmds:
+      - apm install
+      - apm compile
+      - echo "APM agents ready — see .claude/agents/ for deployed files"
+
+  apm:audit:
+    desc: "Audit all APM packages for dangerous Unicode patterns"
+    cmds:
+      - apm audit
 
   # ---------------------------------------------------------------------------
   # Release tasks
