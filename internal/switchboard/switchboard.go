@@ -1653,10 +1653,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			if len(runs) > 0 && m.inboxPanel.selectedIdx >= 0 && m.inboxPanel.selectedIdx < len(runs) {
 				run := runs[m.inboxPanel.selectedIdx]
 				rm := modal.NewRerunModal(run, m.agent.providers, m.launchCWD)
-				if run.Kind == "agent" {
-					if slug := agentRunModelSlug(run.Name); slug != "" {
-						rm = rm.WithModelSlug(slug)
-					}
+				// agentRunModelSlug looks in .agents/; returns "" for regular pipelines.
+				if slug := agentRunModelSlug(run.Name); slug != "" {
+					rm = rm.WithModelSlug(slug)
 				}
 				m.rerunModal = rm
 				m.showRerun = true
@@ -2875,9 +2874,17 @@ func (m Model) submitRerun(msg modal.RerunConfirmedMsg) (Model, tea.Cmd) {
 	default: // "pipeline" and any future kinds
 		// Prefer the stored path; fall back to the conventional location derived
 		// from the run name (pipeline runner only stores cwd, not the file path).
+		// Resolve YAML path: prefer stored metadata, then root pipelines dir,
+		// then .agents/ subdir (agent-panel runs stored as "pipeline" kind).
 		yamlPath := meta.PipelineFile
 		if yamlPath == "" {
-			yamlPath = filepath.Join(pipelinesDir(), run.Name+".pipeline.yaml")
+			root := filepath.Join(pipelinesDir(), run.Name+".pipeline.yaml")
+			agents := filepath.Join(pipelinesDir(), ".agents", run.Name+".pipeline.yaml")
+			if _, err := os.Stat(root); err == nil {
+				yamlPath = root
+			} else {
+				yamlPath = agents
+			}
 		}
 		if _, err := os.Stat(yamlPath); err != nil {
 			m = m.prependFeedEntry(feedEntry{
