@@ -1,0 +1,48 @@
+# apm.yml — ORCAI Agent Package Manager manifest
+#
+# Declare all AI agent, skill, prompt, and instruction dependencies here.
+# APM resolves and deploys these to .claude/agents/, .claude/commands/, etc.
+#
+# Usage:
+#   task apm:install   install APM CLI
+#   task apm:fetch     install all deps + compile tool-native files
+#   task apm:update    update APM CLI to latest
+#
+# Commit: apm.yml, apm.lock.yaml, .claude/agents/, .apm/
+# Ignore: apm_modules/
+
+name: orcai
+version: 1.0.0
+description: >
+  ORCAI — the Agentic Bulletin Board System.
+  AI workspace orchestrator backed by tmux and BubbleTea TUI.
+
+dependencies:
+  apm:
+    # ── Core coding agents ───────────────────────────────────────────────────
+    # API architecture advisor — reviews REST/gRPC surface design
+    # Placeholder: replace owner/repo with the actual published package once available.
+    # - github/awesome-copilot/agents/api-architect.agent.md
+
+    # Go code reviewer — idiomatic Go patterns and best practices
+    # - owner/repo/agents/go-reviewer.agent.md#v1.0.0
+
+    # ── Orcai-specific agents (authored in .apm/agents/) ─────────────────────
+    # Local agent definitions live in .apm/agents/ and are included here
+    # so APM tracks them in the lockfile and deploys to .claude/agents/.
+    # Uncomment when a local agent is added:
+    # - ./apm/agents/orcai-sysop.agent.md
+
+    # ── Skills (prompt templates) ─────────────────────────────────────────────
+    # Uncomment to pull community skill packs:
+    # - anthropics/skills/skills/frontend-design
+    # - anthropics/skills/skills/golang-patterns
+
+  mcp:
+    # ── MCP servers ──────────────────────────────────────────────────────────
+    # Uncomment to enable GitHub MCP integration:
+    # - name: io.github.github/github-mcp-server
+    #   transport: stdio
+    #   env:
+    #     GITHUB_TOKEN: "${GITHUB_TOKEN}"
+    #   tools: ["repos", "issues", "pull_requests", "code_search"]
