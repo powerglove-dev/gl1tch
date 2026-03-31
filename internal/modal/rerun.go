@@ -12,6 +12,7 @@ import (
 	"github.com/adam-stokes/orcai/internal/picker"
 	"github.com/adam-stokes/orcai/internal/store"
 	"github.com/adam-stokes/orcai/internal/styles"
+	"github.com/adam-stokes/orcai/internal/translations"
 )
 
 type rerunFocus int
@@ -216,14 +217,22 @@ func (m RerunModal) ViewBox(w, h int, pal styles.ANSIPalette) string {
 	}
 
 	// ── Additional context ───────────────────────────────────────────────────
-	rows = append(rows, panelrender.BoxRow(active("ADDITIONAL CONTEXT", rerunFocusContext), w, pal.Border))
+	contextLabel := "ADDITIONAL CONTEXT"
+	if p := translations.GlobalProvider(); p != nil {
+		contextLabel = p.T(translations.KeyRerunContextLabel, contextLabel)
+	}
+	rows = append(rows, panelrender.BoxRow(active(contextLabel, rerunFocusContext), w, pal.Border))
 	for line := range strings.SplitSeq(m.textarea.View(), "\n") {
 		rows = append(rows, panelrender.BoxRow("  "+line, w, pal.Border))
 	}
 	rows = append(rows, panelrender.BoxRow("", w, pal.Border))
 
 	// ── Working directory ────────────────────────────────────────────────────
-	rows = append(rows, panelrender.BoxRow(active("WORKING DIRECTORY", rerunFocusCWD), w, pal.Border))
+	cwdLabel := "WORKING DIRECTORY"
+	if p := translations.GlobalProvider(); p != nil {
+		cwdLabel = p.T(translations.KeyRerunCwdLabel, cwdLabel)
+	}
+	rows = append(rows, panelrender.BoxRow(active(cwdLabel, rerunFocusCWD), w, pal.Border))
 	rows = append(rows, panelrender.BoxRow("  "+m.cwdInput.View(), w, pal.Border))
 	rows = append(rows, panelrender.BoxRow("", w, pal.Border))
 

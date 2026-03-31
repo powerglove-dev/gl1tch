@@ -83,6 +83,11 @@ type Bundle struct {
 	// Empty string uses the default ▄/▀ block character rendering.
 	HeaderPattern string `yaml:"header_pattern"`
 
+	// Strings holds optional per-theme UI string overrides. These sit between
+	// the user's translations.yaml and the built-in defaults in the provider
+	// chain, letting theme authors ship copy that matches their aesthetic.
+	// Keys match the constants in the translations package.
+	Strings map[string]string `yaml:"strings"`
 }
 
 // Palette holds the seven canonical color slots for a theme.

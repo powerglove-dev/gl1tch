@@ -271,7 +271,11 @@ func QuitConfirmBox(pal styles.ANSIPalette, title, message string, screenW int) 
 		boxW = screenW - 4
 	}
 	if message == "" {
-		message = "Are you sure?"
+		if p := translations.GlobalProvider(); p != nil {
+			message = p.T(translations.KeyQuitConfirmMessage, "Are you sure?")
+		} else {
+			message = "Are you sure?"
+		}
 	}
 	hints := HintBar([]Hint{
 		{Key: "y", Desc: "confirm quit"},

@@ -25,3 +25,16 @@ func SetGlobalProvider(p Provider) {
 	defer global.mu.Unlock()
 	global.p = p
 }
+
+// RebuildChain constructs the standard three-layer provider chain and sets it
+// as the global provider. Call this at startup and whenever the active theme
+// changes (passing the new theme's Strings map).
+//
+// Priority: user ~/.config/orcai/translations.yaml > themeStrings > defaults.
+func RebuildChain(themeStrings map[string]string) {
+	SetGlobalProvider(NewChain(
+		NewYAMLProvider(),
+		NewMapProvider(themeStrings),
+		NewDefaultProvider(),
+	))
+}

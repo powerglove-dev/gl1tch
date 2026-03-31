@@ -11,6 +11,7 @@ import (
 	"github.com/adam-stokes/orcai/internal/panelrender"
 	"github.com/adam-stokes/orcai/internal/styles"
 	"github.com/adam-stokes/orcai/internal/themes"
+	"github.com/adam-stokes/orcai/internal/translations"
 )
 
 // ThemePicker holds the state for the tabbed 2-column theme picker overlay.
@@ -78,7 +79,8 @@ func PreviewTheme(bundle themes.Bundle) {
 }
 
 // ApplyThemeSelection activates the chosen theme: updates the registry, applies
-// tmux colors, publishes a busd event, and persists to disk.
+// tmux colors, publishes a busd event, persists to disk, and rebuilds the
+// global translation chain so theme-bundled strings take effect immediately.
 func ApplyThemeSelection(chosen themes.Bundle) {
 	if gr := themes.GlobalRegistry(); gr != nil {
 		_ = gr.SetActive(chosen.Name)
@@ -87,6 +89,7 @@ func ApplyThemeSelection(chosen themes.Bundle) {
 	if sockPath, err := busd.SocketPath(); err == nil {
 		_ = busd.PublishEvent(sockPath, themes.TopicThemeChanged, themes.ThemeChangedPayload{Name: chosen.Name})
 	}
+	translations.RebuildChain(chosen.Strings)
 }
 
 // themeRow renders a single theme row with swatch and name.
@@ -132,17 +135,29 @@ func ViewThemePicker(dark, light []themes.Bundle, picker ThemePicker, active *th
 		boxW = 40
 	}
 
+	tp := translations.GlobalProvider()
+	tStr := func(key, fallback string) string {
+		if tp == nil {
+			return fallback
+		}
+		return tp.T(key, fallback)
+	}
+
+	pickerTitle := tStr(translations.KeyThemePickerTitle, "SELECT THEME")
+	darkTab := tStr(translations.KeyThemePickerDarkTab, "Dark")
+	lightTab := tStr(translations.KeyThemePickerLightTab, "Light")
+
 	var rows []string
-	rows = append(rows, panelrender.BoxTop(boxW, "SELECT THEME", pal.Border, pal.FG))
+	rows = append(rows, panelrender.BoxTop(boxW, pickerTitle, pal.Border, pal.FG))
 
 	// Tab bar
 	var darkLabel, lightLabel string
 	if picker.Tab == 0 {
-		darkLabel = pal.Accent + "[ Dark ]" + panelrender.RST
-		lightLabel = pal.Dim + "  Light  " + panelrender.RST
+		darkLabel = pal.Accent + "[ " + darkTab + " ]" + panelrender.RST
+		lightLabel = pal.Dim + "  " + lightTab + "  " + panelrender.RST
 	} else {
-		darkLabel = pal.Dim + "  Dark  " + panelrender.RST
-		lightLabel = pal.Accent + "[ Light ]" + panelrender.RST
+		darkLabel = pal.Dim + "  " + darkTab + "  " + panelrender.RST
+		lightLabel = pal.Accent + "[ " + lightTab + " ]" + panelrender.RST
 	}
 	tabBar := darkLabel + "  " + lightLabel
 	rows = append(rows, panelrender.BoxRow("  "+tabBar, boxW, pal.Border))

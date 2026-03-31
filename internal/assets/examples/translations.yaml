@@ -1,20 +1,172 @@
-# ORCAI Translations — Hacker customization file
-# Copy to ~/.config/orcai/translations.yaml and customize.
-# Values support raw ANSI escape codes: \e[38;2;R;G;Bm for 24-bit color,
-# \e[38;5;Nm for 256-color, \e[0m to reset.
+# ORCAI Translations — customize every string in the UI.
+# Copy to ~/.config/orcai/translations.yaml and edit what you want.
+# Everything here is optional — missing keys fall back to the defaults.
+#
+# Values support raw ANSI escape sequences:
+#   \e[38;2;R;G;Bm   24-bit color (truecolor)
+#   \e[38;5;Nm       256-color
+#   \e[1m            bold   \e[0m  reset
+#
+# Priority: this file > active theme's strings: block > built-in defaults.
+# Theme authors: add a strings: map to your theme.yaml to ship matching copy.
 
-# Panel titles
+# ── Panel titles ──────────────────────────────────────────────────────────────
+# The header text rendered above each panel column.
+
 pipelines_panel_title: "▓▒░ PIPELINES ░▒▓"
 agent_runner_panel_title: "▓▒░ AGENTS ░▒▓"
-signal_board_panel_title: "▓▒░ BOARD ░▒▓"
+signal_board_panel_title: "▓▒░ SIGNAL BOARD ░▒▓"
 activity_feed_panel_title: "▓▒░ ACTIVITY ░▒▓"
 inbox_panel_title: "▓▒░ INBOX ░▒▓"
 cron_panel_title: "▓▒░ SCHEDULED ░▒▓"
 
-# Header title (full-width centered bar at top)
-switchboard_header_title: "\e[38;2;189;147;249m✦ ORCAI — ABBS ✦\e[0m"
+# ── Header + modal titles ─────────────────────────────────────────────────────
 
-# Modal titles
+switchboard_header_title: "\e[38;2;189;147;249m✦ ORCAI — ABBS ✦\e[0m"
 quit_modal_title: ">>> BAIL OUT <<<"
 help_modal_title: ">>> GETTING STARTED <<<"
-theme_picker_title: ">>> THEMES <<<"
+theme_picker_title: ">>> SELECT THEME <<<"
+
+# ── Quit modal ────────────────────────────────────────────────────────────────
+# Body line shown in the quit confirmation box.
+
+quit_modal_message: "you sure? the grid will still be here."
+
+# ── Help modal ────────────────────────────────────────────────────────────────
+# The chord prefix note and each section header / binding description.
+
+help_chord_note: "Chord prefix: ^spc  (ctrl+space, then the key below)"
+
+help_section_system: "HELP & SYSTEM"
+help_section_workspace: "WORKSPACE"
+help_section_windows: "WINDOWS & PANES"
+help_section_nav: "NAVIGATION"
+help_section_panels: "PANELS"
+
+# Key binding descriptions (the right-hand column in the help overlay)
+help_bind_help: "this help"
+help_bind_quit: "quit ORCAI"
+help_bind_detach: "detach  (session stays alive)"
+help_bind_reload: "reload  (hot-swap binary)"
+help_bind_themes: "theme picker"
+help_bind_jump: "jump to any window"
+help_bind_new_win: "new window"
+help_bind_prev_win: "previous / next window"
+help_bind_split_right: "split pane right / down"
+help_bind_nav_pane: "navigate panes"
+help_bind_kill: "kill pane / window"
+help_bind_tab_nav: "navigate panels & list items"
+help_bind_enter: "open / confirm / run selected"
+help_bind_esc: "back / close overlay"
+
+# Panel one-liners shown in the PANELS section of the help modal
+help_panel_pipelines: "run and monitor named pipelines"
+help_panel_agent_runner: "launch and wrangle AI agents"
+help_panel_signal_board: "inter-agent message bus"
+help_panel_activity_feed: "live events, run history, logs"
+help_panel_cron: "scheduled pipelines and agent jobs"
+
+# ── Theme picker ──────────────────────────────────────────────────────────────
+# Tab labels in the dark/light mode tab bar.
+
+theme_picker_dark_tab: "Dark"
+theme_picker_light_tab: "Light"
+
+# ── Rerun modal ───────────────────────────────────────────────────────────────
+# Section labels in the pipeline re-run overlay.
+
+rerun_context_label: "ADDITIONAL CONTEXT"
+rerun_cwd_label: "WORKING DIRECTORY"
+
+# ── Welcome onboarding phases ─────────────────────────────────────────────────
+# Scripted fallback text used when ollama is not available. Multi-line values
+# are supported — use a YAML literal block scalar (|) for readability.
+# The LLM-driven responses (when ollama IS available) are separate system
+# prompts and not overridable here.
+
+welcome_phase_intro: |
+  -=[ SYSOP v0.1 - INITIATING HANDSHAKE ]=-
+
+  yo. new blood detected on the BBS.
+
+  i'm SYSOP — your guide to ORCAI, the Agentic Bulletin Board System.
+  think of orcai as a tmux-powered AI workspace: you run agents, chain 'em into
+  pipelines, and everything they learn gets stored in the brain — a local vector db
+  that makes your AI sessions smarter over time.
+
+  what are you trying to build? tell me your use case and we'll get you dialed in.
+
+welcome_phase_use_case: |
+  solid. orcai was built for exactly that kind of operation.
+
+  next up: pipelines. these are YAML files that define what your agents do,
+  step by step. each step picks a provider (ollama, claude, whatever you've got),
+  injects a prompt, and optionally tags output for the brain.
+
+  ready to see the pipeline builder? say the word.
+
+welcome_phase_pipeline: |
+  pipelines live in ~/.config/orcai/pipelines/ — YAML configs, one per file.
+
+  hit ^spc p to open the pipeline builder TUI. left column = your pipelines,
+  right column = editor with YAML preview and a test runner. you can build,
+  test, and run pipelines all from that panel.
+
+  each step looks like:
+    - name: my-step
+      provider: ollama/llama3.2
+      prompt: "analyze this code and find bugs"
+
+  questions? or should we talk about navigating the system?
+
+welcome_phase_nav: |
+  -=[ NAVIGATION CHEATSHEET ]=-
+
+  ^spc j  →  jump window (switch jobs / open sysop tools)
+  ^spc p  →  pipeline builder
+  ^spc b  →  brain editor
+  ^spc n  →  new agent from clipboard
+  Esc     →  back / cancel
+
+  the switchboard (window 0) has three columns:
+    LEFT   = pipelines + signals
+    CENTER = agents, inbox, send panel
+    RIGHT  = activity feed / job logs
+
+  the jump window shows sysop tools (left) and active jobs (right).
+  you navigate between running agent jobs from there.
+
+  ready to hear about the brain?
+
+welcome_phase_brain: |
+  -=[ BRAIN SYSTEM — neural persistence layer ]=-
+
+  when agents run, they write <brain> tags in their output:
+    <brain type="research" title="auth bug" tags="go,security">...</brain>
+
+  orcai extracts these, embeds them as vectors, stores in local SQLite.
+  on future runs? relevant brain notes are auto-injected as context.
+
+  your AI learns your codebase. your preferences. your project.
+
+  press ^spc b to browse and edit brain notes anytime.
+
+  that's the full system. you're ready.
+
+welcome_phase_done: |
+  -=[ HANDSHAKE COMPLETE ]=-
+
+  you're jacked in. the system is yours.
+
+  remember:
+    ^spc j  →  navigate
+    ^spc p  →  build pipelines
+    ^spc b  →  read the brain
+
+  window 0 is home. the feed on the right shows everything that's running.
+
+  good luck out there. the grid is waiting.
+
+    -- SYSOP, signing off --
+
+  [ press q or Ctrl+C to close this window ]

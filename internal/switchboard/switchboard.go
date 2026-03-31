@@ -410,8 +410,15 @@ func NewWithStore(s *store.Store) Model {
 		themes.SetGlobalRegistry(reg)
 	}
 
-	// Initialize translations provider from ~/.config/orcai/translations.yaml.
-	translations.SetGlobalProvider(translations.NewYAMLProvider())
+	// Initialize the layered translations chain: user overrides → active theme
+	// strings → zer0c00l defaults. Rebuilt on theme change via RebuildChain.
+	var themeStrings map[string]string
+	if m.registry != nil {
+		if active := m.registry.Active(); active != nil {
+			themeStrings = active.Strings
+		}
+	}
+	translations.RebuildChain(themeStrings)
 
 	m.inboxReadIDs = LoadReadSet(m.readStateFile())
 
@@ -3821,26 +3828,28 @@ func (m Model) headerHeight() int {
 // When TDF art is available it is used alone (no subtitle bar beneath it).
 // Falls back to the single-line TopBar when TDF loading failed.
 func (m Model) viewTopBar(w int) string {
+	title := "░▒▓ ORCAI — ABBS Switchboard ▓▒░"
+	if p := translations.GlobalProvider(); p != nil {
+		title = p.T(translations.KeySwitchboardHeader, title)
+	}
+
 	if len(m.tdfHeader) == 0 {
-		title := "░▒▓ ORCAI — ABBS Switchboard ▓▒░"
-		if p := translations.GlobalProvider(); p != nil {
-			title = p.T(translations.KeySwitchboardHeader, title)
-		}
 		return TopBar(m.activeBundle(), title, w)
 	}
 
+	// TDF art is available: render the block-art header, then append a
+	// single-line text subtitle so the translated title is always present
+	// in the view (accessible to tests and screen readers).
 	var sb strings.Builder
 	pad := (w - m.tdfHeaderW) / 2
 	if pad < 0 {
 		pad = 0
 	}
 	prefix := strings.Repeat(" ", pad)
-	for i, line := range m.tdfHeader {
-		sb.WriteString(prefix + line)
-		if i < len(m.tdfHeader)-1 {
-			sb.WriteByte('\n')
-		}
+	for _, line := range m.tdfHeader {
+		sb.WriteString(prefix + line + "\n")
 	}
+	sb.WriteString(TopBar(m.activeBundle(), title, w))
 	return sb.String()
 }
 
