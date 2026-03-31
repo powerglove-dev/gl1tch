@@ -3513,9 +3513,6 @@ func (m Model) viewLeftColumn(height, width int) string {
 	// Agent runner is in the center column; pipeline launcher moved to sendpanel popup.
 	remaining := height - len(lines)
 	if remaining >= 4 {
-		lines = append(lines, "")
-		remaining--
-
 		inboxRows := remaining * 6 / 10
 		cronRows := remaining - inboxRows - 1 // 1 for blank separator
 		if inboxRows < 4 {
