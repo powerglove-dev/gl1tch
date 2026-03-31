@@ -3580,7 +3580,25 @@ func (m Model) buildAgentsGrid(height, width int) []string {
 		lines = append(lines, boxTop(width, RenderHeader("agents"), panelBorder, titleColor))
 	}
 
-	entries := fuzzyFeed(m.signalBoard.query, m.filteredFeed())
+	// Always show the current filter (mirrors signal board behaviour).
+	agentFilter := m.signalBoard.activeFilter
+	if agentFilter == "" {
+		agentFilter = "all"
+	}
+	preFiltered := fuzzyFeed(m.signalBoard.query, m.filteredFeed())
+	total := len(preFiltered)
+	sel := m.agentsGridRow*max(1, (width-2)/24) + m.agentsGridCol + 1
+	if total == 0 {
+		sel = 0
+	}
+	scrollIndicator := ""
+	if total > 0 {
+		scrollIndicator = fmt.Sprintf("  %s%d/%d%s", pal.Dim, sel, total, aRst)
+	}
+	filterLine := fmt.Sprintf("  filter: %s%s%s%s", pal.Accent, agentFilter, aRst, scrollIndicator)
+	lines = append(lines, boxRow(filterLine, width, panelBorder))
+
+	entries := preFiltered
 
 	// Column count: at least 1, one card per ~24 cols of inner panel width.
 	innerW := width - 2 // panel body (between outer │ chars)
