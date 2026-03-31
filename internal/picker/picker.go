@@ -244,29 +244,6 @@ func buildProviders() []ProviderDef {
 		}
 	}
 
-	// Sort extras by providerPriority before appending so the agent runner grid
-	// displays providers in canonical order (claude → copilot → codex → …).
-	priorityRank := make(map[string]int, len(providerPriority))
-	for i, name := range providerPriority {
-		priorityRank[name] = i
-	}
-	sort.SliceStable(extras, func(i, j int) bool {
-		ri, iOk := priorityRank[extras[i].name]
-		rj, jOk := priorityRank[extras[j].name]
-		if iOk && jOk {
-			return ri < rj
-		}
-		// Known priority providers sort before unknown ones.
-		if iOk {
-			return true
-		}
-		if jOk {
-			return false
-		}
-		// Both unknown: preserve original discovery order (SliceStable).
-		return false
-	})
-
 	// Append discovered plugins that are not in the static Providers list.
 	staticIDs := make(map[string]bool, len(Providers))
 	for _, p := range Providers {
@@ -319,6 +296,28 @@ func buildProviders() []ProviderDef {
 			PipelineArgs: pipelineArgs,
 		})
 	}
+
+	// Sort the complete provider list by providerPriority so the agent runner
+	// grid always shows providers in canonical order regardless of how they
+	// entered out (static list vs. discovered extras).
+	priorityRank := make(map[string]int, len(providerPriority))
+	for i, name := range providerPriority {
+		priorityRank[name] = i
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		ri, iOk := priorityRank[out[i].ID]
+		rj, jOk := priorityRank[out[j].ID]
+		if iOk && jOk {
+			return ri < rj
+		}
+		if iOk {
+			return true
+		}
+		if jOk {
+			return false
+		}
+		return false
+	})
 
 	return out
 }

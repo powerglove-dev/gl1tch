@@ -39,25 +39,15 @@ func TestProviderPriority_Order(t *testing.T) {
 	}
 }
 
-// TestExtrasSort_KnownBeforeUnknown verifies that the sort used in buildProviders
-// places priority providers before unknown ones.
-func TestExtrasSort_KnownBeforeUnknown(t *testing.T) {
-	type entry struct{ name string }
-	extras := []entry{
-		{"my-custom-agent"},
-		{"gemini"},
-		{"codex"},
-		{"claude"},
-		{"another-unknown"},
-	}
-
+// sortByPriority runs the same sort used in buildProviders on a []ProviderDef.
+func sortByPriority(out []ProviderDef) {
 	priorityRank := make(map[string]int, len(providerPriority))
 	for i, name := range providerPriority {
 		priorityRank[name] = i
 	}
-	sort.SliceStable(extras, func(i, j int) bool {
-		ri, iOk := priorityRank[extras[i].name]
-		rj, jOk := priorityRank[extras[j].name]
+	sort.SliceStable(out, func(i, j int) bool {
+		ri, iOk := priorityRank[out[i].ID]
+		rj, jOk := priorityRank[out[j].ID]
 		if iOk && jOk {
 			return ri < rj
 		}
@@ -69,52 +59,52 @@ func TestExtrasSort_KnownBeforeUnknown(t *testing.T) {
 		}
 		return false
 	})
+}
 
-	wantOrder := []string{"claude", "codex", "gemini", "my-custom-agent", "another-unknown"}
+// TestOutSort_OllamaAndShellSortAfterPriorityProviders verifies that the static
+// providers (ollama, shell) end up after claude/copilot/codex in the final list.
+func TestOutSort_OllamaAndShellSortAfterPriorityProviders(t *testing.T) {
+	// Simulate the order in which buildProviders assembles out:
+	// static providers first (ollama, shell), then discovered extras.
+	out := []ProviderDef{
+		{ID: "ollama"},
+		{ID: "shell"},
+		{ID: "gemini"},
+		{ID: "codex"},
+		{ID: "claude"},
+	}
+	sortByPriority(out)
+
+	wantOrder := []string{"claude", "codex", "gemini", "ollama", "shell"}
 	for i, want := range wantOrder {
-		if extras[i].name != want {
-			t.Errorf("position %d: got %q, want %q", i, extras[i].name, want)
+		if out[i].ID != want {
+			t.Errorf("position %d: got %q, want %q", i, out[i].ID, want)
 		}
 	}
 }
 
-// TestExtrasSort_UnknownPreservesRelativeOrder verifies that unknown providers
-// keep their original relative order after sorted priority providers.
-func TestExtrasSort_UnknownPreservesRelativeOrder(t *testing.T) {
-	type entry struct{ name string }
-	extras := []entry{
-		{"zebra-agent"},
-		{"alpha-agent"},
-		{"claude"},
+// TestOutSort_UnknownPreservesRelativeOrder verifies that unknown providers
+// appear after all priority providers, in their original relative order.
+func TestOutSort_UnknownPreservesRelativeOrder(t *testing.T) {
+	out := []ProviderDef{
+		{ID: "zebra-agent"},
+		{ID: "alpha-agent"},
+		{ID: "ollama"},
+		{ID: "claude"},
 	}
+	sortByPriority(out)
 
-	priorityRank := make(map[string]int, len(providerPriority))
-	for i, name := range providerPriority {
-		priorityRank[name] = i
+	// claude → ollama → zebra-agent → alpha-agent (original order for unknowns)
+	if out[0].ID != "claude" {
+		t.Errorf("position 0: got %q, want claude", out[0].ID)
 	}
-	sort.SliceStable(extras, func(i, j int) bool {
-		ri, iOk := priorityRank[extras[i].name]
-		rj, jOk := priorityRank[extras[j].name]
-		if iOk && jOk {
-			return ri < rj
-		}
-		if iOk {
-			return true
-		}
-		if jOk {
-			return false
-		}
-		return false
-	})
-
-	// claude first, then unknown providers in original order: zebra-agent, alpha-agent
-	if extras[0].name != "claude" {
-		t.Errorf("position 0: got %q, want claude", extras[0].name)
+	if out[1].ID != "ollama" {
+		t.Errorf("position 1: got %q, want ollama", out[1].ID)
 	}
-	if extras[1].name != "zebra-agent" {
-		t.Errorf("position 1: got %q, want zebra-agent (original order preserved)", extras[1].name)
+	if out[2].ID != "zebra-agent" {
+		t.Errorf("position 2: got %q, want zebra-agent", out[2].ID)
 	}
-	if extras[2].name != "alpha-agent" {
-		t.Errorf("position 2: got %q, want alpha-agent (original order preserved)", extras[2].name)
+	if out[3].ID != "alpha-agent" {
+		t.Errorf("position 3: got %q, want alpha-agent", out[3].ID)
 	}
 }
