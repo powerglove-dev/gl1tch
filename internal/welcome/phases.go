@@ -1,11 +1,11 @@
-// Package welcome implements the GLITCH first-run onboarding TUI.
+// Package welcome implements the SYSOP first-run onboarding TUI.
 package welcome
 
 // Phase represents the current onboarding stage.
 type Phase int
 
 const (
-	PhaseIntro      Phase = iota // GLITCH greeting + ORCAI overview
+	PhaseIntro      Phase = iota // SYSOP greeting + ORCAI overview
 	PhaseUseCase                 // ask what user wants to build
 	PhasePipeline                // explain pipelines, point to builder
 	PhaseNavigation              // walk through key bindings and layout
@@ -18,7 +18,7 @@ var phaseSystemContext = map[Phase]string{
 	PhaseIntro: `You are starting the intro phase. Welcome the user to ORCAI — the Agentic Bulletin Board System.
 Explain in 3-4 sentences: ORCAI is an AI workspace built on tmux and BubbleTea TUIs.
 You run AI agents (local or cloud) using pipelines, and results feed into the brain — a persistent vector memory.
-Ask them what they want to build or automate. Stay in character as GLITCH.`,
+Ask them what they want to build or automate. Stay in character as SYSOP.`,
 
 	PhaseUseCase: `The user has described their use case. Acknowledge it enthusiastically in hacker persona.
 Explain that ORCAI uses "pipelines" — YAML config files that define a sequence of AI agent steps.
@@ -56,11 +56,11 @@ Wish them luck — make it dramatic and l33t. This is your final message.`,
 
 // scriptedFallback provides canned responses when ollama is unavailable.
 var scriptedFallback = map[Phase]string{
-	PhaseIntro: `-=[ GLITCH v0.1 - INITIATING HANDSHAKE ]=-
+	PhaseIntro: `-=[ SYSOP v0.1 - INITIATING HANDSHAKE ]=-
 
 yo. new blood detected on the BBS.
 
-i'm GLITCH — your sysop guide to ORCAI, the Agentic Bulletin Board System.
+i'm SYSOP — your sysop guide to ORCAI, the Agentic Bulletin Board System.
 think of orcai as a tmux-powered AI workspace: you run agents, chain 'em into
 pipelines, and everything they learn gets stored in the brain — a local vector db
 that makes your AI sessions smarter over time.
@@ -133,7 +133,7 @@ window 0 is home. the feed on the right shows everything that's running.
 
 good luck out there. the matrix is waiting.
 
-  -- GLITCH, signing off --
+  -- SYSOP, signing off --
 
 [ press q or Ctrl+C to close this window ]`,
 }

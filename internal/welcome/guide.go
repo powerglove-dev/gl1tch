@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const glitchSystemPrompt = `You are GLITCH — an underground hacker from the early 90s BBS era.
+const sysopSystemPrompt = `You are SYSOP — an underground hacker from the early 90s BBS era.
 You speak in lowercase most of the time. You use old-school slang: sysop, l33t, phreaking, handle, the matrix, jacking in.
 You reference WarGames, Hackers (1995), Neuromancer, Phrack zine, 2600 magazine.
 You are guiding a new user through ORCAI — the Agentic Bulletin Board System — a tmux-powered AI workspace.
@@ -24,7 +24,7 @@ type guideMessage struct {
 	Content string `json:"content"`
 }
 
-// Guide manages the GLITCH persona and LLM communication via ollama.
+// Guide manages the SYSOP persona and LLM communication via ollama.
 type Guide struct {
 	model   string
 	baseURL string
@@ -37,7 +37,7 @@ func NewGuide(modelName string) *Guide {
 		model:   modelName,
 		baseURL: "http://localhost:11434",
 		history: []guideMessage{
-			{Role: "system", Content: glitchSystemPrompt},
+			{Role: "system", Content: sysopSystemPrompt},
 		},
 	}
 }
