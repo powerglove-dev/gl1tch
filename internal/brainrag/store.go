@@ -3,13 +3,13 @@ package brainrag
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
+	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
+	"math"
 	"os"
-	"path/filepath"
 	"sort"
-	"sync"
 
 	"github.com/adam-stokes/orcai/internal/store"
 )
@@ -22,26 +22,16 @@ type VectorEntry struct {
 	Hash   string    `json:"hash"` // SHA256 of text
 }
 
-// RAGStore is a flat-file vector store for brain note embeddings.
+// RAGStore is a SQLite-backed vector store scoped to a working directory.
 type RAGStore struct {
-	path    string // e.g. ~/.local/share/orcai/brain.vectors.json
-	entries []VectorEntry
-	mu      sync.RWMutex
+	db  *sql.DB
+	cwd string
 }
 
-// NewRAGStore opens or creates the vector store at the given path.
-func NewRAGStore(path string) (*RAGStore, error) {
-	r := &RAGStore{path: path}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, fmt.Errorf("brainrag: mkdir %q: %w", filepath.Dir(path), err)
-	}
-	data, err := os.ReadFile(path)
-	if err == nil {
-		_ = json.Unmarshal(data, &r.entries)
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("brainrag: read store %q: %w", path, err)
-	}
-	return r, nil
+// NewRAGStore creates a RAGStore backed by db, scoped to cwd.
+// The brain_vectors table must already exist (applied by store.Open/OpenAt).
+func NewRAGStore(db *sql.DB, cwd string) *RAGStore {
+	return &RAGStore{db: db, cwd: cwd}
 }
 
 // hashText returns the SHA256 hex hash of text.
@@ -50,37 +40,61 @@ func hashText(text string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// IndexNote computes an embedding for text and stores it under noteID.
-// If the entry already exists and the hash matches, it is a no-op.
+// encodeVector serializes a float32 slice as a little-endian IEEE 754 byte blob.
+func encodeVector(v []float32) []byte {
+	buf := make([]byte, len(v)*4)
+	for i, f := range v {
+		binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(f))
+	}
+	return buf
+}
+
+// decodeVector deserializes a little-endian IEEE 754 byte blob to a float32 slice.
+func decodeVector(b []byte) []float32 {
+	v := make([]float32, len(b)/4)
+	for i := range v {
+		v[i] = math.Float32frombits(binary.LittleEndian.Uint32(b[i*4:]))
+	}
+	return v
+}
+
+// IndexNote computes an embedding for text and stores it under noteID scoped to r.cwd.
+// If an entry already exists with the same hash, it is a no-op.
 func (r *RAGStore) IndexNote(ctx context.Context, baseURL, model, noteID, text string) error {
 	h := hashText(text)
 
-	r.mu.RLock()
-	for _, e := range r.entries {
-		if e.NoteID == noteID && e.Hash == h {
-			r.mu.RUnlock()
-			return nil // already up-to-date
-		}
+	var existingHash string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT hash FROM brain_vectors WHERE cwd = ? AND note_id = ?`,
+		r.cwd, noteID,
+	).Scan(&existingHash)
+	if err == nil && existingHash == h {
+		return nil // already up-to-date
 	}
-	r.mu.RUnlock()
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("brainrag: check existing vector: %w", err)
+	}
 
 	vec, err := Embed(ctx, baseURL, model, text)
 	if err != nil {
 		return fmt.Errorf("brainrag: index note %q: %w", noteID, err)
 	}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	// Update existing or append.
-	for i, e := range r.entries {
-		if e.NoteID == noteID {
-			r.entries[i] = VectorEntry{NoteID: noteID, Text: text, Vector: vec, Hash: h}
-			return r.save()
-		}
+	blob := encodeVector(vec)
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO brain_vectors (cwd, note_id, text, vector, hash)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(cwd, note_id) DO UPDATE SET
+		   text       = excluded.text,
+		   vector     = excluded.vector,
+		   hash       = excluded.hash,
+		   indexed_at = CURRENT_TIMESTAMP`,
+		r.cwd, noteID, text, blob, h,
+	)
+	if err != nil {
+		return fmt.Errorf("brainrag: upsert vector for %q: %w", noteID, err)
 	}
-	r.entries = append(r.entries, VectorEntry{NoteID: noteID, Text: text, Vector: vec, Hash: h})
-	return r.save()
+	return nil
 }
 
 // RefreshStale re-embeds notes whose SHA256(body) differs from the stored hash.
@@ -91,79 +105,89 @@ func (r *RAGStore) RefreshStale(ctx context.Context, baseURL, model string, note
 		id := fmt.Sprintf("%d", n.ID)
 		h := hashText(n.Body)
 
-		r.mu.RLock()
-		stale := true
-		for _, e := range r.entries {
-			if e.NoteID == id && e.Hash == h {
-				stale = false
-				break
-			}
+		var existingHash string
+		err := r.db.QueryRowContext(ctx,
+			`SELECT hash FROM brain_vectors WHERE cwd = ? AND note_id = ?`,
+			r.cwd, id,
+		).Scan(&existingHash)
+		if err == nil && existingHash == h {
+			continue
 		}
-		r.mu.RUnlock()
-
-		if !stale {
+		if err != nil && err != sql.ErrNoRows {
+			fmt.Fprintf(os.Stderr, "[brainrag] warn: check stale %s: %v\n", id, err)
 			continue
 		}
 
 		vec, err := Embed(ctx, baseURL, model, n.Body)
 		if err != nil {
-			// Degrade gracefully: log and skip this note.
 			fmt.Fprintf(os.Stderr, "[brainrag] warn: could not embed note %s: %v\n", id, err)
 			continue
 		}
 
-		r.mu.Lock()
-		updated := false
-		for i, e := range r.entries {
-			if e.NoteID == id {
-				r.entries[i] = VectorEntry{NoteID: id, Text: n.Body, Vector: vec, Hash: h}
-				updated = true
-				break
-			}
+		blob := encodeVector(vec)
+		if _, err = r.db.ExecContext(ctx,
+			`INSERT INTO brain_vectors (cwd, note_id, text, vector, hash)
+			 VALUES (?, ?, ?, ?, ?)
+			 ON CONFLICT(cwd, note_id) DO UPDATE SET
+			   text       = excluded.text,
+			   vector     = excluded.vector,
+			   hash       = excluded.hash,
+			   indexed_at = CURRENT_TIMESTAMP`,
+			r.cwd, id, n.Body, blob, h,
+		); err != nil {
+			fmt.Fprintf(os.Stderr, "[brainrag] warn: upsert stale vector %s: %v\n", id, err)
 		}
-		if !updated {
-			r.entries = append(r.entries, VectorEntry{NoteID: id, Text: n.Body, Vector: vec, Hash: h})
-		}
-		_ = r.save()
-		r.mu.Unlock()
 	}
 	return nil
 }
 
-// scoredEntry is used for sorting query results.
-type scoredEntry struct {
-	noteID string
-	score  float32
-}
-
-// Query embeds the query text and returns the top-K most similar note IDs.
-// If filter is non-empty, only entries whose NoteID is in the filter are considered.
+// Query embeds the query text and returns the top-K most similar note IDs for r.cwd.
+// If filter is non-empty, only entries whose NoteID is in filter are considered.
 // Returns an empty slice (not an error) if Ollama is unavailable.
 func (r *RAGStore) Query(ctx context.Context, baseURL, model, q string, topK int, filter []string) ([]string, error) {
 	qVec, err := Embed(ctx, baseURL, model, q)
 	if err != nil {
-		// Degrade gracefully.
 		fmt.Fprintf(os.Stderr, "[brainrag] warn: query embed failed: %v\n", err)
 		return nil, nil
 	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT note_id, vector FROM brain_vectors WHERE cwd = ?`,
+		r.cwd,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("brainrag: query vectors: %w", err)
+	}
+	defer rows.Close()
 
 	filterSet := make(map[string]struct{}, len(filter))
 	for _, id := range filter {
 		filterSet[id] = struct{}{}
 	}
 
-	r.mu.RLock()
-	scored := make([]scoredEntry, 0, len(r.entries))
-	for _, e := range r.entries {
+	type scoredEntry struct {
+		noteID string
+		score  float32
+	}
+	var scored []scoredEntry
+
+	for rows.Next() {
+		var noteID string
+		var blob []byte
+		if err := rows.Scan(&noteID, &blob); err != nil {
+			continue
+		}
 		if len(filter) > 0 {
-			if _, ok := filterSet[e.NoteID]; !ok {
+			if _, ok := filterSet[noteID]; !ok {
 				continue
 			}
 		}
-		s := CosineSimilarity(qVec, e.Vector)
-		scored = append(scored, scoredEntry{noteID: e.NoteID, score: s})
+		s := CosineSimilarity(qVec, decodeVector(blob))
+		scored = append(scored, scoredEntry{noteID: noteID, score: s})
 	}
-	r.mu.RUnlock()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("brainrag: query rows: %w", err)
+	}
 
 	sort.Slice(scored, func(i, j int) bool {
 		return scored[i].score > scored[j].score
@@ -181,16 +205,4 @@ func (r *RAGStore) Query(ctx context.Context, baseURL, model, q string, topK int
 		ids[i] = scored[i].noteID
 	}
 	return ids, nil
-}
-
-// save writes all entries to disk. Must be called with r.mu held.
-func (r *RAGStore) save() error {
-	data, err := json.MarshalIndent(r.entries, "", "  ")
-	if err != nil {
-		return fmt.Errorf("brainrag: marshal store: %w", err)
-	}
-	if err := os.WriteFile(r.path, data, 0o600); err != nil {
-		return fmt.Errorf("brainrag: write store %q: %w", r.path, err)
-	}
-	return nil
 }

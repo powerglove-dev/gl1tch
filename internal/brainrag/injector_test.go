@@ -24,8 +24,7 @@ func openTestStore(t *testing.T) *store.Store {
 
 func TestBrainInjector_Unavailable(t *testing.T) {
 	// Point injector at a non-existent server — Ollama unavailable.
-	storePath := filepath.Join(t.TempDir(), "brain.vectors.json")
-	rs, _ := NewRAGStore(storePath)
+	rs := NewRAGStore(openTestStore(t).DB(), "/test/cwd")
 	s := openTestStore(t)
 
 	inj := &BrainInjector{
@@ -58,8 +57,7 @@ func TestBrainInjector_FilterByLinkedNotes(t *testing.T) {
 	// 3 calls: index note1, index note2, embed query
 	srv := mockOllama(t, [][]float32{v, v, v})
 
-	storePath := filepath.Join(t.TempDir(), "brain.vectors.json")
-	rs, _ := NewRAGStore(storePath)
+	rs := NewRAGStore(s.DB(), "/test/cwd")
 
 	id1str := fmt.Sprintf("%d", id1)
 	id2str := fmt.Sprintf("%d", id2)

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/adam-stokes/orcai/internal/brainrag"
+	"github.com/adam-stokes/orcai/internal/store"
 )
 
 func init() {
@@ -141,7 +142,7 @@ var skipDirs = map[string]bool{
 }
 
 // builtinIndexCode walks a path, chunks source files, embeds them with Ollama,
-// and stores the results in the RAG vector store.
+// and stores the results in the RAG vector store (brain_vectors table in orcai.db).
 //
 // Args:
 //   - "path":       directory to walk (default ".")
@@ -149,7 +150,6 @@ var skipDirs = map[string]bool{
 //   - "model":      embedding model (default "nomic-embed-text")
 //   - "base_url":   Ollama base URL (default "http://localhost:11434")
 //   - "chunk_size": max chars per chunk (default 1500)
-//   - "store_path": RAG store file path (default ~/.local/share/orcai/brain.vectors.json)
 func builtinIndexCode(ctx context.Context, args map[string]any, w io.Writer) (map[string]any, error) {
 	root := toString(args["path"])
 	if root == "" {
@@ -186,20 +186,18 @@ func builtinIndexCode(ctx context.Context, args map[string]any, w io.Writer) (ma
 		chunkSize = 1500
 	}
 
-	storePath := toString(args["store_path"])
-	if storePath == "" {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			storePath = filepath.Join(home, ".local", "share", "orcai", "brain.vectors.json")
-		} else {
-			storePath = "brain.vectors.json"
-		}
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = root
 	}
 
-	rs, err := brainrag.NewRAGStore(storePath)
+	s, err := store.Open()
 	if err != nil {
-		return nil, fmt.Errorf("builtin.index_code: open rag store: %w", err)
+		return nil, fmt.Errorf("builtin.index_code: open store: %w", err)
 	}
+	defer s.Close()
+
+	rs := brainrag.NewRAGStore(s.DB(), cwd)
 
 	fileCount := 0
 	chunkCount := 0

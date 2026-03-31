@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -23,11 +22,8 @@ func TestBrainE2E_IndexAndQuery_Ollama(t *testing.T) {
 	checkModelAvailable(t, "nomic-embed-text")
 
 	ctx := context.Background()
-	storePath := filepath.Join(t.TempDir(), "brain.vectors.json")
-	rs, err := brainrag.NewRAGStore(storePath)
-	if err != nil {
-		t.Fatalf("NewRAGStore: %v", err)
-	}
+	s := openTestStore(t)
+	rs := brainrag.NewRAGStore(s.DB(), "/test/e2e")
 
 	// Index 5 Go source snippets from the orcai codebase.
 	snippets := []struct {
@@ -41,14 +37,13 @@ func TestBrainE2E_IndexAndQuery_Ollama(t *testing.T) {
 		{"snippet-brainrag", "The brainrag package provides vector embedding and RAG for brain notes using Ollama."},
 	}
 
-	for _, s := range snippets {
-		if err := rs.IndexNote(ctx, brainrag.DefaultBaseURL, brainrag.DefaultEmbedModel, s.id, s.text); err != nil {
-			t.Fatalf("IndexNote %s: %v", s.id, err)
+	for _, snippet := range snippets {
+		if err := rs.IndexNote(ctx, brainrag.DefaultBaseURL, brainrag.DefaultEmbedModel, snippet.id, snippet.text); err != nil {
+			t.Fatalf("IndexNote %s: %v", snippet.id, err)
 		}
 	}
 
 	// Create a store with the snippets as brain notes.
-	s := openTestStore(t)
 	for _, snippet := range snippets {
 		_, _ = s.InsertBrainNote(ctx, store.BrainNote{
 			RunID:  1,
@@ -63,8 +58,7 @@ func TestBrainE2E_IndexAndQuery_Ollama(t *testing.T) {
 	}
 
 	// Re-index with proper IDs from store.
-	storePath2 := filepath.Join(t.TempDir(), "brain2.vectors.json")
-	rs2, _ := brainrag.NewRAGStore(storePath2)
+	rs2 := brainrag.NewRAGStore(s.DB(), "/test/e2e/store")
 	for _, n := range allNotes {
 		_ = rs2.IndexNote(ctx, brainrag.DefaultBaseURL, brainrag.DefaultEmbedModel,
 			fmt.Sprintf("%d", n.ID), n.Body)

@@ -62,6 +62,18 @@ const createClarificationsSchema = `CREATE TABLE IF NOT EXISTS clarifications (
     answer      TEXT
 )`
 
+// createBrainVectorsSchema is the DDL for the brain_vectors table.
+const createBrainVectorsSchema = `CREATE TABLE IF NOT EXISTS brain_vectors (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  cwd         TEXT NOT NULL,
+  note_id     TEXT NOT NULL,
+  text        TEXT NOT NULL,
+  vector      BLOB NOT NULL,
+  hash        TEXT NOT NULL,
+  indexed_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(cwd, note_id)
+)`
+
 // createStepCheckpointsSchema is the DDL for the step_checkpoints table.
 const createStepCheckpointsSchema = `CREATE TABLE IF NOT EXISTS step_checkpoints (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,13 +117,23 @@ func applySchema(db *sql.DB) error {
 	if err := applyClarificationStepIDMigration(db); err != nil {
 		return err
 	}
-	return applyStepCheckpointsTableMigration(db)
+	if err := applyStepCheckpointsTableMigration(db); err != nil {
+		return err
+	}
+	return applyBrainVectorsTableMigration(db)
 }
 
 // applyStepCheckpointsTableMigration creates the step_checkpoints table if it
 // does not already exist. CREATE TABLE IF NOT EXISTS is idempotent.
 func applyStepCheckpointsTableMigration(db *sql.DB) error {
 	_, err := db.Exec(createStepCheckpointsSchema)
+	return err
+}
+
+// applyBrainVectorsTableMigration creates the brain_vectors table if it does
+// not already exist. CREATE TABLE IF NOT EXISTS is idempotent.
+func applyBrainVectorsTableMigration(db *sql.DB) error {
+	_, err := db.Exec(createBrainVectorsSchema)
 	return err
 }
 

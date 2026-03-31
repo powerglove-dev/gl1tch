@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -26,14 +25,12 @@ func TestBrainE2E_CodebaseUpdate_HighConfidence(t *testing.T) {
 	ctx := context.Background()
 
 	// Step 1: index_code for internal/pipeline/*.go files.
-	storePath := filepath.Join(t.TempDir(), "brain.vectors.json")
 	args := map[string]any{
 		"path":       "../../internal/pipeline",
 		"extensions": ".go",
 		"model":      brainrag.DefaultEmbedModel,
 		"base_url":   brainrag.DefaultBaseURL,
 		"chunk_size": "1500",
-		"store_path": storePath,
 	}
 
 	mgr := plugin.NewManager()
@@ -66,7 +63,7 @@ func TestBrainE2E_CodebaseUpdate_HighConfidence(t *testing.T) {
 	})
 
 	allNotes, _ := s.AllBrainNotes(ctx)
-	rs, _ := brainrag.NewRAGStore(storePath)
+	rs := brainrag.NewRAGStore(s.DB(), t.TempDir())
 	for _, n := range allNotes {
 		_ = rs.IndexNote(ctx, brainrag.DefaultBaseURL, brainrag.DefaultEmbedModel,
 			fmt.Sprintf("%d", n.ID), n.Body)

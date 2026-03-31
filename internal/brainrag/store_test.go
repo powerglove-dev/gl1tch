@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 )
 
@@ -40,11 +39,8 @@ func TestRAGStore_IndexAndQuery(t *testing.T) {
 	embeddings := [][]float32{v0, v1, v2, v0}
 	srv := mockOllama(t, embeddings)
 
-	storePath := filepath.Join(t.TempDir(), "brain.vectors.json")
-	rs, err := NewRAGStore(storePath)
-	if err != nil {
-		t.Fatalf("NewRAGStore: %v", err)
-	}
+	s := openTestStore(t)
+	rs := NewRAGStore(s.DB(), "/test/cwd")
 
 	ctx := context.Background()
 	if err := rs.IndexNote(ctx, srv.URL, "test-model", "note-0", "text about Go"); err != nil {
@@ -79,8 +75,8 @@ func TestRAGStore_IndexAndQuery_Filter(t *testing.T) {
 	embeddings := [][]float32{v0, v1, v2, v0}
 	srv := mockOllama(t, embeddings)
 
-	storePath := filepath.Join(t.TempDir(), "brain.vectors.json")
-	rs, _ := NewRAGStore(storePath)
+	s := openTestStore(t)
+	rs := NewRAGStore(s.DB(), "/test/cwd")
 
 	ctx := context.Background()
 	_ = rs.IndexNote(ctx, srv.URL, "test-model", "note-0", "text 0")
@@ -107,8 +103,8 @@ func TestRAGStore_IdempotentIndex(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	storePath := filepath.Join(t.TempDir(), "brain.vectors.json")
-	rs, _ := NewRAGStore(storePath)
+	s := openTestStore(t)
+	rs := NewRAGStore(s.DB(), "/test/cwd")
 	ctx := context.Background()
 
 	_ = rs.IndexNote(ctx, srv.URL, "test-model", "note-x", "same text")

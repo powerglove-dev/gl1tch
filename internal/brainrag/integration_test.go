@@ -5,7 +5,6 @@ package brainrag
 import (
 	"context"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -51,11 +50,8 @@ func TestEmbed_RealOllama(t *testing.T) {
 func TestRAGStore_RealIndexAndQuery(t *testing.T) {
 	checkModelAvailable(t, "nomic-embed-text")
 
-	storePath := filepath.Join(t.TempDir(), "brain.vectors.json")
-	rs, err := NewRAGStore(storePath)
-	if err != nil {
-		t.Fatalf("NewRAGStore: %v", err)
-	}
+	s := openTestStore(t)
+	rs := NewRAGStore(s.DB(), "/test/cwd")
 
 	ctx := context.Background()
 	texts := []struct {
