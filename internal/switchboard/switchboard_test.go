@@ -1698,13 +1698,14 @@ func TestSendPanel_EnterOnCWDSlot_SetsInlineDirPicker(t *testing.T) {
 	// Tab inside popup: SendPopupFocusPicker → SendPopupFocusCWD.
 	m = tabNTimes(m, 1)
 
-	// Enter on CWD slot: should emit SendBrowseCWDMsg → switchboard opens DirPicker.
+	// Enter on CWD slot: should open the inline dir picker inside the agent popup.
 	m3, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	result := m3.(switchboard.Model)
-	if !result.DirPickerOpen() {
-		t.Error("expected dirPickerOpen=true after Enter on CWD slot in agent popup")
+	if !result.SendPanelDirPickerOpen() {
+		t.Error("expected sendPanel inline dir picker open after Enter on CWD slot")
 	}
-	if result.DirPickerCtx() != "agent" {
-		t.Errorf("expected dirPickerCtx=agent, got %q", result.DirPickerCtx())
+	// The switchboard-level dir picker overlay should NOT be open (it's now inline).
+	if result.DirPickerOpen() {
+		t.Error("switchboard-level dir picker should not open; CWD picker is now inline")
 	}
 }

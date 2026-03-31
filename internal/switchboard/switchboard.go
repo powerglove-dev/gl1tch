@@ -459,11 +459,15 @@ func (m Model) AgentFormStep() int { return 0 }
 // ThemePickerOpen returns whether the theme picker overlay is open — used in tests.
 func (m Model) ThemePickerOpen() bool { return m.themePicker.Open }
 
-// DirPickerOpen reports whether the dir picker is open — used in tests.
+// DirPickerOpen reports whether the pipeline dir picker overlay is open — used in tests.
 func (m Model) DirPickerOpen() bool { return m.dirPickerOpen }
 
 // DirPickerCtx returns the dir picker context string — used in tests.
 func (m Model) DirPickerCtx() string { return m.dirPickerCtx }
+
+// SendPanelDirPickerOpen reports whether the inline dir picker inside the agent
+// popup is open — used in tests.
+func (m Model) SendPanelDirPickerOpen() bool { return m.sendPanel.DirPickerOpen() }
 
 // WithAgentPrompts returns a copy of the model with the given prompts loaded — used in tests.
 func (m Model) WithAgentPrompts(prompts []store.Prompt) Model {
@@ -979,6 +983,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Dir picker messages ───────────────────────────────────────────────────
 
 	case dirWalkResultMsg:
+		// Route to the sendpanel's inline dir picker when it's open.
+		if m.agent.focused && m.sendPanel.DirPickerOpen() {
+			var cmd tea.Cmd
+			m.sendPanel, cmd = m.sendPanel.Update(msg)
+			return m, cmd
+		}
 		if m.dirPickerOpen {
 			var cmd tea.Cmd
 			m.dirPicker, cmd = m.dirPicker.Update(msg)
@@ -987,16 +997,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case DirSelectedMsg:
+		// Inline agent popup dir picker.
+		if m.sendPanel.DirPickerOpen() {
+			m.sendPanel = m.sendPanel.CloseDirPicker().SetCWD(msg.Path)
+			return m, nil
+		}
+		// Pipeline dir picker.
 		m.dirPickerOpen = false
-		if m.dirPickerCtx == "agent" {
-			m.sendPanel = m.sendPanel.SetCWD(msg.Path)
-		} else if m.dirPickerCtx == "pipeline" {
-			// Launch the pending pipeline with the selected CWD.
+		if m.dirPickerCtx == "pipeline" {
 			return m.launchPendingPipeline(msg.Path)
 		}
 		return m, nil
 
 	case DirCancelledMsg:
+		// Inline agent popup dir picker.
+		if m.sendPanel.DirPickerOpen() {
+			m.sendPanel = m.sendPanel.CloseDirPicker()
+			return m, nil
+		}
+		// Pipeline dir picker.
 		m.dirPickerOpen = false
 		m.pendingPipelineName = ""
 		m.pendingPipelineYAML = ""
@@ -1681,9 +1700,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			case buildershared.SendSubmitMsg:
 				return m.submitAgentJob(v.Message)
 			case buildershared.SendBrowseCWDMsg:
-				m.dirPicker = NewDirPickerModel()
-				m.dirPickerOpen = true
-				m.dirPickerCtx = "agent"
+				// Dir picker is now inline in the agent popup — just start the async walk.
 				return m, DirPickerInit()
 			default:
 				// Some other cmd result — wrap it back as a Cmd if non-nil
@@ -3217,8 +3234,8 @@ func (m Model) View() string {
 	body := buildBody()
 
 	// Dir picker overlay — used for pipeline context only.
-	// The agent context renders the dir picker inline within the agent modal.
-	if m.dirPickerOpen && m.dirPickerCtx != "agent" {
+	// The agent CWD picker is rendered inline within the agent popup modal.
+	if m.dirPickerOpen {
 		base := topBar + "\n" + body
 		return overlayCenter(base, m.dirPicker.ViewDirPickerBox(w, m.ansiPalette()), w, h)
 	}
@@ -3270,12 +3287,6 @@ func (m Model) View() string {
 	if m.agent.focused && m.sendPanel.SavedPipelineOpen() {
 		base := topBar + "\n" + body
 		return overlayCenter(base, m.sendPanel.SavedPipelineOverlayView(w, m.ansiPalette()), w, h)
-	}
-
-	// Dir picker for agent CWD — overlay on the normal 3-col view.
-	if m.dirPickerOpen && m.dirPickerCtx == "agent" {
-		base := topBar + "\n" + body
-		return overlayCenter(base, m.dirPicker.ViewDirPickerBox(w, m.ansiPalette()), w, h)
 	}
 
 	// Re-run modal — full-screen panel like inbox detail.

@@ -47,6 +47,8 @@ type SendPanel struct {
 	agentPicker          modal.AgentPickerModel
 	agentOpen            bool
 	agentPopupFocus      int // SendPopupFocusPicker or SendPopupFocusCWD
+	dirPicker            modal.DirPickerModel
+	dirPickerOpen        bool   // inline dir picker active within the agent popup
 	focus                int // SendFocusName … SendFocusMessage
 	focused              bool
 	savedPromptsOpen     bool
@@ -127,6 +129,17 @@ func (s SendPanel) ModelID() string { return s.agentPicker.SelectedModelID() }
 // CWD returns the current working directory value.
 func (s SendPanel) CWD() string { return s.cwd }
 
+// DirPickerOpen reports whether the inline dir picker is active inside the agent popup.
+func (s SendPanel) DirPickerOpen() bool { return s.dirPickerOpen }
+
+// CloseDirPicker closes the inline dir picker and returns focus to the CWD row.
+func (s SendPanel) CloseDirPicker() SendPanel {
+	s.dirPickerOpen = false
+	s.agentPopupFocus = SendPopupFocusCWD
+	s.syncFocus()
+	return s
+}
+
 // SetCWD sets the CWD value (called externally after dir picker resolves).
 func (s SendPanel) SetCWD(path string) SendPanel {
 	s.cwd = path
@@ -173,7 +186,7 @@ func (s SendPanel) ClearSavedPipeline() SendPanel {
 }
 
 func (s *SendPanel) syncFocus() {
-	if !s.focused || s.agentOpen || s.savedPromptsOpen || s.savedPipelineOpen {
+	if !s.focused || s.agentOpen || s.savedPromptsOpen || s.savedPipelineOpen || s.dirPickerOpen {
 		s.nameInput.Blur()
 		s.msgInput.Blur()
 		return
@@ -193,11 +206,28 @@ func (s *SendPanel) syncFocus() {
 
 // Update handles key events for the send panel.
 func (s SendPanel) Update(msg tea.Msg) (SendPanel, tea.Cmd) {
+	// ── Inline dir picker: route DirWalkResultMsg to populate directories ─────
+	if dwMsg, ok := msg.(modal.DirWalkResultMsg); ok {
+		if s.dirPickerOpen {
+			var cmd tea.Cmd
+			s.dirPicker, cmd = s.dirPicker.Update(dwMsg)
+			return s, cmd
+		}
+		return s, nil
+	}
+
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return s, nil
 	}
 	key := keyMsg.String()
+
+	// ── Inline dir picker: route key events when active ───────────────────────
+	if s.dirPickerOpen {
+		var cmd tea.Cmd
+		s.dirPicker, cmd = s.dirPicker.Update(keyMsg)
+		return s, cmd
+	}
 
 	// ── Saved prompts picker open ─────────────────────────────────────────────
 	if s.savedPromptsOpen {
@@ -240,7 +270,10 @@ func (s SendPanel) Update(msg tea.Msg) (SendPanel, tea.Cmd) {
 			return s, nil
 		case "enter":
 			if s.agentPopupFocus == SendPopupFocusCWD {
-				// Emit browse CWD message; keep popup open until caller responds
+				// Open inline dir picker; tell parent to start the async walk.
+				s.dirPicker = modal.NewDirPickerModel()
+				s.dirPickerOpen = true
+				s.syncFocus()
 				return s, func() tea.Msg { return SendBrowseCWDMsg{} }
 			}
 			s.agentOpen = false
@@ -465,6 +498,21 @@ func (s SendPanel) OverlayView(w int, pal styles.ANSIPalette) string {
 	}
 	innerW := boxW - 4
 
+	// ── Inline dir picker mode ────────────────────────────────────────────────
+	if s.dirPickerOpen {
+		var rows []string
+		rows = append(rows, panelrender.BoxTop(boxW, "AGENT RUNNER", pal.Border, pal.Accent))
+		rows = append(rows, panelrender.BoxRow("  "+pal.Accent+sbBld+"CWD"+sbRst, boxW, pal.Border))
+		rows = append(rows, panelrender.BoxRow("", boxW, pal.Border))
+		// ViewInline renders box rows at boxW width with │ borders already applied.
+		for _, line := range strings.Split(s.dirPicker.ViewInline(boxW, pal), "\n") {
+			rows = append(rows, line)
+		}
+		rows = append(rows, panelrender.BoxBot(boxW, pal.Border))
+		return strings.Join(rows, "\n")
+	}
+
+	// ── Normal agent picker mode ──────────────────────────────────────────────
 	var rows []string
 	rows = append(rows, panelrender.BoxTop(boxW, "AGENT RUNNER", pal.Border, pal.Accent))
 	rows = append(rows, panelrender.BoxRow("", boxW, pal.Border))
@@ -473,7 +521,7 @@ func (s SendPanel) OverlayView(w int, pal styles.ANSIPalette) string {
 		rows = append(rows, panelrender.BoxRow("  "+r, boxW, pal.Border))
 	}
 
-	// CWD row — display only, enter triggers browse.
+	// CWD row — display only, enter triggers inline browse.
 	cwdLabel := sbDim + "CWD" + sbRst
 	if s.agentPopupFocus == SendPopupFocusCWD {
 		cwdLabel = pal.Accent + sbBld + "CWD" + sbRst
