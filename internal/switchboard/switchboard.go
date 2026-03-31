@@ -25,6 +25,7 @@ import (
 	robfigcron "github.com/robfig/cron/v3"
 
 	"github.com/adam-stokes/orcai/internal/activity"
+	"github.com/adam-stokes/orcai/internal/tdf"
 	orcaicron "github.com/adam-stokes/orcai/internal/cron"
 	"github.com/adam-stokes/orcai/internal/busd/topics"
 	"github.com/adam-stokes/orcai/internal/inbox"
@@ -353,6 +354,9 @@ type Model struct {
 	clarifyInput               textinput.Model
 	clarifyActive              bool
 	clarifyNeedsResume         bool // true only when loaded from DB on startup (subprocess may be dead)
+	// TDF header art — rendered once at startup, cached for every frame.
+	tdfHeader  []string
+	tdfHeaderW int // visual width (ANSI-stripped) of the widest header line
 }
 
 // New creates a new Switchboard Model, discovering pipelines and providers.
@@ -410,6 +414,16 @@ func NewWithStore(s *store.Store) Model {
 	translations.SetGlobalProvider(translations.NewYAMLProvider())
 
 	m.inboxReadIDs = LoadReadSet(m.readStateFile())
+
+	// Pre-render the TDF header art once at startup.
+	if f, err := tdf.LoadEmbedded("amnesiax"); err == nil {
+		m.tdfHeader = tdf.RenderString("ORCAI", f)
+		for _, line := range m.tdfHeader {
+			if w := len([]rune(tdf.StripANSI(line))); w > m.tdfHeaderW {
+				m.tdfHeaderW = w
+			}
+		}
+	}
 
 	return m
 }
@@ -3173,7 +3187,7 @@ func (m Model) View() string {
 	}
 
 	leftW := m.leftColWidth() - 1
-	contentH := max(h-2, 5) // reserve 1 line for top bar + 1 for padding row
+	contentH := max(h-m.headerHeight()-1, 5) // reserve header height + 1 padding row
 
 	left := m.viewLeftColumn(contentH, leftW)
 	leftLines := strings.Split(left, "\n")
@@ -3798,13 +3812,36 @@ func (m Model) buildBanner(w int) string {
 	return logo + sep + sub
 }
 
+// headerHeight returns the number of terminal lines consumed by the top bar.
+func (m Model) headerHeight() int {
+	if len(m.tdfHeader) > 0 {
+		return len(m.tdfHeader) + 1 // TDF lines + subtitle bar
+	}
+	return 1
+}
+
 // viewTopBar renders the full-width ORCAI header bar for the Switchboard.
 func (m Model) viewTopBar(w int) string {
-	title := "░▒▓ ORCAI — ABBS Switchboard ▓▒░"
+	subtitle := "░▒▓ ORCAI — ABBS Switchboard ▓▒░"
 	if p := translations.GlobalProvider(); p != nil {
-		title = p.T(translations.KeySwitchboardHeader, title)
+		subtitle = p.T(translations.KeySwitchboardHeader, subtitle)
 	}
-	return TopBar(m.activeBundle(), title, w)
+
+	if len(m.tdfHeader) == 0 {
+		return TopBar(m.activeBundle(), subtitle, w)
+	}
+
+	var sb strings.Builder
+	pad := (w - m.tdfHeaderW) / 2
+	if pad < 0 {
+		pad = 0
+	}
+	prefix := strings.Repeat(" ", pad)
+	for _, line := range m.tdfHeader {
+		sb.WriteString(prefix + line + "\n")
+	}
+	sb.WriteString(TopBar(m.activeBundle(), subtitle, w))
+	return sb.String()
 }
 
 // buildLauncherSection renders the Pipeline Launcher box.
