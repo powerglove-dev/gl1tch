@@ -76,7 +76,7 @@ const (
 	FeedFailed
 )
 
-// MarkModeState represents the mark mode cycle for the activity feed.
+// MarkModeState represents the mark mode cycle for the inbox detail panel.
 type MarkModeState int
 
 const (
@@ -287,9 +287,6 @@ type Model struct {
 	feedScrollOffset      int
 	feedCursor            int // absolute line index within all visible feed content
 	feedFocused           bool
-	feedMarked        map[int]bool   // marked absolute line indices
-	feedMarkedContent map[int]string // ANSI-stripped content at each marked index
-	feedMarkMode      MarkModeState
 	signalBoard           SignalBoard
 	signalBoardFocused    bool
 	agentsGridRow         int  // selected row in the agents grid (center panel)
@@ -647,15 +644,6 @@ func (m Model) FeedEntryArchived(id string) (bool, bool) {
 
 // SignalBoardActiveFilter returns the current active filter — used in tests.
 func (m Model) SignalBoardActiveFilter() string { return m.signalBoard.activeFilter }
-
-// FeedHasMarks returns whether any feed lines are marked — used in tests.
-func (m Model) FeedHasMarks() bool { return len(m.feedMarked) > 0 }
-
-// FeedMarkedAt returns whether the given absolute line index is marked — used in tests.
-func (m Model) FeedMarkedAt(idx int) bool { return m.feedMarked[idx] }
-
-// FeedMarkMode returns the current feed mark mode — used in tests.
-func (m Model) FeedMarkMode() MarkModeState { return m.feedMarkMode }
 
 // AgentPromptValue returns the current agent prompt textarea value — used in tests.
 func (m Model) AgentPromptValue() string { return m.agent.prompt.Value() }
@@ -1896,7 +1884,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	// Global focus shortcuts — p focuses pipelines.
 	switch key {
 	case "p":
-		m = m.clearFeedMarkMode()
 		m.launcher.focused = true
 		m.agent.focused = false
 		m.feedFocused = false
@@ -1904,7 +1891,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.cronPanel.focused = false
 		return m, nil
 	case "c":
-		m = m.clearFeedMarkMode()
 		m.launcher.focused = false
 		m.agent.focused = false
 		m.feedFocused = false
@@ -1977,7 +1963,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.feedFocused = true
 				m.feedCursor = 0
 			case m.feedFocused:
-				m = m.clearFeedMarkMode()
 				m.feedFocused = false
 				m.launcher.focused = true
 			default:
@@ -1987,7 +1972,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			switch {
 			case m.launcher.focused:
 				m.launcher.focused = false
-				m = m.clearFeedMarkMode()
 				m.feedFocused = true
 				m.feedCursor = 0
 			case m.inboxPanel.focused:
@@ -2006,7 +1990,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.signalBoard.clearSearch()
 				m.agent.focused = true
 			case m.feedFocused:
-				m = m.clearFeedMarkMode()
 				m.feedFocused = false
 				m.signalBoardFocused = true
 			default:
@@ -2023,22 +2006,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.launcher.focused = false
 			m.agent.focused = false
 			m.signalBoardFocused = false
-			if m.feedFocused {
-				m = m.clearFeedMarkMode()
-			}
 			m.feedFocused = !m.feedFocused
 		}
 		return m, nil
 
 	case "a":
-		m = m.clearFeedMarkMode()
 		m.launcher.focused = false
 		m.agent.focused = true
 		m.feedFocused = false
 		return m, nil
 
 	case "s":
-		m = m.clearFeedMarkMode()
 		m.launcher.focused = false
 		m.agent.focused = false
 		m.feedFocused = false
@@ -2048,7 +2026,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case "i":
-		m = m.clearFeedMarkMode()
 		m.launcher.focused = false
 		m.agent.focused = false
 		m.feedFocused = false
@@ -2058,29 +2035,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case "r":
-		// Feed: open agent runner modal with marked lines injected.
-		if m.feedFocused && len(m.feedMarked) > 0 {
-			keys := make([]int, 0, len(m.feedMarkedContent))
-			for k := range m.feedMarkedContent {
-				keys = append(keys, k)
-			}
-			sort.Ints(keys)
-			var parts []string
-			for _, k := range keys {
-				if content := strings.TrimSpace(m.feedMarkedContent[k]); content != "" {
-					parts = append(parts, content)
-				}
-			}
-			m.feedMarked = nil
-			m.feedMarkedContent = nil
-			m.agent.prompt.SetValue(strings.Join(parts, "\n"))
-			m.agentModalOpen = true
-			m.agentModalFocus = 2
-			m.agentPromptIdx = 0
-			m.agent.prompt.Focus()
-			m.agentNameInput.SetValue(fmt.Sprintf("agent-%s-%d", m.agent.agentPicker.SelectedProviderID(), time.Now().Unix()))
-			return m, loadAgentPromptsCmd(m.store)
-		}
 		// Global refresh: reload pipelines and providers.
 		m.launcher.pipelines = ScanPipelines(pipelinesDir())
 		if m.launcher.selected >= len(m.launcher.pipelines) && m.launcher.selected > 0 {
@@ -2117,9 +2071,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "pgdown", "]":
 		if m.feedFocused {
-			if m.feedMarkMode == MarkModeActive {
-				m = m.feedToggleMark(m.feedCursor)
-			}
 			total := m.feedLineCount()
 			step := m.feedVisibleHeight()
 			m.feedCursor = min(m.feedCursor+step, max(0, total-1))
@@ -2137,9 +2088,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "pgup", "[":
 		if m.feedFocused {
-			if m.feedMarkMode == MarkModeActive {
-				m = m.feedToggleMark(m.feedCursor)
-			}
 			step := m.feedVisibleHeight()
 			m.feedCursor = max(m.feedCursor-step, 0)
 			m.feedScrollOffset -= step
@@ -2289,45 +2237,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m, nil
 		}
 
-	case "m":
-		if m.feedFocused {
-			switch m.feedMarkMode {
-			case MarkModeOff:
-				m.feedMarkMode = MarkModeActive
-			case MarkModeActive:
-				m.feedMarkMode = MarkModePaused
-			case MarkModePaused:
-				// Third press exits mark mode entirely and clears marks.
-				m = m.clearFeedMarkMode()
-			}
-			return m, nil
-		}
-
-	case "A":
-		// Mark all feed lines (available while in mark mode).
-		if m.feedFocused && m.feedMarkMode != MarkModeOff {
-			rawLines := m.feedRawLines(m.feedPanelWidth())
-			if m.feedMarked == nil {
-				m.feedMarked = make(map[int]bool)
-			}
-			if m.feedMarkedContent == nil {
-				m.feedMarkedContent = make(map[int]string)
-			}
-			for i, line := range rawLines {
-				m.feedMarked[i] = true
-				m.feedMarkedContent[i] = line
-			}
-			return m, nil
-		}
-
-	case "D":
-		// Clear all feed marks (available while in mark mode).
-		if m.feedFocused && m.feedMarkMode != MarkModeOff {
-			m.feedMarked = nil
-			m.feedMarkedContent = nil
-			return m, nil
-		}
-
 	case "enter":
 		return m.handleEnter()
 	}
@@ -2350,36 +2259,6 @@ func (m Model) feedVisibleHeight() int {
 		v = 1
 	}
 	return v
-}
-
-// clearFeedMarkMode resets mark mode to off and clears all feed marks.
-// Call whenever the feed loses focus.
-func (m Model) clearFeedMarkMode() Model {
-	m.feedMarkMode = MarkModeOff
-	m.feedMarked = nil
-	m.feedMarkedContent = nil
-	return m
-}
-
-// feedToggleMark toggles the mark state of the given absolute line index.
-func (m Model) feedToggleMark(idx int) Model {
-	rawLines := m.feedRawLines(m.feedPanelWidth())
-	if m.feedMarked == nil {
-		m.feedMarked = make(map[int]bool)
-	}
-	if m.feedMarkedContent == nil {
-		m.feedMarkedContent = make(map[int]string)
-	}
-	if m.feedMarked[idx] {
-		delete(m.feedMarked, idx)
-		delete(m.feedMarkedContent, idx)
-	} else {
-		m.feedMarked[idx] = true
-		if idx < len(rawLines) {
-			m.feedMarkedContent[idx] = rawLines[idx]
-		}
-	}
-	return m
 }
 
 // inboxDetailToggleMark toggles the mark state of the inbox detail cursor line.
@@ -2428,9 +2307,6 @@ func (m Model) handleDown() Model {
 		return m
 	}
 	if m.feedFocused {
-		if m.feedMarkMode == MarkModeActive {
-			m = m.feedToggleMark(m.feedCursor)
-		}
 		total := m.feedLineCount()
 		m.feedCursor = min(m.feedCursor+1, max(0, total-1))
 		// Keep cursor in view: scroll down only if cursor moves below the bottom edge.
@@ -2485,9 +2361,6 @@ func (m Model) handleUp() Model {
 		return m
 	}
 	if m.feedFocused {
-		if m.feedMarkMode == MarkModeActive {
-			m = m.feedToggleMark(m.feedCursor)
-		}
 		m.feedCursor = max(m.feedCursor-1, 0)
 		// Keep cursor in view: scroll up only if cursor moves above the top edge.
 		if m.feedCursor < m.feedScrollOffset {
@@ -4803,21 +4676,11 @@ func (m Model) viewActivityFeed(height, width int) string {
 		logicalToVisual = append(logicalToVisual, len(*lines))
 		idx := logicalIdx
 		logicalIdx++
-		isMarked := m.feedMarked[idx]
 		isCursor := m.feedFocused && idx == m.feedCursor
 		var row string
-		switch {
-		case isCursor && isMarked:
-			row = boxRowCursorColor(pal.Success+"●"+aRst+content, width, borderColor)
-		case isCursor:
+		if isCursor {
 			row = boxRowCursorColor(content, width, borderColor)
-		case isMarked:
-			markPrefix := pal.Success + "●" + aRst
-			markContent := lipgloss.NewStyle().
-				Background(lipgloss.Color("#2d4a35")).
-				Render(stripANSI(content))
-			row = boxRow(markPrefix+markContent, width, borderColor)
-		default:
+		} else {
 			row = boxRow(content, width, borderColor)
 		}
 		*lines = append(*lines, row)
@@ -5009,27 +4872,12 @@ func (m Model) viewActivityFeed(height, width int) string {
 	// Hint footer row — always present; shows hints when focused, blank when not.
 	var feedHints []panelrender.Hint
 	if m.feedFocused {
-		markDesc := "mark"
-		switch m.feedMarkMode {
-		case MarkModeActive:
-			markDesc = "pause"
-		case MarkModePaused:
-			markDesc = "resume"
-		}
 		feedHints = []panelrender.Hint{
 			{Key: "j/k", Desc: "nav"},
 			{Key: "[", Desc: "page up"},
 			{Key: "]", Desc: "page down"},
 			{Key: "g", Desc: "top"},
 			{Key: "G", Desc: "bottom"},
-			{Key: "m", Desc: markDesc},
-		}
-		if m.feedMarkMode != MarkModeOff {
-			feedHints = append(feedHints, panelrender.Hint{Key: "A", Desc: "mark all"})
-			feedHints = append(feedHints, panelrender.Hint{Key: "D", Desc: "clear"})
-		}
-		if markCount := len(m.feedMarked); markCount > 0 {
-			feedHints = append(feedHints, panelrender.Hint{Key: "r", Desc: fmt.Sprintf("run (%d)", markCount)})
 		}
 	}
 	lines = append(lines, boxRow(panelrender.HintBar(feedHints, width-2, pal), width, borderColor))
