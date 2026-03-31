@@ -2,6 +2,7 @@ package switchboard
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/sahilm/fuzzy"
 
@@ -74,8 +75,29 @@ func (sb *SignalBoard) clampScroll(visibleRows int) {
 }
 
 // sbFixedBodyRows is the fixed number of visible body rows in the signal board.
-// Sized to accommodate at least 20 running agents.
-const sbFixedBodyRows = 10
+// At 3 rows per entry, this fits 4 entries with no remainder.
+const sbFixedBodyRows = 12
+
+// humanDuration formats a duration as a human-readable string.
+func humanDuration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+	seconds := int(d.Seconds()) % 60
+	switch {
+	case days > 0:
+		return fmt.Sprintf("%dd %dh", days, hours)
+	case hours > 0:
+		return fmt.Sprintf("%dh %dm", hours, minutes)
+	case minutes > 0:
+		return fmt.Sprintf("%dm %ds", minutes, seconds)
+	default:
+		return fmt.Sprintf("%ds", seconds)
+	}
+}
 
 // signalBoardPanelHeight returns the total rendered height (in lines) of the
 // signal board panel for the given contentH. Used consistently by View(),
@@ -86,9 +108,7 @@ func (m Model) signalBoardPanelHeight(contentH int) int {
 	if PanelHeader(m.activeBundle(), "signal_board", 80, "", "") != nil {
 		headerLines = 3 // sprite
 	}
-	if m.signalBoard.activeFilter != "" && m.signalBoard.activeFilter != "all" {
-		headerLines++ // filter line
-	}
+	headerLines++ // filter line (always shown)
 	if m.signalBoard.searching || m.signalBoard.query != "" {
 		headerLines++ // search input line
 	}
@@ -100,8 +120,9 @@ func (m Model) signalBoardPanelHeight(contentH int) int {
 	return sbH
 }
 
-// signalBoardVisibleRows computes the number of visible body rows using the
+// signalBoardVisibleRows computes the number of visible entries using the
 // same height formula as the View() layout and buildSignalBoard header count.
+// Each entry occupies 3 body rows.
 func (m Model) signalBoardVisibleRows() int {
 	h := m.height
 	if h <= 0 {
@@ -112,15 +133,13 @@ func (m Model) signalBoardVisibleRows() int {
 
 	// Mirror header line count from buildSignalBoard:
 	// sprite path: 3 sprite lines; else boxTop = 1 line.
-	// Plus 1 filter line when filter is not "all". Plus 1 search line when searching.
+	// Plus 1 filter line (always shown). Plus 1 search line when searching.
 	// Plus 1 for boxBot.
 	headerRows := 1 // boxTop fallback
 	if PanelHeader(m.activeBundle(), "signal_board", 80, "", "") != nil {
 		headerRows = 3 // sprite(3)
 	}
-	if m.signalBoard.activeFilter != "" && m.signalBoard.activeFilter != "all" {
-		headerRows++ // filter line
-	}
+	headerRows++ // filter line (always shown)
 	if m.signalBoard.searching || m.signalBoard.query != "" {
 		headerRows++ // search input line
 	}
@@ -130,7 +149,12 @@ func (m Model) signalBoardVisibleRows() int {
 	if bodyH < 1 {
 		bodyH = 1
 	}
-	return bodyH
+	// Each entry uses 3 rows.
+	visibleEntries := bodyH / 3
+	if visibleEntries < 1 {
+		visibleEntries = 1
+	}
+	return visibleEntries
 }
 
 // buildSignalBoard renders the SIGNAL BOARD panel.
@@ -158,18 +182,16 @@ func (m Model) buildSignalBoard(height, width int) []string {
 	var lines []string
 	if sprite := PanelHeader(m.activeBundle(), "signal_board", width, borderColor, pal.Accent); sprite != nil {
 		lines = append(lines, sprite...)
-		// Only show the filter line when a non-default filter is active.
-		if filter != "all" {
-			scrollIndicator := ""
-			if total > 0 {
-				scrollIndicator = fmt.Sprintf("  %s%d/%d%s", pal.Dim, sel, total, aRst)
-			}
-			filterLine := fmt.Sprintf("  filter: %s%s%s%s", pal.Accent, filter, aRst, scrollIndicator)
-			lines = append(lines, boxRow(filterLine, width, borderColor))
-		}
 	} else {
 		lines = append(lines, boxTop(width, RenderHeader("signal_board"), borderColor, pal.Accent))
 	}
+	// Always show the current filter with scroll indicator.
+	scrollIndicator := ""
+	if total > 0 {
+		scrollIndicator = fmt.Sprintf("  %s%d/%d%s", pal.Dim, sel, total, aRst)
+	}
+	filterLine := fmt.Sprintf("  filter: %s%s%s%s", pal.Accent, filter, aRst, scrollIndicator)
+	lines = append(lines, boxRow(filterLine, width, borderColor))
 
 	// Search input line (only visible when / search mode is active, or query is non-empty).
 	if m.signalBoard.searching || m.signalBoard.query != "" {
@@ -187,6 +209,11 @@ func (m Model) buildSignalBoard(height, width int) []string {
 	bodyH := height - len(lines) - 2 // -1 for boxBot, -1 for hint footer
 	if bodyH <= 0 {
 		bodyH = 1
+	}
+	// Each entry occupies 3 rows.
+	visibleEntries := bodyH / 3
+	if visibleEntries < 1 {
+		visibleEntries = 1
 	}
 
 	if len(filtered) == 0 {
@@ -206,15 +233,16 @@ func (m Model) buildSignalBoard(height, width int) []string {
 		}
 
 		// Visible window.
-		end := scrollOff + bodyH
+		end := scrollOff + visibleEntries
 		if end > len(filtered) {
 			end = len(filtered)
 		}
 		shown := filtered[scrollOff:end]
 
+		maxTitleLen := max(width-6, 8)
+
 		for i, entry := range shown {
 			absIdx := scrollOff + i
-			ts := entry.ts.Format("15:04:05")
 
 			var led string
 			switch entry.status {
@@ -247,7 +275,6 @@ func (m Model) buildSignalBoard(height, width int) []string {
 			}
 
 			title := entry.title
-			maxTitleLen := max(width-30, 8)
 			if len([]rune(title)) > maxTitleLen {
 				title = string([]rune(title)[:maxTitleLen-1]) + "…"
 			}
@@ -256,9 +283,19 @@ func (m Model) buildSignalBoard(height, width int) []string {
 			if absIdx == m.signalBoard.selectedIdx && m.signalBoardFocused {
 				cursor = pal.Accent + "> " + aRst
 			}
-			rowContent := fmt.Sprintf("%s[%s] %s  %-*s  %s",
-				cursor, led, ts, maxTitleLen, title, statusLabel)
-			lines = append(lines, boxRow(rowContent, width, borderColor))
+
+			startTime := entry.ts.Format("3:04 PM")
+			duration := humanDuration(time.Since(entry.ts))
+
+			// Row 1: name
+			lines = append(lines, boxRow(fmt.Sprintf("%s%s", cursor, title), width, borderColor))
+			// Row 2: start time | duration
+			lines = append(lines, boxRow(fmt.Sprintf("  %s%s%s  %s|%s  %s%s%s",
+				pal.Dim, startTime, aRst,
+				pal.Dim, aRst,
+				pal.Dim, duration, aRst), width, borderColor))
+			// Row 3: status indicator
+			lines = append(lines, boxRow(fmt.Sprintf("  [%s]  %s", led, statusLabel), width, borderColor))
 		}
 	}
 

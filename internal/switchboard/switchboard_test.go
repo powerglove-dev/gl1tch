@@ -363,14 +363,17 @@ func TestSignalBoard_HeaderContainsFilter(t *testing.T) {
 		t.Errorf("signal board should show filter line when filter is 'running': %s", rendered)
 	}
 
-	// After pressing f to cycle to "all", the filter line should be hidden.
+	// After pressing f to cycle to "all", the filter line is still always shown.
 	m3f := m3.SetSignalBoardFocused(true)
 	m4, _ := m3f.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
 	m5 := m4.(switchboard.Model)
 	sb2 := m5.BuildSignalBoard(8, 60)
 	rendered2 := strings.Join(sb2, "\n")
-	if strings.Contains(rendered2, "filter:") {
-		t.Errorf("signal board should not show filter line when filter is 'all': %s", rendered2)
+	if !strings.Contains(rendered2, "filter:") {
+		t.Errorf("signal board should always show filter line: %s", rendered2)
+	}
+	if !strings.Contains(rendered2, "all") {
+		t.Errorf("signal board filter line should show 'all' after cycling: %s", rendered2)
 	}
 }
 
