@@ -242,6 +242,10 @@ func (m Model) openEdit(name string) Model {
 			// Multi-step or unparseable: show raw YAML as content.
 			m.editor = m.editor.SetContent(string(data))
 		}
+		// Show the existing YAML in the runner panel so the user can see
+		// what was previously generated before deciding whether to re-run.
+		yamlLines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+		m.runner = m.runner.SetLines(yamlLines, "loaded — ready to run")
 	}
 
 	m.focus = FocusEditor

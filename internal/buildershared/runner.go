@@ -59,6 +59,17 @@ func (r RunnerPanel) Clear() RunnerPanel {
 	return r
 }
 
+// SetLines pre-populates the runner panel with static lines and a status message.
+// Used to display existing pipeline YAML without running anything.
+func (r RunnerPanel) SetLines(lines []string, status string) RunnerPanel {
+	r.lines = lines
+	r.running = false
+	r.statusMsg = status
+	r.statusErr = false
+	r.clarifyActive = false
+	return r
+}
+
 // IsRunning returns true if a run is in progress.
 func (r RunnerPanel) IsRunning() bool { return r.running }
 
