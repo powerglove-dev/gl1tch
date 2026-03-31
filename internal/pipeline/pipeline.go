@@ -15,7 +15,6 @@ type Pipeline struct {
 	Steps       []Step         `yaml:"steps"`
 	Vars        map[string]any `yaml:"vars"` // Pipeline-level seed context available to all steps.
 	MaxParallel int            `yaml:"max_parallel"` // Maximum concurrent steps; defaults to 8 when zero.
-	UseBrain    bool           `yaml:"use_brain"`
 	WriteBrain  bool           `yaml:"write_brain"`
 }
 
@@ -48,9 +47,6 @@ type Step struct {
 	// When set, the step is expanded into N cloned steps, one per item.
 	ForEach string `yaml:"for_each"`
 
-	// UseBrain controls brain read injection for this step.
-	// Pointer for tri-state: nil = inherit pipeline setting, true = force on, false = force off.
-	UseBrain *bool `yaml:"use_brain"`
 	// WriteBrain controls brain write injection for this step.
 	// Pointer for tri-state: nil = inherit pipeline setting, true = force on, false = force off.
 	WriteBrain *bool `yaml:"write_brain"`
@@ -58,6 +54,13 @@ type Step struct {
 	// body is prepended (with a blank line separator) to the step's input before
 	// execution. Uses case-insensitive title matching.
 	PromptID string `yaml:"prompt_id,omitempty"`
+
+	// Outputs declares the output keys produced by this step.
+	// After the step completes, its full output string is stored under each declared key.
+	Outputs map[string]string `yaml:"outputs,omitempty"`
+	// Inputs maps input names to template expressions like "{{ steps.<id>.<key> }}".
+	// These are resolved before execution using accumulated step outputs.
+	Inputs map[string]string `yaml:"inputs,omitempty"`
 }
 
 // RetryPolicy specifies how a step should be retried on failure.

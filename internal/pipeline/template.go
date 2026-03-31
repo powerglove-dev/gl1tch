@@ -3,8 +3,12 @@ package pipeline
 import (
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 )
+
+// stepInputPattern matches {{ steps.<id>.<key> }} template expressions.
+var stepInputPattern = regexp.MustCompile(`\{\{\s*steps\.([^.}\s]+)\.([^}\s]+)\s*\}\}`)
 
 // Interpolate replaces all {{key}} and {{dot.path}} placeholders in s with
 // values from vars. For dot-separated keys like {{step.fetch.data.url}}, it
@@ -76,6 +80,31 @@ func resolveKey(vars map[string]any, key string) (any, bool) {
 	}
 
 	return nil, false
+}
+
+// ResolveStepInputs resolves all {{ steps.<id>.<key> }} template expressions in s
+// using accumulated step outputs from ec. Returns an error if any referenced output
+// does not exist (step ID or key not found).
+func ResolveStepInputs(s string, ec *ExecutionContext, stepName, runIDStr string) (string, error) {
+	var resolveErr error
+	result := stepInputPattern.ReplaceAllStringFunc(s, func(match string) string {
+		if resolveErr != nil {
+			return match
+		}
+		subs := stepInputPattern.FindStringSubmatch(match)
+		if len(subs) < 3 {
+			return match
+		}
+		stepID, key := subs[1], subs[2]
+		val, ok := ec.StepOutput(stepID, key)
+		if !ok {
+			resolveErr = fmt.Errorf("step %s: input %q: step %s output %s not found (run_id=%s, step=%s)",
+				stepName, match, stepID, key, runIDStr, stepName)
+			return match
+		}
+		return val
+	})
+	return result, resolveErr
 }
 
 // resolvePath looks up key in vars by walking the nested map using dot-path

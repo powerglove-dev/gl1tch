@@ -41,9 +41,9 @@ func capturePlugin(t *testing.T, mgr *plugin.Manager, name, output string, captu
 	}
 }
 
-// TestBrainReadInjection_PreamblePresent verifies that when use_brain is true
-// and a StoreBrainInjector is configured, the plugin receives a prompt that
-// starts with the brain preamble.
+// TestBrainReadInjection_PreamblePresent verifies that when a StoreBrainInjector is
+// configured, the plugin receives a prompt that starts with the brain preamble.
+// Brain is always on — no use_brain flag needed.
 func TestBrainReadInjection_PreamblePresent(t *testing.T) {
 	s := openTestStore(t)
 	mgr := plugin.NewManager()
@@ -51,8 +51,7 @@ func TestBrainReadInjection_PreamblePresent(t *testing.T) {
 	capturePlugin(t, mgr, "echo", "result", &captured)
 
 	p := &pipeline.Pipeline{
-		Name:     "brain-read-test",
-		UseBrain: true,
+		Name: "brain-read-test",
 		Steps: []pipeline.Step{
 			{ID: "s1", Plugin: "echo", Prompt: "hello"},
 		},
@@ -75,15 +74,14 @@ func TestBrainReadInjection_PreamblePresent(t *testing.T) {
 }
 
 // TestBrainReadInjection_AbsentWithoutInjector verifies that when no injector
-// is provided, the prompt is NOT prefixed with brain preamble even if use_brain: true.
+// is provided, the prompt is NOT prefixed with brain preamble.
 func TestBrainReadInjection_AbsentWithoutInjector(t *testing.T) {
 	mgr := plugin.NewManager()
 	var captured string
 	capturePlugin(t, mgr, "echo", "result", &captured)
 
 	p := &pipeline.Pipeline{
-		Name:     "brain-no-injector-test",
-		UseBrain: true,
+		Name: "brain-no-injector-test",
 		Steps: []pipeline.Step{
 			{ID: "s1", Plugin: "echo", Prompt: "just the prompt"},
 		},
@@ -99,38 +97,6 @@ func TestBrainReadInjection_AbsentWithoutInjector(t *testing.T) {
 		t.Errorf("unexpected brain preamble in prompt: %q", captured)
 	}
 	if captured != "just the prompt" {
-		t.Errorf("expected prompt unchanged, got: %q", captured)
-	}
-}
-
-// TestBrainReadInjection_AbsentWhenFlagOff verifies that even with an injector
-// configured, if use_brain is false the preamble is NOT added.
-func TestBrainReadInjection_AbsentWhenFlagOff(t *testing.T) {
-	s := openTestStore(t)
-	mgr := plugin.NewManager()
-	var captured string
-	capturePlugin(t, mgr, "echo", "result", &captured)
-
-	p := &pipeline.Pipeline{
-		Name:     "brain-off-test",
-		UseBrain: false, // explicitly off
-		Steps: []pipeline.Step{
-			{ID: "s1", Plugin: "echo", Prompt: "plain prompt"},
-		},
-	}
-
-	_, err := pipeline.Run(context.Background(), p, mgr, "",
-		pipeline.WithRunStore(s),
-		pipeline.WithBrainInjector(pipeline.NewStoreBrainInjector(s)),
-	)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	if strings.Contains(captured, "## ORCAI Database Context") {
-		t.Errorf("unexpected brain preamble in prompt: %q", captured)
-	}
-	if captured != "plain prompt" {
 		t.Errorf("expected prompt unchanged, got: %q", captured)
 	}
 }
@@ -182,7 +148,7 @@ func TestBrainWriteInsertion_NoteInserted(t *testing.T) {
 }
 
 // TestBrainFeedbackLoop verifies that a step A that writes a brain note
-// causes step B (use_brain: true, needs A) to receive that note in its preamble.
+// causes step B (needs A) to receive that note in its preamble (brain always on).
 func TestBrainFeedbackLoop(t *testing.T) {
 	s := openTestStore(t)
 	mgr := plugin.NewManager()
@@ -223,11 +189,10 @@ func TestBrainFeedbackLoop(t *testing.T) {
 				WriteBrain: &trueVal,
 			},
 			{
-				ID:       "step-b",
-				Plugin:   "reader",
-				Prompt:   "read something",
-				Needs:    []string{"step-a"},
-				UseBrain: &trueVal,
+				ID:     "step-b",
+				Plugin: "reader",
+				Prompt: "read something",
+				Needs:  []string{"step-a"},
 			},
 		},
 	}
@@ -271,8 +236,7 @@ func TestBrainRunIsolation(t *testing.T) {
 	capturePlugin(t, mgr, "echo", "result", &captured)
 
 	p := &pipeline.Pipeline{
-		Name:     "brain-isolation-test",
-		UseBrain: true,
+		Name: "brain-isolation-test",
 		Steps: []pipeline.Step{
 			{ID: "s1", Plugin: "echo", Prompt: "hello"},
 		},
@@ -485,6 +449,7 @@ func TestBrainWriteInsertion_NoStoreConfigured(t *testing.T) {
 
 // TestBrainLegacyPath verifies that brain injection works on the legacy runner
 // (pipelines without `needs`, `retry`, `for_each`, or `on_failure`).
+// Brain is always on — no use_brain flag needed.
 func TestBrainLegacyPath(t *testing.T) {
 	s := openTestStore(t)
 	mgr := plugin.NewManager()
@@ -493,8 +458,7 @@ func TestBrainLegacyPath(t *testing.T) {
 
 	// No Needs fields → isLegacyPipeline returns true.
 	p := &pipeline.Pipeline{
-		Name:     "brain-legacy-test",
-		UseBrain: true,
+		Name: "brain-legacy-test",
 		Steps: []pipeline.Step{
 			{ID: "s1", Plugin: "echo", Prompt: "legacy hello"},
 		},
@@ -512,4 +476,3 @@ func TestBrainLegacyPath(t *testing.T) {
 		t.Errorf("expected brain preamble in legacy path prompt, got: %q", captured)
 	}
 }
-

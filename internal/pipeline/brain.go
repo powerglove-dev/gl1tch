@@ -11,26 +11,22 @@ import (
 	"github.com/adam-stokes/orcai/internal/store"
 )
 
-// injectBrainContext applies read and write brain pre-context modifications to a
-// prompt string. It is called by both the legacy and DAG execution paths before
-// dispatching to a plugin.
-//   - If use_brain is active and a BrainInjector is configured, the read preamble
-//     (which includes the brain_notes write instruction) is prepended.
-//   - If write_brain is active without use_brain, the write instruction is appended.
+// injectBrainContext applies brain pre-context modifications to a prompt string.
+// It is called by both the legacy and DAG execution paths before dispatching to a plugin.
+//   - Brain is always on: if a BrainInjector is configured, the read preamble
+//     (which includes the brain_notes write instruction) is always prepended.
+//   - If write_brain is active and no injector is configured, the write instruction is appended.
 func injectBrainContext(ctx context.Context, prompt string, p *Pipeline, step *Step, ec *ExecutionContext) string {
-	if stepUseBrain(p, step) {
-		if inj := ec.GetBrainInjector(); inj != nil {
-			if preamble, err := inj.ReadContext(ctx, ec.RunID()); err == nil && preamble != "" {
-				prompt = preamble + "\n\n" + prompt
-			} else if err != nil {
-				fmt.Fprintf(os.Stderr, "[debug] brain read context error for step %q: %v\n", step.ID, err)
-			}
-		} else {
-			fmt.Fprintf(os.Stderr, "[debug] use_brain active for step %q but no BrainInjector configured\n", step.ID)
+	if inj := ec.GetBrainInjector(); inj != nil {
+		if preamble, err := inj.ReadContext(ctx, ec.RunID()); err == nil && preamble != "" {
+			prompt = preamble + "\n\n" + prompt
+		} else if err != nil {
+			fmt.Fprintf(os.Stderr, "[debug] brain read context error for step %q: %v\n", step.ID, err)
 		}
-		// use_brain implies the write instruction — already included in the preamble.
+		// BrainInjector preamble already includes the write instruction.
 		return prompt
 	}
+	// No injector configured — fall back to write instruction only when write_brain is set.
 	if stepWriteBrain(p, step) {
 		prompt = prompt + brainWriteInstruction
 	}

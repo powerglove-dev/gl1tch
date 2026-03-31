@@ -318,7 +318,7 @@ func TestSignalBoard_FilterAll(t *testing.T) {
 	m3 = m3.AddFeedEntry("j3", "failed job", switchboard.FeedFailed, nil)
 	m3 = m3.SetSignalBoardFilter("all") // default is now "running"; set explicitly for this test
 
-	sb := m3.BuildSignalBoard(12, 60)
+	sb := m3.BuildSignalBoard(15, 60)
 	rendered := strings.Join(sb, "\n")
 	// All filter — all 3 jobs should appear.
 	if !strings.Contains(rendered, "running") {
@@ -574,7 +574,7 @@ func TestFeedScrollIndicator_NoIndicatorWhenAllVisible(t *testing.T) {
 }
 
 func TestFeedScrollIndicator_DownWhenContentBelow(t *testing.T) {
-	m := switchboard.New()
+	m := switchboard.NewWithTestProviders()
 	m2, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
 	m3 := m2.(switchboard.Model)
 	// Add enough entries to overflow the visible height.
@@ -1416,10 +1416,13 @@ func TestFeedLineCount_MatchesViewActivityFeed(t *testing.T) {
 
 // ── WriteSingleStepPipeline ───────────────────────────────────────────────────
 
-func TestWriteSingleStepPipeline_UseBrain(t *testing.T) {
+// TestWriteSingleStepPipeline_BrainAlwaysOn verifies that use_brain is never
+// written to YAML (brain is always on; use_brain is no longer a pipeline field).
+func TestWriteSingleStepPipeline_BrainAlwaysOn(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("ORCAI_PIPELINES_DIR", dir)
 
+	// useBrain=true is passed but should have no effect on YAML output.
 	path, err := switchboard.WriteSingleStepPipeline("test-brain", "opencode", "", "do a thing", true)
 	if err != nil {
 		t.Fatalf("WriteSingleStepPipeline: %v", err)
@@ -1428,9 +1431,8 @@ func TestWriteSingleStepPipeline_UseBrain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read pipeline: %v", err)
 	}
-	yaml := string(data)
-	if !strings.Contains(yaml, "use_brain: true") {
-		t.Errorf("expected use_brain: true in YAML, got:\n%s", yaml)
+	if strings.Contains(string(data), "use_brain") {
+		t.Errorf("expected no use_brain key in YAML (brain is always on), got:\n%s", string(data))
 	}
 }
 
@@ -1448,13 +1450,6 @@ func TestWriteSingleStepPipeline_NoBrain(t *testing.T) {
 	}
 	if strings.Contains(string(data), "use_brain") {
 		t.Errorf("expected no use_brain key in YAML when useBrain=false")
-	}
-}
-
-func TestAgentUseBrain_DefaultFalse(t *testing.T) {
-	m := switchboard.New()
-	if m.AgentUseBrain() {
-		t.Error("agentUseBrain should default to false")
 	}
 }
 

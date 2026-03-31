@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/adam-stokes/orcai/internal/activity"
+	"github.com/adam-stokes/orcai/internal/brainaudit"
+	"github.com/adam-stokes/orcai/internal/brainrag"
 	"github.com/adam-stokes/orcai/internal/busd/topics"
 	"github.com/adam-stokes/orcai/internal/clarify"
 	"github.com/adam-stokes/orcai/internal/plugin"
@@ -31,14 +33,16 @@ type resumeFromConfig struct {
 }
 
 type runConfig struct {
-	store        *store.Store
-	publisher    EventPublisher
-	runID        int64
-	pipeName     string
-	injector     BrainInjector // optional brain context injector
-	resumeStepID string
-	resumePrompt string
-	resumeFrom   *resumeFromConfig
+	store           *store.Store
+	publisher       EventPublisher
+	runID           int64
+	pipeName        string
+	injector        BrainInjector     // optional brain context injector
+	ragStore        *brainrag.RAGStore // optional RAG vector store for refresh
+	ragInjector     *brainrag.BrainInjector // optional RAG-based brain injector
+	resumeStepID    string
+	resumePrompt    string
+	resumeFrom      *resumeFromConfig
 }
 
 // WithRunStore attaches a result store to the run so results are persisted.
@@ -54,10 +58,23 @@ func WithEventPublisher(p EventPublisher) RunOption {
 	return func(c *runConfig) { c.publisher = p }
 }
 
-// WithBrainInjector attaches a BrainInjector to the run. When a step has
-// use_brain or write_brain active, the injector is used to assemble pre-context.
+// WithBrainInjector attaches a BrainInjector to the run. The brain is always on —
+// when configured, the injector is used to assemble pre-context for every step.
 func WithBrainInjector(inj BrainInjector) RunOption {
 	return func(c *runConfig) { c.injector = inj }
+}
+
+// WithRAGStore attaches a RAGStore to the run. Before any step dispatch,
+// the runner will call rag.RefreshStale in a goroutine with a 2-second timeout warning.
+func WithRAGStore(rag *brainrag.RAGStore) RunOption {
+	return func(c *runConfig) { c.ragStore = rag }
+}
+
+// WithBrainRAGInjector attaches a RAG-based BrainInjector to the run.
+// Before each step dispatch, InjectInto is called to prepend relevant brain notes
+// to the prompt. On error, the original prompt is used.
+func WithBrainRAGInjector(inj *brainrag.BrainInjector) RunOption {
+	return func(c *runConfig) { c.ragInjector = inj }
 }
 
 // WithResumeFrom instructs the runner to resume an existing run from a
@@ -152,6 +169,35 @@ func Run(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput string
 		"pipeline_started", p.Name, p.Name, "running",
 	))
 
+	// If a RAGStore is configured, refresh stale embeddings before any step executes.
+	// This runs in a goroutine with a 2-second timeout warning so it does not block execution.
+	if cfg.ragStore != nil && cfg.store != nil {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			notes, _ := cfg.store.AllBrainNotes(refreshCtx)
+			baseURL := brainrag.DefaultBaseURL
+			model := brainrag.DefaultEmbedModel
+			if cfg.ragInjector != nil {
+				if cfg.ragInjector.BaseURL != "" {
+					baseURL = cfg.ragInjector.BaseURL
+				}
+				if cfg.ragInjector.Model != "" {
+					model = cfg.ragInjector.Model
+				}
+			}
+			_ = cfg.ragStore.RefreshStale(refreshCtx, baseURL, model, notes)
+		}()
+		// Warn if refresh takes more than 2 seconds.
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			fmt.Fprintf(os.Stderr, "[brainrag] warn: RAG refresh is taking longer than 2s, continuing without waiting\n")
+		}
+	}
+
 	var result string
 	var runErr error
 
@@ -233,8 +279,11 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 	if cfg.injector != nil {
 		ec.SetBrainInjector(cfg.injector, cfg.runID)
 	}
-	// Note: if use_brain is active on a step but no BrainInjector was provided,
-	// the runner will log at debug level and proceed without injection (spec: silent no-op).
+	if cfg.ragInjector != nil {
+		ec.SetRAGInjector(cfg.ragInjector)
+	}
+	// Brain is always on: when a BrainInjector is provided, every step will receive
+	// brain context. If no injector is provided, the runner proceeds without injection.
 
 	// Expose the process working directory so pipeline steps can use {{cwd}}.
 	if cwd, err := os.Getwd(); err == nil {
@@ -376,6 +425,11 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 			lastPluginOutput = output
 			lastOutput = output
 
+			// Store declared step outputs.
+			for key := range step.Outputs {
+				ec.SetStepOutput(step.ID, key, output)
+			}
+
 			outMap := map[string]any{"value": output}
 
 			// Publish step.done.
@@ -463,8 +517,10 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 	if cfg.injector != nil {
 		ec.SetBrainInjector(cfg.injector, cfg.runID)
 	}
-	// Note: if use_brain is active on a step but no BrainInjector was provided,
-	// the runner will log at debug level and proceed without injection (spec: silent no-op).
+	if cfg.ragInjector != nil {
+		ec.SetRAGInjector(cfg.ragInjector)
+	}
+	// Brain is always on: when a BrainInjector is provided, every step will receive brain context.
 	// Expose the process working directory so pipeline steps can use {{cwd}}.
 	if cwd, err := os.Getwd(); err == nil {
 		ec.Set("cwd", cwd)
@@ -857,6 +913,15 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 							}
 						}
 					}
+					// Store declared step outputs.
+					if step := byID[res.id]; step != nil {
+						if v, ok := res.output["value"]; ok {
+							outStr := fmt.Sprint(v)
+							for key := range step.Outputs {
+								ec.SetStepOutput(res.id, key, outStr)
+							}
+						}
+					}
 				} else {
 					ec.Set("step."+res.id+".state", "done")
 				}
@@ -1192,7 +1257,8 @@ done:
 	cleanupErr := executor.Cleanup(ctx)
 	// Parse <brain_notes> from any output (including partial on failure).
 	// Best-effort: called regardless of step success/failure.
-	if stepUseBrain(p, step) || stepWriteBrain(p, step) {
+	// Brain is always on — parse whenever write_brain is active or an injector is configured.
+	if stepWriteBrain(p, step) || ec.GetBrainInjector() != nil {
 		if valueStr, ok := extractOutputValue(out); ok && valueStr != "" {
 			parseBrainBlock(ctx, valueStr, step.ID, ec)
 		}
@@ -1296,6 +1362,23 @@ func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap 
 	}
 	promptOrInput := Interpolate(raw, snap)
 
+	// Resolve {{ steps.<id>.<key> }} patterns from accumulated step outputs.
+	runIDStr := strconv.FormatInt(ec.RunID(), 10)
+	resolved, resolveErr := ResolveStepInputs(promptOrInput, ec, step.ID, runIDStr)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+	promptOrInput = resolved
+
+	// Also resolve declared Inputs map values.
+	for _, tmpl := range step.Inputs {
+		resolvedInput, inputErr := ResolveStepInputs(tmpl, ec, step.ID, runIDStr)
+		if inputErr != nil {
+			return nil, inputErr
+		}
+		_ = resolvedInput // inputs are available via snap but we resolve them for validation
+	}
+
 	// Prepend saved prompt body if prompt_id is set.
 	if step.PromptID != "" {
 		if st != nil {
@@ -1308,6 +1391,27 @@ func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap 
 	}
 
 	promptOrInput = injectBrainContext(ctx, promptOrInput, p, step, ec)
+
+	// RAG injection: if a BrainRAGInjector is configured, inject relevant brain notes.
+	var ragNoteIDs []string
+	if ragInj := ec.GetRAGInjector(); ragInj != nil {
+		injected, injErr := ragInj.InjectInto(ctx, promptOrInput)
+		if injErr != nil {
+			fmt.Fprintf(os.Stderr, "[brainrag] warn: RAG inject failed for step %q: %v\n", step.ID, injErr)
+		} else {
+			promptOrInput = injected
+		}
+	}
+
+	// Audit log: best-effort, never fail the step.
+	go func() {
+		_ = brainaudit.Append(brainaudit.AuditEntry{
+			RunID:              strconv.FormatInt(ec.RunID(), 10),
+			StepName:           step.ID,
+			BrainNotesInjected: ragNoteIDs,
+			PromptLengthChars:  len(promptOrInput),
+		})
+	}()
 
 	// Append the ORCAI_CLARIFY instruction for executors that support reactive
 	// clarification. Pipelines using unregistered executors are unaffected.
@@ -1378,6 +1482,14 @@ func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mg
 	}
 	promptOrInput := Interpolate(raw, snap)
 
+	// Resolve {{ steps.<id>.<key> }} patterns from accumulated step outputs.
+	runIDStr := strconv.FormatInt(ec.RunID(), 10)
+	resolvedPrompt, resolveErr := ResolveStepInputs(promptOrInput, ec, step.ID, runIDStr)
+	if resolveErr != nil {
+		return "", resolveErr
+	}
+	promptOrInput = resolvedPrompt
+
 	// Prepend saved prompt body if prompt_id is set.
 	if step.PromptID != "" {
 		if st != nil {
@@ -1390,6 +1502,26 @@ func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mg
 	}
 
 	promptOrInput = injectBrainContext(ctx, promptOrInput, p, step, ec)
+
+	// RAG injection: if a BrainRAGInjector is configured, inject relevant brain notes.
+	if ragInj := ec.GetRAGInjector(); ragInj != nil {
+		injected, injErr := ragInj.InjectInto(ctx, promptOrInput)
+		if injErr != nil {
+			fmt.Fprintf(os.Stderr, "[brainrag] warn: RAG inject failed for step %q: %v\n", step.ID, injErr)
+		} else {
+			promptOrInput = injected
+		}
+	}
+
+	// Audit log: best-effort.
+	go func() {
+		_ = brainaudit.Append(brainaudit.AuditEntry{
+			RunID:              strconv.FormatInt(ec.RunID(), 10),
+			StepName:           step.ID,
+			BrainNotesInjected: []string{},
+			PromptLengthChars:  len(promptOrInput),
+		})
+	}()
 
 	// Append ORCAI_CLARIFY instruction for reactive executors so the model
 	// knows the protocol for requesting user input.
@@ -1445,7 +1577,8 @@ func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mg
 
 	// Parse <brain_notes> from output whenever the step is brain-aware,
 	// even on failure (best-effort from any partial output).
-	if stepUseBrain(p, step) || stepWriteBrain(p, step) {
+	// Brain is always on — parse whenever write_brain is active or an injector is configured.
+	if stepWriteBrain(p, step) || ec.GetBrainInjector() != nil {
 		parseBrainBlock(ctx, output, step.ID, ec)
 	}
 	return output, execErr

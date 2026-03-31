@@ -1,0 +1,76 @@
+// Package braincontext provides types for linking brain notes to pipeline workspaces.
+package braincontext
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// WorkspaceType identifies the kind of workspace a brain context is associated with.
+type WorkspaceType string
+
+const (
+	WorkspacePipeline  WorkspaceType = "pipeline"
+	WorkspaceAgent     WorkspaceType = "agent"
+	WorkspaceScheduled WorkspaceType = "scheduled"
+)
+
+// WorkspaceContext links a workspace (pipeline, agent, or scheduled) to a set of
+// brain note IDs. This is persisted as a JSON sidecar file alongside the pipeline YAML.
+type WorkspaceContext struct {
+	WorkspaceType WorkspaceType `json:"workspace_type,omitempty"`
+	WorkspaceID   string        `json:"workspace_id"`
+	LinkedNoteIDs []string      `json:"linked_note_ids"`
+}
+
+// Empty returns a zero-value WorkspaceContext.
+func Empty() WorkspaceContext { return WorkspaceContext{} }
+
+// sidecarPath returns the path of the .brain.json sidecar for a given pipeline file.
+// e.g. /pipelines/my.pipeline.yaml → /pipelines/my.brain.json
+func sidecarPath(pipelinePath string) string {
+	base := filepath.Base(pipelinePath)
+	// Strip .pipeline.yaml or .yaml suffix and replace with .brain.json
+	name := strings.TrimSuffix(base, ".pipeline.yaml")
+	if name == base {
+		name = strings.TrimSuffix(base, ".yaml")
+	}
+	return filepath.Join(filepath.Dir(pipelinePath), name+".brain.json")
+}
+
+// LoadWorkspaceContext reads the brain sidecar file for the given pipeline path.
+// Returns Empty() if the sidecar does not exist (not an error).
+func LoadWorkspaceContext(pipelinePath string) (WorkspaceContext, error) {
+	sp := sidecarPath(pipelinePath)
+	data, err := os.ReadFile(sp)
+	if os.IsNotExist(err) {
+		return Empty(), nil
+	}
+	if err != nil {
+		return Empty(), fmt.Errorf("braincontext: read sidecar %q: %w", sp, err)
+	}
+	var wc WorkspaceContext
+	if err := json.Unmarshal(data, &wc); err != nil {
+		return Empty(), fmt.Errorf("braincontext: parse sidecar %q: %w", sp, err)
+	}
+	return wc, nil
+}
+
+// SaveWorkspaceContext writes the WorkspaceContext to the sidecar file alongside path.
+func SaveWorkspaceContext(pipelinePath string, wc WorkspaceContext) error {
+	sp := sidecarPath(pipelinePath)
+	data, err := json.MarshalIndent(wc, "", "  ")
+	if err != nil {
+		return fmt.Errorf("braincontext: marshal: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(sp), 0o755); err != nil {
+		return fmt.Errorf("braincontext: mkdir: %w", err)
+	}
+	if err := os.WriteFile(sp, data, 0o600); err != nil {
+		return fmt.Errorf("braincontext: write sidecar %q: %w", sp, err)
+	}
+	return nil
+}

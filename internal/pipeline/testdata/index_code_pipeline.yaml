@@ -1,0 +1,12 @@
+name: index-codebase
+version: "1"
+# Example pipeline: index Go source files into the brain RAG store.
+# Requires Ollama running with the nomic-embed-text model.
+steps:
+  - id: index
+    executor: builtin.index_code
+    args:
+      path: "."
+      extensions: ".go,.ts,.py,.md"
+      model: "nomic-embed-text"
+      chunk_size: "1500"

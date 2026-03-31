@@ -31,6 +31,7 @@ import (
 	"github.com/adam-stokes/orcai/internal/modal"
 	"github.com/adam-stokes/orcai/internal/panelrender"
 	"github.com/adam-stokes/orcai/internal/picker"
+	"github.com/adam-stokes/orcai/internal/braineditor"
 	"github.com/adam-stokes/orcai/internal/buildershared"
 	"github.com/adam-stokes/orcai/internal/pipelineeditor"
 	"github.com/adam-stokes/orcai/internal/store"
@@ -345,6 +346,9 @@ type Model struct {
 	// Pipeline editor (full-screen two-column TUI).
 	pipelineEditorOpen bool
 	pipelineEditor     pipelineeditor.Model
+	// Brain editor (full-screen two-column TUI).
+	brainEditorOpen bool
+	brainEditor     braineditor.Model
 	// Re-run modal
 	rerunModal    modal.RerunModal
 	showRerun     bool
@@ -409,6 +413,7 @@ func NewWithStore(s *store.Store) Model {
 		agentNameInput:        func() textinput.Model { ti := textinput.New(); ti.Placeholder = "agent-<provider>-<timestamp>"; ti.CharLimit = 128; return ti }(),
 		savedPromptPicker:     modal.NewFuzzyPickerModel(8),
 		pipelineEditor:        pipelineeditor.New(agentProviders, pipelinesDir(), s),
+		brainEditor:           braineditor.New(s, agentProviders),
 		pipelineScheduleInput: pipeSchedTA,
 		signalBoard:           SignalBoard{activeFilter: "running"},
 		inboxPanel:            InboxPanel{activeFilter: "unread"},
@@ -818,13 +823,11 @@ func WriteSingleStepPipeline(name, providerID, modelID, prompt string, useBrain 
 		model = "\n    model: " + modelID
 	}
 
-	useBrainYAML := ""
-	if useBrain {
-		useBrainYAML = "\n    use_brain: true"
-	}
+	// Brain is always on — use_brain is no longer a pipeline field.
+	_ = useBrain
 
-	content := fmt.Sprintf("name: %s\nversion: \"1\"\nsteps:\n  - id: run\n    executor: %s%s%s\n    prompt: |\n%s",
-		name, providerID, model, useBrainYAML, promptLines.String())
+	content := fmt.Sprintf("name: %s\nversion: \"1\"\nsteps:\n  - id: run\n    executor: %s%s\n    prompt: |\n%s",
+		name, providerID, model, promptLines.String())
 
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return "", err
@@ -1319,7 +1322,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// When any global overlay is active, all keys must go through handleKey
 		// so ESC / y / n can dismiss it regardless of which panel is focused.
-		if m.confirmQuit || m.helpOpen || m.agentModalOpen || m.themePicker.Open || m.dirPickerOpen || m.confirmDelete || m.pipelineLaunchMode != plModeNone || m.showRerun || m.pipelineEditorOpen {
+		if m.confirmQuit || m.helpOpen || m.agentModalOpen || m.themePicker.Open || m.dirPickerOpen || m.confirmDelete || m.pipelineLaunchMode != plModeNone || m.showRerun || m.pipelineEditorOpen || m.brainEditorOpen {
 			return m.handleKey(msg)
 		}
 		// Inbox captures all other keys when focused, but the detail overlay
@@ -1340,6 +1343,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pipelineeditor.CloseMsg:
 		m.pipelineEditorOpen = false
 		m.launcher.pipelines = ScanPipelines(pipelinesDir())
+		return m, nil
+
+	case braineditor.CloseMsg:
+		m.brainEditorOpen = false
 		return m, nil
 
 	case buildershared.RunLineMsg, buildershared.RunDoneMsg, pipelineeditor.ClarifyPollMsg:
@@ -1668,6 +1675,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if m.pipelineEditorOpen {
 		updatedEditor, cmd := m.pipelineEditor.HandleKey(msg)
 		m.pipelineEditor = updatedEditor
+		return m, cmd
+	}
+
+	// Brain editor — captured before panel handlers.
+	if m.brainEditorOpen {
+		updated, cmd := m.brainEditor.Update(tea.KeyMsg(msg))
+		if be, ok := updated.(braineditor.Model); ok {
+			m.brainEditor = be
+		}
 		return m, cmd
 	}
 
@@ -2168,6 +2184,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.launcher.focused = true
 		}
 		return m, nil
+
+	// Brain editor — open with 'b'.
+	case "b":
+		return m.handleOpenBrainEditor()
 
 	// Pipeline CRUD keys (launcher focused).
 	case "n":
@@ -2761,6 +2781,15 @@ func (m Model) handleEditPipeline() (Model, tea.Cmd) {
 	m.pipelineEditor = updated
 	m.pipelineEditorOpen = true
 	return m, nil
+}
+
+// handleOpenBrainEditor opens the full-screen brain note editor.
+func (m Model) handleOpenBrainEditor() (Model, tea.Cmd) {
+	m.brainEditor = braineditor.New(m.store, m.agent.providers)
+	m.brainEditor.SetPalette(m.ansiPalette())
+	m.brainEditor.SetSize(m.width, m.height)
+	m.brainEditorOpen = true
+	return m, m.brainEditor.Init()
 }
 
 // execDeletePipeline removes the pending pipeline file and refreshes the list.
@@ -3466,6 +3495,12 @@ func (m Model) View() string {
 	// Pipeline editor — full-screen two-column panel.
 	if m.pipelineEditorOpen {
 		return m.pipelineEditor.View(w, h)
+	}
+
+	// Brain editor — full-screen two-column panel.
+	if m.brainEditorOpen {
+		m.brainEditor.SetSize(w, h)
+		return m.brainEditor.View()
 	}
 
 	// Agent modal — full-screen panel like inbox detail.

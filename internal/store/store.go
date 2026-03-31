@@ -155,6 +155,47 @@ func (s *Store) RecentBrainNotes(ctx context.Context, runID int64, limit int) ([
 	return notes, nil
 }
 
+// AllBrainNotes returns all brain notes across all runs, ordered by created_at descending.
+func (s *Store) AllBrainNotes(ctx context.Context) ([]BrainNote, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, run_id, step_id, created_at, tags, body
+		   FROM brain_notes
+		  ORDER BY created_at DESC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: all brain notes: %w", err)
+	}
+	defer rows.Close()
+
+	var notes []BrainNote
+	for rows.Next() {
+		var n BrainNote
+		if err := rows.Scan(&n.ID, &n.RunID, &n.StepID, &n.CreatedAt, &n.Tags, &n.Body); err != nil {
+			return nil, fmt.Errorf("store: all brain notes scan: %w", err)
+		}
+		notes = append(notes, n)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: all brain notes rows: %w", err)
+	}
+	if notes == nil {
+		notes = []BrainNote{}
+	}
+	return notes, nil
+}
+
+// UpdateBrainNote updates the body and tags of an existing brain note by ID.
+func (s *Store) UpdateBrainNote(ctx context.Context, id int64, body, tags string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE brain_notes SET body = ?, tags = ? WHERE id = ?`,
+		body, tags, id,
+	)
+	if err != nil {
+		return fmt.Errorf("store: update brain note: %w", err)
+	}
+	return nil
+}
+
 // RecoverOrphanedRuns finds runs with finished_at=NULL and exit_status=NULL
 // that do NOT have a pending (unanswered) clarification — those are legitimately
 // paused. It marks them as interrupted: exit_status=2, stderr="interrupted: orcai

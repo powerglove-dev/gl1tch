@@ -1,10 +1,12 @@
 package pipeline
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
 
+	"github.com/adam-stokes/orcai/internal/braincontext"
 	"github.com/adam-stokes/orcai/internal/store"
 )
 
@@ -12,11 +14,20 @@ import (
 // It provides concurrent-safe access to a nested map[string]any, addressable
 // via dot-separated path expressions (e.g. "step.fetch.data.url").
 type ExecutionContext struct {
-	mu       sync.RWMutex
-	data     map[string]any
-	db       *store.Store
-	injector BrainInjector
-	runID    int64
+	mu           sync.RWMutex
+	data         map[string]any
+	db           *store.Store
+	injector     BrainInjector
+	ragInjector  ragInjectorIface // optional RAG-based injector
+	runID        int64
+	workspaceCtx braincontext.WorkspaceContext
+	stepOutputs  map[string]map[string]string // stepID → key → value
+}
+
+// ragInjectorIface is implemented by *brainrag.BrainInjector.
+// Defined as an interface to avoid an import cycle in context.go.
+type ragInjectorIface interface {
+	InjectInto(ctx context.Context, prompt string) (string, error)
 }
 
 // ExecutionContextOption configures an ExecutionContext at construction time.
@@ -30,7 +41,10 @@ func WithStore(s *store.Store) ExecutionContextOption {
 
 // NewExecutionContext returns an empty ExecutionContext with optional configuration.
 func NewExecutionContext(opts ...ExecutionContextOption) *ExecutionContext {
-	ec := &ExecutionContext{data: make(map[string]any)}
+	ec := &ExecutionContext{
+		data:        make(map[string]any),
+		stepOutputs: make(map[string]map[string]string),
+	}
 	for _, opt := range opts {
 		opt(ec)
 	}
@@ -39,6 +53,20 @@ func NewExecutionContext(opts ...ExecutionContextOption) *ExecutionContext {
 
 // DB returns the attached result store, or nil if none was configured.
 func (c *ExecutionContext) DB() *store.Store { return c.db }
+
+// SetRAGInjector attaches a RAG-based injector to the context.
+func (c *ExecutionContext) SetRAGInjector(inj ragInjectorIface) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ragInjector = inj
+}
+
+// GetRAGInjector returns the RAG injector, or nil if not set.
+func (c *ExecutionContext) GetRAGInjector() ragInjectorIface {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.ragInjector
+}
 
 // SetBrainInjector attaches a BrainInjector and the current run ID to the
 // context. Called by the runner after ec creation when a brain injector is
@@ -63,6 +91,46 @@ func (c *ExecutionContext) RunID() int64 {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.runID
+}
+
+// SetStepOutput stores the value of a declared output key for a step.
+// Thread-safe; used by the runner after each step completes.
+func (c *ExecutionContext) SetStepOutput(stepID, key, val string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stepOutputs == nil {
+		c.stepOutputs = make(map[string]map[string]string)
+	}
+	if c.stepOutputs[stepID] == nil {
+		c.stepOutputs[stepID] = make(map[string]string)
+	}
+	c.stepOutputs[stepID][key] = val
+}
+
+// StepOutput retrieves a declared output value for the given step and key.
+// Returns ("", false) if the step or key has not been recorded yet.
+func (c *ExecutionContext) StepOutput(stepID, key string) (string, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if m, ok := c.stepOutputs[stepID]; ok {
+		v, ok := m[key]
+		return v, ok
+	}
+	return "", false
+}
+
+// SetWorkspaceContext attaches a WorkspaceContext to the execution context.
+func (c *ExecutionContext) SetWorkspaceContext(wc braincontext.WorkspaceContext) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.workspaceCtx = wc
+}
+
+// WorkspaceCtx returns the WorkspaceContext associated with this execution context.
+func (c *ExecutionContext) WorkspaceCtx() braincontext.WorkspaceContext {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.workspaceCtx
 }
 
 // Get retrieves the value at the dot-separated path. Returns (nil, false) if

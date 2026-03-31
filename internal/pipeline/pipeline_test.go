@@ -119,29 +119,24 @@ func TestInterpolate_NonStringValue(t *testing.T) {
 	}
 }
 
-// TestLoadAcceptsBrainFields verifies that a pipeline with use_brain and write_brain
+// TestLoadAcceptsBrainFields verifies that a pipeline with write_brain
 // fields at both the pipeline and step level loads without error and the values are
-// correctly parsed.
+// correctly parsed. use_brain is no longer a field (brain is always on).
 func TestLoadAcceptsBrainFields(t *testing.T) {
 	input := `
 name: test-brain-fields
 version: "1"
-use_brain: true
 write_brain: true
 steps:
   - id: s1
     executor: claude
     model: claude-sonnet-4-6
-    use_brain: true
     write_brain: false
     prompt: "hello"
 `
 	p, err := pipeline.Load(strings.NewReader(input))
 	if err != nil {
 		t.Fatalf("Load: unexpected error: %v", err)
-	}
-	if !p.UseBrain {
-		t.Error("expected pipeline.UseBrain to be true")
 	}
 	if !p.WriteBrain {
 		t.Error("expected pipeline.WriteBrain to be true")
@@ -150,9 +145,6 @@ steps:
 		t.Fatalf("expected 1 step, got %d", len(p.Steps))
 	}
 	s := p.Steps[0]
-	if s.UseBrain == nil || !*s.UseBrain {
-		t.Error("expected step.UseBrain to be *true")
-	}
 	if s.WriteBrain == nil || *s.WriteBrain {
 		t.Error("expected step.WriteBrain to be *false")
 	}
