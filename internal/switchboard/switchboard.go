@@ -32,6 +32,7 @@ import (
 	"github.com/adam-stokes/orcai/internal/modal"
 	"github.com/adam-stokes/orcai/internal/panelrender"
 	"github.com/adam-stokes/orcai/internal/picker"
+	"github.com/adam-stokes/orcai/internal/pipelineeditor"
 	"github.com/adam-stokes/orcai/internal/store"
 	"github.com/adam-stokes/orcai/internal/styles"
 	"github.com/adam-stokes/orcai/internal/themes"
@@ -346,6 +347,9 @@ type Model struct {
 	inboxEditorTempFile     string // path to temp file open in $EDITOR
 	inboxEditorClipSnapshot string // clipboard state before editor launch
 	inboxEditorOrigContent  string // original content written to temp file
+	// Pipeline editor (full-screen two-column TUI).
+	pipelineEditorOpen bool
+	pipelineEditor     pipelineeditor.Model
 	// Re-run modal
 	rerunModal    modal.RerunModal
 	showRerun     bool
@@ -409,6 +413,7 @@ func NewWithStore(s *store.Store) Model {
 		agentSchedule:         schedTA,
 		agentNameInput:        func() textinput.Model { ti := textinput.New(); ti.Placeholder = "agent-<provider>-<timestamp>"; ti.CharLimit = 128; return ti }(),
 		savedPromptPicker:     modal.NewFuzzyPickerModel(8),
+		pipelineEditor:        pipelineeditor.New(agentProviders, pipelinesDir(), s),
 		pipelineScheduleInput: pipeSchedTA,
 		signalBoard:           SignalBoard{activeFilter: "running"},
 		inboxPanel:            InboxPanel{activeFilter: "unread"},
@@ -1328,7 +1333,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// When any global overlay is active, all keys must go through handleKey
 		// so ESC / y / n can dismiss it regardless of which panel is focused.
-		if m.confirmQuit || m.helpOpen || m.jumpOpen || m.agentModalOpen || m.themePicker.Open || m.dirPickerOpen || m.confirmDelete || m.pipelineLaunchMode != plModeNone || m.showRerun {
+		if m.confirmQuit || m.helpOpen || m.jumpOpen || m.agentModalOpen || m.themePicker.Open || m.dirPickerOpen || m.confirmDelete || m.pipelineLaunchMode != plModeNone || m.showRerun || m.pipelineEditorOpen {
 			return m.handleKey(msg)
 		}
 		// Inbox captures all other keys when focused, but the detail overlay
@@ -1348,6 +1353,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case jumpwindow.CloseMsg:
 		m.jumpOpen = false
+		return m, nil
+
+	case jumpwindow.PipelinesMsg:
+		// Jump window selected the pipelines entry: close jump window and open editor.
+		m.jumpOpen = false
+		m.pipelineEditor.SetProviders(m.agent.providers)
+		m.pipelineEditor.SetPalette(m.ansiPalette())
+		m.pipelineEditor.SetSize(m.width, m.height-1)
+		m.pipelineEditorOpen = true
+		return m, nil
+
+	case pipelineeditor.CloseMsg:
+		m.pipelineEditorOpen = false
+		m.launcher.pipelines = ScanPipelines(pipelinesDir())
+		return m, nil
+
+	case pipelineeditor.RunLineMsg, pipelineeditor.RunDoneMsg, pipelineeditor.ClarifyPollMsg:
+		if m.pipelineEditorOpen {
+			updated, cmd := m.pipelineEditor.HandleMsg(msg)
+			m.pipelineEditor = updated
+			return m, cmd
+		}
 		return m, nil
 
 	case inbox.RunCompletedMsg:
@@ -1669,6 +1696,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	// Pipeline mode-select / schedule-input overlay — captured before panel handlers.
 	if m.pipelineLaunchMode != plModeNone {
 		return m.handlePipelineLaunchOverlay(msg)
+	}
+
+	// Pipeline editor — captured before panel handlers.
+	if m.pipelineEditorOpen {
+		updatedEditor, cmd := m.pipelineEditor.HandleKey(msg)
+		m.pipelineEditor = updatedEditor
+		return m, cmd
 	}
 
 	// Agent modal — all keys captured before panel handlers.
@@ -2850,38 +2884,29 @@ func (m Model) handlePipelineLaunchOverlay(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleNewPipeline creates a template pipeline file and opens it in $EDITOR.
+// handleNewPipeline opens the full-screen pipeline editor for a new pipeline.
 func (m Model) handleNewPipeline() (Model, tea.Cmd) {
-	dir := pipelinesDir()
-	if dir == "" {
-		return m, nil
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return m, nil
-	}
-	name := fmt.Sprintf("new-pipeline-%d", time.Now().Unix())
-	path := filepath.Join(dir, name+".pipeline.yaml")
-	template := "name: " + name + "\nsteps:\n  - name: hello\n    run: echo \"hello world\"\n"
-	if err := os.WriteFile(path, []byte(template), 0o600); err != nil {
-		return m, nil
-	}
-	openEditorInWindow(path)
-	// Refresh pipeline list so the new entry is immediately visible.
-	m.launcher.pipelines = ScanPipelines(dir)
-	if m.launcher.selected >= len(m.launcher.pipelines) && m.launcher.selected > 0 {
-		m.launcher.selected = max(len(m.launcher.pipelines)-1, 0)
-	}
+	m.pipelineEditor.SetProviders(m.agent.providers)
+	m.pipelineEditor.SetPalette(m.ansiPalette())
+	m.pipelineEditor.SetSize(m.width, m.height-1)
+	updated := m.pipelineEditor.OpenNew()
+	m.pipelineEditor = updated
+	m.pipelineEditorOpen = true
 	return m, nil
 }
 
-// handleEditPipeline opens the selected pipeline's YAML file in $EDITOR.
+// handleEditPipeline opens the full-screen pipeline editor for the selected pipeline.
 func (m Model) handleEditPipeline() (Model, tea.Cmd) {
 	if len(m.launcher.pipelines) == 0 {
 		return m, nil
 	}
+	m.pipelineEditor.SetProviders(m.agent.providers)
+	m.pipelineEditor.SetPalette(m.ansiPalette())
+	m.pipelineEditor.SetSize(m.width, m.height-1)
 	name := m.launcher.pipelines[m.launcher.selected]
-	path := filepath.Join(pipelinesDir(), name+".pipeline.yaml")
-	openEditorInWindow(path)
+	updated := m.pipelineEditor.OpenEdit(name)
+	m.pipelineEditor = updated
+	m.pipelineEditorOpen = true
 	return m, nil
 }
 
@@ -3589,6 +3614,11 @@ func (m Model) View() string {
 	if m.pipelineLaunchMode == plScheduleInput {
 		base := topBar + "\n" + body
 		return overlayCenter(base, m.viewPipelineScheduleInput(w), w, h)
+	}
+
+	// Pipeline editor — full-screen two-column panel.
+	if m.pipelineEditorOpen {
+		return m.pipelineEditor.View(w, h)
 	}
 
 	// Agent modal — full-screen panel like inbox detail.

@@ -22,16 +22,22 @@ import (
 
 // window is a single tmux window entry.
 type window struct {
-	index         string // tmux window index (string for display)
-	name          string // window name
-	id            string // window ID (@N)
-	switchboard   bool   // synthetic entry that navigates to orcai session window 0
-	cronSession   bool   // synthetic entry that switches to the orcai-cron session
-	promptsWindow bool   // synthetic entry that opens the prompt manager TUI
+	index           string // tmux window index (string for display)
+	name            string // window name
+	id              string // window ID (@N)
+	switchboard     bool   // synthetic entry that navigates to orcai session window 0
+	cronSession     bool   // synthetic entry that switches to the orcai-cron session
+	promptsWindow   bool   // synthetic entry that opens the prompt manager TUI
+	pipelinesWindow bool   // synthetic entry that opens the pipeline editor TUI
 }
 
 // CloseMsg is posted by an EmbeddedModel when it wants the parent to dismiss it.
 type CloseMsg struct{}
+
+// PipelinesMsg is posted by an EmbeddedModel when the user selects the
+// pipelines entry in the sysop column. The parent switchboard should close
+// the jump window and open the pipeline editor.
+type PipelinesMsg struct{}
 
 type model struct {
 	windows       []window
@@ -100,6 +106,7 @@ func newModel() model {
 		sysop = append(sysop, cronWins...)
 	}
 	sysop = append(sysop, window{name: "prompts", promptsWindow: true})
+	sysop = append(sysop, window{name: "pipelines", pipelinesWindow: true})
 	m.sysop = sysop
 	return m
 }
@@ -236,6 +243,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						self, _ := os.Executable()
 						self = filepath.Clean(self)
 						exec.Command("tmux", "new-window", "-n", "orcai-prompts", self+" prompts tui").Run() //nolint:errcheck
+					} else if w.pipelinesWindow {
+						if m.embedded {
+							return m, func() tea.Msg { return PipelinesMsg{} }
+						}
+						// Standalone mode: nothing to do here.
 					} else {
 						target := w.id
 						if target == "" {
