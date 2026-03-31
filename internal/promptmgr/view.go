@@ -33,11 +33,8 @@ func (m *Model) View() string {
 	}
 
 	pal := m.ansiPal()
-	bundle := m.themeState.Bundle()
-	topBar := panelrender.TopBar(bundle, "░▒▓ ORCAI — Prompt Manager ▓▒░", m.width)
 
-	// Reserve 1 row for topBar + 1 blank row.
-	contentH := m.height - 2
+	contentH := m.height
 
 	leftW := m.width / 3
 	rightW := m.width - leftW
@@ -69,7 +66,7 @@ func (m *Model) View() string {
 		lines[i] = left + right
 	}
 
-	base := topBar + "\n\n" + strings.Join(lines, "\n")
+	base := strings.Join(lines, "\n")
 
 	// Overlay the dir picker when active.
 	if m.dirPickerActive {

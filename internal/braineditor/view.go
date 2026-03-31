@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/adam-stokes/orcai/internal/panelrender"
 )
 
 // View implements tea.Model — renders the two-column brain editor.
@@ -23,23 +25,7 @@ func (m Model) View() string {
 		leftW = 24
 	}
 	rightW := w - leftW
-	bodyH := h - 1 // reserve one row for the top bar
-
-	// Top bar.
-	topBar := pal.Accent + "\x1b[1m BRAIN NOTES\x1b[0m"
-	if m.statusMsg != "" {
-		sep := pal.Dim + " · \x1b[0m"
-		if m.statusErr {
-			topBar += sep + pal.Error + m.statusMsg + "\x1b[0m"
-		} else {
-			topBar += sep + pal.Success + m.statusMsg + "\x1b[0m"
-		}
-	}
-	// Confirm-delete overlay row.
-	if m.confirmDelete {
-		confirmLine := pal.Error + "\x1b[1m  Delete this note? [y] confirm, any other key = cancel\x1b[0m"
-		topBar = confirmLine
-	}
+	bodyH := h
 
 	// Left column: sidebar.
 	leftLines := m.sidebar.SetFocused(m.focus == focusSidebar).View(leftW, bodyH, pal)
@@ -48,7 +34,6 @@ func (m Model) View() string {
 	rightLines := m.buildRight(rightW, bodyH)
 
 	var rows []string
-	rows = append(rows, topBar)
 	for i := range bodyH {
 		var l, r string
 		if i < len(leftLines) {
@@ -64,7 +49,21 @@ func (m Model) View() string {
 		rows = append(rows, l+r)
 	}
 
-	return strings.Join(rows, "\n")
+	base := strings.Join(rows, "\n")
+
+	// Confirm-delete overlay.
+	if m.confirmDelete {
+		confirmMsg := fmt.Sprintf(
+			"%s\x1b[1m┌─────────────────────────────────────┐\x1b[0m\n"+
+				"%s\x1b[1m│  Delete this note?                  │\x1b[0m\n"+
+				"%s\x1b[1m│  [y] confirm  ·  any other = cancel │\x1b[0m\n"+
+				"%s\x1b[1m└─────────────────────────────────────┘\x1b[0m",
+			pal.Error, pal.Error, pal.Error, pal.Error,
+		)
+		return panelrender.OverlayCenter(base, confirmMsg, w, h)
+	}
+
+	return base
 }
 
 func (m Model) buildRight(w, h int) []string {

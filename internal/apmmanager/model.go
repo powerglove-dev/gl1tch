@@ -12,7 +12,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/adam-stokes/orcai/internal/panelrender"
 	"github.com/adam-stokes/orcai/internal/plugin"
 	"github.com/adam-stokes/orcai/internal/themes"
 	"github.com/adam-stokes/orcai/internal/tuikit"
@@ -270,10 +269,8 @@ func (m Model) View() string {
 		return "loading..."
 	}
 
-	topBar := panelrender.TopBar(m.bundle, "░▒▓ ORCAI — APM Agent Manager ▓▒░", m.width)
-
-	// Reserve 2 rows: top bar + footer.
-	contentH := m.height - 3
+	// Reserve 1 row for footer.
+	contentH := m.height - 2
 	if contentH < 4 {
 		contentH = 4
 	}
@@ -291,7 +288,7 @@ func (m Model) View() string {
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, divider, right)
 	footer := m.viewFooter()
 
-	content := lipgloss.JoinVertical(lipgloss.Left, topBar, body, footer)
+	content := lipgloss.JoinVertical(lipgloss.Left, body, footer)
 
 	if m.helpOpen {
 		return renderOverlay(content, m.viewHelp(), m.width, m.height)

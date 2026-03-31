@@ -278,23 +278,12 @@ func (m *TwoColumnModel) View() string {
 		leftW = 20
 	}
 	rightW := w - leftW
-	bodyH := h - 1
-
-	topBar := pal.Accent + "\x1b[1m PROMPT BUILDER\x1b[0m"
-	if m.statusMsg != "" {
-		sep := pal.Dim + " · \x1b[0m"
-		if m.statusErr {
-			topBar += sep + pal.Error + m.statusMsg + "\x1b[0m"
-		} else {
-			topBar += sep + pal.Success + m.statusMsg + "\x1b[0m"
-		}
-	}
+	bodyH := h
 
 	leftLines := m.sidebar.SetFocused(m.focus == tcFocusSidebar).View(leftW, bodyH, pal)
 	rightLines := m.buildRight(rightW, bodyH)
 
 	var rows []string
-	rows = append(rows, topBar)
 	for i := range bodyH {
 		var l, r string
 		if i < len(leftLines) {

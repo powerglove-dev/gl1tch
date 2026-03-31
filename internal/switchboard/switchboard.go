@@ -3199,8 +3199,8 @@ func (m Model) View() string {
 	left := m.viewLeftColumn(contentH, leftW)
 	leftLines := strings.Split(left, "\n")
 
-	// topBar includes the padding row so all join sites below are consistent.
-	topBar := m.viewTopBar(w) + "\n"
+	// header is the TDF block-art header (empty string when TDF not loaded).
+	header := m.viewTDFHeader(w)
 
 	buildBody := func() string {
 		if w < 80 {
@@ -3255,27 +3255,27 @@ func (m Model) View() string {
 	// Dir picker overlay — used for pipeline context only.
 	// The agent CWD picker is rendered inline within the agent popup modal.
 	if m.dirPickerOpen {
-		base := topBar + "\n" + body
+		base := header +body
 		return overlayCenter(base, m.dirPicker.ViewDirPickerBox(w, m.ansiPalette()), w, h)
 	}
 
 	if m.helpOpen {
-		base := topBar + "\n" + body
+		base := header +body
 		return overlayCenter(base, m.viewHelpModal(w, h), w, h)
 	}
 
 	if m.confirmQuit {
-		base := topBar + "\n" + body
+		base := header +body
 		return overlayCenter(base, m.viewQuitModalBox(w), w, h)
 	}
 
 	// Pipeline mode-select / schedule-input overlay.
 	if m.pipelineLaunchMode == plModeSelect {
-		base := topBar + "\n" + body
+		base := header +body
 		return overlayCenter(base, m.viewPipelineModeSelect(w), w, h)
 	}
 	if m.pipelineLaunchMode == plScheduleInput {
-		base := topBar + "\n" + body
+		base := header +body
 		return overlayCenter(base, m.viewPipelineScheduleInput(w), w, h)
 	}
 
@@ -3292,46 +3292,46 @@ func (m Model) View() string {
 
 	// Agent picker popup — overlay on the normal 3-col view.
 	if m.agent.focused && m.sendPanel.AgentOpen() {
-		base := topBar + "\n" + body
+		base := header +body
 		return overlayCenter(base, m.sendPanel.OverlayView(w, m.ansiPalette()), w, h)
 	}
 
 	// Saved prompts picker popup — overlay on the normal 3-col view.
 	if m.agent.focused && m.sendPanel.SavedPromptsOpen() {
-		base := topBar + "\n" + body
+		base := header +body
 		return overlayCenter(base, m.sendPanel.SavedPromptOverlayView(w, m.ansiPalette()), w, h)
 	}
 
 	// Saved pipeline picker popup — overlay on the normal 3-col view.
 	if m.agent.focused && m.sendPanel.SavedPipelineOpen() {
-		base := topBar + "\n" + body
+		base := header +body
 		return overlayCenter(base, m.sendPanel.SavedPipelineOverlayView(w, m.ansiPalette()), w, h)
 	}
 
 	// Re-run modal — full-screen panel like inbox detail.
 	if m.showRerun {
-		return topBar + "\n" + m.rerunModal.ViewBox(w, h, m.ansiPalette())
+		return header +m.rerunModal.ViewBox(w, h, m.ansiPalette())
 	}
 
 	// Delete confirmation — floating overlay on top of the switchboard.
 	if m.confirmDelete {
-		base := topBar + "\n" + body
+		base := header +body
 		return overlayCenter(base, m.viewDeleteModalBox(w), w, h)
 	}
 
 	// Theme picker overlay.
 	if m.themePicker.Open && m.registry != nil {
-		base := topBar + "\n" + body
+		base := header +body
 		content := viewThemePicker(m)
 		return overlayCenter(base, content, w, h)
 	}
 
 	// Inbox detail overlay — full-screen ANSI box panel for a run result.
 	if m.inboxDetailOpen && len(m.inboxModel.Runs()) > 0 {
-		return topBar + "\n" + m.viewInboxDetail(w, h, m.inboxMarkdownMode)
+		return header +m.viewInboxDetail(w, h, m.inboxMarkdownMode)
 	}
 
-	return topBar + "\n" + body
+	return header +body
 }
 
 // viewQuitModalBox renders the quit confirmation popup box.
@@ -3816,31 +3816,24 @@ func (m Model) buildBanner(w int) string {
 	return logo + sep + sub
 }
 
-// headerHeight returns the number of terminal lines consumed by the top bar.
+// headerHeight returns the number of terminal lines consumed by the TDF header
+// (art lines + 1 padding row above). Returns 0 when no TDF art was loaded.
 func (m Model) headerHeight() int {
-	if len(m.tdfHeader) > 0 {
-		return len(m.tdfHeader)
+	if len(m.tdfHeader) == 0 {
+		return 0
 	}
-	return 1
+	return len(m.tdfHeader) + 1 // +1 for the blank padding row
 }
 
-// viewTopBar renders the full-width ORCAI header bar for the Switchboard.
-// When TDF art is available it is used alone (no subtitle bar beneath it).
-// Falls back to the single-line TopBar when TDF loading failed.
-func (m Model) viewTopBar(w int) string {
-	title := "░▒▓ ORCAI — ABBS Switchboard ▓▒░"
-	if p := translations.GlobalProvider(); p != nil {
-		title = p.T(translations.KeySwitchboardHeader, title)
-	}
-
+// viewTDFHeader renders the TDF block-art header centered to width w,
+// with one blank padding row above the art. Returns an empty string when
+// no TDF art was loaded at startup.
+func (m Model) viewTDFHeader(w int) string {
 	if len(m.tdfHeader) == 0 {
-		return TopBar(m.activeBundle(), title, w)
+		return ""
 	}
-
-	// TDF art is available: render the block-art header, then append a
-	// single-line text subtitle so the translated title is always present
-	// in the view (accessible to tests and screen readers).
 	var sb strings.Builder
+	sb.WriteByte('\n') // padding row above logo
 	pad := (w - m.tdfHeaderW) / 2
 	if pad < 0 {
 		pad = 0
@@ -3849,7 +3842,6 @@ func (m Model) viewTopBar(w int) string {
 	for _, line := range m.tdfHeader {
 		sb.WriteString(prefix + line + "\n")
 	}
-	sb.WriteString(TopBar(m.activeBundle(), title, w))
 	return sb.String()
 }
 

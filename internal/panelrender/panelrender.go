@@ -54,16 +54,18 @@ func RenderHeader(panel string) string {
 // ── Box drawing ───────────────────────────────────────────────────────────────
 
 // BoxTop renders the top border of a box. If title is non-empty it is centered
-// in the border using borderColor and labelColor.
+// in the border using box-drawing T-junction connectors: ┌────┤ TITLE ├────┐
 func BoxTop(w int, title, borderColor, labelColor string) string {
 	if title == "" {
 		return borderColor + "┌" + strings.Repeat("─", pmax(w-2, 0)) + "┐" + RST
 	}
 	label := " " + title + " "
-	dashes := pmax(w-2-lipgloss.Width(label), 0)
+	// inner accounts for ┌, ┤, label, ├, ┐ — 4 box-drawing chars + label
+	inner := "┌┤" + label + "├┐"
+	dashes := pmax(w-lipgloss.Width(inner), 0)
 	left := dashes / 2
 	right := dashes - left
-	return borderColor + "┌" + strings.Repeat("─", left) + labelColor + label + borderColor + strings.Repeat("─", right) + "┐" + RST
+	return borderColor + "┌" + strings.Repeat("─", left) + "┤" + labelColor + label + borderColor + "├" + strings.Repeat("─", right) + "┐" + RST
 }
 
 // BoxBot renders the bottom border of a box.

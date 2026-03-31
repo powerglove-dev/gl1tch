@@ -155,9 +155,8 @@ func TestViewContainsBanner(t *testing.T) {
 	m := switchboard.New()
 	m2, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	view := m2.(switchboard.Model).View()
-	if !strings.Contains(view, "ORCAI") {
-		t.Errorf("View() missing ORCAI banner:\n%s", view)
-	}
+	// The top bar is gone — TDF block-art is the header. Check that the view
+	// rendered at all: it should contain panel box-drawing borders.
 	if !strings.Contains(view, "│") {
 		t.Errorf("View() missing box-drawing border:\n%s", view)
 	}

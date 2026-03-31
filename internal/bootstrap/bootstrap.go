@@ -9,12 +9,12 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/adam-stokes/orcai/internal/assistant"
 	"github.com/adam-stokes/orcai/internal/busd"
 	"github.com/adam-stokes/orcai/internal/keybindings"
 	"github.com/adam-stokes/orcai/internal/layout"
 	"github.com/adam-stokes/orcai/internal/systemprompts"
 	"github.com/adam-stokes/orcai/internal/themes"
-	"github.com/adam-stokes/orcai/internal/welcome"
 	"github.com/adam-stokes/orcai/internal/widgetdispatch"
 )
 
@@ -120,6 +120,8 @@ func buildTmuxConf(self string) string {
 		"bind-key -T orcai-chord h     { switch-client -T root ; if-shell -F '#{==:#{session_name},orcai-cron}' { send-keys ? } { switch-client -t orcai ; select-window -t orcai:0 ; send-keys -t orcai:0 C-h } }\n" +
 		// Pressing ctrl+space again exits the chord table without action.
 		"bind-key -T orcai-chord C-Space switch-client -T root\n" +
+		// GLITCH AI assistant
+		"bind-key -T orcai-chord a     { switch-client -T root ; new-window -n orcai-assistant \"" + self + " assistant\" }\n" +
 		// Explicitly unbind removed chords so stale sessions don't keep them.
 		"unbind-key -T orcai-chord n\n" +
 		"unbind-key -T orcai-chord m\n" +
@@ -301,10 +303,10 @@ func Run() error {
 			"@orcai-label", "orcai-cron").Run()
 	}
 
-	// First-run: open the GLITCH welcome TUI in a new window before attaching.
-	if welcome.IsFirstRun(cfgDir) {
-		exec.Command("tmux", "new-window", "-t", SessionName+":", "-n", "orcai-welcome", //nolint:errcheck
-			self+" welcome").Run()
+	// First-run: open the GLITCH assistant TUI in a new window before attaching.
+	if assistant.IsFirstRun(cfgDir) {
+		exec.Command("tmux", "new-window", "-t", SessionName+":", "-n", "orcai-assistant", //nolint:errcheck
+			self+" assistant").Run()
 	}
 
 	cmd := exec.Command("tmux", "-f", confPath, "attach-session", "-t", SessionName)

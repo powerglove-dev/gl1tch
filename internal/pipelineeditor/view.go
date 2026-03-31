@@ -8,12 +8,6 @@ import (
 	"github.com/adam-stokes/orcai/internal/panelrender"
 )
 
-// ANSI helpers (package-local).
-const (
-	aRst = "\x1b[0m"
-	aBld = "\x1b[1m"
-	aDim = "\x1b[2m"
-)
 
 // View renders the full-screen two-column pipeline editor.
 func (m Model) View(w, h int) string {
@@ -24,25 +18,19 @@ func (m Model) View(w, h int) string {
 		h = 40
 	}
 
-	pal := m.pal
 	leftW := w / 4
 	if leftW < 20 {
 		leftW = 20
 	}
 	rightW := w - leftW
 
-	// Top bar.
-	topBar := pal.Accent + aBld + " PIPELINE BUILDER" + aRst
-
-	// Body height = total - topbar(1).
-	bodyH := h - 1
+	bodyH := h
 
 	leftLines := m.buildLeft(leftW, bodyH)
 	rightLines := m.buildRight(rightW, bodyH)
 
 	// Merge left and right columns.
 	var rows []string
-	rows = append(rows, topBar)
 	maxRows := bodyH
 	for i := range maxRows {
 		var l, r string

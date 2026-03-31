@@ -39,10 +39,7 @@ func (m Model) View() string {
 		return "loading..."
 	}
 
-	topBar := panelrender.TopBar(m.bundle, "░▒▓ ORCAI — ABBS Cron ▓▒░", m.width)
-
-	// Reserve 2 rows for the top bar (1) and blank padding row (1).
-	contentH := m.height - 2
+	contentH := m.height
 
 	// Split remaining height: 35% jobs (capped at 14 rows), 65% logs.
 	// Hint bars are rendered inside each pane.
@@ -55,7 +52,7 @@ func (m Model) View() string {
 	top := m.viewJobList(m.width, topH)
 	bot := m.viewLogPane(m.width, botH)
 
-	content := lipgloss.JoinVertical(lipgloss.Left, topBar, "", top, bot)
+	content := lipgloss.JoinVertical(lipgloss.Left, top, bot)
 
 	// Render overlays on top if open.
 	if m.jumpOpen {

@@ -138,7 +138,7 @@ func listWindows() []window {
 			continue // skip switchboard window
 		}
 		switch rawName {
-		case "orcai-prompt-builder", "orcai-pipeline-builder", "orcai-brain", "orcai-welcome":
+		case "orcai-prompt-builder", "orcai-pipeline-builder", "orcai-brain", "orcai-welcome", "orcai-assistant":
 			continue // sysop tools live in the left column, not active jobs
 		}
 		display := label
