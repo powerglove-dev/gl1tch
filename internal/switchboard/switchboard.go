@@ -297,13 +297,14 @@ type Model struct {
 	confirmDelete         bool
 	pendingDeletePipeline string
 	agentModalOpen       bool
-	agentModalFocus      int                    // 0=provider/model, 1=saved-prompt, 2=prompt, 3=use_brain, 4=cwd, 5=schedule
+	agentModalFocus      int                    // 0=provider/model, 1=saved-prompt, 2=prompt, 3=use_brain, 4=cwd, 5=schedule, 6=name
 	agentPrompts         []store.Prompt         // loaded from store when modal opens
 	agentPromptIdx       int                    // selected saved-prompt index; 0 = none
 	savedPromptPicker    modal.FuzzyPickerModel // inline fuzzy picker for saved prompts
 	agentSchedule         textarea.Model
 	agentScheduleErr      string
 	agentUseBrain         bool
+	agentNameInput        textinput.Model
 	helpOpen              bool
 	jumpOpen              bool
 	jumpModal             jumpwindow.EmbeddedModel
@@ -406,6 +407,7 @@ func NewWithStore(s *store.Store) Model {
 			prompt:      ta,
 		},
 		agentSchedule:         schedTA,
+		agentNameInput:        func() textinput.Model { ti := textinput.New(); ti.Placeholder = "agent-<provider>-<timestamp>"; ti.CharLimit = 128; return ti }(),
 		savedPromptPicker:     modal.NewFuzzyPickerModel(8),
 		pipelineScheduleInput: pipeSchedTA,
 		signalBoard:           SignalBoard{activeFilter: "running"},
@@ -1313,6 +1315,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.agentModalFocus = 2
 			m.agentPromptIdx = 0
 			m.agent.prompt.Focus()
+			m.agentNameInput.SetValue(fmt.Sprintf("agent-%s-%d", m.agent.agentPicker.SelectedProviderID(), time.Now().Unix()))
 			return m, loadAgentPromptsCmd(m.store)
 		}
 		return m, nil
@@ -1626,6 +1629,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.agentModalFocus = 2
 				m.agentPromptIdx = 0
 				m.agent.prompt.Focus()
+				m.agentNameInput.SetValue(fmt.Sprintf("agent-%s-%d", m.agent.agentPicker.SelectedProviderID(), time.Now().Unix()))
 				return m, loadAgentPromptsCmd(m.store)
 			}
 			return m, nil
@@ -2062,6 +2066,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.agentModalFocus = 2
 			m.agentPromptIdx = 0
 			m.agent.prompt.Focus()
+			m.agentNameInput.SetValue(fmt.Sprintf("agent-%s-%d", m.agent.agentPicker.SelectedProviderID(), time.Now().Unix()))
 			return m, loadAgentPromptsCmd(m.store)
 		}
 		// Global refresh: reload pipelines and providers.
@@ -2518,7 +2523,7 @@ func loadAgentPromptsCmd(st *store.Store) tea.Cmd {
 }
 
 // agentModalNextFocus advances the agent modal focus slot forward.
-// Focus slots: 0=picker(provider+model), 1=saved-prompt, 2=prompt, 3=use_brain, 4=cwd, 5=schedule.
+// Focus slots: 0=picker(provider+model), 1=saved-prompt, 2=prompt, 3=use_brain, 4=cwd, 5=schedule, 6=name.
 func agentModalNextFocus(cur int) int {
 	switch cur {
 	case 0:
@@ -2531,7 +2536,9 @@ func agentModalNextFocus(cur int) int {
 		return 4
 	case 4:
 		return 5
-	default: // 5 or anything else
+	case 5:
+		return 6
+	default: // 6 or anything else
 		return 0
 	}
 }
@@ -2540,7 +2547,7 @@ func agentModalNextFocus(cur int) int {
 func agentModalPrevFocus(cur int) int {
 	switch cur {
 	case 0:
-		return 5
+		return 6
 	case 1:
 		return 0
 	case 2:
@@ -2549,8 +2556,10 @@ func agentModalPrevFocus(cur int) int {
 		return 2
 	case 4:
 		return 3
-	default: // 5
+	case 5:
 		return 4
+	default: // 6
+		return 5
 	}
 }
 
@@ -2579,6 +2588,7 @@ func (m Model) handleAgentModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.agentModalOpen = false
 		m.agent.prompt.Blur()
 		m.agentSchedule.Blur()
+		m.agentNameInput.Blur()
 		m.agentScheduleErr = ""
 		return m, nil
 
@@ -2604,12 +2614,19 @@ func (m Model) handleAgentModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case 2:
 			m.agent.prompt.Focus()
 			m.agentSchedule.Blur()
+			m.agentNameInput.Blur()
 		case 5:
 			m.agent.prompt.Blur()
 			m.agentSchedule.Focus()
+			m.agentNameInput.Blur()
+		case 6:
+			m.agent.prompt.Blur()
+			m.agentSchedule.Blur()
+			m.agentNameInput.Focus()
 		default:
 			m.agent.prompt.Blur()
 			m.agentSchedule.Blur()
+			m.agentNameInput.Blur()
 		}
 		return m, nil
 
@@ -2619,18 +2636,25 @@ func (m Model) handleAgentModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case 2:
 			m.agent.prompt.Focus()
 			m.agentSchedule.Blur()
+			m.agentNameInput.Blur()
 		case 5:
 			m.agent.prompt.Blur()
 			m.agentSchedule.Focus()
+			m.agentNameInput.Blur()
+		case 6:
+			m.agent.prompt.Blur()
+			m.agentSchedule.Blur()
+			m.agentNameInput.Focus()
 		default:
 			m.agent.prompt.Blur()
 			m.agentSchedule.Blur()
+			m.agentNameInput.Blur()
 		}
 		return m, nil
 
 	case "up", "k":
-		if m.agentModalFocus == 2 || m.agentModalFocus == 5 {
-			// Let textarea handle the key when prompt or schedule is focused.
+		if m.agentModalFocus == 2 || m.agentModalFocus == 5 || m.agentModalFocus == 6 {
+			// Let textarea/textinput handle the key when prompt, schedule, or name is focused.
 			break
 		}
 		if m.agentModalFocus == 0 {
@@ -2641,8 +2665,8 @@ func (m Model) handleAgentModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case "down", "j":
-		if m.agentModalFocus == 2 || m.agentModalFocus == 5 {
-			// Let textarea handle the key when prompt or schedule is focused.
+		if m.agentModalFocus == 2 || m.agentModalFocus == 5 || m.agentModalFocus == 6 {
+			// Let textarea/textinput handle the key when prompt, schedule, or name is focused.
 			break
 		}
 		if m.agentModalFocus == 0 {
@@ -2705,6 +2729,15 @@ func (m Model) handleAgentModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if m.agentModalFocus == 5 {
 		var cmd tea.Cmd
 		m.agentSchedule, cmd = m.agentSchedule.Update(msg)
+		return m, cmd
+	}
+	if m.agentModalFocus == 6 {
+		if key == "enter" {
+			// Enter in the name field submits the job.
+			return m.submitAgentJob()
+		}
+		var cmd tea.Cmd
+		m.agentNameInput, cmd = m.agentNameInput.Update(msg)
 		return m, cmd
 	}
 	return m, nil
@@ -2900,6 +2933,7 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 	if m.agent.focused {
 		m.agentModalOpen = true
 		m.agentModalFocus = 0
+		m.agentNameInput.SetValue(fmt.Sprintf("agent-%s-%d", m.agent.agentPicker.SelectedProviderID(), time.Now().Unix()))
 		return m, loadAgentPromptsCmd(m.store)
 	}
 
@@ -2968,6 +3002,7 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 			m.agentModalFocus = 0 // start at picker (provider+model) so user confirms selection
 			m.agentPromptIdx = 0
 			m.agent.prompt.Blur()
+			m.agentNameInput.SetValue(fmt.Sprintf("agent-%s-%d", m.agent.agentPicker.SelectedProviderID(), time.Now().Unix()))
 			return m, loadAgentPromptsCmd(m.store)
 		}
 		return m, nil
@@ -3087,7 +3122,10 @@ func (m Model) submitAgentJob() (Model, tea.Cmd) {
 		}
 		m.agentScheduleErr = ""
 
-		entryName := fmt.Sprintf("agent-%s-%d", prov.ID, time.Now().UnixNano())
+		entryName := strings.TrimSpace(m.agentNameInput.Value())
+		if entryName == "" {
+			entryName = fmt.Sprintf("agent-%s-%d", prov.ID, time.Now().UnixNano())
+		}
 
 		// Generate a minimal single-step pipeline YAML so the scheduled run
 		// has the prompt embedded and runs via the standard pipeline executor.
@@ -3130,6 +3168,8 @@ func (m Model) submitAgentJob() (Model, tea.Cmd) {
 		m.agentSchedule.SetValue("")
 		m.agentSchedule.Blur()
 		m.agentScheduleErr = ""
+		m.agentNameInput.SetValue("")
+		m.agentNameInput.Blur()
 		m.agentPromptIdx = 0
 		return m, nil
 	}
@@ -3152,7 +3192,10 @@ func (m Model) submitAgentJob() (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	entryName := fmt.Sprintf("agent-%s-%d", prov.ID, time.Now().UnixNano())
+	entryName := strings.TrimSpace(m.agentNameInput.Value())
+	if entryName == "" {
+		entryName = fmt.Sprintf("agent-%s-%d", prov.ID, time.Now().UnixNano())
+	}
 
 	// Resolve CWD and optionally create a git worktree for isolation.
 	cwd := m.agentCWD
@@ -3197,6 +3240,8 @@ func (m Model) submitAgentJob() (Model, tea.Cmd) {
 	m.agentSchedule.SetValue("")
 	m.agentSchedule.Blur()
 	m.agentScheduleErr = ""
+	m.agentNameInput.SetValue("")
+	m.agentNameInput.Blur()
 	m.agentPromptIdx = 0
 
 	return m.launchPendingPipeline(cwd)
@@ -3830,6 +3875,14 @@ func (m Model) viewAgentModalBox(w, h int) string {
 		rows = append(rows, boxRow(aDim+"  0 9 * * *    daily at 9am"+aRst, modalW, modalBorderColor))
 		rows = append(rows, boxRow(aDim+"  0 9 * * 1-5  weekdays at 9am"+aRst, modalW, modalBorderColor))
 	}
+
+	// ── NAME section ─────────────────────────────────────────────────────────
+	rows = append(rows, boxRow("", modalW, modalBorderColor))
+	nameHeader := "  " + sectionLabel("SESSION NAME", m.agentModalFocus == 6)
+	rows = append(rows, boxRow(nameHeader, modalW, modalBorderColor))
+	m.agentNameInput.Width = max(modalW-6, 10)
+	nameView := "  " + m.agentNameInput.View()
+	rows = append(rows, boxRow(nameView, modalW, modalBorderColor))
 
 	// ── Hint bar ──────────────────────────────────────────────────────────────
 	rows = append(rows, boxRow("", modalW, modalBorderColor))
