@@ -3,12 +3,17 @@
 package pipeline_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/adam-stokes/orcai/internal/pipeline"
+	"github.com/adam-stokes/orcai/internal/plugin"
 )
 
 // smokeModel returns the model to use for smoke tests.
@@ -28,12 +33,47 @@ func smokeModelBase(full string) string {
 	return full
 }
 
+// ollamaGenerateStub returns a StubPlugin that calls the ollama HTTP API directly,
+// bypassing the discovery/config layer so the smoke test runs on a fresh CI runner
+// without a configured orcai installation.
+func ollamaGenerateStub(model string) *plugin.StubPlugin {
+	return &plugin.StubPlugin{
+		PluginName: "ollama",
+		PluginDesc: "ollama smoke stub",
+		ExecuteFn: func(ctx context.Context, input string, _ map[string]string, w io.Writer) error {
+			body, _ := json.Marshal(map[string]any{
+				"model":  model,
+				"prompt": input,
+				"stream": false,
+			})
+			resp, err := http.Post("http://localhost:11434/api/generate", "application/json", bytes.NewReader(body))
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			var result struct {
+				Response string `json:"response"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+				return err
+			}
+			_, err = io.WriteString(w, result.Response)
+			return err
+		},
+	}
+}
+
 // TestSmokePipeline_SingleStep verifies a one-step ollama pipeline runs without error
 // and produces non-empty output. Intentionally minimal — just confirms the pipeline
-// executor is wired correctly and ollama is reachable.
+// executor dispatches correctly and ollama is reachable.
 func TestSmokePipeline_SingleStep(t *testing.T) {
 	model := smokeModel()
 	checkModelAvailable(t, smokeModelBase(model))
+
+	mgr := plugin.NewManager()
+	if err := mgr.Register(ollamaGenerateStub(model)); err != nil {
+		t.Fatalf("register stub: %v", err)
+	}
 
 	p := &pipeline.Pipeline{
 		Name:    "smoke",
@@ -48,9 +88,7 @@ func TestSmokePipeline_SingleStep(t *testing.T) {
 		},
 	}
 
-	mgr := buildManager()
 	pub := &collectPublisher{}
-
 	result, err := pipeline.Run(context.Background(), p, mgr, "", pipeline.WithEventPublisher(pub))
 	if err != nil {
 		t.Fatalf("pipeline.Run: %v", err)
