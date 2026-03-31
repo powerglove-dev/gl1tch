@@ -89,6 +89,11 @@ func NewSendPanel(providers []picker.ProviderDef) SendPanel {
 // Used by the view for rendering. Use Enter() when actually moving focus into the panel.
 func (s SendPanel) SetFocused(b bool) SendPanel {
 	s.focused = b
+	if !b {
+		s.agentOpen = false
+		s.savedPromptsOpen = false
+		s.savedPipelineOpen = false
+	}
 	s.syncFocus()
 	return s
 }
@@ -148,6 +153,11 @@ func (s SendPanel) SetCWD(path string) SendPanel {
 
 // AgentOpen reports whether the agent picker popup is open.
 func (s SendPanel) AgentOpen() bool { return s.agentOpen }
+
+// AnyModalOpen reports whether any sub-modal (agent, saved prompt, saved pipeline) is open.
+func (s SendPanel) AnyModalOpen() bool {
+	return s.agentOpen || s.savedPromptsOpen || s.savedPipelineOpen
+}
 
 // SavedPromptsOpen reports whether the saved prompts fuzzy picker is open.
 func (s SendPanel) SavedPromptsOpen() bool { return s.savedPromptsOpen }

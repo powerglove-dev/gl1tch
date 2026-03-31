@@ -655,6 +655,7 @@ func (m Model) SetSignalBoardFocused(v bool) Model {
 	m.signalBoardFocused = v
 	m.launcher.focused = false
 	m.agent.focused = false
+	m.sendPanel = m.sendPanel.SetFocused(false)
 	m.feedFocused = false
 	m.inboxPanel.focused = false
 	m.inboxModel.SetFocused(false)
@@ -666,6 +667,7 @@ func (m Model) SetFeedFocused(v bool) Model {
 	m.feedFocused = v
 	m.launcher.focused = false
 	m.agent.focused = false
+	m.sendPanel = m.sendPanel.SetFocused(false)
 	m.signalBoardFocused = false
 	m.inboxPanel.focused = false
 	m.inboxModel.SetFocused(false)
@@ -1691,7 +1693,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	// When agent send panel is focused, route most keys to it.
 	// (tab/shift+tab are already handled above in the tab case)
-	if m.agent.focused && key != "esc" && key != "ctrl+c" && key != "ctrl+q" && key != "tab" && key != "shift+tab" {
+	if m.agent.focused && key != "ctrl+c" && key != "ctrl+q" && key != "tab" && key != "shift+tab" &&
+		(key != "esc" || m.sendPanel.AnyModalOpen()) {
 		newPanel, cmd := m.sendPanel.Update(msg)
 		m.sendPanel = newPanel
 		if cmd != nil {
@@ -1933,6 +1936,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "c":
 		m.launcher.focused = false
 		m.agent.focused = false
+		m.sendPanel = m.sendPanel.SetFocused(false)
 		m.feedFocused = false
 		m.signalBoardFocused = false
 		m.inboxPanel.focused = false
@@ -2040,6 +2044,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			// Toggle activity feed focus so ↑↓ scrolls through output lines.
 			m.launcher.focused = false
 			m.agent.focused = false
+			m.sendPanel = m.sendPanel.SetFocused(false)
 			m.signalBoardFocused = false
 			m.feedFocused = !m.feedFocused
 		}
@@ -2057,6 +2062,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "s":
 		m.launcher.focused = false
 		m.agent.focused = false
+		m.sendPanel = m.sendPanel.SetFocused(false)
 		m.feedFocused = false
 		m.signalBoardFocused = true
 		m.inboxPanel.focused = false
@@ -2066,6 +2072,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "i":
 		m.launcher.focused = false
 		m.agent.focused = false
+		m.sendPanel = m.sendPanel.SetFocused(false)
 		m.feedFocused = false
 		m.signalBoardFocused = false
 		m.inboxPanel.focused = true
@@ -3888,6 +3895,7 @@ func (m Model) navigateToInboxRun(runIDStr string) (Model, tea.Cmd) {
 			// clear other focus
 			m.launcher.focused = false
 			m.agent.focused = false
+			m.sendPanel = m.sendPanel.SetFocused(false)
 			m.feedFocused = false
 			m.signalBoardFocused = false
 			m.agentsCenterFocused = false
