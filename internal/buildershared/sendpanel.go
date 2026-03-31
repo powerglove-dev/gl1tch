@@ -73,8 +73,12 @@ func NewSendPanel(providers []picker.ProviderDef) SendPanel {
 }
 
 // SetFocused sets whether the send panel has outer focus.
+// Entering the panel always resets inner focus to SendFocusName.
 func (s SendPanel) SetFocused(b bool) SendPanel {
 	s.focused = b
+	if b {
+		s.focus = SendFocusName
+	}
 	s.syncFocus()
 	return s
 }

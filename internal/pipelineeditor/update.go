@@ -136,8 +136,10 @@ func (m Model) handleListKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		switch v := innerMsg.(type) {
 		case buildershared.SidebarSelectMsg:
 			m = m.openEdit(v.Name)
-			m.editor = m.editor.SetFocused(true)
+			m.send = m.send.SetName(v.Name)
 			m.sidebar = m.sidebar.SetFocused(false)
+			m.send = m.send.SetFocused(true)
+			m.focus = FocusChat
 			return m, nil
 		case buildershared.SidebarDeleteMsg:
 			path := m.pipelinesDir + "/" + v.Name + ".pipeline.yaml"
@@ -149,8 +151,9 @@ func (m Model) handleListKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// 'n' key — new pipeline
 		if key == "n" {
 			m = m.openNew()
-			m.editor = m.editor.SetFocused(true)
 			m.sidebar = m.sidebar.SetFocused(false)
+			m.send = m.send.SetFocused(true)
+			m.focus = FocusChat
 			return m, nil
 		}
 	}
@@ -158,16 +161,17 @@ func (m Model) handleListKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	// 'n' key when sidebar doesn't emit a cmd
 	if key == "n" {
 		m = m.openNew()
-		m.editor = m.editor.SetFocused(true)
 		m.sidebar = m.sidebar.SetFocused(false)
+		m.send = m.send.SetFocused(true)
+		m.focus = FocusChat
 		return m, nil
 	}
 
-	// Tab: move focus to editor.
+	// Tab: move focus to send panel (editor panel removed from view).
 	if key == "tab" {
 		m.sidebar = m.sidebar.SetFocused(false)
-		m.editor = m.editor.SetFocused(true)
-		m.focus = FocusEditor
+		m.send = m.send.SetFocused(true)
+		m.focus = FocusChat
 		return m, nil
 	}
 
