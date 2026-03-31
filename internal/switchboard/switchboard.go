@@ -4303,7 +4303,7 @@ func (m Model) buildAgentSection(w int) []string {
 		end := min(offset+windowRows*gridCols, len(m.agent.providers))
 		providers := m.agent.providers[offset:end]
 
-		for rowStart := 0; rowStart < len(providers); rowStart += gridCols {
+		for rowStart := 0; rowStart < windowRows*gridCols; rowStart += gridCols {
 			var topRow, midRow, botRow strings.Builder
 			topRow.WriteByte(' ')
 			midRow.WriteByte(' ')
