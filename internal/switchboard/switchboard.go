@@ -3951,8 +3951,8 @@ func (m Model) viewCenterColumn(height, width int) []string {
 }
 
 // buildAgentsGrid renders the Agents panel as a 2-D grid of boxed agent cards.
-// Each card is 3 lines tall (top border, content, bottom border). The selected
-// card's border is rendered in accent color; unselected cards use dim border.
+// Each card is 5 lines tall (top border, name, duration, status, bottom border).
+// The selected card's border is rendered in accent color; unselected cards use dim border.
 // gridCols = max(1, width/24).  Source: filteredFeed() (same as signal board).
 func (m Model) buildAgentsGrid(height, width int) []string {
 	pal := m.ansiPalette()
@@ -4008,35 +4008,42 @@ func (m Model) buildAgentsGrid(height, width int) []string {
 	if bodyH < 1 {
 		bodyH = 1
 	}
-	// Each card row occupies 3 panel lines (top, content, bottom).
-	maxCardRows := bodyH / 3
+	// Each card row occupies 5 panel lines (top border, name, duration, status, bottom border).
+	maxCardRows := bodyH / 5
 
 	if len(entries) == 0 {
 		lines = append(lines, boxRow(pal.Dim+"  no agents"+aRst, width, panelBorder))
 	} else {
 		for row := 0; row < gridRows && row < maxCardRows; row++ {
-			// Accumulate 3 strings: top borders, content lines, bottom borders.
-			var topRow, midRow, botRow strings.Builder
+			// Accumulate 5 strings: top border, name row, duration row, status row, bottom border.
+			var topRow, nameRow, durRow, statusRow, botRow strings.Builder
 
 			// Leading margin (1 space).
 			topRow.WriteByte(' ')
-			midRow.WriteByte(' ')
+			nameRow.WriteByte(' ')
+			durRow.WriteByte(' ')
+			statusRow.WriteByte(' ')
 			botRow.WriteByte(' ')
 
 			for col := 0; col < gridCols; col++ {
 				// Inter-card gap (skip for first column).
 				if col > 0 {
 					topRow.WriteByte(' ')
-					midRow.WriteByte(' ')
+					nameRow.WriteByte(' ')
+					durRow.WriteByte(' ')
+					statusRow.WriteByte(' ')
 					botRow.WriteByte(' ')
 				}
 
 				idx := row*gridCols + col
 				if idx >= len(entries) {
 					// Empty placeholder card (blank space same width).
-					topRow.WriteString(strings.Repeat(" ", cardW))
-					midRow.WriteString(strings.Repeat(" ", cardW))
-					botRow.WriteString(strings.Repeat(" ", cardW))
+					blank := strings.Repeat(" ", cardW)
+					topRow.WriteString(blank)
+					nameRow.WriteString(blank)
+					durRow.WriteString(blank)
+					statusRow.WriteString(blank)
+					botRow.WriteString(blank)
 					continue
 				}
 
@@ -4058,50 +4065,63 @@ func (m Model) buildAgentsGrid(height, width int) []string {
 					} else {
 						led = pal.Dim + "●" + aRst
 					}
-					statusLabel = pal.Accent + "run" + aRst
+					statusLabel = pal.Accent + "running" + aRst
 				case FeedPaused:
 					led = pal.Warn + "?" + aRst
-					statusLabel = pal.Warn + "paused" + aRst
+					statusLabel = pal.Warn + "awaiting reply" + aRst
 				case FeedDone:
 					led = pal.Success + "✓" + aRst
 					statusLabel = pal.Success + "done" + aRst
 				case FeedFailed:
 					led = pal.Error + "✗" + aRst
-					statusLabel = pal.Error + "fail" + aRst
+					statusLabel = pal.Error + "failed" + aRst
 				default:
 					led = pal.Dim + "●" + aRst
 					statusLabel = pal.Dim + "idle" + aRst
 				}
 
-				statusVis := len(stripANSI(statusLabel))
-				// cardW = 2 borders + innerCardW; content: " led title…pad status "
 				innerCardW := cardW - 2
-				// Fixed visible chars: 1 (left space) + 1 (led) + 1 (space) + 1 (right space) + statusVis = 4 + statusVis
-				maxTitleVis := max(innerCardW-4-statusVis, 1)
+
+				// Row 1 (name): truncate title to fit.
 				title := e.title
 				titleRunes := []rune(title)
+				maxTitleVis := max(innerCardW-2, 1) // 1 space margin each side
 				if len(titleRunes) > maxTitleVis {
 					title = string(titleRunes[:maxTitleVis-1]) + "…"
 				}
-				titleVis := len([]rune(title))
-				padLen := max(innerCardW-1-1-1-titleVis-statusVis-1, 0)
+				namePad := max(innerCardW-1-len([]rune(title)), 0)
 
-				// Top border: ╭─────────────╮
+				// Row 2 (duration): start time | elapsed.
+				startTime := e.ts.Format("3:04 PM")
+				duration := humanDuration(time.Since(e.ts))
+				durVis := len(startTime) + 2 + len(duration)
+				durPad := max(innerCardW-1-durVis, 0)
+
+				// Row 3 (status): led + status label.
+				statusContent := led + " " + statusLabel
+				statusVis := 1 + 1 + len(stripANSI(statusLabel))
+				statusPad := max(innerCardW-1-statusVis, 0)
+
+				// Top border: ╭──────────────────╮
 				topRow.WriteString(cBorder + "╭" + strings.Repeat("─", innerCardW) + "╮" + aRst)
 
-				// Content line: │ led title   status │
-				midRow.WriteString(cBorder + "│" + aRst)
-				midRow.WriteString(" " + led + " " + pal.FG + title + aRst)
-				midRow.WriteString(strings.Repeat(" ", padLen))
-				midRow.WriteString(statusLabel)
-				midRow.WriteString(" " + cBorder + "│" + aRst)
+				// Name row: │ title             │
+				nameRow.WriteString(cBorder + "│" + aRst + " " + pal.FG + title + aRst + strings.Repeat(" ", namePad) + cBorder + "│" + aRst)
 
-				// Bottom border: ╰─────────────╯
+				// Duration row: │ 3:04 PM  1h 30m  │
+				durRow.WriteString(cBorder + "│" + aRst + " " + pal.Dim + startTime + aRst + "  " + pal.Dim + duration + aRst + strings.Repeat(" ", durPad) + cBorder + "│" + aRst)
+
+				// Status row: │ ● running         │
+				statusRow.WriteString(cBorder + "│" + aRst + " " + statusContent + strings.Repeat(" ", statusPad) + cBorder + "│" + aRst)
+
+				// Bottom border: ╰──────────────────╯
 				botRow.WriteString(cBorder + "╰" + strings.Repeat("─", innerCardW) + "╯" + aRst)
 			}
 
 			lines = append(lines, boxRow(topRow.String(), width, panelBorder))
-			lines = append(lines, boxRow(midRow.String(), width, panelBorder))
+			lines = append(lines, boxRow(nameRow.String(), width, panelBorder))
+			lines = append(lines, boxRow(durRow.String(), width, panelBorder))
+			lines = append(lines, boxRow(statusRow.String(), width, panelBorder))
 			lines = append(lines, boxRow(botRow.String(), width, panelBorder))
 		}
 	}
