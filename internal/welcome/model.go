@@ -125,6 +125,10 @@ func New(cfgDir string) Model {
 		}
 	}
 
+	// Mark as seen immediately — any exit path (Ctrl-C, close window, completion)
+	// prevents the welcome from auto-launching again on the next session start.
+	MarkSeen(cfgDir) //nolint:errcheck
+
 	return m
 }
 
@@ -228,11 +232,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.streamBuf = ""
 		m.updateViewport()
 
-		// Write sentinel when the done phase response finishes.
+		// Auto-quit after the done phase response finishes.
 		if m.phase == PhaseDone {
-			if err := MarkSeen(m.cfgDir); err != nil {
-				// best effort
-			}
+			return m, tea.Quit
 		}
 
 	case sysopStreamErrMsg:

@@ -3815,20 +3815,21 @@ func (m Model) buildBanner(w int) string {
 // headerHeight returns the number of terminal lines consumed by the top bar.
 func (m Model) headerHeight() int {
 	if len(m.tdfHeader) > 0 {
-		return len(m.tdfHeader) + 1 // TDF lines + subtitle bar
+		return len(m.tdfHeader)
 	}
 	return 1
 }
 
 // viewTopBar renders the full-width ORCAI header bar for the Switchboard.
+// When TDF art is available it is used alone (no subtitle bar beneath it).
+// Falls back to the single-line TopBar when TDF loading failed.
 func (m Model) viewTopBar(w int) string {
-	subtitle := "░▒▓ ORCAI — ABBS Switchboard ▓▒░"
-	if p := translations.GlobalProvider(); p != nil {
-		subtitle = p.T(translations.KeySwitchboardHeader, subtitle)
-	}
-
 	if len(m.tdfHeader) == 0 {
-		return TopBar(m.activeBundle(), subtitle, w)
+		title := "░▒▓ ORCAI — ABBS Switchboard ▓▒░"
+		if p := translations.GlobalProvider(); p != nil {
+			title = p.T(translations.KeySwitchboardHeader, title)
+		}
+		return TopBar(m.activeBundle(), title, w)
 	}
 
 	var sb strings.Builder
@@ -3837,10 +3838,12 @@ func (m Model) viewTopBar(w int) string {
 		pad = 0
 	}
 	prefix := strings.Repeat(" ", pad)
-	for _, line := range m.tdfHeader {
-		sb.WriteString(prefix + line + "\n")
+	for i, line := range m.tdfHeader {
+		sb.WriteString(prefix + line)
+		if i < len(m.tdfHeader)-1 {
+			sb.WriteByte('\n')
+		}
 	}
-	sb.WriteString(TopBar(m.activeBundle(), subtitle, w))
 	return sb.String()
 }
 
