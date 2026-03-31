@@ -436,6 +436,11 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 // runDAG executes a pipeline using the DAG execution engine with full parallelism,
 // retry, on_failure routing, and for_each expansion.
 func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput string, cfg *runConfig) (string, error) {
+	// Wrap ctx with a cancel so a failing step (no on_failure) can stop all
+	// in-flight goroutines immediately rather than waiting for them to drain.
+	ctx, cancelPipeline := context.WithCancel(ctx)
+	defer cancelPipeline()
+
 	maxParallel := p.MaxParallel
 	if maxParallel <= 0 {
 		maxParallel = 8
@@ -565,6 +570,9 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 	}
 
 	// launchStep acquires a semaphore slot and runs a step in a goroutine.
+	// If the step is a lazy for_each placeholder (Args["_lazy_foreach"] is set),
+	// it evaluates the for_each expression against the live EC, runs each item
+	// clone sequentially via dispatchStep, and sends a single synthetic completion.
 	launchStep := func(id string) {
 		st := states[id]
 		step := byID[id]
@@ -585,8 +593,77 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 
 			snap := ec.Snapshot()
 			args := interpolateArgs(step.Args, snap)
+
+			// Lazy for_each: expand at runtime using the live execution context.
+			if tmplVal, ok := args["_lazy_foreach"]; ok {
+				tmpl := fmt.Sprint(tmplVal)
+				resolved := Interpolate(tmpl, snap)
+				items := expandForEach(resolved)
+
+				stepStart := time.Now()
+				var combinedBuf strings.Builder
+				var lastErr error
+
+				for i, item := range items {
+					if ctx.Err() != nil {
+						lastErr = ctx.Err()
+						break
+					}
+					cloneID := fmt.Sprintf("%s[%d]", id, i)
+					clone := cloneStep(*step)
+					clone.ID = cloneID
+					if clone.Args == nil {
+						clone.Args = make(map[string]any)
+					}
+					delete(clone.Args, "_lazy_foreach")
+					clone.Args["_item"] = item
+					clone.Args["item"] = item
+
+					cloneSnap := ec.Snapshot()
+					cloneSnap["item"] = item
+					cloneArgs := map[string]any{"_item": item, "item": item}
+
+					fmt.Printf(StepStatusLineFormat+"\n", cloneID, "running")
+					cloneOut, cloneErr := dispatchStep(ctx, &clone, cloneArgs, cloneSnap, ec, mgr, cfg.runID, cfg.pipeName, cfg.publisher, p, cfg.store)
+					if cloneErr != nil {
+						lastErr = cloneErr
+						fmt.Printf(StepStatusLineFormat+"\n", cloneID, "failed")
+						fmt.Printf("  error: %v\n", cloneErr)
+						break
+					}
+					fmt.Printf(StepStatusLineFormat+"\n", cloneID, "done")
+
+					// Aggregate clone output under the parent placeholder ID.
+					if cloneOut != nil {
+						if v, ok := cloneOut["value"]; ok {
+							valStr := fmt.Sprint(v)
+							if combinedBuf.Len() > 0 {
+								combinedBuf.WriteString("\n\n---\n\n")
+							}
+							combinedBuf.WriteString(valStr)
+							parentKey := "step." + id + ".data.value"
+							ec.Set(parentKey, combinedBuf.String())
+						}
+					}
+				}
+
+				combinedVal := combinedBuf.String()
+				var syntheticOut map[string]any
+				if lastErr == nil {
+					syntheticOut = map[string]any{"value": combinedVal}
+					lastOutputMu.Lock()
+					lastOutput = combinedVal
+					lastOutputMu.Unlock()
+				}
+				durationMs := time.Since(stepStart).Milliseconds()
+				completedCh <- stepResult{id: id, output: syntheticOut, err: lastErr, startedAt: stepStart, durationMs: durationMs}
+				return
+			}
+
 			if itemVal, ok := args["_item"]; ok {
 				args["item"] = itemVal
+				// Inject item into snap so {{item}} resolves in step.Vars interpolation.
+				snap["item"] = itemVal
 			}
 
 			// Resolve the configured prompt for inbox display (pre-brain-injection).
@@ -724,12 +801,14 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 						}
 					}
 				} else {
-					// No on_failure handler — propagate immediately.
+					// No on_failure handler — propagate immediately and cancel
+					// the pipeline context so all in-flight steps are stopped.
 					firstStepErrMu.Lock()
 					if firstStepErr == nil {
 						firstStepErr = stepErr
 					}
 					firstStepErrMu.Unlock()
+					cancelPipeline()
 				}
 			} else {
 				st.mu.Lock()
@@ -764,6 +843,19 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput str
 					ec.Set("step."+res.id+".state", "done")
 					if v, ok := res.output["value"]; ok {
 						ec.Set(res.id+".out", fmt.Sprint(v))
+					}
+					// Aggregate for_each clone output under the parent step ID so
+					// templates can reference {{step.<orig>.data.value}} directly.
+					if bracketIdx := strings.LastIndex(res.id, "["); bracketIdx != -1 && strings.HasSuffix(res.id, "]") {
+						parentID := res.id[:bracketIdx]
+						if v, ok := res.output["value"]; ok {
+							parentKey := "step." + parentID + ".data.value"
+							if existing, ok := ec.Get(parentKey); ok {
+								ec.Set(parentKey, fmt.Sprint(existing)+"\n\n---\n\n"+fmt.Sprint(v))
+							} else {
+								ec.Set(parentKey, fmt.Sprint(v))
+							}
+						}
 					}
 				} else {
 					ec.Set("step."+res.id+".state", "done")
@@ -845,6 +937,12 @@ func skipTransitive(failedID string, dependents map[string][]string, states map[
 
 // expandForEachSteps replaces steps with ForEach set by N cloned steps.
 // Each clone gets the ID "<orig>[i]" and an "_item" arg set to the item value.
+//
+// If the ForEach expression contains a "{{step." reference (i.e. depends on a
+// runtime step output), expansion is deferred to runtime: the step is kept as a
+// single placeholder with Args["_lazy_foreach"] set to the original expression.
+// The DAG treats the placeholder as a normal node; when it becomes ready the
+// runDAG loop expands it lazily against the live ExecutionContext.
 func expandForEachSteps(steps []Step, userInput string, pipeVars map[string]any) ([]Step, error) {
 	// Build a minimal vars map for interpolating ForEach expressions.
 	vars := make(map[string]any)
@@ -854,10 +952,18 @@ func expandForEachSteps(steps []Step, userInput string, pipeVars map[string]any)
 	vars["param.input"] = userInput
 
 	// First pass: compute expansions so we can rewrite Needs refs.
+	// Steps with runtime-deferred for_each are NOT expanded here — they remain
+	// as single placeholder nodes so downstream Needs refs stay intact.
 	origForEach := make(map[string][]string) // origID → expanded IDs
 	for _, s := range steps {
 		if s.ForEach != "" {
 			resolved := Interpolate(s.ForEach, vars)
+			if strings.Contains(s.ForEach, "{{step.") {
+				// Deferred — will be expanded at runtime; keep original ID as a
+				// single placeholder so Needs rewriting below leaves it alone.
+				origForEach[s.ID] = []string{s.ID}
+				continue
+			}
 			items := expandForEach(resolved)
 			ids := make([]string, len(items))
 			for i := range items {
@@ -876,7 +982,19 @@ func expandForEachSteps(steps []Step, userInput string, pipeVars map[string]any)
 			out = append(out, s)
 			continue
 		}
-		// Expand into N clones.
+		// Deferred for_each: keep as a placeholder and let the runner expand at runtime.
+		if strings.Contains(s.ForEach, "{{step.") {
+			placeholder := cloneStep(s)
+			placeholder.ForEach = ""
+			if placeholder.Args == nil {
+				placeholder.Args = make(map[string]any)
+			}
+			placeholder.Args["_lazy_foreach"] = s.ForEach
+			placeholder.Needs = rewriteNeeds(s.Needs, origForEach)
+			out = append(out, placeholder)
+			continue
+		}
+		// Static expansion into N clones.
 		resolved := Interpolate(s.ForEach, vars)
 		items := expandForEach(resolved)
 		if len(items) == 0 {
@@ -1081,7 +1199,16 @@ done:
 	}
 
 	if execErr != nil {
+		// Wrap execErr with any captured output so the failure reason is visible.
+		if out != nil {
+			if v, ok := out["value"]; ok {
+				if s := fmt.Sprint(v); s != "" {
+					execErr = fmt.Errorf("%w\noutput: %s", execErr, s)
+				}
+			}
+		}
 		fmt.Printf(StepStatusLineFormat+"\n", step.ID, "failed")
+		fmt.Printf("  error: %v\n", execErr)
 		// Publish step.failed.
 		if payload, merr := json.Marshal(map[string]any{
 			"run_id":      runID,
@@ -1089,6 +1216,7 @@ done:
 			"step":        step.ID,
 			"status":      "failed",
 			"duration_ms": stepDurationMs,
+			"error":       execErr.Error(),
 		}); merr == nil {
 			_ = pub.Publish(ctx, topics.StepFailed, payload)
 		}
@@ -1187,7 +1315,21 @@ func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap 
 		promptOrInput = strings.TrimRight(promptOrInput, "\n") + clarify.Instruction
 	}
 
-	stepVars := ec.FlatStrings()
+	// Build stepVars for the plugin.
+	// For tool-kind plugins (kind: tool in sidecar YAML), only pass the
+	// interpolated step.Vars plus cwd and model. This prevents large step
+	// outputs from being dumped as ORCAI_* env vars into every subprocess.
+	// Agent plugins still get the full EC so they have full context.
+	var stepVars map[string]string
+	type kinder interface{ Kind() string }
+	if k, ok := pl.(kinder); ok && k.Kind() == "tool" {
+		stepVars = make(map[string]string, len(step.Vars)+3)
+		if cwd, ok := ec.Get("cwd"); ok {
+			stepVars["cwd"] = fmt.Sprint(cwd)
+		}
+	} else {
+		stepVars = ec.FlatStrings()
+	}
 	stepVars["model"] = step.Model
 	for k, v := range step.Vars {
 		stepVars[k] = Interpolate(v, snap)
