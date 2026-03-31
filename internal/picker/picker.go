@@ -46,7 +46,7 @@ var Providers = []ProviderDef{
 // original discovery order.
 var providerPriority = []string{
 	"claude",
-	"copilot",
+	"github-copilot",
 	"codex",
 	"gemini",
 	"opencode",

@@ -15,8 +15,8 @@ func TestProviderPriority_Order(t *testing.T) {
 	cases := []struct {
 		a, b string // a must rank before b
 	}{
-		{"claude", "copilot"},
-		{"copilot", "codex"},
+		{"claude", "github-copilot"},
+		{"github-copilot", "codex"},
 		{"codex", "gemini"},
 		{"gemini", "opencode"},
 		{"opencode", "ollama"},
