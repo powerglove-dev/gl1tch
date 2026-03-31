@@ -172,8 +172,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.viewportReady = true // must be set before resizeViewport calls updateViewport
 		m.resizeViewport()
-		m.viewportReady = true
 
 	case tea.KeyMsg:
 		switch msg.Type {
@@ -305,21 +305,66 @@ func (m *Model) upsertStreamEntry() {
 	m.messages = append(m.messages, entry{who: speakerGlitch, text: m.streamBuf})
 }
 
+const headerTopPad = 2 // blank lines above the title
+
 func (m *Model) resizeViewport() {
-	titleH := len(m.titleLines) + 2 // +2 for subtitle and padding
-	inputH := 3                      // input box height
-	vpH := m.height - titleH - inputH
+	// fixed rows: top padding + title lines + subtitle + divider + bottom divider + input
+	fixedH := headerTopPad + len(m.titleLines) + 1 + 1 + 1 + 1
+	vpH := m.height - fixedH
 	if vpH < 5 {
 		vpH = 5
 	}
+	vpW := m.width - 4 // 2-char margin each side
+	if vpW < 20 {
+		vpW = 20
+	}
 	if m.viewport.Width == 0 {
-		m.viewport = viewport.New(m.width-2, vpH)
+		m.viewport = viewport.New(vpW, vpH)
 		m.viewport.YPosition = 0
 	} else {
-		m.viewport.Width = m.width - 2
+		m.viewport.Width = vpW
 		m.viewport.Height = vpH
 	}
 	m.updateViewport()
+}
+
+// titleVisualWidth returns the visual (ANSI-stripped) width of the widest title line.
+func (m *Model) titleVisualWidth() int {
+	max := 0
+	for _, line := range m.titleLines {
+		w := len([]rune(stripANSISimple(line)))
+		if w > max {
+			max = w
+		}
+	}
+	return max
+}
+
+// stripANSISimple removes ESC[ ... m sequences for width measurement.
+func stripANSISimple(s string) string {
+	out := make([]byte, 0, len(s))
+	i := 0
+	for i < len(s) {
+		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+			i += 2
+			for i < len(s) && s[i] != 'm' {
+				i++
+			}
+			i++
+			continue
+		}
+		out = append(out, s[i])
+		i++
+	}
+	return string(out)
+}
+
+func padCenter(s string, visualWidth, termWidth int) string {
+	pad := (termWidth - visualWidth) / 2
+	if pad <= 0 {
+		return s
+	}
+	return strings.Repeat(" ", pad) + s
 }
 
 func (m *Model) updateViewport() {
@@ -389,24 +434,38 @@ func (m Model) View() string {
 
 	var sb strings.Builder
 
-	// Title block — TDF lines carry their own ANSI color; plain fallback gets accent style.
+	// Vertical padding above title.
+	for range headerTopPad {
+		sb.WriteString("\n")
+	}
+
+	// Title block — centered horizontally.
+	// TDF lines carry their own ANSI color; plain fallback gets accent style.
+	titleW := m.titleVisualWidth()
 	for _, line := range m.titleLines {
+		centered := padCenter(line, titleW, m.width)
 		if m.titleHasANSI {
-			sb.WriteString(line + "\n")
+			sb.WriteString(centered + "\n")
 		} else {
-			sb.WriteString(accentStyle.Render(line) + "\n")
+			sb.WriteString(accentStyle.Render(centered) + "\n")
 		}
 	}
-	sb.WriteString(dimStyle.Render("  >> the agentic bulletin board system  //  first-run setup") + "\n")
+
+	// Centered subtitle.
+	subtitle := ">> the agentic bulletin board system  //  first-run setup"
+	sb.WriteString(padCenter(dimStyle.Render(subtitle), len(subtitle), m.width) + "\n")
+
+	// Full-width divider.
 	sb.WriteString(dimStyle.Render(strings.Repeat("─", m.width)) + "\n")
 
-	// Conversation viewport
-	sb.WriteString(m.viewport.View())
-	sb.WriteString("\n")
+	// Conversation viewport — padded to match margins.
+	margin := strings.Repeat(" ", 2)
+	for _, line := range strings.Split(m.viewport.View(), "\n") {
+		sb.WriteString(margin + line + "\n")
+	}
 
-	// Input bar
-	divider := dimStyle.Render(strings.Repeat("─", m.width))
-	sb.WriteString(divider + "\n")
+	// Input bar.
+	sb.WriteString(dimStyle.Render(strings.Repeat("─", m.width)) + "\n")
 	sb.WriteString(m.input.View())
 
 	if m.phase == PhaseDone {
