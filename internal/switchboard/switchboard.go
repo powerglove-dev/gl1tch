@@ -964,6 +964,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Agent prompt pre-selection ────────────────────────────────────────────
 
+	case buildershared.SendSubmitMsg:
+		return m.submitAgentJob(msg.Message)
+
+	case buildershared.SendBrowseCWDMsg:
+		return m, DirPickerInit()
+
 	case agentPromptsLoadedMsg:
 		m.agentPrompts = msg.prompts
 		m.sendPanel = m.sendPanel.SetSavedPromptTitles(buildPromptTitles(msg.prompts))
@@ -1697,22 +1703,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		(key != "esc" || m.sendPanel.AnyModalOpen()) {
 		newPanel, cmd := m.sendPanel.Update(msg)
 		m.sendPanel = newPanel
-		if cmd != nil {
-			outMsg := cmd()
-			switch v := outMsg.(type) {
-			case buildershared.SendSubmitMsg:
-				return m.submitAgentJob(v.Message)
-			case buildershared.SendBrowseCWDMsg:
-				// Dir picker is now inline in the agent popup — just start the async walk.
-				return m, DirPickerInit()
-			default:
-				// Some other cmd result — wrap it back as a Cmd if non-nil
-				if outMsg != nil {
-					return m, func() tea.Msg { return outMsg }
-				}
-			}
-		}
-		return m, nil
+		return m, cmd
 	}
 
 	// Signal board search input — intercept chars when searching.
