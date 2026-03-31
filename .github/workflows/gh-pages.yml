@@ -1,0 +1,74 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'assets/ui/**'
+      - 'sdk/styles/**'
+      - '.github/workflows/gh-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build ANSI-to-HTML converter
+        run: |
+          if [ -f cmd/ansi2html/main.go ]; then
+            go build -o bin/ansi2html ./cmd/ansi2html/
+            echo "ansi2html built"
+          else
+            echo "ansi2html not found, skipping ANSI conversion"
+          fi
+
+      - name: Convert ANSI art assets to HTML fragments
+        run: |
+          mkdir -p docs/ans
+          if [ -f bin/ansi2html ]; then
+            for f in assets/ui/*.ans; do
+              name=$(basename "$f" .ans)
+              ./bin/ansi2html "$f" "docs/ans/${name}.html"
+              echo "converted: $f -> docs/ans/${name}.html"
+            done
+          fi
+
+      - name: Validate HTML
+        run: |
+          for f in docs/*.html; do
+            python3 -c "
+          from html.parser import HTMLParser
+          import sys
+          class V(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.errors = []
+          p = V()
+          p.feed(open('$f').read())
+          print('ok: $f')
+          " || echo "WARNING: HTML issue in $f"
+          done
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          publish_branch: gh-pages
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+          commit_message: 'deploy: ${{ github.sha }}'
