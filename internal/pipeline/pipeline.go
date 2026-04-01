@@ -12,6 +12,7 @@ import (
 type Pipeline struct {
 	Name        string         `yaml:"name"`
 	Version     string         `yaml:"version"`
+	Description string         `yaml:"description"` // Human-readable summary; used by the intent router.
 	Steps       []Step         `yaml:"steps"`
 	Vars        map[string]any `yaml:"vars"` // Pipeline-level seed context available to all steps.
 	MaxParallel int            `yaml:"max_parallel"` // Maximum concurrent steps; defaults to 8 when zero.

@@ -10,6 +10,7 @@ order: 2
 |-------|------|---------|-------------|
 | `name` | `string` | *required* | Unique name for the pipeline. Used in logs, the store, and as a lookup key. |
 | `version` | `string` | `""` | Schema version. Currently always `"1"`. |
+| `description` | `string` | `""` | Human-readable summary of what the pipeline does. Used by the intent router to match `glitch ask` prompts to the right pipeline. |
 | `steps` | `Step[]` | *required* | Ordered list of steps. Execution order is determined by `needs` dependencies, not array position. |
 | `vars` | `map[string]any` | `{}` | Pipeline-level seed context. Available to all steps via template expressions. |
 | `max_parallel` | `int` | `8` | Maximum number of steps that can run concurrently. Only matters for DAG pipelines with parallel branches. |
@@ -34,6 +35,7 @@ order: 2
 | `prompt_id` | `string` | `""` | Title of a saved prompt in the store. When set, the prompt body is prepended to the step's input before execution. Case-insensitive title matching. |
 | `outputs` | `map[string]string` | `{}` | Declares output keys produced by this step. After completion, the full output string is stored under each declared key. |
 | `inputs` | `map[string]string` | `{}` | Maps input names to template expressions like `{{steps.<id>.<key>}}`. Resolved before execution using accumulated step outputs. |
+| `write_brain` | `bool` | `false` | When true, the step's output is written to the brain store after execution. Later runs can inject this context via `--brain`. |
 
 ## Conditions
 

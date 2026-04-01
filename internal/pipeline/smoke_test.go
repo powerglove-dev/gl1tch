@@ -39,7 +39,7 @@ func smokeModelBase(full string) string {
 func ollamaGenerateStub(model string) *executor.StubExecutor {
 	return &executor.StubExecutor{
 		ExecutorName: "ollama",
-		PluginDesc: "ollama smoke stub",
+		ExecutorDesc: "ollama smoke stub",
 		ExecuteFn: func(ctx context.Context, input string, _ map[string]string, w io.Writer) error {
 			body, _ := json.Marshal(map[string]any{
 				"model":  model,
