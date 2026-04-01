@@ -1244,13 +1244,13 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 			backend := p.backend
 			ctx := p.ctx
 			st := p.store
-			return p, func() tea.Msg {
+			return p, tea.Batch(glitchTick(), func() tea.Msg {
 				ch, err := backend.stream(ctx, turns, userText, glitchLoadBrainContext(st), "")
 				if err != nil {
 					return glitchErrMsg{err: err}
 				}
 				return glitchNextToken(ch)()
-			}
+			})
 		}
 	}
 
