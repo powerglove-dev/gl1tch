@@ -1,8 +1,69 @@
 /* ─────────────────────────────────────────────────────────────
-   ORCAI BBS  —  bbs.js
-   Hex dump canvas · Typewriter · Keyboard nav · Copy buttons
-   ANSI logo color cycling
+   ORCAI ABBS  —  bbs.js
+   Hex dump canvas · Typewriter · KeyboardRouter · ANSI pipeline demo
    ───────────────────────────────────────────────────────────── */
+
+// ── KeyboardRouter ────────────────────────────────────────────
+var KeyboardRouter = (function() {
+  var activeScreen = 'home';
+  var screenHandlers = {};
+  var screenOrder = ['home','about','getting-started','plugins','pipelines','changelog','themes','labs','docs'];
+
+  function switchScreen(id) {
+    document.querySelectorAll('.screen').forEach(function(el) { el.classList.remove('active'); });
+    var target = document.querySelector('[data-screen="' + id + '"]');
+    if (target) target.classList.add('active');
+    // update nav active
+    document.querySelectorAll('[data-nav-screen]').forEach(function(el) {
+      el.classList.toggle('active', el.dataset.navScreen === id);
+    });
+    // update status bar
+    var csEl = document.querySelector('.current-screen');
+    if (csEl) csEl.textContent = id.toUpperCase().replace(/-/g,' ');
+    activeScreen = id;
+    // call onEnter
+    if (screenHandlers[id] && screenHandlers[id]._onEnter) screenHandlers[id]._onEnter();
+  }
+
+  function register(screenId, handlers) {
+    screenHandlers[screenId] = handlers;
+  }
+
+  function toggleHelp() {
+    var overlay = document.querySelector('.help-overlay');
+    if (overlay) overlay.classList.toggle('open');
+  }
+
+  function dispatch(e) {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    var overlay = document.querySelector('.help-overlay');
+    if (overlay && overlay.classList.contains('open')) {
+      if (e.key === '?' || e.key === 'Escape' || e.key === 'F1') { e.preventDefault(); toggleHelp(); }
+      return;
+    }
+    var idx = parseInt(e.key);
+    if (idx >= 1 && idx <= screenOrder.length) { e.preventDefault(); switchScreen(screenOrder[idx-1]); return; }
+    switch (e.key) {
+      case '?': case 'F1': e.preventDefault(); toggleHelp(); break;
+      case 'q': case 'Escape':
+        document.body.style.transition = 'opacity 0.5s';
+        document.body.style.opacity = '0';
+        setTimeout(function() { document.body.style.opacity = '1'; }, 2500);
+        break;
+      default:
+        var h = screenHandlers[activeScreen];
+        if (h && h[e.key]) h[e.key](e);
+    }
+  }
+
+  return {
+    switchScreen: switchScreen,
+    register: register,
+    dispatch: dispatch,
+    toggleHelp: toggleHelp,
+    getActive: function() { return activeScreen; }
+  };
+})();
 
 // ── Hex dump background canvas ────────────────────────────────
 function initHexCanvas() {
@@ -133,35 +194,21 @@ function colorLogo() {
     fragment.appendChild(span);
   });
 
-  // Clear and repopulate using safe DOM methods only
   while (logo.firstChild) logo.removeChild(logo.firstChild);
   logo.appendChild(fragment);
 }
 
-// ── Keyboard navigation (index.html only) ────────────────────
-function initKeyboardNav() {
-  document.addEventListener('keydown', function(e) {
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-
-    switch (e.key) {
-      case 'Enter':
-        window.location.href = 'getting-started.html';
-        break;
-      case 'p':
-      case 'P':
-        window.location.href = 'plugins.html';
-        break;
-      case 'g':
-      case 'G':
-        window.open('https://github.com/orcai', '_blank');
-        break;
-      case 'Escape':
-        document.body.style.transition = 'opacity 0.4s';
-        document.body.style.opacity    = '0';
-        setTimeout(function() { document.body.style.opacity = '1'; }, 3000);
-        break;
+// ── Clock ──────────────────────────────────────────────────────
+function initClock() {
+  function tick() {
+    var el = document.querySelector('.clock');
+    if (el) {
+      var now = new Date();
+      el.textContent = now.toTimeString().slice(0,8);
     }
-  });
+  }
+  tick();
+  setInterval(tick, 1000);
 }
 
 // ── Copy buttons ───────────────────────────────────────────────
@@ -210,61 +257,167 @@ function fallbackCopy(text) {
   document.body.removeChild(ta);
 }
 
-// ── Scroll reveal ─────────────────────────────────────────────
-function initScrollReveal() {
-  var cards = document.querySelectorAll('.feature-card, .plugin-tier');
-  if (!cards.length || !('IntersectionObserver' in window)) return;
+// ── Pipeline example switcher ──────────────────────────────────
+var PipelineExamples = (function() {
+  var current = 0;
 
-  var obs = new IntersectionObserver(function(entries) {
-    entries.forEach(function(entry) {
-      if (entry.isIntersecting) {
-        entry.target.style.transition = 'opacity 0.5s, transform 0.5s';
-        entry.target.style.opacity    = '1';
-        entry.target.style.transform  = 'translateY(0)';
-        obs.unobserve(entry.target);
-      }
+  var examples = [
+    // 0: code-review
+    [
+      '# code-review — diff summarizer + issue extractor',
+      '# runs on every PR: claude reads the diff, jq filters',
+      '# high-severity issues, writes a timestamped report.',
+      '',
+      'name: code-review',
+      'description: Summarize a PR diff and extract high-severity issues',
+      '',
+      'steps:',
+      '  - id: summarize',
+      '    executor: claude',
+      '    model: claude-sonnet-4-6',
+      '    prompt: |',
+      '      You are a senior engineer reviewing a pull request.',
+      '      Summarize the key changes, flag any risks, and note',
+      '      anything that needs a second look.',
+      '      Diff: {{diff}}',
+      '',
+      '  - id: extract-issues',
+      '    plugin: jq',
+      '    vars:',
+      '      filter: "[.issues[]? | select(.severity==\"high\")]"',
+      '',
+      '  - id: write-report',
+      '    plugin: write',
+      '    vars:',
+      '      path: "./reports/review-{{date}}.json"'
+    ].join('\n'),
+
+    // 1: brain-feedback-loop
+    [
+      '# brain-feedback-loop — local → cloud knowledge chain',
+      '# qwen2.5 analyzes cheaply and writes an insight note.',
+      '# claude reads that note and synthesizes a recommendation.',
+      '',
+      'name: brain-feedback-loop',
+      'description: Local model builds context, cloud model acts on it',
+      '',
+      'use_brain: true',
+      '',
+      'steps:',
+      '  - id: analyze',
+      '    executor: ollama',
+      '    model: qwen2.5-coder:latest',
+      '    write_brain: true',
+      '    prompt: |',
+      '      Analyze the codebase in ./src. Identify the single',
+      '      most important architectural insight. Be specific.',
+      '      Start your response with "INSIGHT:"',
+      '',
+      '  - id: synthesize',
+      '    executor: claude',
+      '    model: claude-haiku-4-5-20251001',
+      '    use_brain: true',
+      '    prompt: |',
+      '      Given the architectural insight above, write a',
+      '      concrete refactor plan. Include file names.',
+      '      Keep it under 200 words.'
+    ].join('\n'),
+
+    // 2: gh-triage
+    [
+      '# gh-triage — automated issue triage + weekly digest',
+      '# fetches open issues from GitHub, runs local analysis,',
+      '# saves a prioritized markdown report to disk.',
+      '',
+      'name: gh-triage',
+      'description: Weekly issue triage with Ollama + brain context',
+      '',
+      'steps:',
+      '  - id: fetch-issues',
+      '    plugin: gh',
+      '    vars:',
+      '      args: "issue list --json number,title,body,labels --limit 30"',
+      '',
+      '  - id: fetch-recent-prs',
+      '    plugin: gh',
+      '    vars:',
+      '      args: "pr list --state merged --json number,title --limit 10"',
+      '',
+      '  - id: triage',
+      '    executor: ollama',
+      '    model: llama3.2:latest',
+      '    write_brain: true',
+      '    prompt: |',
+      '      Issues: {{steps.fetch-issues.output}}',
+      '      Recent merged PRs: {{steps.fetch-recent-prs.output}}',
+      '      Rank the top 5 open issues by impact. Explain briefly.',
+      '',
+      '  - id: save',
+      '    plugin: write',
+      '    vars:',
+      '      path: "./triage/{{date}}.md"'
+    ].join('\n')
+  ];
+
+  var twTimer = null;
+
+  function show(idx) {
+    current = idx;
+    var el = document.getElementById('pipeline-example');
+    if (!el) return;
+    // update tab active state
+    document.querySelectorAll('.pipeline-tab').forEach(function(btn, i) {
+      btn.classList.toggle('active', i === idx);
     });
-  }, { threshold: 0.1 });
-
-  cards.forEach(function(card) {
-    card.style.opacity   = '0';
-    card.style.transform = 'translateY(16px)';
-    obs.observe(card);
-  });
-}
-
-// ── Node status clock ─────────────────────────────────────────
-function initNodeStatus() {
-  var el = document.querySelector('.node-status .clock');
-  if (!el) return;
-
-  function tick() {
-    el.textContent = new Date().toUTCString().replace('GMT', 'UTC');
+    // typewriter animation
+    if (twTimer) clearTimeout(twTimer);
+    el.textContent = '';
+    var text = examples[idx];
+    var i = 0;
+    function tick() {
+      if (i < text.length) {
+        el.textContent = text.slice(0, i + 1);
+        i++;
+        twTimer = setTimeout(tick, i % 40 === 0 ? 100 : 14);
+      }
+    }
+    tick();
   }
-  tick();
-  setInterval(tick, 1000);
-}
+
+  function next() { show((current + 1) % examples.length); }
+
+  return { show: show, next: next, current: function() { return current; } };
+})();
 
 // ── Boot ───────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
   initHexCanvas();
   colorLogo();
+  initClock();
+  initCopyButtons();
 
-  var tw = document.getElementById('typewriter');
-  if (tw) {
-    typewriter(tw, [
-      'AI workspace for hackers',
-      'tmux \u00b7 plugins \u00b7 pipelines \u00b7 ANSI art',
-      'run your agents at scale',
-      'ctrl+; to open the chord menu',
+  var twEl = document.getElementById('typewriter');
+  if (twEl) {
+    typewriter(twEl, [
+      'orchestrate your agents.',
+      'build pipelines in YAML.',
+      'run in tmux. stay in the terminal.',
+      'plugins are just CLI tools.',
+      'chain claude → jq → write. done.'
     ]);
   }
 
-  if (document.body.dataset.page === 'index') {
-    initKeyboardNav();
-  }
+  // Register pipelines screen handler
+  KeyboardRouter.register('pipelines', {
+    'Tab': function(e) { e.preventDefault(); PipelineExamples.next(); },
+    'r':   function() { PipelineExamples.show(PipelineExamples.current()); },
+    'R':   function() { PipelineExamples.show(PipelineExamples.current()); },
+    _onEnter: function() { PipelineExamples.show(0); }
+  });
 
-  initCopyButtons();
-  initScrollReveal();
-  initNodeStatus();
+  // keyboard router
+  document.addEventListener('keydown', KeyboardRouter.dispatch);
+
+  // activate home screen by default
+  KeyboardRouter.switchScreen('home');
 });

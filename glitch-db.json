@@ -1,0 +1,106 @@
+{
+  "commands": {
+    "install": "go install github.com/powerglove-dev/gl1tch@latest\n\nBinary lands in $GOPATH/bin. Make sure it's on your $PATH.\n\nThen pull a local model:\n\n  ollama pull qwen2.5-coder:latest\n\nRun `glitch`. That's it.",
+    "pipelines": "Pipelines are YAML files that chain steps. Each step runs a model or tool. Each step gets the previous step's output.\n\nname: code-review\nversion: \"1\"\nsteps:\n  - id: read\n    executor: ollama\n    model: qwen2.5-coder:latest\n    prompt: |\n      Read the diff at {{input}} and summarize\n      what changed. Be specific.\n\n  - id: review\n    executor: claude\n    model: claude-haiku-4-5-20251001\n    prompt: |\n      Based on this summary:\n      {{steps.read.output}}\n\n      Flag any bugs, security issues, or\n      patterns that look wrong.\n\nLocal model reads. Cloud model judges. Run it:\n\n  glitch pipeline run code-review.yaml\n\nOr from inside GLITCH: /pipeline code-review",
+    "brain": "Brain is persistent memory that accumulates across pipeline runs.\n\nA step with write_brain: true stores its output as a vector in SQLite, tagged to your current directory. Future steps with use_brain: true get that context injected automatically.\n\nLocal model indexes. Cloud model synthesizes. The cost of reprocessing drops to zero after the first run.\n\nExample:\n\n  - id: index\n    executor: ollama\n    model: qwen2.5-coder:latest\n    write_brain: true\n    prompt: Summarize the architecture of this codebase.\n\n  - id: advise\n    executor: claude\n    model: claude-sonnet-4-6\n    use_brain: true\n    prompt: Given the architecture above, what should we tackle first?\n\nBrowse brain notes from inside GLITCH with ^space b.",
+    "model": "Switch models from inside GLITCH:\n\n  /model ollama/qwen2.5-coder:latest\n  /model claude/claude-sonnet-4-6\n  /model claude/claude-haiku-4-5-20251001\n\nOr open the picker: /models\n\nLocal models (Ollama) run on your machine — zero cost, nothing leaves.\nCloud models are one flag per step. Use them when the question earns it.",
+    "ollama": "Ollama runs AI models locally. No API key. No cost. Prompts never leave your machine.\n\n  brew install ollama\n  ollama pull qwen2.5-coder:latest\n  ollama pull llama3.2\n  ollama serve\n\nIn any pipeline step:\n\n  executor: ollama\n  model: qwen2.5-coder:latest\n\nFrom inside GLITCH: /model ollama/qwen2.5-coder:latest\n\nqwen2.5-coder is the default for code tasks. llama3.2 is good for reasoning.",
+    "why": "Every SaaS AI tool runs your code on someone else's server.\n\nGLITCH defaults to local. Ollama runs on your hardware. Your prompts go nowhere. No API bill for the work that doesn't need one.\n\nCloud models are opt-in, one field per step. When a task genuinely needs Claude's reasoning — a final review, a hard synthesis — you add one line. The rest stays local.\n\nYou own the stack. The cost reflects the actual work.",
+    "themes": "Themes are bundles: a palette YAML, an optional TDF font, an optional ANSI splash screen.\n\nDrop the directory in ~/.config/glitch/themes/ and switch from inside GLITCH:\n\n  /themes\n\nArrow keys to browse, Enter to apply. The title font up top is one of them.",
+    "cost": "Local models via Ollama cost nothing. No per-token charges. No seat license. No rate limits.\n\nCloud models are opt-in — one executor field in one step. Use them where they actually earn it.\n\nMost pipelines: Ollama for the indexing and parsing, Claude for the final synthesis. The bill is tiny.",
+    "cron": "Pipelines can run on a schedule. Daily standup prep. Nightly codebase summaries. Morning PR digests.\n\nFrom inside GLITCH: /cron\n\nCron jobs run in a dedicated session. Results appear in the signal board.",
+    "help": "Commands:\n\n  /install     get GLITCH running\n  /pipelines   chain models with memory\n  /brain       persistent context across runs\n  /model       switch models\n  /ollama      local models, zero cost\n  /why         the philosophy\n  /themes      visual customization\n  /cost        what you actually pay\n  /cron        scheduled pipelines\n\nOr type a question. Tab completes commands."
+  },
+  "qa": [
+    {
+      "question": "what is glitch",
+      "keywords": ["glitch", "what", "product", "tool", "workspace", "is"],
+      "response": "GLITCH is an AI workspace that lives in your terminal. Local models run by default — your code stays on your machine, costs stay near zero. Cloud models are opt-in, per step, when they earn it. You talk to it like a chat interface. It runs pipelines, manages brain context, and drives tmux sessions."
+    },
+    {
+      "question": "how to install glitch",
+      "keywords": ["install", "setup", "brew", "download", "get", "start", "begin"],
+      "response": "go install github.com/powerglove-dev/gl1tch@latest\n\nMake sure $GOPATH/bin is on your $PATH. Then pull a local model:\n\n  ollama pull qwen2.5-coder:latest\n\nRun `glitch`. Type /install for the full walkthrough."
+    },
+    {
+      "question": "how do I talk to glitch",
+      "keywords": ["talk", "chat", "use", "interact", "type", "input", "ask"],
+      "response": "Run `glitch`. The input is at the bottom of the screen. Tab to focus it. Type your question and hit Enter. Type / to see slash commands — autocomplete shows all of them."
+    },
+    {
+      "question": "what slash commands are there",
+      "keywords": ["slash", "commands", "list", "available", "what", "command"],
+      "response": "Type / in GLITCH to see them all with autocomplete. The main ones:\n\n  /pipeline [name]   launch a pipeline\n  /model [name]      switch provider/model\n  /models            open the model picker\n  /themes            open the theme picker\n  /prompt [name]     load a prompt\n  /terminal [cmd]    open a right-side split\n  /rerun [name]      rerun a pipeline\n  /cron              switch to cron session\n  /cwd [path]        change working directory\n  /clear             clear chat history\n  /quit              exit"
+    },
+    {
+      "question": "what are the keyboard shortcuts",
+      "keywords": ["keyboard", "shortcut", "keybind", "hotkey", "ctrl", "key", "binding", "navigate"],
+      "response": "Inside GLITCH:\n\n  Tab         focus the input\n  Esc         unfocus\n  ^space a    focus GLITCH (chord)\n  ^space p    open pipeline builder\n  ^space b    open brain editor\n  ^space j    jump to a tmux window\n\nType / for slash command autocomplete."
+    },
+    {
+      "question": "how do pipelines work",
+      "keywords": ["pipeline", "pipelines", "yaml", "steps", "chain", "how", "work", "run"],
+      "response": "Pipelines are YAML files that chain steps — each step gets the previous step's output. Local model for the indexing, cloud model for the synthesis. Run with `/pipeline name` from inside GLITCH, or `glitch pipeline run file.yaml` from the shell. Type /pipelines for a working example with annotations."
+    },
+    {
+      "question": "what is brain context",
+      "keywords": ["brain", "context", "memory", "inject", "rag", "store", "vector", "sqlite"],
+      "response": "Brain is persistent memory that accumulates across runs. Steps with write_brain: true store their output as vectors in SQLite, tagged to your working directory. Steps with use_brain: true get that context injected automatically. One local indexing run, free context forever after. Type /brain for the full walkthrough."
+    },
+    {
+      "question": "how do I switch models",
+      "keywords": ["model", "models", "switch", "change", "provider", "ollama", "claude", "pick"],
+      "response": "/model ollama/qwen2.5-coder:latest\n/model claude/claude-sonnet-4-6\n/model claude/claude-haiku-4-5-20251001\n\nOr open the full picker: /models\n\nType /model for the complete list of formats."
+    },
+    {
+      "question": "how do I use local AI models",
+      "keywords": ["local", "ollama", "offline", "model", "free", "qwen", "llama", "private", "air-gap"],
+      "response": "Install Ollama, pull a model, run `ollama serve`. Then from GLITCH: /model ollama/qwen2.5-coder:latest\n\nOr set it in any pipeline step: executor: ollama, model: qwen2.5-coder:latest\n\nZero cost. Works offline. Your prompts never leave the machine. Type /ollama for the setup."
+    },
+    {
+      "question": "how much does glitch cost",
+      "keywords": ["cost", "price", "pricing", "money", "free", "pay", "bill", "token"],
+      "response": "GLITCH is free. Local models via Ollama cost nothing. You pay only for cloud API calls you explicitly add. Most workflows use Ollama for the heavy lifting and Claude for the last step. The bill is small. Type /cost for the full picture."
+    },
+    {
+      "question": "how do themes work",
+      "keywords": ["theme", "themes", "customize", "color", "appearance", "palette", "font", "tdf"],
+      "response": "Type /themes from inside GLITCH. Arrow keys to browse, Enter to apply. Themes are directories in ~/.config/glitch/themes/ — each contains a palette YAML, an optional TDF font, and an optional ANSI splash. Type /themes to open the picker."
+    },
+    {
+      "question": "how do I create a pipeline",
+      "keywords": ["create", "write", "build", "make", "new", "pipeline", "yaml", "author"],
+      "response": "Open the pipeline builder: ^space p from inside GLITCH. Or write a YAML file directly — name, version, and a steps list. Each step needs an id, executor, and prompt. Run it with /pipeline name or `glitch pipeline run file.yaml`. Type /pipelines for an annotated example."
+    },
+    {
+      "question": "can pipelines run on a schedule",
+      "keywords": ["schedule", "cron", "daily", "nightly", "recurring", "automatic", "timed"],
+      "response": "Yes. From inside GLITCH: /cron to open the cron session. Configure a pipeline to run daily, nightly, or on any cron schedule. Good for standup prep, nightly summaries, morning PR digests. Type /cron for the setup."
+    },
+    {
+      "question": "what providers does glitch support",
+      "keywords": ["provider", "providers", "model", "models", "claude", "ollama", "openai", "gemini", "support"],
+      "response": "Ollama for local models — qwen2.5-coder, llama3.2, mistral, codestral, anything you can pull. Claude via the Anthropic API. Mix them in a single pipeline. Local handles the cheap work, cloud handles the hard parts."
+    },
+    {
+      "question": "does glitch work on linux",
+      "keywords": ["linux", "mac", "windows", "platform", "os", "system", "arm"],
+      "response": "macOS and Linux. Requires tmux. Windows via WSL2."
+    },
+    {
+      "question": "is glitch open source",
+      "keywords": ["open", "source", "github", "license", "code", "repo"],
+      "response": "GLITCH is source-available. See github.com/powerglove-dev/gl1tch for the license and contribution guide."
+    },
+    {
+      "question": "how do I configure glitch",
+      "keywords": ["config", "configure", "settings", "yaml", "file", "setup", "default"],
+      "response": "GLITCH reads ~/.config/glitch/config.yaml on startup. Set default model, theme, keybindings. Pipelines live in ~/.config/glitch/pipelines/. Wrappers for Tier 2 executors live in ~/.config/glitch/wrappers/."
+    },
+    {
+      "question": "how do I get help",
+      "keywords": ["help", "documentation", "docs", "support", "question", "stuck"],
+      "response": "Type /help to see all commands. Type a question in plain text for fuzzy search. Open an issue at github.com/powerglove-dev/gl1tch for bugs."
+    }
+  ]
+}
