@@ -34,7 +34,7 @@ import GlitchLogo from './GlitchLogo.astro';
           aria-label="GLITCH terminal input"
         />
       </div>
-      <div class="terminal-input-hint">enter send  ·  ↑↓ history  ·  tab complete  ·  /install /prompts /pipelines</div>
+      <div class="terminal-input-hint">enter send  ·  ↑↓ history  ·  tab complete  ·  /install /pipelines /screenshots</div>
     </div>
   </div>
 </div>
@@ -154,6 +154,11 @@ function processCommand(raw: string) {
       return;
     }
 
+    if (name === 'install') {
+      showInstall();
+      return;
+    }
+
     if (name === 'screenshots' || name === 'ss') {
       openScreenshots();
       return;
@@ -178,6 +183,115 @@ function processCommand(raw: string) {
   }
 
   appendLine('output-dim', `No response found for that. Try /help.`);
+}
+
+// ── Install command ───────────────────────────────────────────────────────────
+
+interface ReleaseData {
+  version: string;
+  repo: string;
+  assets: Record<string, string>;
+}
+
+async function detectPlatform(): Promise<{ os: string; arch: string }> {
+  const ua  = navigator.userAgent.toLowerCase();
+  const pf  = (navigator.platform ?? '').toLowerCase();
+
+  let os   = 'linux';
+  let arch = 'amd64';
+
+  if (pf.includes('mac') || ua.includes('macintosh')) {
+    os = 'darwin';
+  } else if (pf.includes('win') || ua.includes('windows')) {
+    os = 'windows';
+  }
+
+  // Try the modern high-entropy UA API first (Chrome/Edge)
+  try {
+    const uaData = (navigator as any).userAgentData;
+    if (uaData?.getHighEntropyValues) {
+      const hints = await uaData.getHighEntropyValues(['architecture']);
+      if (hints.architecture === 'arm') arch = 'arm64';
+    }
+  } catch { /* ignore */ }
+
+  // Fallback heuristics
+  if (arch === 'amd64') {
+    if (ua.includes('arm64') || ua.includes('aarch64')) arch = 'arm64';
+  }
+
+  return { os, arch };
+}
+
+async function showInstall() {
+  appendLine('output-dim', 'detecting platform...');
+
+  let rel: ReleaseData | null = null;
+  try {
+    const res = await fetch('/release.json');
+    const data = await res.json() as ReleaseData;
+    if (data.version) rel = data;
+  } catch { /* no release yet */ }
+
+  const { os, arch } = await detectPlatform();
+
+  if (!rel || !rel.version) {
+    // No release published yet — fall back to source install
+    typewrite(
+      'No binary release found yet.\n\n' +
+      'Install from source:\n\n' +
+      '  go install github.com/powerglove-dev/gl1tch@latest\n\n' +
+      'Make sure $GOPATH/bin is on your $PATH.'
+    );
+    return;
+  }
+
+  const key = `${os}_${arch}`;
+  const url = rel.assets[key] ?? '';
+  const version = rel.version;
+  const isWindows = os === 'windows';
+
+  let lines = `GLITCH ${version}\n\n`;
+
+  if (isWindows) {
+    // Windows: show WSL2 (recommended) and native options
+    const linuxUrl = rel.assets['linux_amd64'] ?? '';
+    lines += `Windows detected.\n\n`;
+    lines += `WSL2 (recommended — full tmux experience):\n`;
+    if (linuxUrl) {
+      lines += `  curl -L "${linuxUrl}" | tar xz -C /tmp/glitch-install\n`;
+      lines += `  cd /tmp/glitch-install && ./install.sh\n`;
+    }
+    lines += `\nNative Windows:\n`;
+    if (url) {
+      lines += `  Download: ${url}\n`;
+      lines += `  Extract the zip and run install.sh in PowerShell.\n`;
+    }
+    lines += `\nWSL2 gives you the full experience. tmux required.`;
+  } else {
+    const label = os === 'darwin'
+      ? (arch === 'arm64' ? 'macOS — Apple Silicon' : 'macOS — Intel')
+      : (arch === 'arm64' ? 'Linux — ARM64' : 'Linux — x86_64');
+
+    lines += `${label}\n\n`;
+    if (url) {
+      lines += `  curl -L "${url}" | tar xz -C /tmp/glitch-install\n`;
+      lines += `  cd /tmp/glitch-install && ./install.sh\n\n`;
+    }
+    lines += `Make sure ~/.local/bin is on your $PATH.\n\n`;
+
+    // Offer the other arch too
+    const otherArch  = arch === 'arm64' ? 'amd64' : 'arm64';
+    const otherLabel = os === 'darwin'
+      ? (otherArch === 'arm64' ? 'Apple Silicon' : 'Intel')
+      : (otherArch === 'arm64' ? 'ARM64' : 'x86_64');
+    const otherUrl   = rel.assets[`${os}_${otherArch}`] ?? '';
+    if (otherUrl) {
+      lines += `Wrong arch? ${otherLabel}: ${otherUrl}`;
+    }
+  }
+
+  typewrite(lines);
 }
 
 // ── Screenshots gallery ───────────────────────────────────────────────────────
@@ -346,7 +460,7 @@ async function runIntro() {
   await typewrite('When you need cloud reasoning, you choose it — one flag, one step. Everything else stays local.');
   await sleep(400);
 
-  await typewrite('Type /install to get started. /prompts to run a session. /pipelines to see what you can build.');
+  await typewrite('Type /install to get started. /pipelines to see what you can build. /screenshots to see it in action.');
 }
 
 function clearTerminal() {
@@ -357,7 +471,8 @@ function clearTerminal() {
 function tabComplete() {
   if (!db || !inputEl.value.startsWith('/')) return;
   const partial = inputEl.value.slice(1).toLowerCase();
-  const matches = Object.keys(db.commands).filter(c => c.startsWith(partial));
+  const allCmds = [...Object.keys(db.commands), 'screenshots', 'clear'];
+  const matches = allCmds.filter(c => c.startsWith(partial));
   if (matches.length === 1) {
     inputEl.value = `/${matches[0]}`;
   } else if (matches.length > 1) {

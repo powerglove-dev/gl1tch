@@ -1,10 +1,12 @@
-# .goreleaser.yml — GoReleaser configuration for ORCAI
+# .goreleaser.yml — GoReleaser configuration for GLITCH
 # https://goreleaser.com
 version: 2
 
+project_name: glitch
+
 builds:
-  - id: orcai
-    binary: orcai
+  - id: glitch
+    binary: glitch
     env:
       - CGO_ENABLED=0
     goos:
@@ -24,11 +26,11 @@ builds:
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
 
-  # Core provider plugins — built from the sibling orcai-plugins repo.
-  # Requires ../orcai-plugins to be checked out alongside this repo.
-  - id: orcai-claude
-    binary: orcai-claude
-    dir: ../orcai-plugins/plugins/claude
+  # Core provider plugins — cloned from github.com/powerglove-dev/plugins
+  # by the release workflow before GoReleaser runs.
+  - id: glitch-claude
+    binary: glitch-claude
+    dir: ../plugins/plugins/claude
     main: .
     env:
       - CGO_ENABLED=0
@@ -45,9 +47,9 @@ builds:
     ldflags:
       - -s -w
 
-  - id: orcai-github-copilot
-    binary: orcai-github-copilot
-    dir: ../orcai-plugins/plugins/github-copilot
+  - id: glitch-github-copilot
+    binary: glitch-github-copilot
+    dir: ../plugins/plugins/github-copilot
     main: .
     env:
       - CGO_ENABLED=0
@@ -64,9 +66,9 @@ builds:
     ldflags:
       - -s -w
 
-  - id: orcai-codex
-    binary: orcai-codex
-    dir: ../orcai-plugins/plugins/codex
+  - id: glitch-codex
+    binary: glitch-codex
+    dir: ../plugins/plugins/codex
     main: .
     env:
       - CGO_ENABLED=0
@@ -83,9 +85,9 @@ builds:
     ldflags:
       - -s -w
 
-  - id: orcai-gemini
-    binary: orcai-gemini
-    dir: ../orcai-plugins/plugins/gemini
+  - id: glitch-gemini
+    binary: glitch-gemini
+    dir: ../plugins/plugins/gemini
     main: .
     env:
       - CGO_ENABLED=0
@@ -102,9 +104,9 @@ builds:
     ldflags:
       - -s -w
 
-  - id: orcai-opencode
-    binary: orcai-opencode
-    dir: ../orcai-plugins/plugins/opencode
+  - id: glitch-opencode
+    binary: glitch-opencode
+    dir: ../plugins/plugins/opencode
     main: .
     env:
       - CGO_ENABLED=0
@@ -121,9 +123,9 @@ builds:
     ldflags:
       - -s -w
 
-  - id: orcai-ollama
-    binary: orcai-ollama
-    dir: ../orcai-plugins/plugins/ollama
+  - id: glitch-ollama
+    binary: glitch-ollama
+    dir: ../plugins/plugins/ollama
     main: .
     env:
       - CGO_ENABLED=0
@@ -149,17 +151,17 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     # Bundle sidecar YAML files and the install script alongside the binaries.
     files:
-      - src: ../orcai-plugins/plugins/claude/claude.yaml
+      - src: ../plugins/plugins/claude/claude.yaml
         dst: wrappers
-      - src: ../orcai-plugins/plugins/github-copilot/github-copilot.yaml
+      - src: ../plugins/plugins/github-copilot/github-copilot.yaml
         dst: wrappers
-      - src: ../orcai-plugins/plugins/codex/codex.yaml
+      - src: ../plugins/plugins/codex/codex.yaml
         dst: wrappers
-      - src: ../orcai-plugins/plugins/gemini/gemini.yaml
+      - src: ../plugins/plugins/gemini/gemini.yaml
         dst: wrappers
-      - src: ../orcai-plugins/plugins/opencode/opencode.yaml
+      - src: ../plugins/plugins/opencode/opencode.yaml
         dst: wrappers
-      - src: ../orcai-plugins/plugins/ollama/ollama.yaml
+      - src: ../plugins/plugins/ollama/ollama.yaml
         dst: wrappers
       - src: install.sh
         dst: .

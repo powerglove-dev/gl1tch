@@ -1,14 +1,13 @@
-name: Deploy GitHub Pages
+name: Deploy to powerglove.dev
 
 on:
   push:
     branches: [main]
     paths:
-      - 'docs/**'
-      - 'assets/ui/**'
-      - 'sdk/styles/**'
+      - 'site/**'
       - '.github/workflows/gh-pages.yml'
-  workflow_dispatch:
+  workflow_call: {}   # called from release.yml after release.json is updated
+  workflow_dispatch:  # manual trigger
 
 permissions:
   contents: write
@@ -21,54 +20,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          go-version-file: go.mod
-          cache: true
+          node-version: 20
+          cache: npm
+          cache-dependency-path: site/package-lock.json
 
-      - name: Build ANSI-to-HTML converter
-        run: |
-          if [ -f cmd/ansi2html/main.go ]; then
-            go build -o bin/ansi2html ./cmd/ansi2html/
-            echo "ansi2html built"
-          else
-            echo "ansi2html not found, skipping ANSI conversion"
-          fi
+      - name: Install dependencies
+        working-directory: site
+        run: npm ci
 
-      - name: Convert ANSI art assets to HTML fragments
-        run: |
-          mkdir -p docs/ans
-          if [ -f bin/ansi2html ]; then
-            for f in assets/ui/*.ans; do
-              name=$(basename "$f" .ans)
-              ./bin/ansi2html "$f" "docs/ans/${name}.html"
-              echo "converted: $f -> docs/ans/${name}.html"
-            done
-          fi
-
-      - name: Validate HTML
-        run: |
-          for f in docs/*.html; do
-            python3 -c "
-          from html.parser import HTMLParser
-          import sys
-          class V(HTMLParser):
-              def __init__(self):
-                  super().__init__()
-                  self.errors = []
-          p = V()
-          p.feed(open('$f').read())
-          print('ok: $f')
-          " || echo "WARNING: HTML issue in $f"
-          done
+      - name: Build Astro site
+        working-directory: site
+        run: npm run build
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
+        env:
+          SHA: ${{ github.sha }}
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./docs
+          publish_dir: ./site/dist
           publish_branch: gh-pages
+          cname: powerglove.dev
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: 'deploy: ${{ github.sha }}'
+          commit_message: 'deploy: ${{ env.SHA }}'

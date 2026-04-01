@@ -25,6 +25,7 @@ import (
 	"github.com/powerglove-dev/gl1tch/internal/picker"
 	"github.com/powerglove-dev/gl1tch/internal/store"
 	"github.com/powerglove-dev/gl1tch/internal/styles"
+	"github.com/powerglove-dev/gl1tch/internal/systemprompts"
 	"github.com/powerglove-dev/gl1tch/internal/themes"
 )
 

@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 jobs:
   release:
@@ -25,12 +27,41 @@ jobs:
       - name: Install Task
         uses: arduino/setup-task@v2
 
+      - name: Clone plugins repo
+        run: |
+          git clone https://github.com/powerglove-dev/plugins.git ../plugins
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate site release.json
+        env:
+          ACTOR: ${{ github.actor }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          REPO="powerglove-dev/gl1tch"
+          BASE="https://github.com/${REPO}/releases/download/${TAG}"
+          printf '{\n  "version": "%s",\n  "repo": "%s",\n  "assets": {\n    "darwin_arm64":  "%s/glitch_%s_darwin_arm64.tar.gz",\n    "darwin_amd64":  "%s/glitch_%s_darwin_amd64.tar.gz",\n    "linux_amd64":   "%s/glitch_%s_linux_amd64.tar.gz",\n    "linux_arm64":   "%s/glitch_%s_linux_arm64.tar.gz",\n    "windows_amd64": "%s/glitch_%s_windows_amd64.zip"\n  }\n}\n' \
+            "${TAG}" "${REPO}" \
+            "${BASE}" "${TAG}" \
+            "${BASE}" "${TAG}" \
+            "${BASE}" "${TAG}" \
+            "${BASE}" "${TAG}" \
+            "${BASE}" "${TAG}" \
+            > site/public/release.json
+          git config user.name "github-actions[bot]"
+          git config user.email "${ACTOR}@users.noreply.github.com"
+          git add site/public/release.json
+          if git diff --cached --quiet; then
+            echo "release.json unchanged."
+          else
+            git commit -m "chore: update release.json for ${TAG}"
+            git push origin HEAD:main
+          fi
 
       - name: Generate site changelog
         env:
@@ -91,3 +122,37 @@ jobs:
             git commit -m "chore: add changelog for ${TAG}"
             git push origin HEAD:main
           fi
+
+  deploy-site:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main (includes release.json + changelog committed by release job)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install dependencies
+        working-directory: site
+        run: npm ci
+
+      - name: Build Astro site
+        working-directory: site
+        run: npm run build
+
+      - name: Deploy to GitHub Pages (powerglove.dev)
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site/dist
+          publish_branch: gh-pages
+          cname: powerglove.dev
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'

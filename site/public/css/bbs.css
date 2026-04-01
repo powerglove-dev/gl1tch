@@ -256,6 +256,62 @@ body::before {
   to   { opacity: 1; }
 }
 
+/* ─── SCREENSHOT GALLERY ─────────────────────────────────── */
+
+.screenshot-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0 16px;
+  outline: none;
+}
+
+.sg-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.sg-counter    { color: var(--yellow); font-weight: bold; }
+.sg-caption    { color: var(--fg); flex: 1; }
+.sg-keys       { color: var(--comment); white-space: nowrap; }
+
+.sg-img-wrap {
+  border: 1px solid var(--comment);
+  border-radius: 4px;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.sg-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 420px;
+  object-fit: contain;
+  background: var(--bg);
+}
+
+.sg-dots {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  padding-top: 4px;
+}
+
+.sg-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--comment);
+  display: inline-block;
+  transition: background 0.15s;
+}
+
+.sg-dot-active { background: var(--yellow); }
+
 /* ─── ANSI LOGO (HTML fragment from tdfrender) ────────────── */
 
 .ansi-logo {
