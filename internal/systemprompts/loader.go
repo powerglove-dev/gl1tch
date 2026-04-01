@@ -12,10 +12,7 @@ import (
 	"sync"
 )
 
-var (
-	cache   sync.Map // map[string]string — populated on first Load per name
-	prompts sync.Map // map[string]string — same backing map; alias for clarity
-)
+var cache sync.Map // map[string]string — populated on first Load per name
 
 // Load returns the system prompt named name (without the .md extension).
 // It checks ~/.config/glitch/prompts/<name>.md first; if absent or unreadable,
@@ -100,5 +97,3 @@ const (
 	Clarify           = "clarify"
 )
 
-// Ensure these are all pre-loaded (optional convenience; callers can use Load directly).
-var _ = prompts
