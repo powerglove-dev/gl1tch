@@ -6,9 +6,5 @@ description: 'GLITCH — your AI, your terminal, your rules. AI workspace orches
   '
 dependencies:
   apm:
-  - ./.apm/agents/glab-mr.agent.md
-  - ./.apm/agents/glab-issue.agent.md
-  - ./.apm/agents/glab-ci.agent.md
-  - ./.apm/agents/gws.agent.md
   - 8op-org/gl1tch
   mcp: null
