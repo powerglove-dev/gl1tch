@@ -1,5 +1,11 @@
 {
-  "version": "",
+  "version": "v0.3.0",
   "repo": "8op-org/gl1tch",
-  "assets": {}
+  "assets": {
+    "darwin_arm64":  "https://github.com/8op-org/gl1tch/releases/download/v0.3.0/orcai_0.3.0_darwin_arm64.tar.gz",
+    "darwin_amd64":  "https://github.com/8op-org/gl1tch/releases/download/v0.3.0/orcai_0.3.0_darwin_amd64.tar.gz",
+    "linux_amd64":   "https://github.com/8op-org/gl1tch/releases/download/v0.3.0/orcai_0.3.0_linux_amd64.tar.gz",
+    "linux_arm64":   "https://github.com/8op-org/gl1tch/releases/download/v0.3.0/orcai_0.3.0_linux_arm64.tar.gz",
+    "windows_amd64": "https://github.com/8op-org/gl1tch/releases/download/v0.3.0/orcai_0.3.0_windows_amd64.zip"
+  }
 }

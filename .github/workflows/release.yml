@@ -43,15 +43,16 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
           REPO="8op-org/gl1tch"
           BASE="https://github.com/${REPO}/releases/download/${TAG}"
           printf '{\n  "version": "%s",\n  "repo": "%s",\n  "assets": {\n    "darwin_arm64":  "%s/glitch_%s_darwin_arm64.tar.gz",\n    "darwin_amd64":  "%s/glitch_%s_darwin_amd64.tar.gz",\n    "linux_amd64":   "%s/glitch_%s_linux_amd64.tar.gz",\n    "linux_arm64":   "%s/glitch_%s_linux_arm64.tar.gz",\n    "windows_amd64": "%s/glitch_%s_windows_amd64.zip"\n  }\n}\n' \
             "${TAG}" "${REPO}" \
-            "${BASE}" "${TAG}" \
-            "${BASE}" "${TAG}" \
-            "${BASE}" "${TAG}" \
-            "${BASE}" "${TAG}" \
-            "${BASE}" "${TAG}" \
+            "${BASE}" "${VERSION}" \
+            "${BASE}" "${VERSION}" \
+            "${BASE}" "${VERSION}" \
+            "${BASE}" "${VERSION}" \
+            "${BASE}" "${VERSION}" \
             > site/public/release.json
           git config user.name "github-actions[bot]"
           git config user.email "${ACTOR}@users.noreply.github.com"
