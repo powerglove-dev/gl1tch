@@ -293,3 +293,31 @@ func TestLLMClassifier_ExtractsCronAndInput(t *testing.T) {
 		t.Errorf("cron: want %q, got %q", "0 * * * *", result.CronExpr)
 	}
 }
+
+func TestLLMClassifier_EmptyModelReturnsError(t *testing.T) {
+	// Regression: buildPanelRouter was constructing router.Config without Model,
+	// causing the classify step to fail with "model is required". Verify that an
+	// empty Config.Model propagates an error from the executor back to the caller.
+	mgr := executor.NewManager()
+	stub := &executor.StubExecutor{
+		ExecutorName: "ollama",
+		ExecuteFn: func(_ context.Context, _ string, vars map[string]string, _ io.Writer) error {
+			if vars["model"] == "" {
+				return fmt.Errorf("model is required: set --model flag or GLITCH_MODEL environment variable")
+			}
+			return nil
+		},
+	}
+	if err := mgr.Register(stub); err != nil {
+		t.Fatalf("Register stub: %v", err)
+	}
+	cls := NewLLMClassifier(mgr, Config{AmbiguousThreshold: 0.65}) // Model intentionally empty
+	pipelines := []pipeline.PipelineRef{{Name: "git-push", Description: "push"}}
+	_, err := cls.Classify(context.Background(), "push my code", pipelines)
+	if err == nil {
+		t.Fatal("expected error when Config.Model is empty, got nil")
+	}
+	if !strings.Contains(err.Error(), "model is required") {
+		t.Errorf("expected 'model is required' in error, got: %v", err)
+	}
+}

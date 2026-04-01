@@ -720,7 +720,7 @@ func buildPanelRouter(cfgDir string) *router.HybridRouter {
 	if cfgDir != "" {
 		cacheDir = filepath.Join(cfgDir, "cache")
 	}
-	return router.New(mgr, embedder, router.Config{CacheDir: cacheDir})
+	return router.New(mgr, embedder, router.Config{CacheDir: cacheDir, Model: glitchBestOllamaModel()})
 }
 
 // newGlitchPanel builds the panel using the best available provider.
