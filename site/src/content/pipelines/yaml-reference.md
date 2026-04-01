@@ -1,187 +1,75 @@
----
-title: "Pipeline YAML Reference"
-description: "Every field, what it does, and when to use it."
-order: 2
----
+## GLITCH Database Context
 
-## Pipeline-level fields
+### Schema: runs table (read-only)
+Columns: id (INTEGER PK), kind (TEXT), name (TEXT), started_at (INTEGER unix-ms),
+finished_at (INTEGER unix-ms, nullable), exit_status (INTEGER, nullable),
+stdout (TEXT), stderr (TEXT), metadata (TEXT JSON), steps (TEXT JSON array).
+This table is READ-ONLY. Do not issue INSERT, UPDATE, or DELETE against it.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `name` | `string` | *required* | Unique name for the pipeline. Used in logs, the store, and as a lookup key. |
-| `version` | `string` | `""` | Schema version. Currently always `"1"`. |
-| `description` | `string` | `""` | Human-readable summary of what the pipeline does. Used by the intent router to match `glitch ask` prompts to the right pipeline. |
-| `steps` | `Step[]` | *required* | Ordered list of steps. Execution order is determined by `needs` dependencies, not array position. |
-| `vars` | `map[string]any` | `{}` | Pipeline-level seed context. Available to all steps via template expressions. |
-| `max_parallel` | `int` | `8` | Maximum number of steps that can run concurrently. Only matters for DAG pipelines with parallel branches. |
+## Brain Notes (this run)
 
-## Step-level fields
+[polish] [type:finding title:yaml-reference.md was missing template functions tags:docs,template] The yaml-reference.md only documented {{steps.*}} and {{vars.*}} expressions. The full Go text/template function library (default, env, get, trim, upper, lower, replace, split, join, contains, toJson, fromJson, catLines, splitLines) defined in internal/pipeline/template.go was completely undocumented. Also missing: {{.param.input}} for --input flag values, and the hyphen-in-step-ID workaround using the get function. Fixed in site/src/content/pipelines/yaml-reference.md.
+[scan_docs] ` blocks. If one is found and a store is available, it's persisted for the current run. Every subsequent step receives accumulated brain notes in its prompt preamble — automatically, before your prompt text.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `id` | `string` | *required* | Unique identifier for the step. Referenced by `needs`, `on_failure`, and template expressions. |
-| `executor` | `string` | `""` | The executor to run. Native executors: `claude`, `ollama`. Builtins: `builtin.assert`, `builtin.log`, etc. Sidecar wrappers: `gh`, `jq`, `write`, or any name registered in `~/.config/glitch/wrappers/`. |
-| `model` | `string` | `""` | Model identifier passed to the executor. For `claude`: e.g. `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`. For `ollama`: the local model name like `qwen2.5-coder:latest`. |
-| `prompt` | `string` | `""` | The prompt text sent to AI executors. Supports `{{template}}` expressions for variable interpolation. |
-| `input` | `string` | `""` | Raw input string. Used by non-AI executors or to override the default input. Supports template expressions. |
-| `publish_to` | `string` | `""` | Topic name. When set, the step's output is published to the event bus under this topic. |
-| `needs` | `string[]` | `[]` | Step IDs that must complete before this step runs. Creates the DAG execution order. |
-| `vars` | `map[string]string` | `{}` | Flat key-value pairs passed to the executor as environment/template variables. For the `gh` executor, use `vars.args` to pass CLI arguments. |
-| `args` | `map[string]any` | `{}` | Structured data passed to the executor. Supersedes `vars` when set. Used by builtins that need typed input. |
-| `condition` | `Condition` | `{}` | Conditional branching. See Conditions below. |
-| `for_each` | `string` | `""` | Template expression or newline-separated list. When set, the step is cloned once per item. The current item is available as `{{item}}`. |
-| `retry` | `RetryPolicy` | `null` | Retry policy for this step. See Retry below. |
-| `on_failure` | `string` | `""` | Step ID to run if this step fails after all retry attempts. |
-| `prompt_id` | `string` | `""` | Title of a saved prompt in the store. When set, the prompt body is prepended to the step's input before execution. Case-insensitive title matching. |
-| `outputs` | `map[string]string` | `{}` | Declares output keys produced by this step. After completion, the full output string is stored under each declared key. |
-| `inputs` | `map[string]string` | `{}` | Maps input names to template expressions like `{{steps.<id>.<key>}}`. Resolved before execution using accumulated step outputs. |
-| `write_brain` | `bool` | `false` | When true, the step's output is written to the brain store after execution. Later runs can inject this context via `--brain`. |
+There are no YAML flags that control this. Brain scanning and injection are always on when a store is configured (which is the default when running via `glitch pipeline run`). The model decides what's worth remembering by whether it emits a `<brain>` block.
 
-## Conditions
+## Writing to the brain
 
-The `condition` field enables branching. It has three sub-fields:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `if` | `string` | Expression to evaluate against the previous step's output. |
-| `then` | `string` | Step ID to jump to if the expression is true. |
-| `else` | `string` | Step ID to jump to if the expression is false. |
-
-### Condition expressions
-
-| Expression | Matches when |
-|------------|-------------|
-| `always` | Always true. |
-| `not_empty` | Output is not empty after trimming whitespace. |
-| `contains:<str>` | Output contains the literal string `<str>`. |
-| `matches:<regex>` | Output matches the Go regex pattern `<regex>`. |
-| `len > N` | Output length (in bytes) exceeds `N`. |
-
-Example:
+Your prompt instructs the model to emit a brain block. gl1tch finds it, extracts it, stores it.
 
 ```yaml
-- id: classify
-  executor: claude
-  model: claude-haiku-4-5-20251001
-  prompt: "Is this Go or Python code? Reply with one word."
-  condition:
-    if: "contains:Go"
-    then: go-handler
-    else: python-handler
-```
-
-## Retry policy
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `max_attempts` | `int` | `0` | Number of retry attempts. `0` means no retry. |
-| `interval` | `duration` | `"0s"` | Time between retries. Supports Go duration strings: `"2s"`, `"500ms"`, `"1m"`. |
-| `on` | `string` | `"always"` | When to retry: `"always"` retries on any completion, `"on_failure"` retries only on error. |
-
-Example:
-
-```yaml
-- id: flaky-api
-  executor: builtin.http_get
-  args:
-    url: "https://api.example.com/data"
-  retry:
-    max_attempts: 3
-    interval: "2s"
-    on: on_failure
-```
-
-## Template expressions
-
-Templates use `{{double braces}}` and are resolved before step execution.
-
-| Expression | Resolves to |
-|------------|-------------|
-| `{{steps.<id>.output}}` | The string output of a completed step. |
-| `{{steps.<id>.<key>}}` | A specific output key declared in the step's `outputs` map. |
-| `{{vars.<name>}}` | A pipeline-level variable from the `vars` map. |
-| `{{item}}` | The current iteration value inside a `for_each` step. |
-
-## Complete annotated example
-
-```yaml
-# Every field in one file. You would never use all of these at once.
-name: kitchen-sink
-version: "1"
-
-# Pipeline-level settings
-vars:
-  repo: "8op-org/gl1tch"
-  max_lines: "500"
-max_parallel: 4
-
 steps:
-  # Step 1: Fetch data with a sidecar executor
-  - id: fetch-issues
-    executor: gh
-    vars:
-      args: "issue list --repo {{vars.repo}} --json title,body --limit 10"
-
-  # Step 2: AI analysis with dependency
-  - id: analyze
+  - id: audit
     executor: claude
     model: claude-sonnet-4-6
-    needs: [fetch-issues]
     prompt: |
-      Analyze these GitHub issues and categorize by priority:
-      {{steps.fetch-issues.output}}
-    outputs:
-      summary: ""
-
-  # Step 3: Conditional branching
-  - id: check-urgency
-    executor: builtin.assert
-    needs: [analyze]
-    args:
-      expected: "critical"
-      actual: "{{steps.analyze.output}}"
-    condition:
-      if: "contains:critical"
-      then: alert
-      else: log-ok
-
-  # Step 4a: Alert path
-  - id: alert
-    executor: claude
-    model: claude-haiku-4-5-20251001
-    needs: [analyze]
-    prompt: "Draft an urgent alert for: {{steps.analyze.summary}}"
-
-  # Step 4b: Quiet path
-  - id: log-ok
-    executor: builtin.log
-    needs: [analyze]
-    args:
-      message: "No critical issues found."
-
-  # Step 5: Write output to file
-  - id: save-report
-    executor: write
-    needs: [analyze]
-    vars:
-      path: "./issue-report.md"
-    input: "{{steps.analyze.output}}"
-
-  # Step 6: Retry on failure
-  - id: post-webhook
-    executor: builtin.http_get
-    needs: [analyze]
-    args:
-      url: "https://hooks.example.com/notify"
-    retry:
-      max_attempts: 3
-      interval: "5s"
-      on: on_failure
-    on_failure: log-webhook-error
-
-  # Fallback step
-  - id: log-webhook-error
-    executor: builtin.log
-    args:
-      message: "Webhook delivery failed after 3 attempts."
+      Audit this codebase for security issues. Be specific.
+      Record your key findings in a <brain> block at the end.
 ```
+
+The model outputs its analysis, then appends:
+
+```
+<brain tags="security,sql-injection">
+SQL injection in user_search (line 42), admin_filter (line 89),
+report_query (line 156). All use string concatenation. No parameterized queries.
+
+> Do NOT modify the runs table.
+
+---
+BRAIN NOTE INSTRUCTION: Include a <brain> block somewhere in your response to persist an insight for future steps in this pipeline.
+
+Use the <brain> tag with structured attributes to categorize your note:
+
+  <brain type="research" tags="optional,comma,tags" title="Human readable title">
+  Your insight, analysis, or structured data here.
+  </brain>
+
+Available types:
+- research  — background info, context, references
+- finding   — concrete discovery (bug, pattern, fact)
+- data      — structured output (metrics, counts, lists)
+- code      — code snippet or file path reference
+
+The <tags> attribute is optional. The <title> attribute is recommended.
+
+Example:
+  <brain type="finding" tags="auth,security" title="Session token stored in plain text">
+  Found that session tokens are written to ~/.glitch/session without encryption.
+  File: internal/auth/session.go line 42.
+  </brain>
+
+The brain note will be stored and made available to subsequent agent steps with use_brain enabled.
+---
+
+The yaml-reference.md now documents the full template function library. Key additions:
+
+- **Template functions table** — all 14 functions (`default`, `env`, `get`, `trim`, `upper`, `lower`, `trimPrefix`, `trimSuffix`, `replace`, `split`, `join`, `contains`, `hasPrefix`/`hasSuffix`, `catLines`, `splitLines`, `toJson`, `fromJson`) sourced directly from `template.go:19-62`
+- **`{{.param.input}}`** — documents the `--input` flag value available at runtime
+- **Hyphen workaround note** — explains why `{{get "steps.ask-llama.output" .}}` is needed for step IDs with hyphens
+- **Pipe example** — shows `| trim | upper | default` chaining
+
+<brain type="finding" tags="docs,template" title="yaml-reference.md was missing template functions">
+The yaml-reference.md only documented {{steps.*}} and {{vars.*}} expressions. The full Go text/template function library (default, env, get, trim, upper, lower, replace, split, join, contains, toJson, fromJson, catLines, splitLines) defined in internal/pipeline/template.go was completely undocumented. Also missing: {{.param.input}} for --input flag values, and the hyphen-in-step-ID workaround using the get function. Fixed in site/src/content/pipelines/yaml-reference.md.
+</brain>
+
