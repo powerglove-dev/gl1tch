@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Plugin System — ORCAI BBS</title>
+  <title>Plugin System — GLITCH BBS</title>
   <meta name="description" content="orcai plugin system: gRPC native plugins and sidecar YAML wrappers for any CLI tool.">
   <link rel="stylesheet" href="css/bbs.css">
 </head>
@@ -15,7 +15,7 @@
 <nav class="bbs-nav" aria-label="Main navigation">
   <div class="bbs-nav-inner">
     <span style="color:var(--comment)">&#9484;&#9472;&#9472;</span>
-    <a href="index.html" class="nav-brand">ORCAI BBS</a>
+    <a href="index.html" class="nav-brand">GLITCH BBS</a>
     <span class="sep">&#xB7;</span>
     <a href="index.html#about">About</a>
     <span class="sep">&#xB7;</span>
@@ -39,14 +39,14 @@
   <!-- Architecture diagram -->
   <div class="plugin-diagram" aria-label="Plugin architecture diagram">
 <span class="fg-comment">  &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;         &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;</span>
-<span class="fg-comment">  </span><span class="fg-fg">&#x2502;</span><span class="fg-cyan">  MY TOOL </span><span class="fg-fg">&#x2502;</span><span class="fg-purple">&#x2500;&#x2500;gRPC&#x2500;&#x2500;&#x25B6;</span><span class="fg-fg">&#x2502;</span><span class="fg-pink">  ORCAI   </span><span class="fg-fg">&#x2502;</span>
+<span class="fg-comment">  </span><span class="fg-fg">&#x2502;</span><span class="fg-cyan">  MY TOOL </span><span class="fg-fg">&#x2502;</span><span class="fg-purple">&#x2500;&#x2500;gRPC&#x2500;&#x2500;&#x25B6;</span><span class="fg-fg">&#x2502;</span><span class="fg-pink">  GLITCH   </span><span class="fg-fg">&#x2502;</span>
 <span class="fg-comment">  &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;         &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;</span>
 <span class="fg-comment">     Tier 2               Host</span>
 <span class="fg-comment">  </span><span class="fg-yellow">(sidecar.yaml)</span><span class="fg-comment">       (pipeline)</span>
 
 <span class="fg-comment">
   &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;         &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;
-  </span><span class="fg-fg">&#x2502;</span><span class="fg-green"> GO PLUGIN</span><span class="fg-fg">&#x2502;</span><span class="fg-purple">&#x2500;native&#x2500;&#x25B6;</span><span class="fg-fg">&#x2502;</span><span class="fg-pink">  ORCAI   </span><span class="fg-fg">&#x2502;</span>
+  </span><span class="fg-fg">&#x2502;</span><span class="fg-green"> GO PLUGIN</span><span class="fg-fg">&#x2502;</span><span class="fg-purple">&#x2500;native&#x2500;&#x25B6;</span><span class="fg-fg">&#x2502;</span><span class="fg-pink">  GLITCH   </span><span class="fg-fg">&#x2502;</span>
 <span class="fg-comment">  &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;         &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;
      Tier 1               Host
   </span><span class="fg-yellow">(Go interface)</span><span class="fg-comment">       (pipeline)</span>
@@ -87,7 +87,7 @@ type Plugin interface {
     <div class="plugin-tier tier2">
       <h3>TIER 2 &mdash; SIDECAR YAML</h3>
       <p>
-        Drop a YAML file in <span class="fg-cyan">~/.config/orcai/plugins/</span>.
+        Drop a YAML file in <span class="fg-cyan">~/.config/glitch/plugins/</span>.
         orcai's CliAdapter wraps the binary automatically — no code required.
         Perfect for ripgrep, jq, ffmpeg, pandoc, your own shell scripts.
       </p>
@@ -114,7 +114,7 @@ output_schema: |
   <!-- More examples -->
   <h2 class="section-header" style="margin-top:48px">// Example Plugins //</h2>
 
-  <p style="color:var(--comment);font-size:12px;margin-bottom:16px">Sidecar YAML examples — drop these in ~/.config/orcai/plugins/</p>
+  <p style="color:var(--comment);font-size:12px;margin-bottom:16px">Sidecar YAML examples — drop these in ~/.config/glitch/plugins/</p>
 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
 
@@ -215,7 +215,7 @@ output: "{{ steps.analyze.output }}"</pre>
 
 <!-- ── Footer ─────────────────────────────────────────────── -->
 <footer class="bbs-footer">
-  [ <a href="index.html">ORCAI BBS</a> ]
+  [ <a href="index.html">GLITCH BBS</a> ]
   &nbsp;[ EST. 2025 ]&nbsp;
   [ <a href="plugins.html">PLUGINS</a> ]&nbsp;
   [ <a href="https://opensource.org/licenses/MIT" target="_blank" rel="noopener">MIT LICENSE</a> ]
