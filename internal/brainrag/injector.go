@@ -75,8 +75,26 @@ func (b *BrainInjector) InjectInto(ctx context.Context, prompt string) (string, 
 	}
 
 	var sb strings.Builder
-	sb.WriteString("## Relevant Brain Notes\n\n")
 	found := 0
+	hasCodeChunks := false
+	for _, id := range noteIDs {
+		if strings.HasPrefix(id, "file:") {
+			hasCodeChunks = true
+			break
+		}
+	}
+
+	if hasCodeChunks {
+		sb.WriteString("## Relevant Source Code\n\n")
+		sb.WriteString("The following code chunks were retrieved by semantic search over the indexed codebase.\n")
+		sb.WriteString("These are the most relevant matches for this task — not an exhaustive listing.\n")
+		sb.WriteString("Focus only on source files shown. Ignore generated files, vendor directories,\n")
+		sb.WriteString("hidden files/directories, build output, and test fixtures — those are excluded from the index.\n")
+		sb.WriteString("If the relevant code is not shown here, it may not have been indexed yet (run builtin.index_code to refresh).\n\n")
+	} else {
+		sb.WriteString("## Relevant Brain Notes\n\n")
+	}
+
 	for _, id := range noteIDs {
 		n, ok := noteMap[id]
 		if !ok {

@@ -20,6 +20,27 @@ func init() {
 // defaultCodeExtensions is the list of file extensions indexed by default.
 var defaultCodeExtensions = []string{".go", ".ts", ".py", ".md"}
 
+// recommendEmbedModel returns the recommended Ollama embedding model and a
+// human-readable rationale based on the number of source files to be indexed.
+//
+// Tiers:
+//   - ≤500 files:   nomic-embed-text  — fast, low memory, sufficient for small repos
+//   - ≤5 000 files: nomic-embed-text  — still fine; note indexing will take a minute or two
+//   - ≤20 000 files: mxbai-embed-large — better recall justifies the extra time
+//   - >20 000 files: mxbai-embed-large — warn user to narrow the path or increase chunk_size
+func recommendEmbedModel(fileCount int) (model, rationale string) {
+	switch {
+	case fileCount <= 500:
+		return "nomic-embed-text", "small repo — nomic-embed-text is fast and sufficient"
+	case fileCount <= 5000:
+		return "nomic-embed-text", fmt.Sprintf("%d files — nomic-embed-text works well; expect 1-3 min", fileCount)
+	case fileCount <= 20000:
+		return "mxbai-embed-large", fmt.Sprintf("%d files — mxbai-embed-large recommended for better recall at this scale", fileCount)
+	default:
+		return "mxbai-embed-large", fmt.Sprintf("%d files is a large corpus — consider narrowing 'path' to a subdirectory, or raising chunk_size to reduce chunk count. mxbai-embed-large recommended.", fileCount)
+	}
+}
+
 // skipDirs are directory names skipped during code indexing.
 // Sourced from github.com/github/gitignore for the 10 major languages plus
 // common editor/OS patterns. All hidden directories (name starting with ".")
@@ -189,6 +210,36 @@ func builtinIndexCode(ctx context.Context, args map[string]any, w io.Writer) (ma
 	cwd, err := os.Getwd()
 	if err != nil {
 		cwd = root
+	}
+
+	// Pre-scan: count eligible files so we can recommend a model and warn on large repos.
+	prescanCount := 0
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			if d != nil && d.IsDir() {
+				name := d.Name()
+				if skipDirs[name] || (strings.HasPrefix(name, ".") && name != ".") {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if exts[filepath.Ext(d.Name())] {
+			prescanCount++
+		}
+		return nil
+	})
+
+	recModel, recRationale := recommendEmbedModel(prescanCount)
+	if w != nil {
+		fmt.Fprintf(w, "pre-scan: %d source files found\n", prescanCount)
+		fmt.Fprintf(w, "recommended model: %s (%s)\n", recModel, recRationale)
+		if model != recModel {
+			fmt.Fprintf(w, "note: using %q as specified; consider switching to %q for better results\n", model, recModel)
+		}
+		if prescanCount > 20000 {
+			fmt.Fprintf(w, "warning: large corpus — consider narrowing 'path' to a subdirectory or increasing chunk_size to reduce indexing time\n")
+		}
 	}
 
 	s, err := store.Open()
