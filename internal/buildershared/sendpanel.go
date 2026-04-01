@@ -2,6 +2,7 @@ package buildershared
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -466,7 +467,11 @@ func (s SendPanel) View(w, h int, pal styles.ANSIPalette) []string {
 
 	// ── Message input ─────────────────────────────────────────────────────────
 	rows = append(rows, panelrender.BoxRow("", w, borderColor))
-	s.msgInput.Width = w - 6
+	ts := time.Now().Format("15:04:05")
+	// visible prompt: "HH:MM:SS GL1TCH > " = 18 chars
+	s.msgInput.Prompt = sbDim + ts + sbRst + " " + pal.Accent + sbBld + "GL1TCH" + sbRst + sbDim + " > " + sbRst
+	const promptVisW = 18 // "HH:MM:SS GL1TCH > "
+	s.msgInput.Width = w - 6 - promptVisW
 	if s.msgInput.Width < 10 {
 		s.msgInput.Width = 10
 	}
