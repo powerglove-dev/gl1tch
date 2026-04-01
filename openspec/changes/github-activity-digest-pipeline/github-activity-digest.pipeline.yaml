@@ -17,36 +17,36 @@ steps:
 
   # ── 1. Fetch Issues ─────────────────────────────────────────────────────
   - id: fetch-issues-ensemble
-    plugin: gh
+    executor: gh
     vars:
       args: "issue list --repo elastic/ensemble --json number,title,state,updatedAt,labels,assignees,url --limit 30"
 
   - id: fetch-issues-robots
-    plugin: gh
+    executor: gh
     vars:
       args: "issue list --repo elastic/observability-robots --json number,title,state,updatedAt,labels,assignees,url --limit 30"
 
   # ── 2. Fetch PRs ─────────────────────────────────────────────────────────
   - id: fetch-prs-ensemble
-    plugin: gh
+    executor: gh
     vars:
       args: "pr list --repo elastic/ensemble --json number,title,state,updatedAt,labels,reviewDecision,isDraft,url --limit 30"
 
   - id: fetch-prs-robots
-    plugin: gh
+    executor: gh
     vars:
       args: "pr list --repo elastic/observability-robots --json number,title,state,updatedAt,labels,reviewDecision,isDraft,url --limit 30"
 
   # ── 3. Tag with repo + filter issues to last 3 days (259200s) ────────────
   - id: issues-ensemble
-    plugin: jq
+    executor: jq
     needs: [fetch-issues-ensemble]
     input: '{{get "step.fetch-issues-ensemble.data.value" .}}'
     vars:
       filter: 'map(. + {"repo":"elastic/ensemble"}) | map(select(.updatedAt >= ((now - 259200) | todate)))'
 
   - id: issues-robots
-    plugin: jq
+    executor: jq
     needs: [fetch-issues-robots]
     input: '{{get "step.fetch-issues-robots.data.value" .}}'
     vars:
@@ -54,14 +54,14 @@ steps:
 
   # ── 4. Tag PRs with repo ─────────────────────────────────────────────────
   - id: prs-ensemble
-    plugin: jq
+    executor: jq
     needs: [fetch-prs-ensemble]
     input: '{{get "step.fetch-prs-ensemble.data.value" .}}'
     vars:
       filter: 'map(. + {"repo":"elastic/ensemble"})'
 
   - id: prs-robots
-    plugin: jq
+    executor: jq
     needs: [fetch-prs-robots]
     input: '{{get "step.fetch-prs-robots.data.value" .}}'
     vars:
@@ -154,7 +154,7 @@ steps:
 
   # ── 7. Validate JSON and pretty-print ────────────────────────────────────
   - id: validate-json
-    plugin: jq
+    executor: jq
     needs: [digest]
     input: "{{.step.digest.data.value}}"
     vars:

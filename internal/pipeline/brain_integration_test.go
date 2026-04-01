@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 	"github.com/powerglove-dev/gl1tch/internal/pipeline"
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
 	"github.com/powerglove-dev/gl1tch/internal/store"
 )
 
@@ -25,10 +25,10 @@ func openTestStore(t *testing.T) *store.Store {
 
 // capturePlugin registers a plugin that writes `output` to the writer and
 // records its promptOrInput in the provided *string pointer.
-func capturePlugin(t *testing.T, mgr *plugin.Manager, name, output string, captured *string) {
+func capturePlugin(t *testing.T, mgr *executor.Manager, name, output string, captured *string) {
 	t.Helper()
-	if err := mgr.Register(&plugin.StubPlugin{
-		PluginName: name,
+	if err := mgr.Register(&executor.StubExecutor{
+		ExecutorName: name,
 		ExecuteFn: func(_ context.Context, input string, _ map[string]string, w io.Writer) error {
 			if captured != nil {
 				*captured = input
@@ -46,14 +46,14 @@ func capturePlugin(t *testing.T, mgr *plugin.Manager, name, output string, captu
 // Brain is always on — no use_brain flag needed.
 func TestBrainReadInjection_PreamblePresent(t *testing.T) {
 	s := openTestStore(t)
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	var captured string
 	capturePlugin(t, mgr, "echo", "result", &captured)
 
 	p := &pipeline.Pipeline{
 		Name: "brain-read-test",
 		Steps: []pipeline.Step{
-			{ID: "s1", Plugin: "echo", Prompt: "hello"},
+			{ID: "s1", Executor: "echo", Prompt: "hello"},
 		},
 	}
 
@@ -77,14 +77,14 @@ func TestBrainReadInjection_PreamblePresent(t *testing.T) {
 // is provided, the prompt does NOT get the database context preamble but DOES get
 // the brain write instruction appended (brain is always on).
 func TestBrainReadInjection_AbsentWithoutInjector(t *testing.T) {
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	var captured string
 	capturePlugin(t, mgr, "echo", "result", &captured)
 
 	p := &pipeline.Pipeline{
 		Name: "brain-no-injector-test",
 		Steps: []pipeline.Step{
-			{ID: "s1", Plugin: "echo", Prompt: "just the prompt"},
+			{ID: "s1", Executor: "echo", Prompt: "just the prompt"},
 		},
 	}
 
@@ -109,7 +109,7 @@ func TestBrainReadInjection_AbsentWithoutInjector(t *testing.T) {
 // output contains a <brain> block persists a note in the store.
 func TestBrainWriteInsertion_NoteInserted(t *testing.T) {
 	s := openTestStore(t)
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	brainOutput := `I analyzed the data. <brain_notes>Key insight: X is important</brain_notes> Done.`
 	capturePlugin(t, mgr, "writer", brainOutput, nil)
 
@@ -117,7 +117,7 @@ func TestBrainWriteInsertion_NoteInserted(t *testing.T) {
 		Name:       "brain-write-test",
 		WriteBrain: true,
 		Steps: []pipeline.Step{
-			{ID: "write-step", Plugin: "writer", Prompt: "analyze this"},
+			{ID: "write-step", Executor: "writer", Prompt: "analyze this"},
 		},
 	}
 
@@ -155,12 +155,12 @@ func TestBrainWriteInsertion_NoteInserted(t *testing.T) {
 // causes step B (needs A) to receive that note in its preamble (brain always on).
 func TestBrainFeedbackLoop(t *testing.T) {
 	s := openTestStore(t)
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 
 	// Step A: outputs a brain note.
 	writerOutput := `Analysis complete. <brain_notes>Loop insight from step A</brain_notes>`
-	if err := mgr.Register(&plugin.StubPlugin{
-		PluginName: "writer",
+	if err := mgr.Register(&executor.StubExecutor{
+		ExecutorName: "writer",
 		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
 			_, err := w.Write([]byte(writerOutput))
 			return err
@@ -171,8 +171,8 @@ func TestBrainFeedbackLoop(t *testing.T) {
 
 	// Step B: captures its prompt to verify preamble injection.
 	var capturedB string
-	if err := mgr.Register(&plugin.StubPlugin{
-		PluginName: "reader",
+	if err := mgr.Register(&executor.StubExecutor{
+		ExecutorName: "reader",
 		ExecuteFn: func(_ context.Context, input string, _ map[string]string, w io.Writer) error {
 			capturedB = input
 			_, err := w.Write([]byte("read done"))
@@ -188,13 +188,13 @@ func TestBrainFeedbackLoop(t *testing.T) {
 		Steps: []pipeline.Step{
 			{
 				ID:         "step-a",
-				Plugin:     "writer",
+				Executor:     "writer",
 				Prompt:     "write something",
 				WriteBrain: &trueVal,
 			},
 			{
 				ID:     "step-b",
-				Plugin: "reader",
+				Executor: "reader",
 				Prompt: "read something",
 				Needs:  []string{"step-a"},
 			},
@@ -235,14 +235,14 @@ func TestBrainRunIsolation(t *testing.T) {
 		t.Fatalf("InsertBrainNote: %v", err)
 	}
 
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	var captured string
 	capturePlugin(t, mgr, "echo", "result", &captured)
 
 	p := &pipeline.Pipeline{
 		Name: "brain-isolation-test",
 		Steps: []pipeline.Step{
-			{ID: "s1", Plugin: "echo", Prompt: "hello"},
+			{ID: "s1", Executor: "echo", Prompt: "hello"},
 		},
 	}
 
@@ -267,14 +267,14 @@ func TestBrainRunIsolation(t *testing.T) {
 // emits output with no <brain> block, the step succeeds and no note is stored.
 func TestBrainWriteInsertion_NoBrainBlock(t *testing.T) {
 	s := openTestStore(t)
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	capturePlugin(t, mgr, "emit-text", "just some text, no brain block here", nil)
 
 	p := &pipeline.Pipeline{
 		Name:       "no-brain-block",
 		WriteBrain: true,
 		Steps: []pipeline.Step{
-			{ID: "s1", Plugin: "emit-text"},
+			{ID: "s1", Executor: "emit-text"},
 		},
 	}
 
@@ -299,14 +299,14 @@ func TestBrainWriteInsertion_NoBrainBlock(t *testing.T) {
 // step emits malformed <brain> XML, the step succeeds and no note is stored.
 func TestBrainWriteInsertion_MalformedBrainBlock(t *testing.T) {
 	s := openTestStore(t)
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	capturePlugin(t, mgr, "emit-bad", "<brain unclosed content", nil)
 
 	p := &pipeline.Pipeline{
 		Name:       "malformed-brain-block",
 		WriteBrain: true,
 		Steps: []pipeline.Step{
-			{ID: "s1", Plugin: "emit-bad"},
+			{ID: "s1", Executor: "emit-bad"},
 		},
 	}
 
@@ -331,14 +331,14 @@ func TestBrainWriteInsertion_MalformedBrainBlock(t *testing.T) {
 // tags attribute is stored with Tags == "".
 func TestBrainWriteInsertion_NoTagsAttribute(t *testing.T) {
 	s := openTestStore(t)
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	capturePlugin(t, mgr, "emit-notags", "<brain_notes>plain note with no tags</brain_notes>", nil)
 
 	p := &pipeline.Pipeline{
 		Name:       "no-tags-brain-block",
 		WriteBrain: true,
 		Steps: []pipeline.Step{
-			{ID: "s1", Plugin: "emit-notags"},
+			{ID: "s1", Executor: "emit-notags"},
 		},
 	}
 
@@ -370,15 +370,15 @@ func TestBrainWriteInsertion_NoTagsAttribute(t *testing.T) {
 // the DAG runner (step has Needs) persists a note with the correct fields.
 func TestBrainWriteInsertion_DAGPath(t *testing.T) {
 	s := openTestStore(t)
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 
 	// Step A: plain step that just succeeds.
 	capturePlugin(t, mgr, "noop", "ok", nil)
 
 	// Step B: depends on A, emits a brain block.
 	trueVal := true
-	if err := mgr.Register(&plugin.StubPlugin{
-		PluginName: "dag-writer",
+	if err := mgr.Register(&executor.StubExecutor{
+		ExecutorName: "dag-writer",
 		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
 			_, err := w.Write([]byte(`<brain_notes>insight from dag</brain_notes>`))
 			return err
@@ -390,10 +390,10 @@ func TestBrainWriteInsertion_DAGPath(t *testing.T) {
 	p := &pipeline.Pipeline{
 		Name: "dag-brain-write",
 		Steps: []pipeline.Step{
-			{ID: "step-a", Plugin: "noop"},
+			{ID: "step-a", Executor: "noop"},
 			{
 				ID:         "step-b",
-				Plugin:     "dag-writer",
+				Executor:     "dag-writer",
 				Needs:      []string{"step-a"},
 				WriteBrain: &trueVal,
 			},
@@ -433,12 +433,12 @@ func TestBrainWriteInsertion_NoStoreConfigured(t *testing.T) {
 		Name:       "no-store",
 		WriteBrain: true,
 		Steps: []pipeline.Step{
-			{ID: "s1", Plugin: "emit-brain"},
+			{ID: "s1", Executor: "emit-brain"},
 		},
 	}
-	mgr := plugin.NewManager()
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "emit-brain",
+	mgr := executor.NewManager()
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "emit-brain",
 		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
 			_, err := w.Write([]byte(`<brain_notes>note</brain_notes>`))
 			return err
@@ -456,7 +456,7 @@ func TestBrainWriteInsertion_NoStoreConfigured(t *testing.T) {
 // Brain is always on — no use_brain flag needed.
 func TestBrainLegacyPath(t *testing.T) {
 	s := openTestStore(t)
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	var captured string
 	capturePlugin(t, mgr, "echo", "result", &captured)
 
@@ -464,7 +464,7 @@ func TestBrainLegacyPath(t *testing.T) {
 	p := &pipeline.Pipeline{
 		Name: "brain-legacy-test",
 		Steps: []pipeline.Step{
-			{ID: "s1", Plugin: "echo", Prompt: "legacy hello"},
+			{ID: "s1", Executor: "echo", Prompt: "legacy hello"},
 		},
 	}
 

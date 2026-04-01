@@ -11,8 +11,8 @@ import (
 
 	"github.com/powerglove-dev/gl1tch/internal/braincontext"
 	"github.com/powerglove-dev/gl1tch/internal/brainrag"
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 	"github.com/powerglove-dev/gl1tch/internal/pipeline"
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
 	"github.com/powerglove-dev/gl1tch/internal/store"
 )
 
@@ -33,7 +33,7 @@ func TestBrainE2E_CodebaseUpdate_HighConfidence(t *testing.T) {
 		"chunk_size": "1500",
 	}
 
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 
 	// Run the index_code builtin directly (not via pipeline).
 	// We run a pipeline that uses builtin.index_code.
@@ -83,8 +83,8 @@ func TestBrainE2E_CodebaseUpdate_HighConfidence(t *testing.T) {
 	var capturedOutput string
 
 	// Register a capture plugin to capture llama3.2 output (or use existing).
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "capture-output",
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "capture-output",
 		ExecuteFn: func(_ context.Context, input string, _ map[string]string, w io.Writer) error {
 			// Simulate model output for testing purposes.
 			output := `const brainWriteInstruction = ` + "`" + `
@@ -104,7 +104,7 @@ BRAIN NOTE INSTRUCTION: Include a <brain_notes> block somewhere in your response
 		Steps: []pipeline.Step{
 			{
 				ID:         "query-step",
-				Plugin:     "capture-output",
+				Executor:     "capture-output",
 				WriteBrain: &trueVal,
 				Prompt: `Based on the code context, add a single-line comment improvement to brain.go:
 the brainWriteInstruction constant. Output ONLY the exact replacement constant

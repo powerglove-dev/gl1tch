@@ -6,25 +6,25 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 	"github.com/powerglove-dev/gl1tch/internal/pipeline"
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
 )
 
 // TestStepOutputs_HappyPath verifies that step A's declared output is accessible
 // via {{ steps.A.body }} in step B's prompt.
 func TestStepOutputs_HappyPath(t *testing.T) {
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	var capturedB string
 
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "step-a-plugin",
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "step-a-plugin",
 		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
 			_, err := w.Write([]byte("output from step A"))
 			return err
 		},
 	})
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "step-b-plugin",
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "step-b-plugin",
 		ExecuteFn: func(_ context.Context, input string, _ map[string]string, w io.Writer) error {
 			capturedB = input
 			_, err := w.Write([]byte("step B got: " + input))
@@ -37,12 +37,12 @@ func TestStepOutputs_HappyPath(t *testing.T) {
 		Steps: []pipeline.Step{
 			{
 				ID:      "step-a",
-				Plugin:  "step-a-plugin",
+				Executor:  "step-a-plugin",
 				Outputs: map[string]string{"body": "string"},
 			},
 			{
 				ID:     "step-b",
-				Plugin: "step-b-plugin",
+				Executor: "step-b-plugin",
 				Prompt: "Data: {{ steps.step-a.body }}",
 				Needs:  []string{"step-a"},
 			},
@@ -62,17 +62,17 @@ func TestStepOutputs_HappyPath(t *testing.T) {
 // TestStepOutputs_MissingKey verifies that referencing a nonexistent step output
 // returns a descriptive error.
 func TestStepOutputs_MissingKey(t *testing.T) {
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "step-a-plugin",
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "step-a-plugin",
 		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
 			_, err := w.Write([]byte("some output"))
 			return err
 		},
 	})
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "step-b-plugin",
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "step-b-plugin",
 		ExecuteFn: func(_ context.Context, input string, _ map[string]string, w io.Writer) error {
 			_, err := w.Write([]byte(input))
 			return err
@@ -84,12 +84,12 @@ func TestStepOutputs_MissingKey(t *testing.T) {
 		Steps: []pipeline.Step{
 			{
 				ID:     "step-a",
-				Plugin: "step-a-plugin",
+				Executor: "step-a-plugin",
 				// No Outputs declared — so "result" key doesn't exist.
 			},
 			{
 				ID:     "step-b",
-				Plugin: "step-b-plugin",
+				Executor: "step-b-plugin",
 				Prompt: "Data: {{ steps.step-a.result }}",
 				Needs:  []string{"step-a"},
 			},
@@ -107,25 +107,25 @@ func TestStepOutputs_MissingKey(t *testing.T) {
 
 // TestStepOutputs_ThreeStepChain verifies A → B → C data flow.
 func TestStepOutputs_ThreeStepChain(t *testing.T) {
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	var capturedC string
 
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "a-plugin",
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "a-plugin",
 		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
 			_, err := w.Write([]byte("value-from-A"))
 			return err
 		},
 	})
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "b-plugin",
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "b-plugin",
 		ExecuteFn: func(_ context.Context, input string, _ map[string]string, w io.Writer) error {
 			_, err := w.Write([]byte("B-received: " + input))
 			return err
 		},
 	})
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "c-plugin",
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "c-plugin",
 		ExecuteFn: func(_ context.Context, input string, _ map[string]string, w io.Writer) error {
 			capturedC = input
 			_, err := w.Write([]byte("C-received: " + input))
@@ -138,19 +138,19 @@ func TestStepOutputs_ThreeStepChain(t *testing.T) {
 		Steps: []pipeline.Step{
 			{
 				ID:      "step-a",
-				Plugin:  "a-plugin",
+				Executor:  "a-plugin",
 				Outputs: map[string]string{"data": "string"},
 			},
 			{
 				ID:      "step-b",
-				Plugin:  "b-plugin",
+				Executor:  "b-plugin",
 				Prompt:  "A said: {{ steps.step-a.data }}",
 				Needs:   []string{"step-a"},
 				Outputs: map[string]string{"result": "string"},
 			},
 			{
 				ID:     "step-c",
-				Plugin: "c-plugin",
+				Executor: "c-plugin",
 				Prompt: "B result: {{ steps.step-b.result }}",
 				Needs:  []string{"step-b"},
 			},

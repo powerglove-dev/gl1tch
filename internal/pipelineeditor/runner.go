@@ -12,10 +12,10 @@ import (
 
 	"github.com/powerglove-dev/gl1tch/internal/buildershared"
 	"github.com/powerglove-dev/gl1tch/internal/busd/topics"
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 	"github.com/powerglove-dev/gl1tch/internal/picker"
-	"github.com/powerglove-dev/gl1tch/internal/systemprompts"
 	"github.com/powerglove-dev/gl1tch/internal/pipeline"
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
+	"github.com/powerglove-dev/gl1tch/internal/systemprompts"
 )
 
 
@@ -51,9 +51,9 @@ func (m Model) startRun() (Model, tea.Cmd) {
 	go func() {
 		defer close(ch)
 
-		mgr, err := buildPluginManager(providers)
+		mgr, err := buildExecutorManager(providers)
 		if err != nil {
-			ch <- "error building plugin manager: " + err.Error()
+			ch <- "error building executor manager: " + err.Error()
 			return
 		}
 
@@ -115,9 +115,9 @@ func (m Model) startRunWithPrompt(prompt string) (Model, tea.Cmd) {
 	go func() {
 		defer close(ch)
 
-		mgr, err := buildPluginManager(providers)
+		mgr, err := buildExecutorManager(providers)
 		if err != nil {
-			ch <- "error building plugin manager: " + err.Error()
+			ch <- "error building executor manager: " + err.Error()
 			return
 		}
 
@@ -150,10 +150,10 @@ func (m Model) startRunWithPrompt(prompt string) (Model, tea.Cmd) {
 	return m, buildershared.WaitForLine(ch)
 }
 
-// buildPluginManager constructs a plugin.Manager from the provider list,
+// buildExecutorManager constructs a executor.Manager from the provider list,
 // matching the registration pattern used in cmd/pipeline.go.
-func buildPluginManager(providers []picker.ProviderDef) (*plugin.Manager, error) {
-	mgr := plugin.NewManager()
+func buildExecutorManager(providers []picker.ProviderDef) (*executor.Manager, error) {
+	mgr := executor.NewManager()
 	for _, prov := range providers {
 		// Sidecar-backed providers are registered by LoadWrappersFromDir.
 		if prov.SidecarPath != "" {
@@ -163,7 +163,7 @@ func buildPluginManager(providers []picker.ProviderDef) (*plugin.Manager, error)
 		if binary == "" {
 			binary = prov.ID
 		}
-		if err := mgr.Register(plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", binary, prov.PipelineArgs...)); err != nil {
+		if err := mgr.Register(executor.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", binary, prov.PipelineArgs...)); err != nil {
 			// Non-fatal: provider just won't be available.
 			_ = err
 		}

@@ -15,7 +15,7 @@ steps:
     type: input
     prompt: "Enter topic:"
   - id: step2
-    plugin: claude
+    executor: claude
     model: claude-sonnet-4-6
     prompt: "Summarize: {{step1.out}}"
     condition:
@@ -23,10 +23,10 @@ steps:
       then: step3a
       else: step3b
   - id: step3a
-    plugin: openspec
+    executor: openspec
     input: "{{step2.out}}"
   - id: step3b
-    plugin: openclaw
+    executor: openclaw
     input: "{{step2.out}}"
   - id: output
     type: output

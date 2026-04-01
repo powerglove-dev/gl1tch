@@ -49,7 +49,7 @@ func pressRune(b *BubbleModel, r rune) *BubbleModel {
 // TestTabCyclesActiveField checks that Tab moves through fields in the active group.
 func TestTabCyclesActiveField(t *testing.T) {
 	m := New(nil)
-	m.AddStep(pipeline.Step{ID: "s1", Plugin: "claude"})
+	m.AddStep(pipeline.Step{ID: "s1", Executor: "claude"})
 	b := NewBubble(m, testProviders)
 
 	if b.activeField != 0 {
@@ -73,7 +73,7 @@ func TestTabCyclesActiveField(t *testing.T) {
 // TestShiftTabCyclesBackward checks that Shift+Tab goes backward across groups.
 func TestShiftTabCyclesBackward(t *testing.T) {
 	m := New(nil)
-	m.AddStep(pipeline.Step{ID: "s1", Plugin: "claude"})
+	m.AddStep(pipeline.Step{ID: "s1", Executor: "claude"})
 	b := NewBubble(m, testProviders)
 	// activeGroup=0 (expanded), groups 1&2 collapsed; shift+tab from field 0 → group 2 (collapsed)
 	b = pressKey(b, tea.KeyShiftTab)
@@ -88,8 +88,8 @@ func TestShiftTabCyclesBackward(t *testing.T) {
 // TestStepNavigationResetsActiveField checks Up/Down resets group and field.
 func TestStepNavigationResetsActiveField(t *testing.T) {
 	m := New(nil)
-	m.AddStep(pipeline.Step{ID: "s1", Plugin: "claude"})
-	m.AddStep(pipeline.Step{ID: "s2", Plugin: "gemini"})
+	m.AddStep(pipeline.Step{ID: "s1", Executor: "claude"})
+	m.AddStep(pipeline.Step{ID: "s2", Executor: "gemini"})
 	b := NewBubble(m, testProviders)
 	b = pressKey(b, tea.KeyTab) // activeField = 1
 	b = pressKey(b, tea.KeyDown)
@@ -134,7 +134,7 @@ func TestTabNoOpWithNoSteps(t *testing.T) {
 // TestPromptFieldUpdatesStep checks that typing in the prompt field updates the step.
 func TestPromptFieldUpdatesStep(t *testing.T) {
 	m := New(nil)
-	m.AddStep(pipeline.Step{ID: "s1", Plugin: "claude"})
+	m.AddStep(pipeline.Step{ID: "s1", Executor: "claude"})
 	b := NewBubble(m, testProviders)
 
 	// Tab twice to reach Prompt field (0→1→2) in Core group
@@ -158,7 +158,7 @@ func TestPromptFieldUpdatesStep(t *testing.T) {
 // are forwarded to the text input, not intercepted as actions.
 func TestPromptFieldAllowsActionKeys(t *testing.T) {
 	m := New(nil)
-	m.AddStep(pipeline.Step{ID: "s1", Plugin: "claude"})
+	m.AddStep(pipeline.Step{ID: "s1", Executor: "claude"})
 	b := NewBubble(m, testProviders)
 
 	// Tab twice to reach Prompt field

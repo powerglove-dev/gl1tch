@@ -12,7 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 	"github.com/powerglove-dev/gl1tch/internal/themes"
 	"github.com/powerglove-dev/gl1tch/internal/tuikit"
 )
@@ -57,8 +57,8 @@ type Agent struct {
 	ErrMsg string
 	// AgentMDPath is the absolute path to the deployed .agent.md file, empty if not installed.
 	AgentMDPath string
-	// PluginID is the registered plugin name in the plugin.Manager, empty if not installed.
-	PluginID string
+	// ExecutorID is the registered executor name in the executor.Manager, empty if not installed.
+	ExecutorID string
 }
 
 // pane indices for two-pane layout.
@@ -87,17 +87,17 @@ type Model struct {
 	// projectRoot is the directory containing apm.yml, used to locate deployed agents.
 	projectRoot string
 
-	pluginMgr *plugin.Manager
+	executorMgr *executor.Manager
 }
 
 // New returns an ApmManager model ready for use. projectRoot should be the
-// directory containing apm.yml (usually the git root). pluginMgr is the
-// shared plugin registry where installed agents are registered as CliAdapters.
-func New(projectRoot string, pluginMgr *plugin.Manager) Model {
+// directory containing apm.yml (usually the git root). executorMgr is the
+// shared executor registry where installed agents are registered as CliAdapters.
+func New(projectRoot string, executorMgr *executor.Manager) Model {
 	return Model{
 		themeState:  tuikit.NewThemeState(nil),
 		projectRoot: projectRoot,
-		pluginMgr:   pluginMgr,
+		executorMgr:   executorMgr,
 	}
 }
 
@@ -150,12 +150,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setAgentState(msg.agentID, StateInstalled, "")
 		if idx := m.indexByID(msg.agentID); idx >= 0 {
-			m.agents[idx].PluginID = msg.pluginID
+			m.agents[idx].ExecutorID = msg.executorID
 		}
 		return m, func() tea.Msg {
 			return AgentInstallDoneMsg{
 				AgentID:  msg.agentID,
-				PluginID: msg.pluginID,
+				ExecutorID: msg.executorID,
 				Adapter:  msg.adapter,
 			}
 		}
@@ -163,7 +163,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AgentUninstallDoneMsg:
 		m.setAgentState(msg.AgentID, StateAvailable, "")
 		if idx := m.indexByID(msg.AgentID); idx >= 0 {
-			m.agents[idx].PluginID = ""
+			m.agents[idx].ExecutorID = ""
 			m.agents[idx].AgentMDPath = ""
 		}
 		return m, nil
@@ -229,11 +229,11 @@ func (m Model) installSelected() (tea.Model, tea.Cmd) {
 	m.setAgentState(a.ID, StateInstalling, "")
 	return m, tea.Batch(
 		func() tea.Msg { return AgentInstallStartMsg{AgentID: a.ID} },
-		installAgentCmd(m.projectRoot, *a, m.pluginMgr),
+		installAgentCmd(m.projectRoot, *a, m.executorMgr),
 	)
 }
 
-// uninstallSelected removes the selected agent from disk and the plugin registry.
+// uninstallSelected removes the selected agent from disk and the executor registry.
 func (m Model) uninstallSelected() (tea.Model, tea.Cmd) {
 	a := m.selectedAgent()
 	if a == nil || a.InstallState != StateInstalled {
@@ -241,7 +241,7 @@ func (m Model) uninstallSelected() (tea.Model, tea.Cmd) {
 	}
 	agentID := a.ID
 	root := m.projectRoot
-	mgr := m.pluginMgr
+	mgr := m.executorMgr
 	return m, func() tea.Msg {
 		if err := uninstallAgent(root, agentID, mgr); err != nil {
 			return AgentInstallErrMsg{AgentID: agentID, Err: err}
@@ -256,10 +256,10 @@ func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 	if a == nil || a.InstallState != StateInstalled {
 		return m, nil
 	}
-	pluginID := a.PluginID
+	executorID := a.ExecutorID
 	agentID := a.ID
 	return m, func() tea.Msg {
-		return AgentActivatedMsg{AgentID: agentID, PluginID: pluginID}
+		return AgentActivatedMsg{AgentID: agentID, ExecutorID: executorID}
 	}
 }
 
@@ -386,8 +386,8 @@ func (m Model) viewDetail(w, h int) string {
 		}
 	}
 
-	if a.PluginID != "" {
-		sb.WriteString("\n" + dim.Render("plugin: ") + a.PluginID + "\n")
+	if a.ExecutorID != "" {
+		sb.WriteString("\n" + dim.Render("executor: ") + a.ExecutorID + "\n")
 	}
 
 	return style.Render(sb.String())
@@ -431,8 +431,8 @@ func (m Model) viewHelp() string {
 		"  enter       Activate selected agent (emits AgentActivatedMsg)",
 		"  ? / esc     Toggle this help",
 		"",
-		"Agents are fetched from apm.yml and wrapped as CliAdapter plugins.",
-		"Press 'i' to install, then 'enter' to make the agent available to plugins.",
+		"Agents are fetched from apm.yml and wrapped as CliAdapter executors.",
+		"Press i to install, then enter to make the agent available to executors.",
 	}
 	return strings.Join(lines, "\n")
 }
@@ -539,7 +539,7 @@ func truncate(s string, maxLen int) string {
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 // loadAgentsCmd scans the project's apm.yml and .claude/agents/ directory to
-// build the initial agent list, cross-referencing install state with the plugin
+// build the initial agent list, cross-referencing install state with the executor
 // manager.
 func loadAgentsCmd(projectRoot string) tea.Cmd {
 	return func() tea.Msg {
@@ -549,17 +549,17 @@ func loadAgentsCmd(projectRoot string) tea.Cmd {
 }
 
 // installAgentCmd runs `apm install <id>` in the background, then reads the
-// deployed .agent.md and registers a CliAdapter in pluginMgr.
-func installAgentCmd(projectRoot string, a Agent, pluginMgr *plugin.Manager) tea.Cmd {
+// deployed .agent.md and registers a CliAdapter in executorMgr.
+func installAgentCmd(projectRoot string, a Agent, executorMgr *executor.Manager) tea.Cmd {
 	return func() tea.Msg {
-		agentMDPath, adapter, err := installAndWrap(context.Background(), projectRoot, a, pluginMgr)
+		agentMDPath, adapter, err := installAndWrap(context.Background(), projectRoot, a, executorMgr)
 		if err != nil {
 			return agentInstallResultMsg{agentID: a.ID, err: err}
 		}
 		_ = agentMDPath
 		return agentInstallResultMsg{
 			agentID:  a.ID,
-			pluginID: adapter.Name(),
+			executorID: adapter.Name(),
 			adapter:  adapter,
 		}
 	}
@@ -590,7 +590,7 @@ func scanAgents(projectRoot string) ([]Agent, error) {
 		}
 		a.InstallState = StateInstalled
 		a.AgentMDPath = path
-		a.PluginID = agentPluginID(a.ID)
+		a.ExecutorID = agentExecutorID(a.ID)
 		seen[a.ID] = true
 		agents = append(agents, a)
 	}
@@ -655,14 +655,14 @@ func parseAgentMD(path string) Agent {
 }
 
 // installAndWrap runs `apm install <id>`, locates the deployed .agent.md, reads
-// it as a system prompt, and registers a CliAdapter in pluginMgr.
+// it as a system prompt, and registers a CliAdapter in executorMgr.
 // It returns the path to the deployed file and the registered adapter.
 func installAndWrap(
 	ctx context.Context,
 	projectRoot string,
 	a Agent,
-	pluginMgr *plugin.Manager,
-) (string, *plugin.CliAdapter, error) {
+	executorMgr *executor.Manager,
+) (string, *executor.CliAdapter, error) {
 	// Run `apm install <id>` to fetch and deploy the agent file.
 	cmd := exec.CommandContext(ctx, "apm", "install", a.ID)
 	cmd.Dir = projectRoot
@@ -684,24 +684,24 @@ func installAndWrap(
 
 	// Wrap as a CliAdapter: claude --print receives user input on stdin and
 	// uses the agent.md content as the system prompt.
-	pluginID := agentPluginID(a.ID)
+	executorID := agentExecutorID(a.ID)
 	desc := a.Description
 	if desc == "" {
 		desc = "APM agent: " + a.Name
 	}
 
-	adapter := plugin.NewCliAdapter(
-		pluginID,
+	adapter := executor.NewCliAdapter(
+		executorID,
 		desc,
 		"claude",
 		"--print",
 		"--system", string(systemPrompt),
 	)
 
-	if err := pluginMgr.Register(adapter); err != nil {
+	if err := executorMgr.Register(adapter); err != nil {
 		// If already registered (e.g. re-install), treat as success.
 		if !strings.Contains(err.Error(), "already registered") {
-			return "", nil, fmt.Errorf("register plugin %s: %w", pluginID, err)
+			return "", nil, fmt.Errorf("register executor %s: %w", executorID, err)
 		}
 	}
 
@@ -745,11 +745,11 @@ func findDeployedAgentMD(projectRoot, agentID string) (string, error) {
 }
 
 // uninstallAgent removes the deployed .agent.md from disk.
-// plugin.Manager has no Remove method; the plugin stays registered for the
+// executor.Manager has no Remove method; the executor stays registered for the
 // current session (safe — it won't accept new work once removed from the
 // filesystem). Full deregistration takes effect on the next glitch restart.
-func uninstallAgent(projectRoot, agentID string, mgr *plugin.Manager) error {
-	_ = mgr // reserved for when plugin.Manager gains a Remove method
+func uninstallAgent(projectRoot, agentID string, mgr *executor.Manager) error {
+	_ = mgr // reserved for when executor.Manager gains a Remove method
 	agentsDir := filepath.Join(projectRoot, ".claude", "agents")
 	segments := strings.Split(agentID, "/")
 	name := segments[len(segments)-1]
@@ -763,9 +763,9 @@ func uninstallAgent(projectRoot, agentID string, mgr *plugin.Manager) error {
 	return nil
 }
 
-// agentPluginID derives a stable plugin registry name from an APM agent ID.
+// agentExecutorID derives a stable executor registry name from an APM agent ID.
 // e.g. "anthropics/skills/agents/api-architect" → "apm.api-architect"
-func agentPluginID(agentID string) string {
+func agentExecutorID(agentID string) string {
 	segments := strings.Split(agentID, "/")
 	base := segments[len(segments)-1]
 	base = strings.TrimSuffix(base, ".agent.md")

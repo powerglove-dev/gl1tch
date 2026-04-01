@@ -1,4 +1,4 @@
-package plugin
+package executor
 
 import (
 	"fmt"
@@ -7,10 +7,10 @@ import (
 	"strings"
 )
 
-// LoadWrappers scans dir for *.yaml sidecar files and returns the resulting plugins.
+// LoadWrappers scans dir for *.yaml sidecar files and returns the resulting executors.
 // Files that fail to parse are skipped; their errors are collected and returned.
 // If dir does not exist, an empty slice and nil errors are returned.
-func LoadWrappers(dir string) ([]Plugin, []error) {
+func LoadWrappers(dir string) ([]Executor, []error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -19,7 +19,7 @@ func LoadWrappers(dir string) ([]Plugin, []error) {
 		return nil, []error{fmt.Errorf("load wrappers: read dir %s: %w", dir, err)}
 	}
 
-	var plugins []Plugin
+	var executors []Executor
 	var errs []error
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
@@ -31,7 +31,7 @@ func LoadWrappers(dir string) ([]Plugin, []error) {
 			errs = append(errs, err)
 			continue
 		}
-		plugins = append(plugins, p)
+		executors = append(executors, p)
 	}
-	return plugins, errs
+	return executors, errs
 }

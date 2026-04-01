@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/powerglove-dev/gl1tch/internal/busd/topics"
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 	"github.com/powerglove-dev/gl1tch/internal/pipeline"
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
 )
 
-func makeWritePlugin(name, output string) *plugin.StubPlugin {
-	return &plugin.StubPlugin{
-		PluginName: name,
+func makeWritePlugin(name, output string) *executor.StubExecutor {
+	return &executor.StubExecutor{
+		ExecutorName: name,
 		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
 			_, err := w.Write([]byte(output))
 			return err
@@ -33,14 +33,14 @@ func TestRunner_LinearPipeline(t *testing.T) {
 		Version: "1.0",
 		Steps: []pipeline.Step{
 			{ID: "s1", Type: "input"},
-			{ID: "s2", Plugin: "echo"},
+			{ID: "s2", Executor: "echo"},
 			{ID: "s3", Type: "output"},
 		},
 	}
 
-	mgr := plugin.NewManager()
-	if err := mgr.Register(&plugin.StubPlugin{
-		PluginName: "echo",
+	mgr := executor.NewManager()
+	if err := mgr.Register(&executor.StubExecutor{
+		ExecutorName: "echo",
 		ExecuteFn: func(_ context.Context, input string, _ map[string]string, w io.Writer) error {
 			_, err := w.Write([]byte("echoed: " + input))
 			return err
@@ -65,21 +65,21 @@ func TestRunner_ConditionalBranch_Then(t *testing.T) {
 			{ID: "s1", Type: "input"},
 			{
 				ID:     "s2",
-				Plugin: "classifier",
+				Executor: "classifier",
 				Condition: pipeline.Condition{
 					If:   "contains:go",
 					Then: "golang-step",
 					Else: "other-step",
 				},
 			},
-			{ID: "golang-step", Plugin: "go-handler"},
-			{ID: "other-step", Plugin: "other-handler"},
+			{ID: "golang-step", Executor: "go-handler"},
+			{ID: "other-step", Executor: "other-handler"},
 			{ID: "out", Type: "output"},
 		},
 	}
 
-	mgr := plugin.NewManager()
-	for _, p := range []plugin.Plugin{
+	mgr := executor.NewManager()
+	for _, p := range []executor.Executor{
 		makeWritePlugin("classifier", "golang rocks"),
 		makeWritePlugin("go-handler", "handled by go"),
 		makeWritePlugin("other-handler", "handled by other"),
@@ -105,21 +105,21 @@ func TestRunner_ConditionalBranch_Else(t *testing.T) {
 			{ID: "s1", Type: "input"},
 			{
 				ID:     "s2",
-				Plugin: "classifier",
+				Executor: "classifier",
 				Condition: pipeline.Condition{
 					If:   "contains:python",
 					Then: "python-step",
 					Else: "default-step",
 				},
 			},
-			{ID: "python-step", Plugin: "py-handler"},
-			{ID: "default-step", Plugin: "default-handler"},
+			{ID: "python-step", Executor: "py-handler"},
+			{ID: "default-step", Executor: "default-handler"},
 			{ID: "out", Type: "output"},
 		},
 	}
 
-	mgr := plugin.NewManager()
-	for _, p := range []plugin.Plugin{
+	mgr := executor.NewManager()
+	for _, p := range []executor.Executor{
 		makeWritePlugin("classifier", "golang rocks"),
 		makeWritePlugin("py-handler", "python handler"),
 		makeWritePlugin("default-handler", "default handler"),
@@ -143,15 +143,15 @@ func TestRunner_TemplateInterpolation(t *testing.T) {
 		Name: "interp-test",
 		Steps: []pipeline.Step{
 			{ID: "s1", Type: "input"},
-			{ID: "s2", Plugin: "upper", Prompt: "input was: {{.s1.out}}"},
+			{ID: "s2", Executor: "upper", Prompt: "input was: {{.s1.out}}"},
 			{ID: "out", Type: "output"},
 		},
 	}
 
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	var capturedInput string
-	if err := mgr.Register(&plugin.StubPlugin{
-		PluginName: "upper",
+	if err := mgr.Register(&executor.StubExecutor{
+		ExecutorName: "upper",
 		ExecuteFn: func(_ context.Context, input string, _ map[string]string, w io.Writer) error {
 			capturedInput = input
 			_, err := w.Write([]byte("done"))
@@ -175,11 +175,11 @@ func TestRunner_MissingPlugin(t *testing.T) {
 		Name: "missing-test",
 		Steps: []pipeline.Step{
 			{ID: "s1", Type: "input"},
-			{ID: "s2", Plugin: "nonexistent"},
+			{ID: "s2", Executor: "nonexistent"},
 			{ID: "out", Type: "output"},
 		},
 	}
-	mgr := plugin.NewManager() // empty — no plugins registered intentionally
+	mgr := executor.NewManager() // empty — no plugins registered intentionally
 	_, err := pipeline.Run(context.Background(), p, mgr, "hello")
 	if err == nil {
 		t.Error("expected error for missing plugin")
@@ -201,18 +201,18 @@ func TestParallelExecution(t *testing.T) {
 		Steps: []pipeline.Step{
 			{
 				ID:     "step-a",
-				Plugin: "echo-a",
+				Executor: "echo-a",
 			},
 			{
 				ID:     "step-b",
-				Plugin: "echo-b",
+				Executor: "echo-b",
 			},
 		},
 	}
 
-	mgr := plugin.NewManager()
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "echo-a",
+	mgr := executor.NewManager()
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "echo-a",
 		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
 			mu.Lock()
 			startA = time.Now()
@@ -222,8 +222,8 @@ func TestParallelExecution(t *testing.T) {
 			return err
 		},
 	})
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "echo-b",
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "echo-b",
 		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
 			mu.Lock()
 			startB = time.Now()
@@ -270,7 +270,7 @@ func TestRetryPolicy(t *testing.T) {
 		Steps: []pipeline.Step{
 			{
 				ID:     "flaky",
-				Plugin: "flaky-plugin",
+				Executor: "flaky-plugin",
 				Retry: &pipeline.RetryPolicy{
 					MaxAttempts: 3,
 					Interval:    pipeline.Duration{},
@@ -280,9 +280,9 @@ func TestRetryPolicy(t *testing.T) {
 		},
 	}
 
-	mgr := plugin.NewManager()
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "flaky-plugin",
+	mgr := executor.NewManager()
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "flaky-plugin",
 		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
 			n := attempts.Add(1)
 			if n < 3 {
@@ -316,37 +316,37 @@ func TestOnFailure(t *testing.T) {
 		Steps: []pipeline.Step{
 			{
 				ID:        "failing-step",
-				Plugin:    "always-fail",
+				Executor:    "always-fail",
 				OnFailure: "recovery-step",
 			},
 			{
 				ID:     "dependent-step",
-				Plugin: "should-not-run",
+				Executor: "should-not-run",
 				Needs:  []string{"failing-step"},
 			},
 			{
 				ID:     "recovery-step",
-				Plugin: "recovery-plugin",
+				Executor: "recovery-plugin",
 			},
 		},
 	}
 
-	mgr := plugin.NewManager()
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "always-fail",
+	mgr := executor.NewManager()
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "always-fail",
 		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
 			return errors.New("intentional failure")
 		},
 	})
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "should-not-run",
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "should-not-run",
 		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
 			dependentRan = true
 			return nil
 		},
 	})
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "recovery-plugin",
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "recovery-plugin",
 		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
 			failureHandlerRan = true
 			_, err := w.Write([]byte("recovered"))
@@ -380,15 +380,15 @@ func TestForEach(t *testing.T) {
 		Steps: []pipeline.Step{
 			{
 				ID:      "process",
-				Plugin:  "item-processor",
+				Executor:  "item-processor",
 				ForEach: "alpha\nbeta\ngamma",
 			},
 		},
 	}
 
-	mgr := plugin.NewManager()
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "item-processor",
+	mgr := executor.NewManager()
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "item-processor",
 		ExecuteFn: func(_ context.Context, _ string, vars map[string]string, w io.Writer) error {
 			// The item is injected as vars["_item"] through the args mechanism.
 			// In the DAG runner, item is in args, not vars — but the plugin gets
@@ -430,7 +430,7 @@ func TestBuiltinStep(t *testing.T) {
 		},
 	}
 
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	result, err := pipeline.Run(context.Background(), p, mgr, "")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -454,7 +454,7 @@ func TestBuiltinAssertFails(t *testing.T) {
 		},
 	}
 
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	_, err := pipeline.Run(context.Background(), p, mgr, "")
 	// The failure may be swallowed by the DAG (no dependents, no on_failure),
 	// so we just run and ensure no panic.
@@ -470,26 +470,26 @@ func TestStepStatusLogLines(t *testing.T) {
 		Steps: []pipeline.Step{
 			{
 				ID:     "step1",
-				Plugin: "noop1",
+				Executor: "noop1",
 			},
 			{
 				ID:     "step2",
-				Plugin: "noop2",
+				Executor: "noop2",
 				Needs:  []string{"step1"},
 			},
 		},
 	}
 
-	mgr := plugin.NewManager()
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "noop1",
+	mgr := executor.NewManager()
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "noop1",
 		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
 			_, err := w.Write([]byte("out1"))
 			return err
 		},
 	})
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "noop2",
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "noop2",
 		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
 			_, err := w.Write([]byte("out2"))
 			return err
@@ -620,13 +620,13 @@ func TestEventEmission_Legacy(t *testing.T) {
 		Name: "event-legacy-test",
 		Steps: []pipeline.Step{
 			{ID: "in", Type: "input"},
-			{ID: "s1", Plugin: "echo1"},
-			{ID: "s2", Plugin: "echo2"},
+			{ID: "s1", Executor: "echo1"},
+			{ID: "s2", Executor: "echo2"},
 			{ID: "out", Type: "output"},
 		},
 	}
 
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	_ = mgr.Register(makeWritePlugin("echo1", "output1"))
 	_ = mgr.Register(makeWritePlugin("echo2", "output2"))
 
@@ -688,12 +688,12 @@ func TestEventEmission_DAG(t *testing.T) {
 		Name:        "event-dag-test",
 		MaxParallel: 2,
 		Steps: []pipeline.Step{
-			{ID: "s1", Plugin: "dag-echo1"},
-			{ID: "s2", Plugin: "dag-echo2", Needs: []string{"s1"}},
+			{ID: "s1", Executor: "dag-echo1"},
+			{ID: "s2", Executor: "dag-echo2", Needs: []string{"s1"}},
 		},
 	}
 
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	_ = mgr.Register(makeWritePlugin("dag-echo1", "dag-output1"))
 	_ = mgr.Register(makeWritePlugin("dag-echo2", "dag-output2"))
 
@@ -737,11 +737,11 @@ func TestPublishTo(t *testing.T) {
 		Name:        "publish-to-test",
 		MaxParallel: 2,
 		Steps: []pipeline.Step{
-			{ID: "produce", Plugin: "producer", PublishTo: "custom.topic"},
+			{ID: "produce", Executor: "producer", PublishTo: "custom.topic"},
 		},
 	}
 
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	_ = mgr.Register(makeWritePlugin("producer", "hello"))
 
 	pub := &capturingPublisher{}

@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/powerglove-dev/gl1tch/internal/discovery"
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 	"github.com/powerglove-dev/gl1tch/internal/providers"
 )
 
@@ -102,7 +102,7 @@ func loadSidecarMeta(configDir string) map[string]sidecarMeta {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
 			continue
 		}
-		adapter, err := plugin.NewCliAdapterFromSidecar(filepath.Join(wrappersDir, e.Name()))
+		adapter, err := executor.NewCliAdapterFromSidecar(filepath.Join(wrappersDir, e.Name()))
 		if err != nil {
 			continue
 		}
@@ -153,18 +153,18 @@ func autodetectModels(cmd string) []ModelOption {
 }
 
 // buildProviders returns a filtered, runtime-enriched provider list driven by
-// the plugin Manager/discovery layer:
-//   - only includes providers found via discovery (native plugins + CLI wrappers)
+// the executor Manager/discovery layer:
+//   - only includes providers found via discovery (native executors + CLI wrappers)
 //   - shell is always included
 //   - reads model metadata from ~/.config/glitch/wrappers/<name>.yaml sidecars
 //   - falls back to runtime Ollama query if the ollama sidecar declares no models
-//   - appends any discovered plugins not in the static Providers list
+//   - appends any discovered executors not in the static Providers list
 func buildProviders() []ProviderDef {
 	configDir := glitchConfigDir()
 	ollamaModels := queryOllamaModels()
 	sidecarData := loadSidecarMeta(configDir)
 
-	// Discover available plugins (native gRPC plugins + CLI wrappers; skip pipelines).
+	// Discover available executors (native gRPC executors + CLI wrappers; skip pipelines).
 	discovered := make(map[string]bool)
 	type extraEntry struct {
 		name        string
@@ -254,7 +254,7 @@ func buildProviders() []ProviderDef {
 			continue
 		}
 		meta := sidecarData[e.name]
-		// Only include agent-kind plugins in the agent runner provider list.
+		// Only include agent-kind executors in the agent runner provider list.
 		if meta.Kind != "" && meta.Kind != "agent" {
 			continue
 		}

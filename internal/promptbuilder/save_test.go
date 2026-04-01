@@ -15,7 +15,7 @@ func TestSave_WritesYAML(t *testing.T) {
 	m := promptbuilder.New(nil)
 	m.SetName("my-test-pipeline")
 	m.AddStep(pipeline.Step{ID: "s1", Type: "input", Prompt: "Enter:"})
-	m.AddStep(pipeline.Step{ID: "s2", Plugin: "claude", Model: "claude-sonnet-4-6"})
+	m.AddStep(pipeline.Step{ID: "s2", Executor: "claude", Model: "claude-sonnet-4-6"})
 
 	outPath := filepath.Join(dir, "my-test-pipeline.pipeline.yaml")
 	if err := promptbuilder.Save(m, outPath); err != nil {

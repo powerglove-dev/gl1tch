@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 	"github.com/powerglove-dev/gl1tch/internal/store"
 )
 
@@ -258,20 +258,20 @@ func TestModel_NewPrompt(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Task 9.2 — Runner with mock plugin
+// Task 9.2 — Runner with mock executor
 // ---------------------------------------------------------------------------
 
-func TestModel_RunnerWithMockPlugin(t *testing.T) {
+func TestModel_RunnerWithMockExecutor(t *testing.T) {
 	st := openTestStore(t)
 
-	stub := &plugin.StubPlugin{
-		PluginName: "test-model",
+	stub := &executor.StubExecutor{
+		ExecutorName: "test-model",
 		ExecuteFn: func(_ context.Context, input string, _ map[string]string, w io.Writer) error {
 			_, err := w.Write([]byte("hello world"))
 			return err
 		},
 	}
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	if err := mgr.Register(stub); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestModel_RunnerWithMockPlugin(t *testing.T) {
 		t.Error("after ctrl+r: want runCancel != nil")
 	}
 
-	// Drain the run command — runPluginCmd blocks until plugin exits.
+	// Drain the run command — runExecutorCmd blocks until executor exits.
 	m = drainCmd(m, cmd)
 
 	// After run completes:
@@ -310,15 +310,15 @@ func TestModel_RunnerWithMockPlugin(t *testing.T) {
 func TestModel_RunnerCancellation(t *testing.T) {
 	st := openTestStore(t)
 
-	stub := &plugin.StubPlugin{
-		PluginName: "test-model",
+	stub := &executor.StubExecutor{
+		ExecutorName: "test-model",
 		ExecuteFn: func(ctx context.Context, _ string, _ map[string]string, _ io.Writer) error {
 			// Block until context cancelled.
 			<-ctx.Done()
 			return ctx.Err()
 		},
 	}
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	if err := mgr.Register(stub); err != nil {
 		t.Fatalf("Register: %v", err)
 	}

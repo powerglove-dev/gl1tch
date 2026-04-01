@@ -10,8 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sahilm/fuzzy"
 
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 	"github.com/powerglove-dev/gl1tch/internal/modal"
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
 	"github.com/powerglove-dev/gl1tch/internal/store"
 	"github.com/powerglove-dev/gl1tch/internal/systemprompts"
 	"github.com/powerglove-dev/gl1tch/internal/tuikit"
@@ -472,9 +472,9 @@ func (m *Model) updateRunnerPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			providerID, modelID, _ := strings.Cut(slug, "/")
-			p, ok := m.pluginMgr.Get(providerID)
+			p, ok := m.executorMgr.Get(providerID)
 			if !ok {
-				m.runnerErrMsg = fmt.Sprintf("plugin %q not found", providerID)
+				m.runnerErrMsg = fmt.Sprintf("executor %q not found", providerID)
 				return m, nil
 			}
 			if m.runCancel != nil {
@@ -487,7 +487,7 @@ func (m *Model) updateRunnerPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.runnerOutput = ""
 			m.runnerErrMsg = ""
 			m.runnerScrollOffset = 0
-			return m, tea.Batch(runPluginCmd(ctx, p, input, m.editingPrompt.CWD, modelID), spinnerTickCmd())
+			return m, tea.Batch(runExecutorCmd(ctx, p, input, m.editingPrompt.CWD, modelID), spinnerTickCmd())
 		default:
 			var cmd tea.Cmd
 			m.followUpInput, cmd = m.followUpInput.Update(msg)
@@ -557,9 +557,9 @@ func (m *Model) startFreshRun() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	providerID, modelID, _ := strings.Cut(slug, "/")
-	p, ok := m.pluginMgr.Get(providerID)
+	p, ok := m.executorMgr.Get(providerID)
 	if !ok {
-		m.runnerErrMsg = fmt.Sprintf("plugin %q not found", providerID)
+		m.runnerErrMsg = fmt.Sprintf("executor %q not found", providerID)
 		return m, nil
 	}
 	input := systemprompts.Load(systemprompts.PromptBuilder) + body
@@ -575,7 +575,7 @@ func (m *Model) startFreshRun() (tea.Model, tea.Cmd) {
 	m.runnerErrMsg = ""
 	m.runnerScrollOffset = 0
 	m.focusPanel = 2
-	return m, tea.Batch(runPluginCmd(ctx, p, input, m.editingPrompt.CWD, modelID), spinnerTickCmd())
+	return m, tea.Batch(runExecutorCmd(ctx, p, input, m.editingPrompt.CWD, modelID), spinnerTickCmd())
 }
 
 func buildConversationContext(turns []runnerTurn) string {
@@ -601,8 +601,8 @@ func buildConversationContext(turns []runnerTurn) string {
 	return sb.String()
 }
 
-// runPluginCmd executes the plugin with input and returns a runDoneMsg or runErrMsg.
-func runPluginCmd(ctx context.Context, p plugin.Plugin, input, cwd, modelID string) tea.Cmd {
+// runExecutorCmd executes the executor with input and returns a runDoneMsg or runErrMsg.
+func runExecutorCmd(ctx context.Context, p executor.Executor, input, cwd, modelID string) tea.Cmd {
 	return func() tea.Msg {
 		pr, pw := io.Pipe()
 		vars := map[string]string{}

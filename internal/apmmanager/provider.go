@@ -8,11 +8,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// AgentCapabilityProvider lets glitch plugins request agent capabilities at
+// AgentCapabilityProvider lets glitch executors request agent capabilities at
 // runtime without knowing whether the required agent is already installed.
 //
 // GetAgent returns the Agent immediately from the in-memory registry (or false).
-// RequireAgent blocks until the agent is installed and its plugin is registered,
+// RequireAgent blocks until the agent is installed and its executor is registered,
 // then returns it. If installation fails, it returns a descriptive error.
 //
 // Plugins that need a capability should call RequireAgent at point-of-use:
@@ -21,7 +21,7 @@ import (
 //	if err != nil {
 //	    return fmt.Errorf("need api-architect agent: %w", err)
 //	}
-//	// agent.PluginID is now registered in the plugin.Manager
+//	// agent.ExecutorID is now registered in the executor.Manager
 type AgentCapabilityProvider interface {
 	// GetAgent returns the Agent for id if it is already installed.
 	GetAgent(id string) (Agent, bool)
@@ -33,7 +33,7 @@ type AgentCapabilityProvider interface {
 // DefaultProvider implements AgentCapabilityProvider by synchronising with the
 // Model's in-memory agent list and delegating installs to installAndWrap.
 //
-// Construct one via NewDefaultProvider and pass it to plugins that need
+// Construct one via NewDefaultProvider and pass it to executors that need
 // on-demand agent capabilities. The send function, if non-nil, is called with
 // progress messages (AgentInstallStartMsg / AgentInstallDoneMsg /
 // AgentInstallErrMsg) so the TUI can track install state.
@@ -83,7 +83,7 @@ func (p *DefaultProvider) GetAgent(id string) (Agent, bool) {
 }
 
 // RequireAgent ensures the agent identified by id is installed and its
-// CliAdapter is registered in the plugin.Manager.
+// CliAdapter is registered in the executor.Manager.
 //
 // If the agent is already installed it returns immediately.
 // If it is not installed, RequireAgent runs apm install synchronously (within
@@ -106,7 +106,7 @@ func (p *DefaultProvider) RequireAgent(ctx context.Context, id string) (Agent, e
 	stub.ID = id
 	stub.InstallState = StateInstalling
 	p.agents[id] = stub
-	pluginMgr := p.model.pluginMgr
+	executorMgr := p.model.executorMgr
 	projectRoot := p.projectRoot
 	p.mu.Unlock()
 
@@ -119,7 +119,7 @@ func (p *DefaultProvider) RequireAgent(ctx context.Context, id string) (Agent, e
 		Name: agentBaseName(id),
 	}
 
-	_, adapter, err := installAndWrap(ctx, projectRoot, a, pluginMgr)
+	_, adapter, err := installAndWrap(ctx, projectRoot, a, executorMgr)
 	if err != nil {
 		p.mu.Lock()
 		entry := p.agents[id]
@@ -140,7 +140,7 @@ func (p *DefaultProvider) RequireAgent(ctx context.Context, id string) (Agent, e
 	}
 	installed.InstallState = StateInstalled
 	installed.AgentMDPath = agentMDPath
-	installed.PluginID = adapter.Name()
+	installed.ExecutorID = adapter.Name()
 
 	p.mu.Lock()
 	p.agents[id] = installed
@@ -148,7 +148,7 @@ func (p *DefaultProvider) RequireAgent(ctx context.Context, id string) (Agent, e
 
 	p.emit(AgentInstallDoneMsg{
 		AgentID:  id,
-		PluginID: adapter.Name(),
+		ExecutorID: adapter.Name(),
 		Adapter:  adapter,
 	})
 

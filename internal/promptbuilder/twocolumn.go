@@ -19,10 +19,10 @@ import (
 
 	"github.com/powerglove-dev/gl1tch/internal/buildershared"
 	"github.com/powerglove-dev/gl1tch/internal/busd/topics"
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 	"github.com/powerglove-dev/gl1tch/internal/panelrender"
 	"github.com/powerglove-dev/gl1tch/internal/picker"
 	"github.com/powerglove-dev/gl1tch/internal/pipeline"
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
 	"github.com/powerglove-dev/gl1tch/internal/styles"
 )
 
@@ -43,7 +43,7 @@ type TwoColumnModel struct {
 
 	// Persistence
 	promptsDir string
-	pluginMgr  *plugin.Manager
+	executorMgr  *executor.Manager
 
 	// Feedback loop
 	firstPrompt string
@@ -66,7 +66,7 @@ type promptEntry struct {
 }
 
 // NewTwoColumn creates a new TwoColumnModel.
-func NewTwoColumn(promptsDir string, providers []picker.ProviderDef, mgr *plugin.Manager) *TwoColumnModel {
+func NewTwoColumn(promptsDir string, providers []picker.ProviderDef, mgr *executor.Manager) *TwoColumnModel {
 	pal := styles.ANSIPalette{
 		Accent:  "\x1b[35m",
 		Dim:     "\x1b[2m",
@@ -84,7 +84,7 @@ func NewTwoColumn(promptsDir string, providers []picker.ProviderDef, mgr *plugin
 		runner:     buildershared.NewRunnerPanel(),
 		send:       buildershared.NewSendPanel(providers),
 		promptsDir: promptsDir,
-		pluginMgr:  mgr,
+		executorMgr:  mgr,
 		pal:        pal,
 	}
 	m.sidebar = m.sidebar.SetItems(m.loadPromptNames())
@@ -384,7 +384,7 @@ func (m *TwoColumnModel) startRun(userMsg string) tea.Cmd {
 	ch := make(chan string, 200)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	mgr := m.pluginMgr
+	mgr := m.executorMgr
 	providers := picker.BuildProviders()
 
 	go func() {
@@ -392,7 +392,7 @@ func (m *TwoColumnModel) startRun(userMsg string) tea.Cmd {
 
 		if mgr == nil {
 			var err error
-			mgr, err = buildPromptPluginManager(providers)
+			mgr, err = buildPromptExecutorManager(providers)
 			if err != nil {
 				ch <- "error: " + err.Error()
 				return
@@ -436,8 +436,8 @@ func buildPromptYAML(name, executorID, modelID, prompt string) string {
 	return sb.String()
 }
 
-func buildPromptPluginManager(providers []picker.ProviderDef) (*plugin.Manager, error) {
-	mgr := plugin.NewManager()
+func buildPromptExecutorManager(providers []picker.ProviderDef) (*executor.Manager, error) {
+	mgr := executor.NewManager()
 	for _, prov := range providers {
 		if prov.SidecarPath != "" {
 			continue
@@ -446,7 +446,7 @@ func buildPromptPluginManager(providers []picker.ProviderDef) (*plugin.Manager, 
 		if binary == "" {
 			binary = prov.ID
 		}
-		_ = mgr.Register(plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", binary, prov.PipelineArgs...))
+		_ = mgr.Register(executor.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", binary, prov.PipelineArgs...))
 	}
 	configDir := picker.GlitchConfigDir()
 	if configDir != "" {

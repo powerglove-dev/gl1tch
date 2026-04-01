@@ -18,7 +18,7 @@ import (
 	"github.com/powerglove-dev/gl1tch/internal/brainrag"
 	"github.com/powerglove-dev/gl1tch/internal/busd/topics"
 	"github.com/powerglove-dev/gl1tch/internal/clarify"
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 	"github.com/powerglove-dev/gl1tch/internal/store"
 )
 
@@ -125,7 +125,7 @@ type stepResult struct {
 // userInput is the initial value injected for the first input step.
 // Optional RunOption values (e.g. WithRunStore, WithEventPublisher) configure behaviour.
 // Returns the final output string (last plugin step output).
-func Run(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput string, opts ...RunOption) (string, error) {
+func Run(ctx context.Context, p *Pipeline, mgr *executor.Manager, userInput string, opts ...RunOption) (string, error) {
 	cfg := &runConfig{}
 	for _, o := range opts {
 		o(cfg)
@@ -274,7 +274,7 @@ func isLegacyPipeline(p *Pipeline) bool {
 
 // runLegacy is the original sequential runner kept for backwards compatibility.
 // It handles "input"/"output" step types and condition branches.
-func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput string, cfg *runConfig) (string, error) {
+func runLegacy(ctx context.Context, p *Pipeline, mgr *executor.Manager, userInput string, cfg *runConfig) (string, error) {
 	ec := NewExecutionContext(WithStore(cfg.store))
 	if cfg.injector != nil {
 		ec.SetBrainInjector(cfg.injector, cfg.runID)
@@ -322,7 +322,7 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 	queue := append([]string(nil), order...)
 
 	lastOutput := userInput
-	var lastPluginOutput string
+	var lastExecutorOutput string
 
 	// resumeStarted tracks whether we have reached the resume step yet.
 	// When cfg.resumeStepID is set, we skip all steps before the matching one.
@@ -363,7 +363,7 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 			lastOutput = userInput
 
 		case "output":
-			return lastPluginOutput, nil
+			return lastExecutorOutput, nil
 
 		default:
 			// Publish step.started.
@@ -422,7 +422,7 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 			ec.Set(step.ID+".out", output)
 			ec.Set("step."+step.ID+".state", "done")
 			ec.Set("step."+step.ID+".data.value", output)
-			lastPluginOutput = output
+			lastExecutorOutput = output
 			lastOutput = output
 
 			// Store declared step outputs.
@@ -484,12 +484,12 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput 
 		}
 	}
 
-	return lastPluginOutput, nil
+	return lastExecutorOutput, nil
 }
 
 // runDAG executes a pipeline using the DAG execution engine with full parallelism,
 // retry, on_failure routing, and for_each expansion.
-func runDAG(ctx context.Context, p *Pipeline, mgr *plugin.Manager, userInput string, cfg *runConfig) (string, error) {
+func runDAG(ctx context.Context, p *Pipeline, mgr *executor.Manager, userInput string, cfg *runConfig) (string, error) {
 	// Wrap ctx with a cancel so a failing step (no on_failure) can stop all
 	// in-flight goroutines immediately rather than waiting for them to drain.
 	ctx, cancelPipeline := context.WithCancel(ctx)
@@ -1139,7 +1139,7 @@ func interpolateArgs(args map[string]any, vars map[string]any) map[string]any {
 
 // dispatchStep determines the executor for a step and runs it (with retries).
 // runID and pipeName are used to populate event payloads; pub receives the events.
-func dispatchStep(ctx context.Context, step *Step, args map[string]any, snap map[string]any, ec *ExecutionContext, mgr *plugin.Manager, runID int64, pipeName string, pub EventPublisher, p *Pipeline, st *store.Store) (map[string]any, error) {
+func dispatchStep(ctx context.Context, step *Step, args map[string]any, snap map[string]any, ec *ExecutionContext, mgr *executor.Manager, runID int64, pipeName string, pub EventPublisher, p *Pipeline, st *store.Store) (map[string]any, error) {
 	executor, err := resolveExecutor(ctx, step, args, snap, ec, mgr, p, st)
 	if err != nil {
 		return nil, err
@@ -1204,9 +1204,6 @@ func dispatchStep(ctx context.Context, step *Step, args map[string]any, snap map
 		if typeName == "" {
 			typeName = step.Type
 		}
-		if typeName == "" {
-			typeName = step.Plugin
-		}
 		if clarify.IsReactive(typeName) {
 			valueStr, _ := extractOutputValue(out)
 			detector := clarify.Get(typeName)
@@ -1240,7 +1237,7 @@ func dispatchStep(ctx context.Context, step *Step, args map[string]any, snap map
 							for k, v := range step.Vars {
 								stepVars[k] = Interpolate(v, snap)
 							}
-							fe := newPluginExecutor(pl, followUp, stepVars, nil)
+							fe := newRegisteredExecutor(pl, followUp, stepVars, nil)
 							if err2 := fe.Init(ctx); err2 == nil {
 								out, execErr = fe.Execute(ctx, args)
 							}
@@ -1328,14 +1325,11 @@ done:
 }
 
 // resolveExecutor builds the appropriate StepExecutor for a step.
-func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap map[string]any, ec *ExecutionContext, mgr *plugin.Manager, p *Pipeline, st *store.Store) (StepExecutor, error) {
-	// Determine the type/executor name: Executor takes precedence over Type, then Plugin.
+func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap map[string]any, ec *ExecutionContext, mgr *executor.Manager, p *Pipeline, st *store.Store) (StepExecutor, error) {
+	// Determine the executor name: Executor takes precedence over Type.
 	typeName := step.Executor
 	if typeName == "" {
 		typeName = step.Type
-	}
-	if typeName == "" {
-		typeName = step.Plugin
 	}
 
 	// Check builtin registry first.
@@ -1348,13 +1342,13 @@ func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap 
 		return nil, fmt.Errorf("unknown builtin type %q", typeName)
 	}
 
-	// Fall back to plugin manager.
+	// Look up in executor manager.
 	pl, ok := mgr.Get(typeName)
 	if !ok {
-		return nil, fmt.Errorf("plugin %q not found", typeName)
+		return nil, fmt.Errorf("executor %q not found", typeName)
 	}
 
-	// Build plugin input string from prompt/input fields.
+	// Build executor input string from prompt/input fields.
 	raw := step.Prompt + step.Input
 	if raw == "" {
 		if v, ok := snap["param.input"]; ok {
@@ -1420,7 +1414,7 @@ func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap 
 		promptOrInput = strings.TrimRight(promptOrInput, "\n") + clarify.Instruction()
 	}
 
-	// Build stepVars for the plugin.
+	// Build stepVars for the executor.
 	// For tool-kind plugins (kind: tool in sidecar YAML), only pass the
 	// interpolated step.Vars plus cwd and model. This prevents large step
 	// outputs from being dumped as GLITCH_* env vars into every subprocess.
@@ -1440,7 +1434,7 @@ func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap 
 		stepVars[k] = Interpolate(v, snap)
 	}
 
-	return newPluginExecutor(pl, promptOrInput, stepVars, nil), nil
+	return newRegisteredExecutor(pl, promptOrInput, stepVars, nil), nil
 }
 
 // builtinExecutor adapts a BuiltinFunc to StepExecutor.
@@ -1459,15 +1453,12 @@ func (b *builtinExecutor) Cleanup(_ context.Context) error { return nil }
 // This is used by the legacy runner only.
 // forceInput, when non-empty, overrides step.Prompt/step.Input completely
 // (used when resuming from a clarification answer).
-func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mgr *plugin.Manager, defaultInput string, p *Pipeline, st *store.Store, runID int64, forceInput string) (string, error) {
-	pluginName := step.Executor
-	if pluginName == "" {
-		pluginName = step.Plugin
-	}
+func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mgr *executor.Manager, defaultInput string, p *Pipeline, st *store.Store, runID int64, forceInput string) (string, error) {
+	executorName := step.Executor
 
-	pl, ok := mgr.Get(pluginName)
+	pl, ok := mgr.Get(executorName)
 	if !ok {
-		return "", fmt.Errorf("plugin %q not found", pluginName)
+		return "", fmt.Errorf("executor %q not found", executorName)
 	}
 
 	snap := ec.Snapshot()
@@ -1526,7 +1517,7 @@ func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mg
 
 	// Append GLITCH_CLARIFY instruction for reactive executors so the model
 	// knows the protocol for requesting user input.
-	if clarify.IsReactive(pluginName) {
+	if clarify.IsReactive(executorName) {
 		promptOrInput = strings.TrimRight(promptOrInput, "\n") + clarify.Instruction()
 	}
 
@@ -1542,8 +1533,8 @@ func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mg
 
 	// Clarification: if the executor output contains GLITCH_CLARIFY:, surface it
 	// via AskClarification (busd), then re-execute with the full conversation context.
-	if execErr == nil && clarify.IsReactive(pluginName) {
-		detector := clarify.Get(pluginName)
+	if execErr == nil && clarify.IsReactive(executorName) {
+		detector := clarify.Get(executorName)
 		for _, line := range strings.Split(output, "\n") {
 			if q, found := detector.Detect(line); found {
 				// Mark the step as paused waiting for clarification.

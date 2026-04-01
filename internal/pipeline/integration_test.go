@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 	"github.com/powerglove-dev/gl1tch/internal/picker"
 	"github.com/powerglove-dev/gl1tch/internal/pipeline"
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
 )
 
 // checkModelAvailable skips the test if the named ollama model is not present.
@@ -40,10 +40,10 @@ func checkModelAvailable(t *testing.T, model string) {
 	t.Skipf("model not available: %s", model)
 }
 
-// buildManager constructs a plugin.Manager with all providers registered.
-func buildManager() *plugin.Manager {
+// buildManager constructs a executor.Manager with all providers registered.
+func buildManager() *executor.Manager {
 	providers := picker.BuildProviders()
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	for _, prov := range providers {
 		if prov.SidecarPath != "" {
 			continue
@@ -52,7 +52,7 @@ func buildManager() *plugin.Manager {
 		if binary == "" {
 			binary = prov.ID
 		}
-		_ = mgr.Register(plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", binary, prov.PipelineArgs...))
+		_ = mgr.Register(executor.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", binary, prov.PipelineArgs...))
 	}
 	return mgr
 }

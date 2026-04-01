@@ -1,4 +1,4 @@
-package plugin_test
+package executor_test
 
 import (
 	"bytes"
@@ -8,46 +8,46 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 )
 
 func TestManager_Empty(t *testing.T) {
-	m := plugin.NewManager()
+	m := executor.NewManager()
 	if len(m.List()) != 0 {
-		t.Errorf("expected empty manager, got %d plugins", len(m.List()))
+		t.Errorf("expected empty manager, got %d executors", len(m.List()))
 	}
 }
 
 func TestManager_Register(t *testing.T) {
-	m := plugin.NewManager()
-	p := &plugin.StubPlugin{PluginName: "test"}
-	if err := m.Register(p); err != nil {
+	m := executor.NewManager()
+	e := &executor.StubExecutor{ExecutorName: "test"}
+	if err := m.Register(e); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	plugins := m.List()
-	if len(plugins) != 1 {
-		t.Fatalf("expected 1 plugin, got %d", len(plugins))
+	executors := m.List()
+	if len(executors) != 1 {
+		t.Fatalf("expected 1 executor, got %d", len(executors))
 	}
-	if plugins[0].Name() != "test" {
-		t.Errorf("expected name 'test', got %q", plugins[0].Name())
+	if executors[0].Name() != "test" {
+		t.Errorf("expected name 'test', got %q", executors[0].Name())
 	}
 }
 
 func TestManager_Get(t *testing.T) {
-	m := plugin.NewManager()
-	if err := m.Register(&plugin.StubPlugin{PluginName: "alpha"}); err != nil {
+	m := executor.NewManager()
+	if err := m.Register(&executor.StubExecutor{ExecutorName: "alpha"}); err != nil {
 		t.Fatalf("Register alpha: %v", err)
 	}
-	if err := m.Register(&plugin.StubPlugin{PluginName: "beta"}); err != nil {
+	if err := m.Register(&executor.StubExecutor{ExecutorName: "beta"}); err != nil {
 		t.Fatalf("Register beta: %v", err)
 	}
 
-	p, ok := m.Get("alpha")
+	e, ok := m.Get("alpha")
 	if !ok {
 		t.Fatal("expected to find 'alpha'")
 	}
-	if p.Name() != "alpha" {
-		t.Errorf("got wrong plugin: %q", p.Name())
+	if e.Name() != "alpha" {
+		t.Errorf("got wrong executor: %q", e.Name())
 	}
 
 	_, ok = m.Get("missing")
@@ -65,53 +65,53 @@ func TestManager_LoadWrappersFromDir_Valid(t *testing.T) {
 		}
 	}
 
-	m := plugin.NewManager()
+	m := executor.NewManager()
 	errs := m.LoadWrappersFromDir(dir)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 	for _, name := range []string{"alpha", "beta"} {
 		if _, ok := m.Get(name); !ok {
-			t.Errorf("expected plugin %q to be registered", name)
+			t.Errorf("expected executor %q to be registered", name)
 		}
 	}
 }
 
 func TestManager_Register_Duplicate(t *testing.T) {
-	m := plugin.NewManager()
-	if err := m.Register(&plugin.StubPlugin{PluginName: "dup"}); err != nil {
+	m := executor.NewManager()
+	if err := m.Register(&executor.StubExecutor{ExecutorName: "dup"}); err != nil {
 		t.Fatalf("first Register: %v", err)
 	}
-	err := m.Register(&plugin.StubPlugin{PluginName: "dup"})
+	err := m.Register(&executor.StubExecutor{ExecutorName: "dup"})
 	if err == nil {
 		t.Fatal("expected error on duplicate registration, got nil")
 	}
 	// First registration must still be intact.
 	if _, ok := m.Get("dup"); !ok {
-		t.Error("original plugin should still be registered after duplicate attempt")
+		t.Error("original executor should still be registered after duplicate attempt")
 	}
 }
 
 func TestManager_LoadWrappersFromDir_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
-	m := plugin.NewManager()
+	m := executor.NewManager()
 	errs := m.LoadWrappersFromDir(dir)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 	if len(m.List()) != 0 {
-		t.Errorf("expected 0 plugins, got %d", len(m.List()))
+		t.Errorf("expected 0 executors, got %d", len(m.List()))
 	}
 }
 
 // TestHierarchicalNaming verifies category.action lookup and _action var injection.
 func TestHierarchicalNaming(t *testing.T) {
-	m := plugin.NewManager()
+	m := executor.NewManager()
 
-	// Register a plugin as the category handler.
+	// Register an executor as the category handler.
 	var capturedVars map[string]string
-	base := &plugin.StubPlugin{
-		PluginName: "providers.claude",
+	base := &executor.StubExecutor{
+		ExecutorName: "providers.claude",
 		ExecuteFn: func(ctx context.Context, input string, vars map[string]string, w io.Writer) error {
 			capturedVars = vars
 			_, err := w.Write([]byte("ok"))
@@ -127,16 +127,16 @@ func TestHierarchicalNaming(t *testing.T) {
 	m.RegisterCategory("providers.claude", "chat", base)
 
 	// Direct lookup should still work.
-	p, ok := m.Get("providers.claude")
+	e, ok := m.Get("providers.claude")
 	if !ok {
 		t.Fatal("expected direct lookup to succeed")
 	}
-	if p.Name() != "providers.claude" {
-		t.Errorf("expected direct name, got %q", p.Name())
+	if e.Name() != "providers.claude" {
+		t.Errorf("expected direct name, got %q", e.Name())
 	}
 
 	// Category.action lookup.
-	pAction, ok := m.Get("providers.claude.chat")
+	eAction, ok := m.Get("providers.claude.chat")
 	if !ok {
 		t.Fatal("expected category.action lookup to succeed")
 	}
@@ -145,7 +145,7 @@ func TestHierarchicalNaming(t *testing.T) {
 	capturedVars = nil
 	ctx := context.Background()
 	var buf bytes.Buffer
-	if err := pAction.Execute(ctx, "test", map[string]string{}, &buf); err != nil {
+	if err := eAction.Execute(ctx, "test", map[string]string{}, &buf); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if capturedVars["_action"] != "chat" {
@@ -153,12 +153,12 @@ func TestHierarchicalNaming(t *testing.T) {
 	}
 
 	// Lookup for unknown action still uses category if category exists.
-	pOther, ok := m.Get("providers.claude.summarize")
+	eOther, ok := m.Get("providers.claude.summarize")
 	if !ok {
 		t.Fatal("expected category lookup with unknown action to succeed")
 	}
 	capturedVars = nil
-	if err := pOther.Execute(ctx, "test", map[string]string{}, &buf); err != nil {
+	if err := eOther.Execute(ctx, "test", map[string]string{}, &buf); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if capturedVars["_action"] != "summarize" {

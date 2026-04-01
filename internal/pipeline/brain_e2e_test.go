@@ -11,8 +11,8 @@ import (
 
 	"github.com/powerglove-dev/gl1tch/internal/braincontext"
 	"github.com/powerglove-dev/gl1tch/internal/brainrag"
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 	"github.com/powerglove-dev/gl1tch/internal/pipeline"
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
 	"github.com/powerglove-dev/gl1tch/internal/store"
 )
 
@@ -76,10 +76,10 @@ func TestBrainE2E_IndexAndQuery_Ollama(t *testing.T) {
 	}
 
 	// Run a pipeline step that will have brain context injected.
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	var capturedPrompt string
-	_ = mgr.Register(&plugin.StubPlugin{
-		PluginName: "capture",
+	_ = mgr.Register(&executor.StubExecutor{
+		ExecutorName: "capture",
 		ExecuteFn: func(_ context.Context, input string, _ map[string]string, w io.Writer) error {
 			capturedPrompt = input
 			_, err := w.Write([]byte("captured"))
@@ -90,7 +90,7 @@ func TestBrainE2E_IndexAndQuery_Ollama(t *testing.T) {
 	p := &pipeline.Pipeline{
 		Name: "brain-e2e-test",
 		Steps: []pipeline.Step{
-			{ID: "s1", Plugin: "capture", Prompt: "tell me about the brain system"},
+			{ID: "s1", Executor: "capture", Prompt: "tell me about the brain system"},
 		},
 	}
 

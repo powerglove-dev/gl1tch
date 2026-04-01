@@ -1,13 +1,13 @@
 // Package apmmanager provides a BubbleTea component for browsing, installing,
 // and activating APM (Agent Package Manager) agents within the glitch TUI.
-// It also exposes [AgentCapabilityProvider], an interface glitch plugins use to
+// It also exposes [AgentCapabilityProvider], an interface glitch executors use to
 // request and receive agent capabilities at runtime.
 package apmmanager
 
-import "github.com/powerglove-dev/gl1tch/internal/plugin"
+import "github.com/powerglove-dev/gl1tch/internal/executor"
 
 // ── Public tea.Msg types ────────────────────────────────────────────────────
-// These are exported because parent components and plugins need to handle them.
+// These are exported because parent components and executors need to handle them.
 
 // AgentListLoadedMsg is dispatched when the initial agent manifest scan completes.
 // If Err is non-nil the list is empty and the error is displayed in the TUI.
@@ -23,12 +23,12 @@ type AgentInstallStartMsg struct {
 }
 
 // AgentInstallDoneMsg is dispatched when an agent installation succeeds.
-// PluginID is the name under which the new CliAdapter was registered in
-// the plugin.Manager, and Adapter is the live adapter instance.
+// ExecutorID is the name under which the new CliAdapter was registered in
+// the executor.Manager, and Adapter is the live adapter instance.
 type AgentInstallDoneMsg struct {
 	AgentID  string
-	PluginID string
-	Adapter  *plugin.CliAdapter
+	ExecutorID string
+	Adapter  *executor.CliAdapter
 }
 
 // AgentInstallErrMsg is dispatched when an agent installation fails.
@@ -38,14 +38,14 @@ type AgentInstallErrMsg struct {
 }
 
 // AgentActivatedMsg signals to the parent that an agent is now live and its
-// plugin is registered. The parent should route tasks to PluginID going forward.
+// executor is registered. The parent should route tasks to ExecutorID going forward.
 type AgentActivatedMsg struct {
 	AgentID  string
-	PluginID string
+	ExecutorID string
 }
 
 // AgentUninstallDoneMsg signals that an agent was removed from disk and its
-// plugin deregistered.
+// executor deregistered.
 type AgentUninstallDoneMsg struct {
 	AgentID string
 }
@@ -57,8 +57,8 @@ type AgentUninstallDoneMsg struct {
 // It is converted to AgentInstallDoneMsg or AgentInstallErrMsg in Update.
 type agentInstallResultMsg struct {
 	agentID  string
-	pluginID string
-	adapter  *plugin.CliAdapter
+	executorID string
+	adapter  *executor.CliAdapter
 	err      error
 }
 

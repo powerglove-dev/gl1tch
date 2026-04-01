@@ -10,9 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 	"github.com/powerglove-dev/gl1tch/internal/picker"
 	"github.com/powerglove-dev/gl1tch/internal/pipeline"
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
 	"github.com/powerglove-dev/gl1tch/internal/store"
 )
 
@@ -64,7 +64,7 @@ var pipelineRunCmd = &cobra.Command{
 		fmt.Printf("[pipeline] starting: %s\n", p.Name)
 
 		runProviders := picker.BuildProviders()
-		mgr := plugin.NewManager()
+		mgr := executor.NewManager()
 		for _, prov := range runProviders {
 			// Sidecar-backed providers are fully registered by LoadWrappersFromDir below.
 			if prov.SidecarPath != "" {
@@ -74,7 +74,7 @@ var pipelineRunCmd = &cobra.Command{
 			if binary == "" {
 				binary = prov.ID
 			}
-			if err := mgr.Register(plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", binary, prov.PipelineArgs...)); err != nil {
+			if err := mgr.Register(executor.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", binary, prov.PipelineArgs...)); err != nil {
 				fmt.Fprintf(os.Stderr, "pipeline: register provider %q: %v\n", prov.ID, err)
 			}
 		}
@@ -180,7 +180,7 @@ var pipelineResumeCmd = &cobra.Command{
 
 		// Build the executor manager (same as pipelineRunCmd).
 		runProviders := picker.BuildProviders()
-		mgr := plugin.NewManager()
+		mgr := executor.NewManager()
 		for _, prov := range runProviders {
 			if prov.SidecarPath != "" {
 				continue
@@ -189,7 +189,7 @@ var pipelineResumeCmd = &cobra.Command{
 			if binary == "" {
 				binary = prov.ID
 			}
-			if err := mgr.Register(plugin.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", binary, prov.PipelineArgs...)); err != nil {
+			if err := mgr.Register(executor.NewCliAdapter(prov.ID, prov.Label+" CLI adapter", binary, prov.PipelineArgs...)); err != nil {
 				fmt.Fprintf(os.Stderr, "resume: register provider %q: %v\n", prov.ID, err)
 			}
 		}

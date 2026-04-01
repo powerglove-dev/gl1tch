@@ -1,4 +1,4 @@
-package plugin_test
+package executor_test
 
 import (
 	"bytes"
@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 )
 
 func TestCliAdapter_Name(t *testing.T) {
-	a := plugin.NewCliAdapter("echo-tool", "A simple echo tool", "echo")
+	a := executor.NewCliAdapter("echo-tool", "A simple echo tool", "echo")
 	if a.Name() != "echo-tool" {
 		t.Errorf("expected 'echo-tool', got %q", a.Name())
 	}
@@ -20,7 +20,7 @@ func TestCliAdapter_Name(t *testing.T) {
 
 func TestCliAdapter_Execute(t *testing.T) {
 	// cat reads stdin and echoes it to stdout — available on macOS/Linux.
-	a := plugin.NewCliAdapter("cat-tool", "echoes input", "cat")
+	a := executor.NewCliAdapter("cat-tool", "echoes input", "cat")
 	var buf bytes.Buffer
 	err := a.Execute(context.Background(), "hello world\n", nil, &buf)
 	if err != nil {
@@ -33,7 +33,7 @@ func TestCliAdapter_Execute(t *testing.T) {
 
 func TestCliAdapter_Execute_ContextCancel(t *testing.T) {
 	// sleep 10 will be cancelled by ctx before it finishes.
-	a := plugin.NewCliAdapter("sleep-tool", "sleeps", "sleep", "10")
+	a := executor.NewCliAdapter("sleep-tool", "sleeps", "sleep", "10")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 	var buf bytes.Buffer
@@ -62,7 +62,7 @@ args: ["-n"]
 input_schema: "string"
 output_schema: "string"
 `)
-	a, err := plugin.NewCliAdapterFromSidecar(path)
+	a, err := executor.NewCliAdapterFromSidecar(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -79,14 +79,14 @@ func TestNewCliAdapterFromSidecar_MissingCommand(t *testing.T) {
 name: broken-tool
 description: missing command
 `)
-	_, err := plugin.NewCliAdapterFromSidecar(path)
+	_, err := executor.NewCliAdapterFromSidecar(path)
 	if err == nil {
 		t.Error("expected error for missing command, got nil")
 	}
 }
 
 func TestNewCliAdapterFromSidecar_FileNotFound(t *testing.T) {
-	_, err := plugin.NewCliAdapterFromSidecar("/nonexistent/path/tool.yaml")
+	_, err := executor.NewCliAdapterFromSidecar("/nonexistent/path/tool.yaml")
 	if err == nil {
 		t.Error("expected error for missing file, got nil")
 	}
@@ -99,7 +99,7 @@ command: cat
 input_schema: "text/plain"
 output_schema: "text/plain"
 `)
-	a, err := plugin.NewCliAdapterFromSidecar(path)
+	a, err := executor.NewCliAdapterFromSidecar(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -116,7 +116,7 @@ output_schema: "text/plain"
 }
 
 func TestCliAdapter_Capabilities_NoSidecar(t *testing.T) {
-	a := plugin.NewCliAdapter("plain-tool", "no schema", "echo")
+	a := executor.NewCliAdapter("plain-tool", "no schema", "echo")
 	if a.Capabilities() != nil {
 		t.Errorf("expected nil capabilities for non-sidecar adapter, got %v", a.Capabilities())
 	}
@@ -124,7 +124,7 @@ func TestCliAdapter_Capabilities_NoSidecar(t *testing.T) {
 
 func TestCliAdapter_Execute_VarsAsEnv(t *testing.T) {
 	// Use `sh -c 'echo $ORCAI_MY_KEY'` to verify the env var is set on the subprocess.
-	a := plugin.NewCliAdapter("sh-tool", "shell", "sh", "-c", "echo $ORCAI_MY_KEY")
+	a := executor.NewCliAdapter("sh-tool", "shell", "sh", "-c", "echo $ORCAI_MY_KEY")
 	var buf bytes.Buffer
 	err := a.Execute(context.Background(), "", map[string]string{"my_key": "hello-from-var"}, &buf)
 	if err != nil {
@@ -137,7 +137,7 @@ func TestCliAdapter_Execute_VarsAsEnv(t *testing.T) {
 
 func TestCliAdapter_Execute_FilterViaEnv(t *testing.T) {
 	// Simulate the jq-sidecar pattern: sh -c 'jq "$GLITCH_FILTER"' with JSON on stdin.
-	a := plugin.NewCliAdapter("jq-sidecar", "jq via env", "sh", "-c", `jq "$GLITCH_FILTER"`)
+	a := executor.NewCliAdapter("jq-sidecar", "jq via env", "sh", "-c", `jq "$GLITCH_FILTER"`)
 	var buf bytes.Buffer
 	err := a.Execute(context.Background(), `{"name":"glitch"}`, map[string]string{"filter": ".name"}, &buf)
 	if err != nil {

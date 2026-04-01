@@ -292,11 +292,8 @@ func (b *BubbleModel) syncFromStep(idx int) {
 	// step ID
 	b.stepIDInput.SetValue(s.ID)
 
-	// executor — prefer Executor field, fallback to Plugin for legacy pipelines
+	// executor — use Executor field
 	exec := s.Executor
-	if exec == "" {
-		exec = s.Plugin //nolint:staticcheck
-	}
 	b.executorDD.SetValue(exec)
 
 	if exec == "" || isBuiltin(exec) {
@@ -389,7 +386,6 @@ func (b *BubbleModel) applyToStep() {
 
 	exec := b.executorDD.Value()
 	s.Executor = exec
-	s.Plugin = "" //nolint:staticcheck // clear deprecated field
 
 	if b.modelEnabled {
 		s.Model = b.modelDD.Value()
@@ -1264,9 +1260,6 @@ func (b *BubbleModel) buildLeftLines(p palette) []string {
 
 	for i, s := range b.inner.Steps() {
 		exec := s.Executor
-		if exec == "" {
-			exec = s.Plugin //nolint:staticcheck
-		}
 		icon := "◆"
 		if isBuiltin(exec) {
 			icon = "⚙"
@@ -1672,9 +1665,6 @@ func truncateANSI(s string, maxVis int) string {
 func stepLabel(s pipeline.Step) string {
 	if s.Executor != "" {
 		return s.Executor
-	}
-	if s.Plugin != "" { //nolint:staticcheck
-		return s.Plugin //nolint:staticcheck
 	}
 	if s.Type != "" {
 		return s.Type

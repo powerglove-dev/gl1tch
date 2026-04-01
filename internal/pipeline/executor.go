@@ -5,7 +5,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 )
 
 // StepExecutor is the unified interface for all step types: builtins, plugins, and
@@ -17,25 +17,25 @@ type StepExecutor interface {
 	Cleanup(ctx context.Context) error
 }
 
-// pluginExecutor adapts the legacy plugin.Plugin interface to StepExecutor.
+// registeredExecutor adapts the executor.Executor interface to StepExecutor.
 // Execute collects output into a buffer and returns {"value": <string>}.
-type pluginExecutor struct {
-	pl     plugin.Plugin
+type registeredExecutor struct {
+	exec   executor.Executor
 	input  string
 	vars   map[string]string
 	w      io.Writer
-	Prompt string // the resolved prompt sent to the plugin; set at construction
+	Prompt string // the resolved prompt sent to the executor; set at construction
 }
 
-func newPluginExecutor(pl plugin.Plugin, input string, vars map[string]string, w io.Writer) *pluginExecutor {
-	return &pluginExecutor{pl: pl, input: input, vars: vars, w: w, Prompt: input}
+func newRegisteredExecutor(exec executor.Executor, input string, vars map[string]string, w io.Writer) *registeredExecutor {
+	return &registeredExecutor{exec: exec, input: input, vars: vars, w: w, Prompt: input}
 }
 
-func (pe *pluginExecutor) Init(_ context.Context) error { return nil }
+func (re *registeredExecutor) Init(_ context.Context) error { return nil }
 
-func (pe *pluginExecutor) Execute(ctx context.Context, _ map[string]any) (map[string]any, error) {
+func (re *registeredExecutor) Execute(ctx context.Context, _ map[string]any) (map[string]any, error) {
 	var buf bytes.Buffer
-	err := pe.pl.Execute(ctx, pe.input, pe.vars, &buf)
+	err := re.exec.Execute(ctx, re.input, re.vars, &buf)
 	out := map[string]any{"value": buf.String()}
 	if err != nil {
 		// Return partial output alongside the error so callers (e.g. brain note
@@ -43,11 +43,11 @@ func (pe *pluginExecutor) Execute(ctx context.Context, _ map[string]any) (map[st
 		return out, err
 	}
 	// Mirror output to the pipeline writer if provided.
-	if pe.w != nil {
-		_, _ = pe.w.Write(buf.Bytes())
+	if re.w != nil {
+		_, _ = re.w.Write(buf.Bytes())
 	}
 	return out, nil
 }
 
-func (pe *pluginExecutor) Cleanup(_ context.Context) error { return nil }
+func (re *registeredExecutor) Cleanup(_ context.Context) error { return nil }
 

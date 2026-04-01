@@ -13,9 +13,9 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 	"github.com/powerglove-dev/gl1tch/internal/modal"
 	"github.com/powerglove-dev/gl1tch/internal/picker"
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
 	"github.com/powerglove-dev/gl1tch/internal/store"
 	"github.com/powerglove-dev/gl1tch/internal/themes"
 	"github.com/powerglove-dev/gl1tch/internal/tuikit"
@@ -24,7 +24,7 @@ import (
 // Model holds all state for the prompt manager TUI.
 type Model struct {
 	store      *store.Store
-	pluginMgr  *plugin.Manager
+	executorMgr  *executor.Manager
 	themeState tuikit.ThemeState
 
 	width, height int
@@ -73,9 +73,9 @@ type Model struct {
 	statusMsg     string // transient status line message
 }
 
-// New creates a new prompt manager model seeded with the given store, plugin
+// New creates a new prompt manager model seeded with the given store, executor
 // manager, and theme bundle.
-func New(st *store.Store, pluginMgr *plugin.Manager, bundle *themes.Bundle) *Model {
+func New(st *store.Store, executorMgr *executor.Manager, bundle *themes.Bundle) *Model {
 	fi := textinput.New()
 	fi.Placeholder = "/ filter..."
 	fi.CharLimit = 128
@@ -94,7 +94,7 @@ func New(st *store.Store, pluginMgr *plugin.Manager, bundle *themes.Bundle) *Mod
 	providers := picker.BuildProviders()
 	return &Model{
 		store:        st,
-		pluginMgr:    pluginMgr,
+		executorMgr:    executorMgr,
 		themeState:   tuikit.NewThemeState(bundle),
 		filterInput:  fi,
 		titleInput:   ti,

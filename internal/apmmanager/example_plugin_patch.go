@@ -1,19 +1,19 @@
 //go:build ignore
 
-// Package apmmanager — example_plugin_patch.go
+// Package apmmanager — example_executor_patch.go
 //
-// This file is a living example showing how an existing glitch plugin (or pipeline
+// This file is a living example showing how an existing glitch executor (or pipeline
 // builtin step) calls RequireAgent to unlock a capability it needs at runtime.
 // Build tag "ignore" keeps it out of the normal build; it is documentation-as-code.
 //
 // The pattern:
 //  1. Accept an AgentCapabilityProvider at construction time.
 //  2. Call RequireAgent(ctx, id) at point-of-use — not at startup.
-//  3. Use the returned Agent.PluginID to look up the registered CliAdapter in the
-//     plugin.Manager and dispatch the user's input.
+//  3. Use the returned Agent.ExecutorID to look up the registered CliAdapter in the
+//     executor.Manager and dispatch the user's input.
 //
-// This lets plugins self-enhance on first use: if the needed agent isn't installed,
-// ApmManager installs it on demand and the plugin continues with the new capability.
+// This lets executors self-enhance on first use: if the needed agent isn't installed,
+// ApmManager installs it on demand and the executor continues with the new capability.
 
 package apmmanager
 
@@ -23,7 +23,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 )
 
 // ── Example 1: a pipeline builtin step ──────────────────────────────────────
@@ -32,7 +32,7 @@ import (
 //
 //	steps:
 //	  - id: summarize
-//	    plugin: builtin.agent_step
+//	    executor: builtin.agent_step
 //	    args:
 //	      agent_id: api-architect
 //	      prompt: "Review the following API surface and suggest improvements"
@@ -73,42 +73,42 @@ func AgentBuiltinStep(provider AgentCapabilityProvider) func(ctx context.Context
 			return nil, fmt.Errorf("builtin.agent_step: %w", err)
 		}
 
-		// The agent's CliAdapter is now registered under agent.PluginID.
+		// The agent's CliAdapter is now registered under agent.ExecutorID.
 		// Here we call its Execute method directly to stream output to w.
-		// In a real wiring, you'd retrieve the adapter from plugin.Manager.
+		// In a real wiring, you'd retrieve the adapter from executor.Manager.
 		_ = agent
-		fmt.Fprintf(w, "[agent:%s] %s\n", agent.PluginID, prompt)
+		fmt.Fprintf(w, "[agent:%s] %s\n", agent.ExecutorID, prompt)
 
-		return map[string]any{"agent_id": agent.ID, "plugin_id": agent.PluginID}, nil
+		return map[string]any{"agent_id": agent.ID, "executor_id": agent.ExecutorID}, nil
 	}
 }
 
-// ── Example 2: a CliAdapter-backed plugin that self-enhances ────────────────
+// ── Example 2: a CliAdapter-backed executor that self-enhances ────────────────
 
-// ReviewerPlugin wraps a static CLI tool but can escalate to an APM code-review
+// ReviewerExecutor wraps a static CLI tool but can escalate to an APM code-review
 // agent when the user's input contains a Go file path.
 //
-// This demonstrates the "self-enhance" pattern: the plugin starts as a thin
+// This demonstrates the "self-enhance" pattern: the executor starts as a thin
 // wrapper and calls RequireAgent only when it detects the heavier capability
 // is needed — avoiding the install cost for simple inputs.
-type ReviewerPlugin struct {
-	provider AgentCapabilityProvider
-	pluginMgr *plugin.Manager
-	base     *plugin.CliAdapter // fast path: static linter
+type ReviewerExecutor struct {
+	provider    AgentCapabilityProvider
+	executorMgr *executor.Manager
+	base        *executor.CliAdapter // fast path: static linter
 }
 
-func NewReviewerPlugin(base *plugin.CliAdapter, provider AgentCapabilityProvider, mgr *plugin.Manager) *ReviewerPlugin {
-	return &ReviewerPlugin{provider: provider, pluginMgr: mgr, base: base}
+func NewReviewerExecutor(base *executor.CliAdapter, provider AgentCapabilityProvider, mgr *executor.Manager) *ReviewerExecutor {
+	return &ReviewerExecutor{provider: provider, executorMgr: mgr, base: base}
 }
 
-func (r *ReviewerPlugin) Name() string              { return "reviewer" }
-func (r *ReviewerPlugin) Description() string        { return "Code reviewer — static linter + optional APM agent escalation" }
-func (r *ReviewerPlugin) Capabilities() []plugin.Capability { return r.base.Capabilities() }
-func (r *ReviewerPlugin) Close() error               { return nil }
+func (r *ReviewerExecutor) Name() string               { return "reviewer" }
+func (r *ReviewerExecutor) Description() string         { return "Code reviewer — static linter + optional APM agent escalation" }
+func (r *ReviewerExecutor) Capabilities() []executor.Capability { return r.base.Capabilities() }
+func (r *ReviewerExecutor) Close() error                { return nil }
 
 // Execute runs the static linter for quick feedback, but if the input mentions
 // a Go file it escalates to the APM "go-reviewer" agent for deep analysis.
-func (r *ReviewerPlugin) Execute(ctx context.Context, input string, vars map[string]string, w io.Writer) error {
+func (r *ReviewerExecutor) Execute(ctx context.Context, input string, vars map[string]string, w io.Writer) error {
 	// Fast path: delegate to the base static linter.
 	if !strings.Contains(input, ".go") {
 		return r.base.Execute(ctx, input, vars, w)
@@ -123,10 +123,10 @@ func (r *ReviewerPlugin) Execute(ctx context.Context, input string, vars map[str
 		return r.base.Execute(ctx, input, vars, w)
 	}
 
-	// Retrieve the registered CliAdapter from the plugin.Manager and execute.
-	agentPlugin, ok := r.pluginMgr.Get(agent.PluginID)
+	// Retrieve the registered CliAdapter from the executor.Manager and execute.
+	agentExec, ok := r.executorMgr.Get(agent.ExecutorID)
 	if !ok {
-		return fmt.Errorf("reviewer: plugin %s not found after RequireAgent", agent.PluginID)
+		return fmt.Errorf("reviewer: executor %s not found after RequireAgent", agent.ExecutorID)
 	}
-	return agentPlugin.Execute(ctx, input, vars, w)
+	return agentExec.Execute(ctx, input, vars, w)
 }

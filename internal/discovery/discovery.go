@@ -11,33 +11,33 @@ import (
 	"github.com/powerglove-dev/gl1tch/internal/providers"
 )
 
-// PluginType distinguishes native gRPC plugins from auto-detected CLI wrappers.
-type PluginType int
+// ExecutorType distinguishes native gRPC executors from auto-detected CLI wrappers.
+type ExecutorType int
 
 const (
-	TypeNative     PluginType = iota // implements OrcaiPlugin gRPC service
-	TypeCLIWrapper                   // auto-detected tool in PATH
-	TypePipeline                     // pipeline definition from *.pipeline.yaml
+	TypeNative     ExecutorType = iota // implements OrcaiExecutor gRPC service
+	TypeCLIWrapper                     // auto-detected tool in PATH
+	TypePipeline                       // pipeline definition from *.pipeline.yaml
 )
 
-// Plugin describes a discovered plugin or CLI wrapper.
-type Plugin struct {
+// ExecutorInfo describes a discovered executor or CLI wrapper.
+type ExecutorInfo struct {
 	Name         string
 	Command      string
 	Args         []string
-	Type         PluginType
+	Type         ExecutorType
 	PipelineFile string
-	// SidecarPath is the path to the sidecar YAML for TypeCLIWrapper plugins
+	// SidecarPath is the path to the sidecar YAML for TypeCLIWrapper executors
 	// discovered from the wrappers directory. Empty for other types.
 	SidecarPath string
 }
 
-// Discover returns all available plugins: Tier 1 (native, from configDir/plugins/),
+// Discover returns all available executors: Tier 1 (native, from configDir/executors/),
 // pipeline definitions (from configDir/pipelines/), and Tier 2 (CLI wrappers from PATH).
-// Native plugins and pipelines shadow CLI wrappers of the same name.
+// Native executors and pipelines shadow CLI wrappers of the same name.
 // CLI wrappers are sourced from the providers.Registry (bundled + user-defined profiles).
-func Discover(configDir string) ([]Plugin, error) {
-	native, err := scanNative(filepath.Join(configDir, "plugins"))
+func Discover(configDir string) ([]ExecutorInfo, error) {
+	native, err := scanNative(filepath.Join(configDir, "executors"))
 	if err != nil {
 		return nil, err
 	}
@@ -48,14 +48,14 @@ func Discover(configDir string) ([]Plugin, error) {
 	}
 
 	knownNames := make(map[string]bool, len(native)+len(pipelines))
-	for _, p := range native {
-		knownNames[p.Name] = true
+	for _, e := range native {
+		knownNames[e.Name] = true
 	}
-	for _, p := range pipelines {
-		knownNames[p.Name] = true
+	for _, e := range pipelines {
+		knownNames[e.Name] = true
 	}
 
-	// Scan wrappers dir for sidecar-declared CLI plugins; check command in PATH.
+	// Scan wrappers dir for sidecar-declared CLI executors; check command in PATH.
 	// These take priority over providers.Registry entries of the same name.
 	wrappers, err := scanWrappers(filepath.Join(configDir, "wrappers"), knownNames)
 	if err != nil {
@@ -70,20 +70,20 @@ func Discover(configDir string) ([]Plugin, error) {
 		return nil, err
 	}
 
-	plugins := append(native, pipelines...)
-	plugins = append(plugins, wrappers...)
+	executors := append(native, pipelines...)
+	executors = append(executors, wrappers...)
 	for _, profile := range reg.Available() {
 		if knownNames[profile.Name] {
-			continue // native plugin, pipeline, or sidecar wrapper takes priority
+			continue // native executor, pipeline, or sidecar wrapper takes priority
 		}
-		plugins = append(plugins, Plugin{
+		executors = append(executors, ExecutorInfo{
 			Name:    profile.Name,
 			Command: profile.Binary,
 			Args:    profile.Session.LaunchArgs,
 			Type:    TypeCLIWrapper,
 		})
 	}
-	return plugins, nil
+	return executors, nil
 }
 
 // sidecarHeader holds just the fields needed to determine name and command.
@@ -93,9 +93,9 @@ type sidecarHeader struct {
 }
 
 // scanWrappers reads YAML files from dir, checks that each command is in PATH,
-// and returns Plugin entries (TypeCLIWrapper) for those that are available.
+// and returns ExecutorInfo entries (TypeCLIWrapper) for those that are available.
 // Names already in knownNames are skipped to let higher-priority types shadow them.
-func scanWrappers(dir string, knownNames map[string]bool) ([]Plugin, error) {
+func scanWrappers(dir string, knownNames map[string]bool) ([]ExecutorInfo, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -104,7 +104,7 @@ func scanWrappers(dir string, knownNames map[string]bool) ([]Plugin, error) {
 		return nil, err
 	}
 
-	var plugins []Plugin
+	var executors []ExecutorInfo
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
 			continue
@@ -124,17 +124,17 @@ func scanWrappers(dir string, knownNames map[string]bool) ([]Plugin, error) {
 		if _, err := exec.LookPath(hdr.Command); err != nil {
 			continue // command not installed
 		}
-		plugins = append(plugins, Plugin{
+		executors = append(executors, ExecutorInfo{
 			Name:        hdr.Name,
 			Command:     hdr.Command,
 			Type:        TypeCLIWrapper,
 			SidecarPath: path,
 		})
 	}
-	return plugins, nil
+	return executors, nil
 }
 
-func scanNative(dir string) ([]Plugin, error) {
+func scanNative(dir string) ([]ExecutorInfo, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
@@ -142,7 +142,7 @@ func scanNative(dir string) ([]Plugin, error) {
 	if err != nil {
 		return nil, err
 	}
-	var plugins []Plugin
+	var executors []ExecutorInfo
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -151,16 +151,16 @@ func scanNative(dir string) ([]Plugin, error) {
 		if err != nil || info.Mode()&0o111 == 0 {
 			continue // not executable
 		}
-		plugins = append(plugins, Plugin{
+		executors = append(executors, ExecutorInfo{
 			Name:    e.Name(),
 			Command: filepath.Join(dir, e.Name()),
 			Type:    TypeNative,
 		})
 	}
-	return plugins, nil
+	return executors, nil
 }
 
-func scanPipelines(dir string) ([]Plugin, error) {
+func scanPipelines(dir string) ([]ExecutorInfo, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
@@ -168,19 +168,19 @@ func scanPipelines(dir string) ([]Plugin, error) {
 	if err != nil {
 		return nil, err
 	}
-	var plugins []Plugin
+	var executors []ExecutorInfo
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".pipeline.yaml") || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
 		name := strings.TrimSuffix(e.Name(), ".pipeline.yaml")
 		fullPath := filepath.Join(dir, e.Name())
-		plugins = append(plugins, Plugin{
+		executors = append(executors, ExecutorInfo{
 			Name:         name,
 			Command:      fullPath,
 			Type:         TypePipeline,
 			PipelineFile: fullPath,
 		})
 	}
-	return plugins, nil
+	return executors, nil
 }

@@ -1,4 +1,4 @@
-package plugin
+package executor
 
 import (
 	"context"
@@ -29,12 +29,12 @@ type SidecarSchema struct {
 	// Category is an optional hierarchical prefix (e.g. "providers.claude").
 	// When set, the adapter is also registered under "category.name" in the Manager.
 	Category string `yaml:"category"`
-	// Kind categorises the plugin. Valid values: "agent" (default), "tool".
-	// Plugins without a kind field default to "agent" for backwards compatibility.
+	// Kind categorises the executor. Valid values: "agent" (default), "tool".
+	// Executors without a kind field default to "agent" for backwards compatibility.
 	Kind string `yaml:"kind"`
 }
 
-// CliAdapter wraps an arbitrary CLI tool as a Tier 2 Plugin.
+// CliAdapter wraps an arbitrary CLI tool as a Tier 2 Executor.
 // Input is written to the subprocess stdin; stdout/stderr is streamed to the writer.
 // args are fixed command-line arguments prepended to every Execute call.
 type CliAdapter struct {
@@ -48,7 +48,7 @@ type CliAdapter struct {
 	kind     string // "agent" or "tool"; defaults to "agent"
 }
 
-// NewCliAdapter creates a Tier 2 plugin that wraps cmd.
+// NewCliAdapter creates a Tier 2 executor that wraps cmd.
 func NewCliAdapter(name, description, cmd string, args ...string) *CliAdapter {
 	return &CliAdapter{name: name, desc: description, cmd: cmd, args: args}
 }
@@ -100,7 +100,7 @@ func (c *CliAdapter) Command() string            { return c.cmd }
 // Category returns the optional hierarchical category prefix. Empty if not set.
 func (c *CliAdapter) Category() string { return c.category }
 
-// Kind returns the plugin kind ("agent" or "tool"). Never empty; defaults to "agent".
+// Kind returns the executor kind ("agent" or "tool"). Never empty; defaults to "agent".
 func (c *CliAdapter) Kind() string { return c.kind }
 
 // Models returns the models declared in the sidecar YAML. Never nil.

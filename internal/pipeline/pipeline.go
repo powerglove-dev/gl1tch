@@ -21,19 +21,17 @@ type Pipeline struct {
 // Step is one unit of work in a pipeline.
 type Step struct {
 	ID        string    `yaml:"id"`
-	Type      string    `yaml:"type"`      // "input", "output", or empty (plugin step)
+	Type      string    `yaml:"type"`      // "input", "output", or empty (executor step)
 	Model     string    `yaml:"model"`
 	Prompt    string    `yaml:"prompt"`
 	Input     string    `yaml:"input"`
 	PublishTo string    `yaml:"publish_to"`
 	Condition Condition `yaml:"condition"`
 
-	// Deprecated: use Executor instead. Plugin specifies the plugin name to invoke.
-	Plugin string `yaml:"plugin"`
-	// Deprecated: use Args instead. Vars is a flat string map passed to the plugin.
+	// Vars is a flat string map passed to the executor.
 	Vars map[string]string `yaml:"vars"`
 
-	// Executor supersedes Plugin when set; use "builtin.*" or "category.action" form.
+	// Executor specifies the executor to invoke; use "builtin.*" or "category.action" form.
 	Executor string `yaml:"executor"`
 	// Args supersedes Vars when set; supports nested values for structured plugin input.
 	Args map[string]any `yaml:"args"`

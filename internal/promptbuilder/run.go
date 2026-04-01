@@ -4,18 +4,18 @@ import (
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 	"github.com/powerglove-dev/gl1tch/internal/picker"
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
 )
 
 // Run launches the prompt builder as a standalone BubbleTea program.
 func Run() {
 	providers := picker.BuildProviders()
 
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	for _, p := range providers {
-		if err := mgr.Register(plugin.NewCliAdapter(p.ID, p.Label+" CLI adapter", p.ID)); err != nil {
-			fmt.Printf("prompt builder: register plugin %q: %v\n", p.ID, err)
+		if err := mgr.Register(executor.NewCliAdapter(p.ID, p.Label+" CLI adapter", p.ID)); err != nil {
+			fmt.Printf("prompt builder: register executor %q: %v\n", p.ID, err)
 		}
 	}
 

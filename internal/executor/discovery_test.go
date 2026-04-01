@@ -1,11 +1,11 @@
-package plugin_test
+package executor_test
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 )
 
 func writeSidecar(t *testing.T, dir, name, content string) {
@@ -20,22 +20,22 @@ func TestLoadWrappers_Valid(t *testing.T) {
 	writeSidecar(t, dir, "tool-a.yaml", "name: tool-a\ncommand: echo\n")
 	writeSidecar(t, dir, "tool-b.yaml", "name: tool-b\ncommand: cat\n")
 
-	plugins, errs := plugin.LoadWrappers(dir)
+	executors, errs := executor.LoadWrappers(dir)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
-	if len(plugins) != 2 {
-		t.Errorf("expected 2 plugins, got %d", len(plugins))
+	if len(executors) != 2 {
+		t.Errorf("expected 2 executors, got %d", len(executors))
 	}
 }
 
 func TestLoadWrappers_DirNotExist(t *testing.T) {
-	plugins, errs := plugin.LoadWrappers("/nonexistent/wrappers/dir")
+	executors, errs := executor.LoadWrappers("/nonexistent/wrappers/dir")
 	if errs != nil {
 		t.Errorf("expected nil errors for missing dir, got %v", errs)
 	}
-	if len(plugins) != 0 {
-		t.Errorf("expected 0 plugins, got %d", len(plugins))
+	if len(executors) != 0 {
+		t.Errorf("expected 0 executors, got %d", len(executors))
 	}
 }
 
@@ -44,9 +44,9 @@ func TestLoadWrappers_MixedValidity(t *testing.T) {
 	writeSidecar(t, dir, "valid.yaml", "name: valid-tool\ncommand: echo\n")
 	writeSidecar(t, dir, "invalid.yaml", "name: broken\n") // missing command
 
-	plugins, errs := plugin.LoadWrappers(dir)
-	if len(plugins) != 1 {
-		t.Errorf("expected 1 plugin, got %d", len(plugins))
+	executors, errs := executor.LoadWrappers(dir)
+	if len(executors) != 1 {
+		t.Errorf("expected 1 executor, got %d", len(executors))
 	}
 	if len(errs) != 1 {
 		t.Errorf("expected 1 error, got %d", len(errs))
@@ -60,11 +60,11 @@ func TestLoadWrappers_IgnoresNonYAML(t *testing.T) {
 		t.Fatalf("write txt: %v", err)
 	}
 
-	plugins, errs := plugin.LoadWrappers(dir)
+	executors, errs := executor.LoadWrappers(dir)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
-	if len(plugins) != 1 {
-		t.Errorf("expected 1 plugin, got %d", len(plugins))
+	if len(executors) != 1 {
+		t.Errorf("expected 1 executor, got %d", len(executors))
 	}
 }

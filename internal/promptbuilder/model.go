@@ -1,8 +1,8 @@
 package promptbuilder
 
 import (
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 	"github.com/powerglove-dev/gl1tch/internal/pipeline"
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
 )
 
 // argsRow is one key/value pair in the args editor.
@@ -18,12 +18,12 @@ type Model struct {
 	name          string
 	steps         []pipeline.Step
 	selectedIndex int
-	pluginMgr     *plugin.Manager
+	executorMgr     *executor.Manager
 }
 
-// New creates a new prompt builder model. pluginMgr may be nil in tests.
-func New(pluginMgr *plugin.Manager) *Model {
-	return &Model{pluginMgr: pluginMgr}
+// New creates a new prompt builder model. executorMgr may be nil in tests.
+func New(executorMgr *executor.Manager) *Model {
+	return &Model{executorMgr: executorMgr}
 }
 
 func (m *Model) Name() string           { return m.name }

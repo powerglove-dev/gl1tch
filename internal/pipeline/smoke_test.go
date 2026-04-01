@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/powerglove-dev/gl1tch/internal/executor"
 	"github.com/powerglove-dev/gl1tch/internal/pipeline"
-	"github.com/powerglove-dev/gl1tch/internal/plugin"
 )
 
 // smokeModel returns the model to use for smoke tests.
@@ -36,9 +36,9 @@ func smokeModelBase(full string) string {
 // ollamaGenerateStub returns a StubPlugin that calls the ollama HTTP API directly,
 // bypassing the discovery/config layer so the smoke test runs on a fresh CI runner
 // without a configured orcai installation.
-func ollamaGenerateStub(model string) *plugin.StubPlugin {
-	return &plugin.StubPlugin{
-		PluginName: "ollama",
+func ollamaGenerateStub(model string) *executor.StubExecutor {
+	return &executor.StubExecutor{
+		ExecutorName: "ollama",
 		PluginDesc: "ollama smoke stub",
 		ExecuteFn: func(ctx context.Context, input string, _ map[string]string, w io.Writer) error {
 			body, _ := json.Marshal(map[string]any{
@@ -70,7 +70,7 @@ func TestSmokePipeline_SingleStep(t *testing.T) {
 	model := smokeModel()
 	checkModelAvailable(t, smokeModelBase(model))
 
-	mgr := plugin.NewManager()
+	mgr := executor.NewManager()
 	if err := mgr.Register(ollamaGenerateStub(model)); err != nil {
 		t.Fatalf("register stub: %v", err)
 	}

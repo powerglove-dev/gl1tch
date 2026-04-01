@@ -10,60 +10,60 @@ import (
 
 func TestScanNative_Empty(t *testing.T) {
 	dir := t.TempDir()
-	plugins, err := discovery.Discover(dir)
+	executors, err := discovery.Discover(dir)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
-	for _, p := range plugins {
-		if p.Type == discovery.TypeNative {
-			t.Errorf("expected no native plugins in empty dir, got %+v", p)
+	for _, e := range executors {
+		if e.Type == discovery.TypeNative {
+			t.Errorf("expected no native executors in empty dir, got %+v", e)
 		}
 	}
 }
 
 func TestScanNative_FindsExecutable(t *testing.T) {
 	dir := t.TempDir()
-	pluginsDir := filepath.Join(dir, "plugins")
-	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+	executorsDir := filepath.Join(dir, "executors")
+	if err := os.MkdirAll(executorsDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	path := filepath.Join(pluginsDir, "orcai-test-plugin")
+	path := filepath.Join(executorsDir, "orcai-test-executor")
 	if err := os.WriteFile(path, []byte("#!/bin/sh\necho hi"), 0o755); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	plugins, err := discovery.Discover(dir)
+	executors, err := discovery.Discover(dir)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
 	found := false
-	for _, p := range plugins {
-		if p.Name == "orcai-test-plugin" && p.Type == discovery.TypeNative {
+	for _, e := range executors {
+		if e.Name == "orcai-test-executor" && e.Type == discovery.TypeNative {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("expected to find orcai-test-plugin, got %+v", plugins)
+		t.Errorf("expected to find orcai-test-executor, got %+v", executors)
 	}
 }
 
 func TestScanNative_SkipsNonExecutable(t *testing.T) {
 	dir := t.TempDir()
-	pluginsDir := filepath.Join(dir, "plugins")
-	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+	executorsDir := filepath.Join(dir, "executors")
+	if err := os.MkdirAll(executorsDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	path := filepath.Join(pluginsDir, "not-executable")
+	path := filepath.Join(executorsDir, "not-executable")
 	if err := os.WriteFile(path, []byte("data"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	plugins, err := discovery.Discover(dir)
+	executors, err := discovery.Discover(dir)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
-	for _, p := range plugins {
-		if p.Name == "not-executable" {
+	for _, e := range executors {
+		if e.Name == "not-executable" {
 			t.Errorf("should not have loaded non-executable file")
 		}
 	}
@@ -71,30 +71,30 @@ func TestScanNative_SkipsNonExecutable(t *testing.T) {
 
 func TestNativePriorityOverCLI(t *testing.T) {
 	dir := t.TempDir()
-	pluginsDir := filepath.Join(dir, "plugins")
-	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+	executorsDir := filepath.Join(dir, "executors")
+	if err := os.MkdirAll(executorsDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	// Create a native plugin named "claude" — it should shadow the CLI wrapper
-	path := filepath.Join(pluginsDir, "claude")
+	// Create a native executor named "claude" — it should shadow the CLI wrapper
+	path := filepath.Join(executorsDir, "claude")
 	if err := os.WriteFile(path, []byte("#!/bin/sh"), 0o755); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	plugins, err := discovery.Discover(dir)
+	executors, err := discovery.Discover(dir)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
 	count := 0
-	for _, p := range plugins {
-		if p.Name == "claude" {
+	for _, e := range executors {
+		if e.Name == "claude" {
 			count++
-			if p.Type != discovery.TypeNative {
-				t.Errorf("expected claude to be TypeNative, got %v", p.Type)
+			if e.Type != discovery.TypeNative {
+				t.Errorf("expected claude to be TypeNative, got %v", e.Type)
 			}
 		}
 	}
 	if count != 1 {
-		t.Errorf("expected exactly 1 claude plugin, got %d", count)
+		t.Errorf("expected exactly 1 claude executor, got %d", count)
 	}
 }
 
@@ -110,13 +110,13 @@ func TestScanPipelines_FindsYAML(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	plugins, err := discovery.Discover(dir)
+	executors, err := discovery.Discover(dir)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
 	found := false
-	for _, p := range plugins {
-		if p.Name == "my-pipeline" && p.Type == discovery.TypePipeline {
+	for _, e := range executors {
+		if e.Name == "my-pipeline" && e.Type == discovery.TypePipeline {
 			found = true
 		}
 	}
@@ -136,13 +136,13 @@ func TestScanPipelines_IgnoresNonYAML(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	plugins, err := discovery.Discover(dir)
+	executors, err := discovery.Discover(dir)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
-	for _, p := range plugins {
-		if p.Type == discovery.TypePipeline {
-			t.Errorf("expected no pipeline plugins, got %+v", p)
+	for _, e := range executors {
+		if e.Type == discovery.TypePipeline {
+			t.Errorf("expected no pipeline executors, got %+v", e)
 		}
 	}
 }
