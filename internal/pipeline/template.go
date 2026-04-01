@@ -32,8 +32,17 @@ var templateFuncs = template.FuncMap{
 	// get resolves a dot-separated path against a nested map[string]any.
 	// Useful for step IDs that contain hyphens which are invalid in dot notation:
 	//   {{get "step.ask-llama.data.value" .}}
+	// {{ steps.X.Y }} patterns in the returned value are escaped so that
+	// ResolveStepInputs does not attempt to resolve them — embedded content
+	// (e.g. docs containing example YAML) should not be treated as templates.
 	"get": func(path string, data map[string]any) any {
-		return getNestedPath(data, strings.Split(path, "."))
+		v := getNestedPath(data, strings.Split(path, "."))
+		if s, ok := v.(string); ok {
+			return stepInputPattern.ReplaceAllStringFunc(s, func(m string) string {
+				return strings.Replace(m, "{{", "{ {", 1)
+			})
+		}
+		return v
 	},
 	"trim":        strings.TrimSpace,
 	"upper":       strings.ToUpper,

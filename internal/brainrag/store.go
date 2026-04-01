@@ -206,3 +206,59 @@ func (r *RAGStore) Query(ctx context.Context, baseURL, model, q string, topK int
 	}
 	return ids, nil
 }
+
+// QueryWithText embeds the query and returns the top-K most similar entries
+// with both their note IDs and original text.
+// Returns an empty slice (not an error) if Ollama is unavailable.
+func (r *RAGStore) QueryWithText(ctx context.Context, baseURL, model, q string, topK int) ([]VectorEntry, error) {
+	qVec, err := Embed(ctx, baseURL, model, q)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[brainrag] warn: query embed failed: %v\n", err)
+		return nil, nil
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT note_id, text, vector FROM brain_vectors WHERE cwd = ?`,
+		r.cwd,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("brainrag: query vectors: %w", err)
+	}
+	defer rows.Close()
+
+	type scoredEntry struct {
+		entry VectorEntry
+		score float32
+	}
+	var scored []scoredEntry
+
+	for rows.Next() {
+		var e VectorEntry
+		var blob []byte
+		if err := rows.Scan(&e.NoteID, &e.Text, &blob); err != nil {
+			continue
+		}
+		s := CosineSimilarity(qVec, decodeVector(blob))
+		scored = append(scored, scoredEntry{entry: e, score: s})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("brainrag: query rows: %w", err)
+	}
+
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
+
+	if topK <= 0 {
+		topK = 5
+	}
+	if topK > len(scored) {
+		topK = len(scored)
+	}
+
+	results := make([]VectorEntry, topK)
+	for i := range topK {
+		results[i] = scored[i].entry
+	}
+	return results, nil
+}

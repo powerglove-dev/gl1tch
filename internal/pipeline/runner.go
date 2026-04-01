@@ -198,17 +198,7 @@ func Run(ctx context.Context, p *Pipeline, mgr *executor.Manager, userInput stri
 		}
 	}
 
-	var result string
-	var runErr error
-
-	// Handle legacy sequential pipeline (no Needs used) plus input/output step types.
-	// If none of the steps has Needs, Retry, ForEach, or builtin types, fall through
-	// to the legacy runner for full backwards compatibility.
-	if isLegacyPipeline(p) {
-		result, runErr = runLegacy(ctx, p, mgr, userInput, cfg)
-	} else {
-		result, runErr = runDAG(ctx, p, mgr, userInput, cfg)
-	}
+	result, runErr := runDAG(ctx, p, mgr, userInput, cfg)
 
 	finishedAt := time.Now()
 	durationMs := finishedAt.Sub(startedAt).Milliseconds()
@@ -254,25 +244,9 @@ func Run(ctx context.Context, p *Pipeline, mgr *executor.Manager, userInput stri
 	return result, runErr
 }
 
-// isLegacyPipeline returns true if none of the steps use DAG-only features,
-// allowing the old sequential code path to handle it unmodified.
-// A pipeline with MaxParallel explicitly set also uses the DAG runner.
-func isLegacyPipeline(p *Pipeline) bool {
-	if p.MaxParallel > 0 {
-		return false
-	}
-	for _, s := range p.Steps {
-		if len(s.Needs) > 0 || s.Retry != nil || s.ForEach != "" || s.OnFailure != "" {
-			return false
-		}
-		if strings.HasPrefix(s.Type, "builtin.") || strings.HasPrefix(s.Executor, "builtin.") {
-			return false
-		}
-	}
-	return true
-}
-
-// runLegacy is the original sequential runner kept for backwards compatibility.
+// runLegacy is the original sequential runner. It is no longer used by Run()
+// (all pipelines go through runDAG) but is kept for resume support via
+// executePluginStep and direct test usage.
 // It handles "input"/"output" step types and condition branches.
 func runLegacy(ctx context.Context, p *Pipeline, mgr *executor.Manager, userInput string, cfg *runConfig) (string, error) {
 	ec := NewExecutionContext(WithStore(cfg.store))
@@ -512,6 +486,23 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *executor.Manager, userInput s
 		return "", fmt.Errorf("pipeline: %w", err)
 	}
 
+	// Build implicit condition dependencies.
+	// For each step with Condition.Then or Condition.Else, treat the branch
+	// targets as implicit dependents of the condition step. The branch targets
+	// gain one extra pendingDep; condition evaluation unblocks the chosen branch
+	// and skips the other.
+	conditionBranchOf := make(map[string]string) // branchStepID → condition step ID
+	for _, s := range steps {
+		if s.Condition.Then != "" {
+			conditionBranchOf[s.Condition.Then] = s.ID
+			dependents[s.ID] = append(dependents[s.ID], s.Condition.Then)
+		}
+		if s.Condition.Else != "" {
+			conditionBranchOf[s.Condition.Else] = s.ID
+			dependents[s.ID] = append(dependents[s.ID], s.Condition.Else)
+		}
+	}
+
 	// Set up shared execution context.
 	ec := NewExecutionContext(WithStore(cfg.store))
 	if cfg.injector != nil {
@@ -547,8 +538,12 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *executor.Manager, userInput s
 		s := &steps[i]
 		byID[s.ID] = s
 		stepIndexByID[s.ID] = i
+		deps := int32(len(s.Needs))
+		if _, isBranch := conditionBranchOf[s.ID]; isBranch {
+			deps++ // implicit dep on the condition step
+		}
 		st := &stepState{status: statusWaiting}
-		st.pendingDeps.Store(int32(len(s.Needs)))
+		st.pendingDeps.Store(deps)
 		states[s.ID] = st
 	}
 
@@ -767,16 +762,9 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *executor.Manager, userInput s
 
 	// Enqueue all initially-ready normal steps (0 pending deps, not on_failure targets).
 	for _, id := range normalSteps {
-		step := byID[id]
-		if len(step.Needs) == 0 {
+		st := states[id]
+		if st.pendingDeps.Load() <= 0 {
 			readyCh <- id
-		} else {
-			// Check if all deps are already done (e.g. input steps completed above).
-			st := states[id]
-			n := st.pendingDeps.Load()
-			if n <= 0 {
-				readyCh <- id
-			}
 		}
 	}
 
@@ -935,8 +923,61 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *executor.Manager, userInput s
 				}
 				firstStepErrMu.Unlock()
 
-				// Unblock dependents.
+				// Evaluate condition branching if present.
+				// Skip the non-matching branch and unblock the matching branch.
+				if step.Condition.If != "" {
+					snap := ec.Snapshot()
+					snap["_output"] = ""
+					if res.output != nil {
+						if v, ok := res.output["value"]; ok {
+							snap["_output"] = fmt.Sprint(v)
+						}
+					}
+					condMatches := EvalCondition(step.Condition.If, snap)
+					var skipID, runID string
+					if condMatches {
+						skipID = step.Condition.Else
+						runID = step.Condition.Then
+					} else {
+						skipID = step.Condition.Then
+						runID = step.Condition.Else
+					}
+					if skipID != "" {
+						if skipSt, ok := states[skipID]; ok {
+							skipSt.mu.Lock()
+							if skipSt.status == statusWaiting {
+								skipSt.status = statusSkipped
+								skipSt.mu.Unlock()
+								newlySkipped := skipTransitive(skipID, dependents, states, ec)
+								completedCh <- stepResult{id: skipID, skipped: true}
+								for _, sid := range newlySkipped {
+									completedCh <- stepResult{id: sid, skipped: true}
+								}
+							} else {
+								skipSt.mu.Unlock()
+							}
+						}
+					}
+					if runID != "" {
+						if runSt, ok := states[runID]; ok {
+							if n := runSt.pendingDeps.Add(-1); n == 0 {
+								runSt.mu.Lock()
+								runStatus := runSt.status
+								runSt.mu.Unlock()
+								if runStatus == statusWaiting {
+									readyCh <- runID
+								}
+							}
+						}
+					}
+				}
+
+				// Unblock explicit dependents (excludes condition branch targets,
+				// which are handled above via conditionBranchOf).
 				for _, dep := range dependents[res.id] {
+					if conditionBranchOf[dep] == res.id {
+						continue // already handled by condition evaluation
+					}
 					depSt := states[dep]
 					if n := depSt.pendingDeps.Add(-1); n == 0 {
 						depSt.mu.Lock()
@@ -952,6 +993,12 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *executor.Manager, userInput s
 		case <-ctx.Done():
 			stopDispatcher()
 			wg.Wait()
+			firstStepErrMu.Lock()
+			stepErr := firstStepErr
+			firstStepErrMu.Unlock()
+			if stepErr != nil {
+				return "", stepErr
+			}
 			return "", ctx.Err()
 		}
 	}
@@ -1233,7 +1280,7 @@ func dispatchStep(ctx context.Context, step *Step, args map[string]any, snap map
 						followUp := BuildClarificationFollowUp(valueStr, answer)
 						if pl, ok := mgr.Get(typeName); ok {
 							stepVars := ec.FlatStrings()
-							stepVars["model"] = step.Model
+							stepVars["model"] = Interpolate(step.Model, snap)
 							for k, v := range step.Vars {
 								stepVars[k] = Interpolate(v, snap)
 							}
@@ -1351,7 +1398,9 @@ func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap 
 	// Build executor input string from prompt/input fields.
 	raw := step.Prompt + step.Input
 	if raw == "" {
-		if v, ok := snap["param.input"]; ok {
+		// param.input is stored as nested keys {"param": {"input": v}},
+		// so a flat snap["param.input"] lookup never matches — use the path helper.
+		if v := getNestedPath(snap, []string{"param", "input"}); v != nil {
 			raw = fmt.Sprint(v)
 		}
 	}
@@ -1429,7 +1478,7 @@ func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap 
 	} else {
 		stepVars = ec.FlatStrings()
 	}
-	stepVars["model"] = step.Model
+	stepVars["model"] = Interpolate(step.Model, snap)
 	for k, v := range step.Vars {
 		stepVars[k] = Interpolate(v, snap)
 	}
@@ -1522,7 +1571,7 @@ func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mg
 	}
 
 	stepVars := ec.FlatStrings()
-	stepVars["model"] = step.Model
+	stepVars["model"] = Interpolate(step.Model, snap)
 	for k, v := range step.Vars {
 		stepVars[k] = Interpolate(v, snap)
 	}

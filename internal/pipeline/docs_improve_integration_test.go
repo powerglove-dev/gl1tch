@@ -193,6 +193,8 @@ FIX: <one sentence: what to add or change>`
 
 // buildDocsImprovePipeline constructs an in-memory version of docs-improve.pipeline.yaml
 // targeting tmpRepo instead of the real repository.
+// The index_code and semantic_search steps are omitted here to keep the test fast;
+// the pipeline is validated end-to-end without the vector index dependency.
 func buildDocsImprovePipeline(tmpRepo, model string) *pipeline.Pipeline {
 	docsDir := filepath.Join(tmpRepo, "site", "src", "content", "pipelines")
 	cmdDir := filepath.Join(tmpRepo, "cmd")
@@ -270,11 +272,22 @@ Current file:
 Output the COMPLETE improved markdown file. Preserve frontmatter. No fences.`,
 			},
 			{
-				ID:       "polish",
+				ID:     "polish",
 				Executor: "claude",
 				Model:    "claude-haiku-4-5-20251001",
-				Needs:    []string{"rewrite"},
-				Prompt:   "You are an editor. Fix grammar and clarity only. Do not add new information. Preserve frontmatter exactly. Output raw markdown.\n\n{{get \"step.rewrite.data.value\" .}}",
+				Needs:    []string{"rewrite", "pick", "scan_code"},
+				Prompt: `You are an expert technical writer for CLI tool documentation.
+
+## What was improved and why:
+{{get "step.pick.data.value" .}}
+
+## Supporting code:
+{{get "step.scan_code.data.value" .}}
+
+## Draft from local model:
+{{get "step.rewrite.data.value" .}}
+
+Produce the final version. Strengthen weak sections, add examples where helpful, fix inaccuracies. Do NOT change frontmatter. Output raw markdown only.`,
 			},
 			{
 				ID:       "write_file",
@@ -298,7 +311,7 @@ if [ -z "$(git diff --stat site/)" ]; then
   exit 0
 fi
 git add site/
-git commit -m "docs: automated improvement by docs-improve pipeline"
+git commit -m "docs: automated improvement by docs-improve pipeline" -m "Co-Authored-By: gl1tch <nomoresecrets+noreply@8op.org>"
 echo "committed"
 `, tmpRepo),
 				},

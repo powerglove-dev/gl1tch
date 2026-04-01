@@ -156,6 +156,9 @@ func (s *Scheduler) runEntry(entry Entry) {
 	switch entry.Kind {
 	case "pipeline", "agent":
 		args = []string{"pipeline", "run", entry.Target}
+		if entry.Input != "" {
+			args = append(args, "--input", "input="+entry.Input)
+		}
 	default:
 		s.logError("cron: unknown entry kind", "name", entry.Name, "kind", entry.Kind)
 		return

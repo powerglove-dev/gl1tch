@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/8op-org/gl1tch/internal/cron"
 	"github.com/8op-org/gl1tch/internal/executor"
 	"github.com/8op-org/gl1tch/internal/picker"
 	"github.com/8op-org/gl1tch/internal/pipeline"
@@ -159,7 +160,119 @@ func routeIntent(ctx context.Context, prompt string, refs []pipeline.PipelineRef
 	return nil, nil
 }
 
-// dispatchMatched runs a matched pipeline with the original prompt as input.
+// matchedIntent holds structured parameters extracted from a routed prompt.
+type matchedIntent struct {
+	Input    string // focus/topic to pass as {{param.input}}
+	CronExpr string // 5-field cron expression, or "" if not scheduled
+}
+
+// extractIntent uses the local model to parse focus and schedule out of a
+// natural-language prompt that has already matched a pipeline.
+// Uses two simple single-answer questions rather than JSON for reliability
+// with small local models. Returns safe defaults on failure.
+func extractIntent(ctx context.Context, prompt string, mgr *executor.Manager, model string) matchedIntent {
+	// Ask two independent questions — simpler prompts are more reliable on 3B models.
+	p := &pipeline.Pipeline{
+		Name:    "ask-extract-intent",
+		Version: "1",
+		Steps: []pipeline.Step{
+			{
+				ID:       "extract_cron",
+				Executor: "ollama",
+				Model:    model,
+				Prompt: `Does this request ask for a repeating schedule? If yes, reply with ONLY a standard 5-field cron expression. If no, reply with NONE.
+
+Examples:
+  "run every hour" → 0 * * * *
+  "repeat every 2 hours" → 0 */2 * * *
+  "run daily" → 0 0 * * *
+  "run now" → NONE
+  "just run it" → NONE
+
+Request: ` + prompt + `
+
+Reply (cron expression or NONE):`,
+			},
+			{
+				ID:       "extract_focus",
+				Executor: "ollama",
+				Model:    model,
+				Prompt: `What topic or area should this pipeline focus on? Reply with ONLY the focus phrase, or NONE if not mentioned.
+
+Examples:
+  "focus on themes documentation" → themes documentation
+  "I want it to focus on the executor docs" → executor docs
+  "run my pipeline" → NONE
+
+Request: ` + prompt + `
+
+Reply (focus phrase or NONE):`,
+			},
+		},
+	}
+
+	// Run both questions in parallel (no needs dependency).
+	type intentResult struct {
+		cron  string
+		focus string
+	}
+	// Run as a pipeline — both steps run concurrently.
+	// We retrieve both outputs from the combined result via a two-step pipeline
+	// that writes to a shared context, so use a sequential approach instead.
+	cronResult, _ := pipeline.Run(ctx, &pipeline.Pipeline{
+		Name: "ask-extract-cron", Version: "1",
+		Steps: []pipeline.Step{p.Steps[0]},
+	}, mgr, "")
+
+	focusResult, _ := pipeline.Run(ctx, &pipeline.Pipeline{
+		Name: "ask-extract-focus", Version: "1",
+		Steps: []pipeline.Step{p.Steps[1]},
+	}, mgr, "")
+
+	_ = p // suppress unused warning
+
+	cronExpr := extractCronExpr(cronResult)
+
+	focus := strings.TrimSpace(focusResult)
+	if strings.EqualFold(focus, "none") || focus == "" {
+		focus = ""
+	} else {
+		// Strip any leading/trailing punctuation the model might add.
+		focus = strings.Trim(focus, `"'.`)
+	}
+
+	return matchedIntent{Input: focus, CronExpr: cronExpr}
+}
+
+// upsertCronEntry adds or updates a cron entry for the given pipeline in cron.yaml.
+func upsertCronEntry(ref *pipeline.PipelineRef, intent matchedIntent) error {
+	configDir, err := glitchConfigDir()
+	if err != nil {
+		return err
+	}
+	cronPath := filepath.Join(configDir, "cron.yaml")
+
+	entries, err := cron.LoadConfigFrom(cronPath)
+	if err != nil {
+		return fmt.Errorf("load cron config: %w", err)
+	}
+
+	e := cron.Entry{
+		Name:       ref.Name,
+		Schedule:   intent.CronExpr,
+		Kind:       "pipeline",
+		Target:     ref.Name,
+		Input:      intent.Input,
+		Timeout:    "15m",
+		WorkingDir: func() string { wd, _ := os.Getwd(); return wd }(),
+	}
+
+	entries = cron.UpsertEntry(entries, e)
+	return cron.SaveConfigTo(cronPath, entries)
+}
+
+// dispatchMatched extracts structured intent from the prompt, optionally
+// schedules the pipeline via cron, then runs it if requested.
 func dispatchMatched(cmd *cobra.Command, prompt string, ref *pipeline.PipelineRef, inputVars map[string]string) error {
 	if askDryRun {
 		fmt.Printf("would run pipeline: %s\n  path: %s\n", ref.Name, ref.Path)
@@ -167,6 +280,30 @@ func dispatchMatched(cmd *cobra.Command, prompt string, ref *pipeline.PipelineRe
 	}
 
 	fmt.Fprintf(os.Stderr, "[route] → %s\n", ref.Name)
+
+	// Use local model to extract focus input and cron schedule from the prompt.
+	mgr, _, resolvedModel, _ := buildAskManager(askProvider, askModel)
+	intent := extractIntent(cmd.Context(), prompt, mgr, resolvedModel)
+
+	// Merge extracted input with any explicit --input flags (explicit wins).
+	if _, hasInput := inputVars["input"]; !hasInput && intent.Input != "" {
+		if inputVars == nil {
+			inputVars = make(map[string]string)
+		}
+		inputVars["input"] = intent.Input
+	}
+
+	// Schedule via cron if requested.
+	if intent.CronExpr != "" {
+		if err := upsertCronEntry(ref, intent); err != nil {
+			fmt.Fprintf(os.Stderr, "[route] warn: could not update cron.yaml: %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "[cron] scheduled %s (%s)\n", ref.Name, intent.CronExpr)
+			if intent.Input != "" {
+				fmt.Fprintf(os.Stderr, "[cron] focus: %s\n", intent.Input)
+			}
+		}
+	}
 
 	f, err := os.Open(ref.Path)
 	if err != nil {
@@ -179,9 +316,9 @@ func dispatchMatched(cmd *cobra.Command, prompt string, ref *pipeline.PipelineRe
 		return fmt.Errorf("load matched pipeline: %w", err)
 	}
 
-	mgr := buildFullManager()
+	runMgr := buildFullManager()
 	runOpts := buildRunOpts(inputVars)
-	result, err := pipeline.Run(cmd.Context(), p, mgr, prompt, runOpts...)
+	result, err := pipeline.Run(cmd.Context(), p, runMgr, prompt, runOpts...)
 	if err != nil {
 		return err
 	}
@@ -273,6 +410,41 @@ func generatePipeline(ctx context.Context, prompt, model string, mgr *executor.M
 		return "", err
 	}
 	return stripFences(strings.TrimSpace(result)), nil
+}
+
+// extractCronExpr scans s for the first line that looks like a 5-field cron
+// expression and returns it, or "" if none found. Tolerates surrounding text,
+// comments, and extra punctuation that small models commonly add.
+func extractCronExpr(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		// Skip obvious non-answers.
+		if strings.EqualFold(line, "none") || line == "" {
+			continue
+		}
+		// Take the first run of up to 5 tokens; ignore trailing comment/text.
+		fields := strings.Fields(line)
+		if len(fields) >= 5 {
+			candidate := strings.Join(fields[:5], " ")
+			// Rough validity: each field must be a cron token (digits, *, /, -, ,).
+			valid := true
+			for _, f := range fields[:5] {
+				for _, c := range f {
+					if c != '*' && c != '/' && c != '-' && c != ',' && (c < '0' || c > '9') {
+						valid = false
+						break
+					}
+				}
+				if !valid {
+					break
+				}
+			}
+			if valid {
+				return candidate
+			}
+		}
+	}
+	return ""
 }
 
 // stripFences removes ```yaml ... ``` or ``` ... ``` wrappers.
