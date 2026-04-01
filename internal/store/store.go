@@ -184,6 +184,34 @@ func (s *Store) AllBrainNotes(ctx context.Context) ([]BrainNote, error) {
 	return notes, nil
 }
 
+// UpsertBrainNote inserts a brain note preserving its original ID, ignoring
+// the row if that ID already exists. Used during backup restore.
+func (s *Store) UpsertBrainNote(ctx context.Context, note BrainNote) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO brain_notes (id, run_id, step_id, created_at, tags, body) VALUES (?, ?, ?, ?, ?, ?)`,
+		note.ID, note.RunID, note.StepID, note.CreatedAt, note.Tags, note.Body,
+	)
+	if err != nil {
+		return fmt.Errorf("store: upsert brain note: %w", err)
+	}
+	return nil
+}
+
+// UpsertPrompt inserts a prompt preserving its original ID, ignoring the row
+// if that ID already exists. Used during backup restore.
+func (s *Store) UpsertPrompt(ctx context.Context, p Prompt) error {
+	return s.writer.send(func(db *sql.DB) error {
+		_, err := db.ExecContext(ctx,
+			`INSERT OR IGNORE INTO prompts (id, title, body, model_slug, last_response, cwd, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			p.ID, p.Title, p.Body, p.ModelSlug, p.LastResponse, p.CWD, p.CreatedAt, p.UpdatedAt,
+		)
+		if err != nil {
+			return fmt.Errorf("store: upsert prompt: %w", err)
+		}
+		return nil
+	})
+}
+
 // UpdateBrainNote updates the body and tags of an existing brain note by ID.
 func (s *Store) UpdateBrainNote(ctx context.Context, id int64, body, tags string) error {
 	_, err := s.db.ExecContext(ctx,
