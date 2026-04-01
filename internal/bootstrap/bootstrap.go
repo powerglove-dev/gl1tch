@@ -120,8 +120,8 @@ func buildTmuxConf(self string) string {
 		"bind-key -T orcai-chord h     { switch-client -T root ; if-shell -F '#{==:#{session_name},orcai-cron}' { send-keys ? } { switch-client -t orcai ; select-window -t orcai:0 ; send-keys -t orcai:0 C-h } }\n" +
 		// Pressing ctrl+space again exits the chord table without action.
 		"bind-key -T orcai-chord C-Space switch-client -T root\n" +
-		// GLITCH AI assistant
-		"bind-key -T orcai-chord a     { switch-client -T root ; new-window -n orcai-assistant \"" + self + " assistant\" }\n" +
+		// GLITCH AI assistant — focus panel in switchboard (window 0), send A key.
+		"bind-key -T orcai-chord a     { switch-client -T root ; switch-client -t orcai ; select-window -t orcai:0 ; send-keys -t orcai:0 A }\n" +
 		// Explicitly unbind removed chords so stale sessions don't keep them.
 		"unbind-key -T orcai-chord n\n" +
 		"unbind-key -T orcai-chord m\n" +

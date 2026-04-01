@@ -287,6 +287,7 @@ type Model struct {
 	feedScrollOffset      int
 	feedCursor            int // absolute line index within all visible feed content
 	feedFocused           bool
+	glitchChat            glitchChatPanel // GLITCH AI assistant (replaces agents grid)
 	signalBoard           SignalBoard
 	signalBoardFocused    bool
 	agentsGridRow         int  // selected row in the agents grid (center panel)
@@ -381,6 +382,7 @@ func NewWithStore(s *store.Store) Model {
 
 	agentProviders := picker.BuildProviders()
 	pipelines := ScanPipelines(pipelinesDir())
+	cfgDir := filepath.Join(os.Getenv("HOME"), ".config", "orcai")
 	m := Model{
 		launcher: launcherSection{
 			pipelines: pipelines,
@@ -388,6 +390,7 @@ func NewWithStore(s *store.Store) Model {
 		agent: agentSection{
 			providers: agentProviders,
 		},
+		glitchChat:            newGlitchPanel(cfgDir, agentProviders),
 		sendPanel:             buildershared.NewSendPanel(agentProviders).SetSavedPipelineTitles(pipelines),
 		pipelineEditor:        pipelineeditor.New(agentProviders, pipelinesDir(), s),
 		brainEditor:           braineditor.New(s, agentProviders),
@@ -792,6 +795,7 @@ func (m Model) Init() tea.Cmd {
 		tryPipelineBusSubscribeCmd(),
 		m.activityFeed.Init(),
 		loadPendingClarificationsCmd(m.store),
+		m.glitchChat.initCmd(),
 	)
 }
 
@@ -947,6 +951,21 @@ var _ io.Writer = (*lineWriter)(nil)
 
 // Update handles tea.Msg values.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// ── GLITCH chat panel: always forward stream messages; route keys when focused ──
+	switch msg.(type) {
+	case glitchStreamMsg, glitchDoneMsg, glitchErrMsg:
+		newPanel, cmd := m.glitchChat.update(msg)
+		m.glitchChat = newPanel
+		return m, cmd
+	}
+	if m.glitchChat.focused {
+		if km, ok := msg.(tea.KeyMsg); ok && km.String() != "ctrl+c" && km.String() != "ctrl+q" {
+			newPanel, cmd := m.glitchChat.update(msg)
+			m.glitchChat = newPanel
+			return m, cmd
+		}
+	}
+
 	// ── Forward non-key messages to activity feed (handles its unexported msg types) ──
 	// Skip KeyMsg — activity model navigation is driven explicitly via handleDown/handleUp
 	// when feedFocused. Forwarding all keys caused j/k in other panes to scroll the feed.
@@ -2157,6 +2176,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.signalBoard.clampScroll(step)
 			return m, nil
 		}
+
+	case "A":
+		// Toggle GLITCH chat panel focus (sent by ^spc a chord).
+		if !m.glitchChat.focused {
+			m.glitchChat = m.glitchChat.setFocused(true)
+			// Unfocus other panels.
+			m.feedFocused = false
+			m.signalBoardFocused = false
+			m.agentsCenterFocused = false
+		} else {
+			m.glitchChat = m.glitchChat.setFocused(false)
+		}
+		return m, nil
 
 	case "g":
 		if m.feedFocused {
@@ -3548,24 +3580,23 @@ func (m Model) viewLeftColumn(height, width int) string {
 	return strings.Join(lines, "\n")
 }
 
-// viewCenterColumn renders the center column: agents grid (top) + agent runner (bottom).
+// viewCenterColumn renders the center column: GLITCH chat (top) + send panel (bottom).
 // The combined output is clamped to height rows.
-// The agents grid gets the upper ~60% of available height; agent runner gets the rest.
 func (m Model) viewCenterColumn(height, width int) []string {
-	// Measure the agent runner height so we can give it exactly the space it needs.
+	// Measure the send panel height so we can give GLITCH the remaining space.
 	agentRunnerLines := m.buildAgentSection(width)
 	agentRunnerH := len(agentRunnerLines)
 
-	// Grid gets remaining height after agent runner (no separator — panels sit flush).
-	gridH := height - agentRunnerH
-	if gridH < 6 {
-		gridH = 6
+	// GLITCH gets remaining height after send panel.
+	glitchH := height - agentRunnerH
+	if glitchH < 6 {
+		glitchH = 6
 	}
 
-	agentGridLines := m.buildAgentsGrid(gridH, width)
+	glitchLines := m.glitchChat.build(glitchH, width, m.ansiPalette())
 
 	var lines []string
-	lines = append(lines, agentGridLines...)
+	lines = append(lines, glitchLines...)
 	lines = append(lines, agentRunnerLines...)
 
 	// Pad up to height.
