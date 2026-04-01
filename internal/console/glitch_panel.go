@@ -1510,26 +1510,7 @@ func (p glitchChatPanel) handleRunEvent(msg glitchRunEventMsg) (glitchChatPanel,
 		text: fmt.Sprintf("pipeline '%s' %s%s", run.Name, status, dur),
 	})
 
-	if p.backend == nil {
-		return p, nil
-	}
-
-	// Build analysis prompt from run data + brain context.
-	prompt := p.buildRunAnalysisPrompt(run, msg.failed)
-	p.streaming = true
-	p.streamBuf = ""
-	p.streamIsRunAnalysis = true
-	backend := p.backend
-	ctx := p.ctx
-	turns := p.turns // pass history for context
-	return p, func() tea.Msg {
-		// Run analysis already embeds brain context in the prompt — don't double-inject.
-		ch, err := backend.stream(ctx, turns, prompt, "", "")
-		if err != nil {
-			return glitchErrMsg{err: err}
-		}
-		return glitchNextToken(ch)()
-	}
+	return p, nil
 }
 
 // buildRunAnalysisPrompt constructs the analysis prompt for a completed run.
@@ -1801,9 +1782,6 @@ func (p *glitchChatPanel) upsertStreamEntry() {
 //   - Curved send panel (╭─╮ input ╰─╯)
 func (p glitchChatPanel) build(height, width int, pal styles.ANSIPalette) []string {
 	borderColor := pal.Border
-	if p.focused {
-		borderColor = pal.Accent
-	}
 
 	const hPad = 3 // horizontal padding (each side) for chat and send panel
 
