@@ -20,5 +20,8 @@ pnpm-debug.log*
 # macOS-specific files
 .DS_Store
 
+# Pipeline activity snapshot — opt-in (force-add to include in release)
+public/activity-snapshot.jsonl
+
 # jetbrains setting folder
 .idea/

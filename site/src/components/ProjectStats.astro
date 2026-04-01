@@ -1,0 +1,104 @@
+---
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+
+interface Stats {
+  generated_at?: string;
+  project_age_days?: number;
+  total_commits?: number;
+  commits_this_week?: number;
+  velocity_trend?: string;
+  feat_ratio_early?: number;
+  feat_ratio_recent?: number;
+  fix_ratio_early?: number;
+  fix_ratio_recent?: number;
+  median_gap_early_hrs?: number;
+  median_gap_recent_hrs?: number;
+  feedback_loop_delta?: string;
+  pipeline_runs?: number;
+  pipeline_success_rate?: number;
+  brain_events?: number;
+}
+
+let stats: Stats = {};
+try {
+  const raw = readFileSync(resolve('./public/project-stats.json'), 'utf-8');
+  stats = JSON.parse(raw);
+} catch (_) {}
+
+const {
+  project_age_days: age,
+  total_commits: commits,
+  velocity_trend: velocity,
+  feedback_loop_delta: feedbackDelta,
+  feat_ratio_early: featEarly,
+  feat_ratio_recent: featRecent,
+  fix_ratio_early: fixEarly,
+  fix_ratio_recent: fixRecent,
+  pipeline_runs: runs,
+  pipeline_success_rate: successRate,
+  brain_events: brainEvents,
+} = stats;
+
+// Trend arrows (only show if both halves exist)
+const hasFeat = featEarly != null && featRecent != null;
+const hasFix  = fixEarly  != null && fixRecent  != null;
+const featTrend = hasFeat ? (featRecent! > featEarly! ? '↑' : featRecent! < featEarly! ? '↓' : '→') : null;
+const fixTrend  = hasFix  ? (fixRecent!  < fixEarly!  ? '↓' : fixRecent!  > fixEarly!  ? '↑' : '→') : null;
+
+// feedback delta: negative % = loops shrinking = good
+const feedbackGood = feedbackDelta?.startsWith('-') ?? false;
+
+type Color = 'green' | 'yellow' | 'dim';
+interface Item { text: string; color: Color }
+
+const items: Item[] = [];
+
+if (age      != null) items.push({ text: `${age}d old`,          color: 'dim'    });
+if (commits  != null) items.push({ text: `${commits} commits`,   color: 'dim'    });
+if (velocity != null) items.push({ text: `velocity ${velocity}`, color: velocity.startsWith('+') ? 'green' : 'yellow' });
+if (feedbackDelta != null) items.push({ text: `loops ${feedbackDelta}`, color: feedbackGood ? 'green' : 'yellow' });
+if (featTrend) items.push({ text: `feat${featTrend}`, color: featTrend === '↑' ? 'green' : 'dim' });
+if (fixTrend)  items.push({ text: `fix${fixTrend}`,  color: fixTrend  === '↓' ? 'green' : 'yellow' });
+if (runs     != null) items.push({ text: `${runs} runs`,         color: 'dim'    });
+if (successRate != null) items.push({ text: `${Math.round(successRate * 100)}% success`, color: successRate >= 0.9 ? 'green' : 'yellow' });
+if (brainEvents != null) items.push({ text: `${brainEvents} scheduled`, color: 'dim' });
+---
+
+{items.length > 0 && (
+  <div class="project-stats" aria-label="Project statistics">
+    {items.map((item, i) => (
+      <>
+        {i > 0 && <span class="ps-sep" aria-hidden="true">·</span>}
+        <span class={`ps-item ps-${item.color}`}>{item.text}</span>
+      </>
+    ))}
+  </div>
+)}
+
+<style>
+.project-stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 0 8px;
+  padding: 6px 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  border-top: 1px solid var(--current-line);
+  background: transparent;
+}
+
+.ps-sep {
+  color: var(--current-line);
+  user-select: none;
+}
+
+.ps-item { white-space: nowrap; }
+
+.ps-dim    { color: var(--comment); }
+.ps-green  { color: var(--green);   }
+.ps-yellow { color: var(--yellow);  }
+</style>

@@ -9,7 +9,9 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "stats": "bash ../scripts/gen-stats.sh",
+    "stats:snapshot": "jq -c '{kind: .kind, ts: .ts}' ~/.glitch/activity.jsonl > public/activity-snapshot.jsonl && bash ../scripts/gen-stats.sh"
   },
   "dependencies": {
     "astro": "^6.0.8",
