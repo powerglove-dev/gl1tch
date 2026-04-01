@@ -1362,11 +1362,6 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					p.pipelineFlow = glitchPipelineFlow{}
 					return p, nil
 				case "/quit", "/exit":
-					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
-					p.messages = append(p.messages, glitchEntry{
-						who:  glitchSpeakerBot,
-						text: "confirm quit? press y to exit, any other key to cancel.",
-					})
 					return p, func() tea.Msg { return glitchQuitMsg{} }
 				case "/themes":
 					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
@@ -2161,17 +2156,17 @@ func (p glitchChatPanel) renderMessages(innerW int, pal styles.ANSIPalette) []st
 		}
 		switch e.who {
 		case glitchSpeakerBot:
-			prefix = glitchLabel + tsStr + pal.Dim + " > " + aRst
+			prefix = glitchLabel + tsStr + " " + aRst
 			contPrefix = "              "
 		case glitchSpeakerUser:
-			prefix = userLabel + tsStr + pal.Dim + " > " + aRst
+			prefix = userLabel + tsStr + " " + aRst
 			contPrefix = "              "
 		}
 
 		// Word-wrap the text to fit innerW minus prefix width.
-		prefixVisW := 11 // "GL1TCH > " or "YOU    > " = 9 visible chars + 2 spaces
+		prefixVisW := 9 // "GL1TCH " or "YOU    " = 7 visible chars + 2 spaces
 		if !e.ts.IsZero() {
-			prefixVisW = 17 // "GL1TCH 3:04pm > " = 16 visible + some buffer
+			prefixVisW = 15 // "GL1TCH 3:04pm " = 14 visible + some buffer
 		}
 		textW := innerW - prefixVisW
 		if textW < 10 {
