@@ -44,8 +44,9 @@ type runConfig struct {
 	resumeStepID    string
 	resumePrompt    string
 	resumeFrom      *resumeFromConfig
-	stepWriter      io.Writer // when set, executor output is teed here in real time
-	statusWriter    io.Writer // destination for [step:*] status lines; defaults to os.Stdout
+	stepWriter           io.Writer // when set, executor output is teed here in real time
+	statusWriter         io.Writer // destination for [step:*] status lines; defaults to os.Stdout
+	disableClarification bool      // when true, skip GLITCH_CLARIFY injection (for internal pipelines)
 
 	// Game scoring fields, protected by stepFailuresMu.
 	stepFailuresMu sync.Mutex
@@ -98,6 +99,13 @@ func WithStepWriter(w io.Writer) RunOption {
 // classification) where status noise should not reach the user's terminal.
 func WithSilentStatus() RunOption {
 	return func(c *runConfig) { c.statusWriter = io.Discard }
+}
+
+// WithNoClarification disables GLITCH_CLARIFY instruction injection for all
+// steps in the run. Use for internal pipelines (e.g. classification) where
+// the LLM must return a structured response, not ask the user questions.
+func WithNoClarification() RunOption {
+	return func(c *runConfig) { c.disableClarification = true }
 }
 
 // WithResumeFrom instructs the runner to resume an existing run from a
@@ -443,7 +451,7 @@ func runLegacy(ctx context.Context, p *Pipeline, mgr *executor.Manager, userInpu
 			stepIdx++
 
 			stepStart := time.Now()
-			output, err := executePluginStep(ctx, step, ec, mgr, lastOutput, p, cfg.store, cfg.runID, forceInput)
+			output, err := executePluginStep(ctx, step, ec, mgr, lastOutput, p, cfg.store, cfg.runID, forceInput, cfg)
 			forceInput = "" // only applies to the resume step
 			stepDurationMs := time.Since(stepStart).Milliseconds()
 
@@ -1279,7 +1287,7 @@ func dispatchStep(ctx context.Context, step *Step, args map[string]any, snap map
 		teeW = game.NewGameTeeWriter(w, category)
 		w = teeW
 	}
-	executor, err := resolveExecutor(ctx, step, args, snap, ec, mgr, p, st, w)
+	executor, err := resolveExecutor(ctx, step, args, snap, ec, mgr, p, st, w, runCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -1343,7 +1351,7 @@ func dispatchStep(ctx context.Context, step *Step, args map[string]any, snap map
 		if typeName == "" {
 			typeName = step.Type
 		}
-		if clarify.IsReactive(typeName) {
+		if clarify.IsReactive(typeName) && !runCfg.disableClarification {
 			valueStr, _ := extractOutputValue(out)
 			detector := clarify.Get(typeName)
 			for _, line := range strings.Split(valueStr, "\n") {
@@ -1490,7 +1498,7 @@ done:
 }
 
 // resolveExecutor builds the appropriate StepExecutor for a step.
-func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap map[string]any, ec *ExecutionContext, mgr *executor.Manager, p *Pipeline, st *store.Store, w io.Writer) (StepExecutor, error) {
+func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap map[string]any, ec *ExecutionContext, mgr *executor.Manager, p *Pipeline, st *store.Store, w io.Writer, runCfg *runConfig) (StepExecutor, error) {
 	// Determine the executor name: Executor takes precedence over Type.
 	typeName := step.Executor
 	if typeName == "" {
@@ -1577,7 +1585,8 @@ func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap 
 
 	// Append the GLITCH_CLARIFY instruction for executors that support reactive
 	// clarification. Pipelines using unregistered executors are unaffected.
-	if clarify.IsReactive(typeName) {
+	// Skipped for internal pipelines (e.g. classification) that require structured output.
+	if clarify.IsReactive(typeName) && !runCfg.disableClarification {
 		promptOrInput = strings.TrimRight(promptOrInput, "\n") + clarify.Instruction()
 	}
 
@@ -1620,7 +1629,7 @@ func (b *builtinExecutor) Cleanup(_ context.Context) error { return nil }
 // This is used by the legacy runner only.
 // forceInput, when non-empty, overrides step.Prompt/step.Input completely
 // (used when resuming from a clarification answer).
-func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mgr *executor.Manager, defaultInput string, p *Pipeline, st *store.Store, runID int64, forceInput string) (string, error) {
+func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mgr *executor.Manager, defaultInput string, p *Pipeline, st *store.Store, runID int64, forceInput string, runCfg *runConfig) (string, error) {
 	executorName := step.Executor
 
 	pl, ok := mgr.Get(executorName)
@@ -1684,7 +1693,8 @@ func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mg
 
 	// Append GLITCH_CLARIFY instruction for reactive executors so the model
 	// knows the protocol for requesting user input.
-	if clarify.IsReactive(executorName) {
+	// Skipped for internal pipelines (e.g. classification) that require structured output.
+	if clarify.IsReactive(executorName) && (runCfg == nil || !runCfg.disableClarification) {
 		promptOrInput = strings.TrimRight(promptOrInput, "\n") + clarify.Instruction()
 	}
 
@@ -1700,7 +1710,7 @@ func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mg
 
 	// Clarification: if the executor output contains GLITCH_CLARIFY:, surface it
 	// via AskClarification (busd), then re-execute with the full conversation context.
-	if execErr == nil && clarify.IsReactive(executorName) {
+	if execErr == nil && clarify.IsReactive(executorName) && (runCfg == nil || !runCfg.disableClarification) {
 		detector := clarify.Get(executorName)
 		for _, line := range strings.Split(output, "\n") {
 			if q, found := detector.Detect(line); found {

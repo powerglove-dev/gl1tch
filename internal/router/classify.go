@@ -47,7 +47,7 @@ func (c *LLMClassifier) Classify(ctx context.Context, prompt string, pipelines [
 		},
 	}
 
-	raw, err := pipeline.Run(ctx, classifyPipeline, c.mgr, "", pipeline.WithSilentStatus())
+	raw, err := pipeline.Run(ctx, classifyPipeline, c.mgr, "", pipeline.WithSilentStatus(), pipeline.WithNoClarification())
 	if err != nil {
 		return nil, fmt.Errorf("router: llm classify: %w", err)
 	}
