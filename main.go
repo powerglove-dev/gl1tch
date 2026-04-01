@@ -10,7 +10,7 @@ import (
 
 	"github.com/powerglove-dev/gl1tch/cmd"
 	"github.com/powerglove-dev/gl1tch/internal/bootstrap"
-	"github.com/powerglove-dev/gl1tch/internal/switchboard"
+	"github.com/powerglove-dev/gl1tch/internal/console"
 )
 
 // Build-time variables injected by GoReleaser via -ldflags.
@@ -44,7 +44,7 @@ func main() {
 	// If already inside a tmux session, run the switchboard TUI directly —
 	// we were launched as the window command by bootstrap.
 	if os.Getenv("TMUX") != "" {
-		switchboard.Run()
+		console.Run()
 		return
 	}
 

@@ -2,14 +2,14 @@
 //
 // The standalone welcome dashboard has been replaced by the Switchboard TUI.
 // This package is retained for backwards compatibility with callers that import
-// internal/welcome directly; all paths now call switchboard.Run().
+// internal/welcome directly; all paths now call console.Run().
 package welcome
 
-import "github.com/powerglove-dev/gl1tch/internal/switchboard"
+import "github.com/powerglove-dev/gl1tch/internal/console"
 
 // Run starts the GLITCH Switchboard. The busSocket parameter is accepted but
-// ignored — bus connectivity is handled inside the switchboard.
+// ignored — bus connectivity is handled inside the console.
 func Run(_ string) error {
-	switchboard.Run()
+	console.Run()
 	return nil
 }

@@ -1,7 +1,7 @@
 // Package switchboard implements the GL1TCH Switchboard — a full-screen BubbleTea
 // TUI that merges the sysop panel and welcome dashboard into a single control
 // surface with a Pipeline Launcher, Agent Runner, and Activity Feed.
-package switchboard
+package console
 
 import (
 	"bytes"
@@ -3263,7 +3263,7 @@ func (m Model) View() string {
 		return header +m.rerunModal.ViewBox(w, h, m.ansiPalette())
 	}
 
-	// Delete confirmation — floating overlay on top of the switchboard.
+	// Delete confirmation — floating overlay on top of the console.
 	if m.confirmDelete {
 		return overlayCenter(blankCanvas(w, h), m.viewDeleteModalBox(w), w, h)
 	}

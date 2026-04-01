@@ -1,4 +1,4 @@
-package switchboard
+package console
 
 import (
 	"bufio"
@@ -905,7 +905,7 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
 					p.messages = append(p.messages, glitchEntry{
 						who:  glitchSpeakerBot,
-						text: "switching to cron view. use ^spc j to return to the switchboard.",
+						text: "switching to cron view. use ^spc j to return to the console.",
 					})
 					return p, func() tea.Msg {
 						exec.Command("tmux", "switch-client", "-t", "glitch-cron").Run() //nolint:errcheck

@@ -1,4 +1,4 @@
-package switchboard_test
+package console_test
 
 import (
 	"strings"
@@ -6,16 +6,16 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/powerglove-dev/gl1tch/internal/switchboard"
+	"github.com/powerglove-dev/gl1tch/internal/console"
 )
 
 // TestThemePicker_OpenOnT verifies that pressing 'T' sets themePickerOpen.
 func TestThemePicker_OpenOnT(t *testing.T) {
-	m := switchboard.NewWithPipelines([]string{"alpha"})
+	m := console.NewWithPipelines([]string{"alpha"})
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("T")})
-	m2, ok := result.(switchboard.Model)
+	m2, ok := result.(console.Model)
 	if !ok {
-		t.Fatalf("Update returned %T, want switchboard.Model", result)
+		t.Fatalf("Update returned %T, want console.Model", result)
 	}
 	if !m2.ThemePickerOpen() {
 		t.Error("pressing T should open the theme picker")
@@ -24,10 +24,10 @@ func TestThemePicker_OpenOnT(t *testing.T) {
 
 // TestThemePicker_CloseOnEsc verifies that pressing 'esc' in picker closes it.
 func TestThemePicker_CloseOnEsc(t *testing.T) {
-	m := switchboard.NewWithPipelines([]string{"alpha"})
+	m := console.NewWithPipelines([]string{"alpha"})
 	// Open picker.
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("T")})
-	m2, ok := result.(switchboard.Model)
+	m2, ok := result.(console.Model)
 	if !ok {
 		t.Fatalf("Update after T returned %T", result)
 	}
@@ -36,7 +36,7 @@ func TestThemePicker_CloseOnEsc(t *testing.T) {
 	}
 	// Close picker.
 	result2, _ := m2.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m3, ok := result2.(switchboard.Model)
+	m3, ok := result2.(console.Model)
 	if !ok {
 		t.Fatalf("Update after esc returned %T", result2)
 	}
@@ -47,7 +47,7 @@ func TestThemePicker_CloseOnEsc(t *testing.T) {
 
 // TestThemePicker_ViewContainsBundleNames verifies viewThemePicker renders bundle names.
 func TestThemePicker_ViewContainsBundleNames(t *testing.T) {
-	view := switchboard.ViewThemePickerForTest()
+	view := console.ViewThemePickerForTest()
 	// The ABS theme should be listed.
 	if !strings.Contains(view, "abs") && !strings.Contains(view, "ABS") {
 		t.Errorf("theme picker view should contain 'abs' or 'ABS', got:\n%s", view)
@@ -56,7 +56,7 @@ func TestThemePicker_ViewContainsBundleNames(t *testing.T) {
 
 // TestFgSeq_RedColor verifies fgSeq produces the correct ANSI sequence for #ff0000.
 func TestFgSeq_RedColor(t *testing.T) {
-	got := switchboard.FgSeqForTest("#ff0000")
+	got := console.FgSeqForTest("#ff0000")
 	want := "\x1b[38;2;255;0;0m"
 	if got != want {
 		t.Errorf("fgSeq(#ff0000) = %q, want %q", got, want)

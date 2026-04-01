@@ -1,4 +1,4 @@
-package switchboard
+package console
 
 import (
 	tea "github.com/charmbracelet/bubbletea"

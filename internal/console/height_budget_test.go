@@ -1,4 +1,4 @@
-package switchboard
+package console
 
 import (
 	"strings"

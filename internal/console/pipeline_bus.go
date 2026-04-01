@@ -2,7 +2,7 @@
 //
 // Tasks 7.1–7.8: authoritative feed updates driven by busd pipeline/step/cron
 // events, with the log-line parser demoted to a fallback for terminals.
-package switchboard
+package console
 
 import (
 	"bufio"

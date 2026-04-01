@@ -1,10 +1,10 @@
-package switchboard_test
+package console_test
 
 import (
 	"strings"
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/switchboard"
+	"github.com/powerglove-dev/gl1tch/internal/console"
 	"github.com/powerglove-dev/gl1tch/internal/themes"
 )
 
@@ -18,7 +18,7 @@ func TestRenderHeader_KnownPanel(t *testing.T) {
 		{"activity_feed", "ACTIVITY FEED"},
 	}
 	for _, c := range cases {
-		got := switchboard.RenderHeader(c.panel)
+		got := console.RenderHeader(c.panel)
 		if got != c.want {
 			t.Errorf("RenderHeader(%q) = %q, want %q", c.panel, got, c.want)
 		}
@@ -26,7 +26,7 @@ func TestRenderHeader_KnownPanel(t *testing.T) {
 }
 
 func TestRenderHeader_UnknownPanel(t *testing.T) {
-	got := switchboard.RenderHeader("my_panel")
+	got := console.RenderHeader("my_panel")
 	if got != "MY_PANEL" {
 		t.Errorf("RenderHeader(my_panel) = %q, want %q", got, "MY_PANEL")
 	}
@@ -35,28 +35,28 @@ func TestRenderHeader_UnknownPanel(t *testing.T) {
 // ── SpriteLines ──────────────────────────────────────────────────────────────
 
 func TestSpriteLines_NilBundle(t *testing.T) {
-	if got := switchboard.SpriteLines(nil, "pipelines", 200); got != nil {
+	if got := console.SpriteLines(nil, "pipelines", 200); got != nil {
 		t.Errorf("SpriteLines(nil, ...) = %v, want nil", got)
 	}
 }
 
 func TestSpriteLines_NilHeaderBytes(t *testing.T) {
 	b := &themes.Bundle{}
-	if got := switchboard.SpriteLines(b, "pipelines", 200); got != nil {
+	if got := console.SpriteLines(b, "pipelines", 200); got != nil {
 		t.Errorf("SpriteLines(no bytes, ...) = %v, want nil", got)
 	}
 }
 
 func TestSpriteLines_EmptyVariants(t *testing.T) {
 	b := &themes.Bundle{HeaderBytes: map[string][][]byte{"pipelines": {}}}
-	if got := switchboard.SpriteLines(b, "pipelines", 200); got != nil {
+	if got := console.SpriteLines(b, "pipelines", 200); got != nil {
 		t.Errorf("SpriteLines(empty variants, ...) = %v, want nil", got)
 	}
 }
 
 func TestSpriteLines_EmptyBytes(t *testing.T) {
 	b := &themes.Bundle{HeaderBytes: map[string][][]byte{"pipelines": {{}}}}
-	if got := switchboard.SpriteLines(b, "pipelines", 200); got != nil {
+	if got := console.SpriteLines(b, "pipelines", 200); got != nil {
 		t.Errorf("SpriteLines(empty bytes, ...) = %v, want nil", got)
 	}
 }
@@ -65,7 +65,7 @@ func TestSpriteLines_NarrowPanel_ReturnsNil(t *testing.T) {
 	// Sprite is 80 visible chars wide; panel is only 40. No fallback variant.
 	sprite := strings.Repeat("X", 80) + "\n"
 	b := &themes.Bundle{HeaderBytes: map[string][][]byte{"pipelines": {[]byte(sprite)}}}
-	if got := switchboard.SpriteLines(b, "pipelines", 40); got != nil {
+	if got := console.SpriteLines(b, "pipelines", 40); got != nil {
 		t.Errorf("SpriteLines(narrow=40, sprite=80) should be nil, got %v", got)
 	}
 }
@@ -77,7 +77,7 @@ func TestSpriteLines_FallsBackToNarrowVariant(t *testing.T) {
 	b := &themes.Bundle{HeaderBytes: map[string][][]byte{
 		"pipelines": {[]byte(wide), []byte(narrow)},
 	}}
-	lines := switchboard.SpriteLines(b, "pipelines", 40)
+	lines := console.SpriteLines(b, "pipelines", 40)
 	if lines == nil {
 		t.Fatal("SpriteLines should fall back to narrow variant")
 	}
@@ -89,7 +89,7 @@ func TestSpriteLines_FallsBackToNarrowVariant(t *testing.T) {
 func TestSpriteLines_WidePanel_ReturnsFirstVariant(t *testing.T) {
 	content := "\x1b[35mPIPELINES\x1b[0m"
 	b := &themes.Bundle{HeaderBytes: map[string][][]byte{"pipelines": {[]byte(content)}}}
-	lines := switchboard.SpriteLines(b, "pipelines", 200)
+	lines := console.SpriteLines(b, "pipelines", 200)
 	if lines == nil {
 		t.Fatal("SpriteLines(wide=200, sprite=9) should not be nil")
 	}
@@ -106,7 +106,7 @@ func TestSpriteLines_ZeroWidth_Unconstrained(t *testing.T) {
 	// panelWidth=0 means no width constraint — first variant is used.
 	wide := strings.Repeat("X", 200)
 	b := &themes.Bundle{HeaderBytes: map[string][][]byte{"pipelines": {[]byte(wide)}}}
-	if got := switchboard.SpriteLines(b, "pipelines", 0); got == nil {
+	if got := console.SpriteLines(b, "pipelines", 0); got == nil {
 		t.Error("SpriteLines(panelWidth=0) should not return nil (unconstrained)")
 	}
 }
@@ -115,7 +115,7 @@ func TestSpriteLines_MultiLine_PreservesLines(t *testing.T) {
 	// Three-line sprite: only non-empty lines should be returned.
 	content := "line1\nline2\nline3\n"
 	b := &themes.Bundle{HeaderBytes: map[string][][]byte{"pipelines": {[]byte(content)}}}
-	lines := switchboard.SpriteLines(b, "pipelines", 200)
+	lines := console.SpriteLines(b, "pipelines", 200)
 	if len(lines) != 3 {
 		t.Errorf("SpriteLines 3-line sprite: got %d lines, want 3", len(lines))
 	}
@@ -123,7 +123,7 @@ func TestSpriteLines_MultiLine_PreservesLines(t *testing.T) {
 
 func TestSpriteLines_UnknownPanel_ReturnsNil(t *testing.T) {
 	b := &themes.Bundle{HeaderBytes: map[string][][]byte{"pipelines": {[]byte("X")}}}
-	if got := switchboard.SpriteLines(b, "other_panel", 200); got != nil {
+	if got := console.SpriteLines(b, "other_panel", 200); got != nil {
 		t.Errorf("SpriteLines(unknown panel) = %v, want nil", got)
 	}
 }

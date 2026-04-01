@@ -1,4 +1,4 @@
-package switchboard_test
+package console_test
 
 import (
 	"os"
@@ -9,7 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	orcaicron "github.com/powerglove-dev/gl1tch/internal/cron"
-	"github.com/powerglove-dev/gl1tch/internal/switchboard"
+	"github.com/powerglove-dev/gl1tch/internal/console"
 )
 
 // TestBuildCronSection_Empty verifies that buildCronSection renders the
@@ -22,7 +22,7 @@ func TestBuildCronSection_Empty(t *testing.T) {
 		t.Skip("skipping empty-case test: real cron.yaml has entries")
 	}
 
-	m := switchboard.New()
+	m := console.New()
 	lines := m.BuildCronSection(80)
 	if len(lines) == 0 {
 		t.Fatal("expected non-empty output from BuildCronSection")
@@ -46,7 +46,7 @@ func TestBuildCronSection_EmptyViaFakeHome(t *testing.T) {
 	os.Setenv("HOME", tmp)
 	defer os.Setenv("HOME", orig)
 
-	m := switchboard.New()
+	m := console.New()
 	lines := m.BuildCronSection(80)
 	if len(lines) == 0 {
 		t.Fatal("expected non-empty output from BuildCronSection")
@@ -59,9 +59,9 @@ func TestBuildCronSection_EmptyViaFakeHome(t *testing.T) {
 
 // TestCronPanelFocus verifies that pressing "c" focuses the cron panel.
 func TestCronPanelFocus(t *testing.T) {
-	m := switchboard.New()
+	m := console.New()
 	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
-	mm := m2.(switchboard.Model)
+	mm := m2.(console.Model)
 	if !mm.CronPanelFocused() {
 		t.Fatal("expected cronPanel.focused after pressing c")
 	}
@@ -71,10 +71,10 @@ func TestCronPanelFocus(t *testing.T) {
 // does not panic even when tmux is not running. The key dispatches
 // ensureCronDaemon + switch-client which fail silently without tmux.
 func TestCronManageKey(t *testing.T) {
-	m := switchboard.New()
+	m := console.New()
 	// Focus the cron panel first.
 	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
-	mm := m2.(switchboard.Model)
+	mm := m2.(console.Model)
 	if !mm.CronPanelFocused() {
 		t.Skip("cron panel not focused; skipping m-key test")
 	}

@@ -293,7 +293,7 @@ func Run() error {
 	applyKeybindings(cfgDir)
 
 	// Kill any stale glitch-cron session so the fresh binary is always used,
-	// then start a new glitch-cron session alongside the switchboard.
+	// then start a new glitch-cron session alongside the console.
 	exec.Command("tmux", "kill-session", "-t", "glitch-cron").Run() //nolint:errcheck
 	if err := exec.Command("tmux", "new-session", "-d", "-s", "glitch-cron",
 		"-x", "220", "-y", "50", self+" cron tui").Run(); err != nil {

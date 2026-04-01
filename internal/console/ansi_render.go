@@ -1,4 +1,4 @@
-package switchboard
+package console
 
 import (
 	"github.com/powerglove-dev/gl1tch/internal/panelrender"
