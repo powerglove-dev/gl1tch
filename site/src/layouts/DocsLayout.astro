@@ -1,0 +1,120 @@
+---
+import Base from './Base.astro';
+import { getCollection } from 'astro:content';
+
+interface Props {
+  title: string;
+  description: string;
+  section?: string;
+  prevDoc?: { slug: string; title: string };
+  nextDoc?: { slug: string; title: string };
+}
+
+const { title, description, section, prevDoc, nextDoc } = Astro.props;
+const currentPath = Astro.url.pathname;
+
+const pipelineDocs = (await getCollection('pipelines')).sort((a, b) => a.data.order - b.data.order);
+
+const navSections = [
+  {
+    label: 'PIPELINES',
+    items: pipelineDocs.map(doc => ({
+      title: doc.data.title,
+      href: `/docs/pipelines/${doc.id}`,
+    })),
+  },
+];
+---
+<Base title={title} description={description}>
+  <div class="docs-page" id="docs-page">
+    <button class="docs-hamburger" id="docs-hamburger" aria-label="Toggle sidebar">
+      <span class="docs-hamburger-icon">[=]</span>
+    </button>
+
+    <aside class="docs-sidebar" id="docs-sidebar">
+      <div class="docs-sidebar-header">
+        <a href="/" class="docs-logo-link">
+          <span class="fg-purple bold">GL1TCH</span>
+        </a>
+        <a href="/" class="docs-back-link">&larr; back to terminal</a>
+      </div>
+
+      <nav class="docs-nav">
+        <a
+          class:list={['docs-nav-link', { active: currentPath === '/docs/' || currentPath === '/docs' }]}
+          href="/docs/"
+        >
+          INDEX
+        </a>
+
+        {navSections.map(section => (
+          <div class="docs-nav-section">
+            <div class="docs-nav-section-label">
+              <span class="fg-comment">&#x250C;&#x2500;</span> {section.label}
+            </div>
+            {section.items.map(item => (
+              <a
+                class:list={['docs-nav-link', { active: currentPath.replace(/\/$/, '') === item.href }]}
+                href={item.href}
+              >
+                {item.title}
+              </a>
+            ))}
+            <div class="docs-nav-section-end">
+              <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span>
+            </div>
+          </div>
+        ))}
+      </nav>
+    </aside>
+
+    <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div>
+
+    <main class="docs-main">
+      <div class="docs-content">
+        {section && (
+          <div class="docs-breadcrumb">
+            <a href="/docs/">docs</a>
+            <span class="fg-comment"> / </span>
+            <a href="/docs/">{section}</a>
+          </div>
+        )}
+
+        <article>
+          <slot />
+        </article>
+
+        {(prevDoc || nextDoc) && (
+          <nav class="docs-prev-next">
+            {prevDoc ? (
+              <a class="docs-prev-next-link prev" href={`/docs/pipelines/${prevDoc.slug}`}>
+                <span class="docs-prev-next-label fg-comment">&larr; prev</span>
+                <span class="docs-prev-next-title">{prevDoc.title}</span>
+              </a>
+            ) : <div />}
+            {nextDoc ? (
+              <a class="docs-prev-next-link next" href={`/docs/pipelines/${nextDoc.slug}`}>
+                <span class="docs-prev-next-label fg-comment">next &rarr;</span>
+                <span class="docs-prev-next-title">{nextDoc.title}</span>
+              </a>
+            ) : <div />}
+          </nav>
+        )}
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const hamburger = document.getElementById('docs-hamburger');
+    const sidebar = document.getElementById('docs-sidebar');
+    const overlay = document.getElementById('docs-sidebar-overlay');
+
+    function toggleSidebar() {
+      sidebar?.classList.toggle('open');
+      overlay?.classList.toggle('open');
+    }
+
+    hamburger?.addEventListener('click', toggleSidebar);
+    overlay?.addEventListener('click', toggleSidebar);
+  </script>
+</Base>

@@ -11,7 +11,7 @@ const labs = [
     id: "B",
     name: "brain-analyze-runs",
     title: "Analyze Pipeline Runs with Brain Context",
-    description: "Uses use_brain + write_brain to analyze recent GL1TCH pipeline runs and record an insight for future reference.",
+    description: "Analyzes recent GL1TCH pipeline runs and records an insight as a brain note for future reference.",
     prereqs: ["claude CLI on PATH (`claude --version`)"],
   },
   {
@@ -62,15 +62,14 @@ steps:
   - id: step-write
     plugin: ollama
     model: qwen2.5:latest
-    write_brain: true
-    prompt: |
+        prompt: |
       Summarize yourself in one sentence. Write the result
       as a brain note starting with: "INSIGHT:"
 
   - id: step-read
     plugin: ollama
     model: qwen2.5:latest
-    use_brain: true
+    needs: [step-write]
     prompt: |
       Reference the INSIGHT from the previous step.
       What did it say about itself?</code></pre>
@@ -82,8 +81,8 @@ steps:
   <div style="margin-bottom:32px">
     <div class="tui-step-header"><span><span class="step-num">LAB B</span> · ANALYZE PIPELINE RUNS WITH BRAIN CONTEXT</span></div>
     <p style="color:var(--fg);font-size:13px;line-height:1.8;margin:0 0 8px">
-      Uses <span class="fg-yellow">use_brain</span> + <span class="fg-yellow">write_brain</span> to analyze recent GL1TCH pipeline runs
-      and record an insight for future reference.
+      Analyzes recent GL1TCH pipeline runs and records an insight as a brain note.
+      Brain context is injected automatically into subsequent steps.
     </p>
     <p class="fg-comment" style="font-size:11px;margin-bottom:4px">// prerequisites</p>
     <p style="color:var(--fg);font-size:12px;line-height:1.8;margin-bottom:8px">
@@ -92,8 +91,6 @@ steps:
     <pre class="fg-comment" style="font-size:11px;margin-bottom:0">// yaml</pre>
     <pre class="code-block yaml-block"><code class="copy-target">name: brain-analyze-runs
 version: "1"
-use_brain: true
-write_brain: true
 
 steps:
   - id: analyze
@@ -172,24 +169,22 @@ steps:
   - id: step-foundation
     plugin: ollama
     model: qwen2.5-coder:latest
-    write_brain: true
-    prompt: |
+        prompt: |
       Write TypeScript functions: add(a,b) and subtract(a,b).
       Include a basic test block using console.log.
 
   - id: step-extend
     plugin: ollama
     model: qwen2.5-coder:latest
-    use_brain: true
-    write_brain: true
-    prompt: |
+    needs: [step-foundation]
+        prompt: |
       Extend the calculator from the previous step.
       Add multiply(a,b) and divide(a,b) with division-by-zero guard.
 
   - id: step-finalize
     executor: claude
     model: claude-haiku-4-5-20251001
-    use_brain: true
+    needs: [step-extend]
     prompt: |
       Review and finalize the TypeScript calculator built so far.
       Add JSDoc comments and export all functions cleanly.</code></pre>

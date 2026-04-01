@@ -1,0 +1,48 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { getCollection } from 'astro:content';
+
+const pipelineDocs = (await getCollection('pipelines')).sort((a, b) => a.data.order - b.data.order);
+
+const sections = [
+  {
+    title: 'PIPELINES',
+    description: 'Multi-step AI workflows defined in YAML. Chain models, tools, and builtins into repeatable automations.',
+    items: pipelineDocs.map(doc => ({
+      title: doc.data.title,
+      description: doc.data.description,
+      href: `/docs/pipelines/${doc.id}`,
+    })),
+  },
+];
+---
+<DocsLayout title="Documentation" description="GL1TCH pipeline documentation. Build multi-step AI workflows in YAML.">
+  <h1 class="docs-page-title"><span class="fg-purple">&#x250C;&#x2500;</span> DOCS</h1>
+  <p class="docs-page-desc">
+    Everything you need to build, run, and debug GL1TCH pipelines.<br/>
+    Start with the quickstart. Read the YAML reference when you need it. Come back for the examples when you want to steal something.
+  </p>
+
+  {sections.map(section => (
+    <div class="docs-section-grid">
+      <div class="docs-section-title">
+        <span class="fg-comment">&#x2502;</span> {section.title}
+        <span class="fg-comment docs-section-desc">&mdash; {section.description}</span>
+      </div>
+
+      <div class="docs-card-grid">
+        {section.items.map((item, i) => (
+          <a class="docs-card" href={item.href}>
+            <div class="docs-card-num fg-comment">{String(i + 1).padStart(2, '0')}</div>
+            <div class="docs-card-title">{item.title}</div>
+            <div class="docs-card-desc fg-comment">{item.description}</div>
+          </a>
+        ))}
+      </div>
+
+      <div class="docs-section-end">
+        <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span>
+      </div>
+    </div>
+  ))}
+</DocsLayout>

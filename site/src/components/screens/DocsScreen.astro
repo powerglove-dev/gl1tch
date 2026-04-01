@@ -1,195 +1,384 @@
 ---
-import { Code } from 'astro:components';
+import { getCollection, render } from 'astro:content';
 
-const ex1 = `\
-name: brain-feedback-loop
-version: "1"
+const pipelines = await getCollection('pipelines');
+const sorted = pipelines.sort((a, b) => a.data.order - b.data.order);
 
-steps:
-  # Step 1: local model writes an insight to brain
-  - id: analyze
-    plugin: ollama
-    model: qwen2.5-coder:latest
-    write_brain: true          # <- output saved to brain context
-    prompt: |
-      Analyze the code in ./src and write one key insight
-      about its architecture. Start with "INSIGHT:"
-
-  # Step 2: cloud model uses that insight
-  - id: summarize
-    executor: claude
-    model: claude-haiku-4-5-20251001
-    use_brain: true            # <- receives step 1's INSIGHT in preamble
-    prompt: |
-      Based on the architecture insight above, suggest
-      one high-impact improvement.`;
-
-const ex2 = `\
-name: selective-brain
-version: "1"
-use_brain: true               # <- all steps receive brain context by default
-
-steps:
-  - id: fetch-data
-    plugin: gh
-    use_brain: false           # <- suppressed: no brain context for data fetch
-    vars:
-      args: "issue list --json number,title --limit 10"
-
-  - id: analyze
-    executor: claude
-    model: claude-haiku-4-5-20251001
-    # use_brain: true inherited from pipeline level
-    prompt: |
-      Given the brain context above and these issues:
-      {{steps.fetch-data.output}}
-      What patterns do you see?`;
+const rendered = await Promise.all(
+  sorted.map(async (doc) => {
+    const { Content } = await render(doc);
+    return { doc, Content, slug: doc.id.replace(/\.(md|mdx)$/, '') };
+  })
+);
 ---
 
-<div class="term-pane-header">
-  <div class="tui-panel-header"><span>DOCS</span></div>
+<div class="dp-shell">
+  <!-- sidebar nav -->
+  <nav class="dp-nav" id="dp-nav">
+    <div class="dp-nav-header">
+      <span class="fg-purple">GL1TCH</span><span class="fg-comment"> / docs</span>
+    </div>
+
+    <div class="dp-nav-section">PIPELINES</div>
+    {rendered.map(({ doc, slug }, i) => (
+      <button
+        class={`dp-nav-item${i === 0 ? ' active' : ''}`}
+        data-target={`dp-section-${slug}`}
+        onclick="DPNav.show(this)"
+      >
+        <span class="dp-nav-num fg-comment">{String(doc.data.order).padStart(2, '0')}</span>
+        <span class="dp-nav-label">{doc.data.title}</span>
+      </button>
+    ))}
+  </nav>
+
+  <!-- content panes -->
+  <div class="dp-content" id="dp-content">
+    {rendered.map(({ doc, Content, slug }, i) => (
+      <article
+        id={`dp-section-${slug}`}
+        class={`dp-article${i === 0 ? ' visible' : ''}`}
+        aria-hidden={i !== 0}
+      >
+        <div class="dp-article-header">
+          <h1 class="dp-title fg-purple">{doc.data.title}</h1>
+          <p class="dp-desc fg-comment">{doc.data.description}</p>
+        </div>
+        <div class="dp-body">
+          <Content />
+        </div>
+      </article>
+    ))}
+  </div>
 </div>
-<div class="term-pane">
-  <h2 class="section-header fg-green">// the pipeline memory system //</h2>
 
-  <!-- use_brain / write_brain definitions -->
-  <div style="margin-bottom:24px">
-    <p style="font-size:13px;line-height:1.9;margin-bottom:16px;color:var(--fg)">
-      Brain fields give your pipelines persistent, accumulated context across steps.
-      A step can <span class="fg-yellow">write</span> insights to the brain store and later steps can
-      <span class="fg-yellow">read</span> from it &mdash; turning a linear pipeline into a knowledge-building loop.
-    </p>
+<script>
+  const DPNav = {
+    show(btn: HTMLButtonElement) {
+      const target = btn.dataset.target;
+      if (!target) return;
 
-    <!-- use_brain -->
-    <div class="tui-step-header"><span><span class="step-num">use_brain</span></span></div>
-    <div style="background:var(--darkbg);border-left:3px solid var(--green);padding:14px 16px;margin:0 0 16px;font-size:13px;line-height:1.8">
-      <span class="fg-green" style="font-weight:bold">use_brain: true</span>
-      <span class="fg-comment"> &mdash; type: bool &nbsp;|&nbsp; default: false</span><br/>
-      <span style="color:var(--fg)">
-        When set on a pipeline or step, injects accumulated brain context into the
-        step&apos;s prompt preamble as a <span class="fg-cyan">&lt;brain&gt;</span> XML block.
-        The AI sees previous insights from earlier steps (or past runs if brain notes
-        were saved). Set at pipeline level to enable for all steps, or override per-step.
-      </span>
-    </div>
+      // deactivate all nav items
+      document.querySelectorAll('.dp-nav-item').forEach(el => el.classList.remove('active'));
+      btn.classList.add('active');
 
-    <!-- write_brain -->
-    <div class="tui-step-header"><span><span class="step-num">write_brain</span></span></div>
-    <div style="background:var(--darkbg);border-left:3px solid var(--cyan);padding:14px 16px;margin:0 0 16px;font-size:13px;line-height:1.8">
-      <span class="fg-cyan" style="font-weight:bold">write_brain: true</span>
-      <span class="fg-comment"> &mdash; type: bool &nbsp;|&nbsp; default: false</span><br/>
-      <span style="color:var(--fg)">
-        When set on a step, the step&apos;s output is appended to the brain context store
-        for the current run. Subsequent steps with <span class="fg-green">use_brain: true</span> will see this
-        output in their preamble. Multiple <span class="fg-cyan">write_brain</span> steps accumulate &mdash;
-        context is concatenated in order.
-      </span>
-    </div>
+      // hide all articles
+      document.querySelectorAll('.dp-article').forEach(el => {
+        el.classList.remove('visible');
+        el.setAttribute('aria-hidden', 'true');
+      });
 
-    <!-- step-level override -->
-    <div class="tui-step-header"><span><span class="step-num">step-level override</span></span></div>
-    <div style="background:var(--darkbg);border-left:3px solid var(--yellow);padding:14px 16px;margin:0 0 4px;font-size:13px;line-height:1.8">
-      <span class="fg-yellow" style="font-weight:bold">use_brain: false</span>
-      <span class="fg-comment"> &mdash; per-step suppression</span><br/>
-      <span style="color:var(--fg)">
-        Even when <span class="fg-green">use_brain: true</span> is set at the pipeline level, you can suppress
-        injection for a specific step with <span class="fg-yellow">use_brain: false</span>.
-        Useful for data-fetch steps where brain context wastes tokens and adds noise.
-      </span>
-    </div>
-  </div>
+      // show target
+      const article = document.getElementById(target);
+      if (article) {
+        article.classList.add('visible');
+        article.removeAttribute('aria-hidden');
+        // scroll content pane to top
+        const pane = document.getElementById('dp-content');
+        if (pane) pane.scrollTop = 0;
+      }
+    }
+  };
 
-  <!-- ── SECTION 2: EXAMPLES ── -->
-  <div class="tui-step-header" style="margin:24px 0 0"><span>EXAMPLES</span></div>
-  <p class="fg-comment" style="font-size:11px;margin:4px 0 12px">// annotated YAML examples //</p>
+  // expose for inline onclick
+  (window as any).DPNav = DPNav;
+</script>
 
-  <p style="color:var(--fg);font-size:12px;margin-bottom:4px">
-    <span class="fg-yellow">&gt;&gt;</span>
-    <span class="fg-cyan"> Example 1:</span> Brain Feedback Loop &mdash; two steps, first writes, second reads
-  </p>
-  <div class="code-wrap">
-    <Code code={ex1} lang="yaml" theme="dracula" />
-  </div>
+<style>
+/* ── Shell layout ── */
+.dp-shell {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
 
-  <p style="color:var(--fg);font-size:12px;margin:16px 0 4px">
-    <span class="fg-yellow">&gt;&gt;</span>
-    <span class="fg-cyan"> Example 2:</span> Selective brain injection &mdash; pipeline-level on, one step suppressed
-  </p>
-  <div class="code-wrap">
-    <Code code={ex2} lang="yaml" theme="dracula" />
-  </div>
+/* ── Sidebar nav ── */
+.dp-nav {
+  width: 168px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--current-line);
+  background: var(--darkbg);
+  overflow-y: auto;
+  padding: 12px 0 8px;
+}
 
-  <!-- ── SECTION 3: BRAIN TIPS ── -->
-  <div class="tui-step-header" style="margin:28px 0 0"><span>BRAIN TIPS</span></div>
-  <p class="fg-comment" style="font-size:11px;margin:4px 0 16px">// making your AI workspace smarter //</p>
+.dp-nav-header {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 0 12px 10px;
+  border-bottom: 1px solid var(--current-line);
+  margin-bottom: 8px;
+  letter-spacing: 0.02em;
+}
 
-  <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:8px">
+.dp-nav-section {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--comment);
+  padding: 8px 12px 4px;
+  text-transform: uppercase;
+}
 
-    <div style="display:flex;gap:12px;align-items:flex-start">
-      <span class="fg-yellow" style="font-family:'JetBrains Mono',monospace;font-size:13px;min-width:32px;flex-shrink:0">[1]</span>
-      <p style="color:var(--fg);font-size:13px;line-height:1.8;margin:0">
-        <span style="color:var(--fg);font-weight:bold">Start writes early, reads late</span> &mdash;
-        Put <span class="fg-cyan">write_brain: true</span> on early exploratory steps (local/fast models),
-        then use <span class="fg-green">use_brain: true</span> on later synthesis steps (cloud/expensive models).
-        You get deep context without burning tokens on every step.
-      </p>
-    </div>
+.dp-nav-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  border-left: 2px solid transparent;
+  color: var(--comment);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  text-align: left;
+  padding: 6px 10px 6px 10px;
+  cursor: pointer;
+  line-height: 1.4;
+  transition: color 0.1s, border-color 0.1s;
+}
 
-    <div style="display:flex;gap:12px;align-items:flex-start">
-      <span class="fg-yellow" style="font-family:'JetBrains Mono',monospace;font-size:13px;min-width:32px;flex-shrink:0">[2]</span>
-      <p style="color:var(--fg);font-size:13px;line-height:1.8;margin:0">
-        <span style="color:var(--fg);font-weight:bold">Suppress on pure data-fetch steps</span> &mdash;
-        If a step just fetches JSON from an API or runs <span class="fg-cyan">gh pr list</span>,
-        add <span class="fg-yellow">use_brain: false</span>. Brain context won&apos;t help and
-        wastes the context window.
-      </p>
-    </div>
+.dp-nav-item:hover {
+  color: var(--fg);
+}
 
-    <div style="display:flex;gap:12px;align-items:flex-start">
-      <span class="fg-yellow" style="font-family:'JetBrains Mono',monospace;font-size:13px;min-width:32px;flex-shrink:0">[3]</span>
-      <p style="color:var(--fg);font-size:13px;line-height:1.8;margin:0">
-        <span style="color:var(--fg);font-weight:bold">Name your insights explicitly</span> &mdash;
-        Prompt your <span class="fg-cyan">write_brain</span> steps to start their output with
-        <span class="fg-yellow">&ldquo;INSIGHT:&rdquo;</span> or <span class="fg-yellow">&ldquo;FINDING:&rdquo;</span>
-        so the brain context is scannable. The AI reading it later will extract the signal faster.
-      </p>
-    </div>
+.dp-nav-item.active {
+  color: var(--fg);
+  border-left-color: var(--purple);
+  background: rgba(135,135,175,0.06);
+}
 
-    <div style="display:flex;gap:12px;align-items:flex-start">
-      <span class="fg-yellow" style="font-family:'JetBrains Mono',monospace;font-size:13px;min-width:32px;flex-shrink:0">[4]</span>
-      <p style="color:var(--fg);font-size:13px;line-height:1.8;margin:0">
-        <span style="color:var(--fg);font-weight:bold">Chain local &rarr; cloud for cost control</span> &mdash;
-        Use a cheap local Ollama model (<span class="fg-cyan">qwen2.5-coder</span>, <span class="fg-cyan">llama3.2</span>)
-        to write brain notes, then a cloud model to synthesize. You get the best of both worlds:
-        local privacy + cloud reasoning.
-      </p>
-    </div>
+.dp-nav-num {
+  font-size: 9px;
+  margin-top: 1px;
+  flex-shrink: 0;
+}
 
-    <div style="display:flex;gap:12px;align-items:flex-start">
-      <span class="fg-yellow" style="font-family:'JetBrains Mono',monospace;font-size:13px;min-width:32px;flex-shrink:0">[5]</span>
-      <p style="color:var(--fg);font-size:13px;line-height:1.8;margin:0">
-        <span style="color:var(--fg);font-weight:bold">Brain context accumulates within a run</span> &mdash;
-        Multiple <span class="fg-cyan">write_brain</span> steps in the same pipeline run all accumulate
-        into the same context block. Step 3 sees what steps 1 and 2 wrote. Design your pipeline
-        like a conversation that builds knowledge progressively.
-      </p>
-    </div>
+/* ── Content pane ── */
+.dp-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
 
-  </div>
+.dp-article {
+  display: none;
+  padding: 28px 32px 48px;
+}
 
-  <!-- ── SECTION 4: PIPELINE YAML QUICK REFERENCE ── -->
-  <div class="tui-step-header" style="margin:28px 0 0"><span>PIPELINE YAML REFERENCE</span></div>
-  <p class="fg-comment" style="font-size:11px;margin:4px 0 12px">// compact field reference //</p>
+.dp-article.visible {
+  display: block;
+}
 
-  <pre style="font-size:12px;line-height:1.8;background:var(--darkbg);padding:16px;margin-bottom:8px;overflow-x:auto"><span class="fg-cyan">  name</span>                             string  Pipeline name, used in <span class="fg-yellow">glitch pipeline run &lt;name&gt;</span>
-<span class="fg-cyan">  version</span>                          string  Schema version, currently <span class="fg-yellow">"1"</span>
-<span class="fg-green">  use_brain</span>                        bool    Inject brain context into all steps (default: false)
-<span class="fg-green">  write_brain</span>                      bool    Append pipeline output to brain store (default: false)
-<span class="fg-cyan">  steps[].id</span>                       string  Unique step identifier, used in <span class="fg-yellow">&#123;&#123;steps.&lt;id&gt;.output&#125;&#125;</span>
-<span class="fg-cyan">  steps[].executor</span> / <span class="fg-cyan">plugin</span>        string  Agent provider (<span class="fg-yellow">claude</span>, <span class="fg-yellow">ollama</span>, <span class="fg-yellow">gh</span>, <span class="fg-yellow">jq</span>, &hellip;)
-<span class="fg-cyan">  steps[].model</span>                    string  Model ID (<span class="fg-comment">e.g. claude-haiku-4-5-20251001, qwen2.5:latest</span>)
-<span class="fg-cyan">  steps[].prompt</span>                   string  Prompt text; supports <span class="fg-yellow">&#123;&#123;steps.&lt;id&gt;.output&#125;&#125;</span> interpolation
-<span class="fg-green">  steps[].use_brain</span>                bool    Per-step override of pipeline-level use_brain
-<span class="fg-green">  steps[].write_brain</span>              bool    Per-step: save this step&apos;s output to brain context</pre>
+.dp-article-header {
+  border-bottom: 1px solid var(--current-line);
+  padding-bottom: 16px;
+  margin-bottom: 28px;
+}
 
-</div>
+.dp-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 18px;
+  font-weight: normal;
+  margin: 0 0 8px;
+  letter-spacing: 0.02em;
+}
+
+.dp-desc {
+  font-size: 12px;
+  margin: 0;
+  line-height: 1.7;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--comment);
+}
+
+/* ── Markdown prose in panel ── */
+.dp-body {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  line-height: 2;
+  color: var(--fg);
+}
+
+/* Headings */
+.dp-body h2 {
+  color: var(--cyan);
+  font-size: 11px;
+  font-weight: normal;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin: 36px 0 14px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--current-line);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dp-body h2::before {
+  content: '//';
+  color: var(--comment);
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+.dp-body h3 {
+  color: var(--yellow);
+  font-size: 12px;
+  font-weight: normal;
+  margin: 28px 0 10px;
+  padding-left: 10px;
+  border-left: 2px solid var(--yellow);
+}
+
+.dp-body h4 {
+  color: var(--fg);
+  font-size: 11px;
+  font-weight: bold;
+  margin: 20px 0 8px;
+  letter-spacing: 0.04em;
+}
+
+/* Paragraphs */
+.dp-body p {
+  margin: 0 0 18px;
+  color: var(--fg);
+}
+
+/* Lists */
+.dp-body ul, .dp-body ol {
+  margin: 0 0 18px;
+  padding-left: 20px;
+}
+.dp-body li {
+  margin-bottom: 8px;
+  line-height: 1.9;
+}
+.dp-body li > p { margin-bottom: 6px; }
+.dp-body ul li::marker { color: var(--purple); }
+.dp-body ol li::marker { color: var(--comment); }
+
+/* Inline code */
+.dp-body code {
+  background: rgba(135,135,175,0.12);
+  color: var(--cyan);
+  padding: 2px 6px;
+  font-size: 11.5px;
+  font-family: 'JetBrains Mono', monospace;
+  border: 1px solid rgba(135,135,175,0.18);
+  border-radius: 2px;
+}
+
+/* Code blocks */
+.dp-body pre {
+  background: var(--darkbg);
+  border-left: 3px solid var(--purple);
+  padding: 16px 18px;
+  overflow-x: auto;
+  margin: 4px 0 22px;
+  font-size: 11.5px;
+  line-height: 1.75;
+}
+.dp-body pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--fg);
+  font-size: inherit;
+}
+
+/* Strong / em */
+.dp-body strong {
+  color: var(--fg);
+  font-weight: bold;
+}
+.dp-body em {
+  color: var(--comment);
+  font-style: normal;
+}
+
+/* Links */
+.dp-body a {
+  color: var(--purple);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(135,135,175,0.3);
+}
+.dp-body a:hover {
+  color: var(--cyan);
+  border-bottom-color: var(--cyan);
+}
+
+/* Tables */
+.dp-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4px 0 24px;
+  font-size: 11.5px;
+  border: 1px solid var(--current-line);
+}
+.dp-body thead {
+  background: var(--darkbg);
+  border-bottom: 2px solid var(--purple);
+}
+.dp-body th {
+  color: var(--purple);
+  text-align: left;
+  padding: 8px 14px;
+  font-weight: normal;
+  letter-spacing: 0.06em;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  border-right: 1px solid var(--current-line);
+  white-space: nowrap;
+}
+.dp-body th:last-child { border-right: none; }
+.dp-body td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--current-line);
+  border-right: 1px solid var(--current-line);
+  vertical-align: top;
+  line-height: 1.7;
+}
+.dp-body td:last-child { border-right: none; }
+.dp-body tr:last-child td { border-bottom: none; }
+.dp-body tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+.dp-body tbody tr:hover { background: rgba(135,135,175,0.06); }
+.dp-body td code, .dp-body th code { font-size: 11px; }
+
+/* Blockquotes — used as admonitions */
+.dp-body blockquote {
+  border-left: 3px solid var(--comment);
+  margin: 4px 0 22px;
+  padding: 12px 16px;
+  background: rgba(95,95,135,0.08);
+  color: var(--fg);
+  line-height: 1.8;
+}
+.dp-body blockquote p { margin: 0; }
+.dp-body blockquote p + p { margin-top: 8px; }
+
+/* Admonition variants via strong prefix */
+/* > **Note:** text  → blue-ish */
+.dp-body blockquote:has(strong:first-child) {
+  border-left-color: var(--cyan);
+  background: rgba(135,175,175,0.07);
+}
+/* > **Warning:** text → yellow */
+.dp-body blockquote:has(strong:first-child):has([data-warn]) {
+  border-left-color: var(--yellow);
+  background: rgba(215,175,95,0.07);
+}
+
+/* Horizontal rule as section divider */
+.dp-body hr {
+  border: none;
+  border-top: 1px solid var(--current-line);
+  margin: 28px 0;
+}
+
+/* Scrollbar inside content */
+.dp-content::-webkit-scrollbar         { width: 4px; }
+.dp-content::-webkit-scrollbar-track   { background: transparent; }
+.dp-content::-webkit-scrollbar-thumb   { background: var(--comment); }
+</style>

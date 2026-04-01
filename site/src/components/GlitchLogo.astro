@@ -3,16 +3,27 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-const dir = path.dirname(fileURLToPath(import.meta.url));
-const gifPath  = path.join(dir, '../../public/glitch-logo.gif');
-const htmlPath = path.join(dir, '../generated/glitch-logo.html');
-
-const useGif  = existsSync(gifPath);
-const useHtml = !useGif && existsSync(htmlPath);
-
+// Resolve paths relative to this component file.
+// Wrapped in try/catch because in Astro dev mode, import.meta.url may be
+// a virtual module URL (/@fs/...) rather than a file:// URL, which causes
+// fileURLToPath to throw — defaulting to the gif in that case since it is
+// always present in public/.
+let useGif = true;   // safe default: gif is always tracked in git
+let useHtml = false;
 let logoHtml = '';
-if (useHtml) {
-  logoHtml = readFileSync(htmlPath, 'utf-8');
+
+try {
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const gifPath  = path.join(dir, '../../public/glitch-logo.gif');
+  const htmlPath = path.join(dir, '../generated/glitch-logo.html');
+
+  useGif  = existsSync(gifPath);
+  useHtml = !useGif && existsSync(htmlPath);
+  if (useHtml) {
+    logoHtml = readFileSync(htmlPath, 'utf-8');
+  }
+} catch {
+  // fileURLToPath failed — keep useGif = true, serve from /glitch-logo.gif
 }
 ---
 {useGif ? (

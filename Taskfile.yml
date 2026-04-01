@@ -210,9 +210,10 @@ tasks:
       - npm run dev
 
   site:build:
-    desc: "Full site build: tdf logo + Astro static build"
+    desc: "Full site build: tdf logo + gif + Astro static build"
     cmds:
       - task: site:tdf-logo
+      - task: site:logo-gif
       - task: site:astro-build
 
   site:astro-build:
