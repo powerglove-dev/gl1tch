@@ -26,11 +26,11 @@ builds:
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
 
-  # Core provider plugins — cloned from github.com/8op-org/plugins
+  # Core provider plugins — cloned from github.com/8op-org/gl1tch-executors
   # by the release workflow before GoReleaser runs.
   - id: glitch-claude
     binary: glitch-claude
-    dir: ../plugins/plugins/claude
+    dir: ../gl1tch-executors/plugins/claude
     main: .
     env:
       - CGO_ENABLED=0
@@ -49,7 +49,7 @@ builds:
 
   - id: glitch-github-copilot
     binary: glitch-github-copilot
-    dir: ../plugins/plugins/github-copilot
+    dir: ../gl1tch-executors/plugins/github-copilot
     main: .
     env:
       - CGO_ENABLED=0
@@ -68,7 +68,7 @@ builds:
 
   - id: glitch-codex
     binary: glitch-codex
-    dir: ../plugins/plugins/codex
+    dir: ../gl1tch-executors/plugins/codex
     main: .
     env:
       - CGO_ENABLED=0
@@ -87,7 +87,7 @@ builds:
 
   - id: glitch-gemini
     binary: glitch-gemini
-    dir: ../plugins/plugins/gemini
+    dir: ../gl1tch-executors/plugins/gemini
     main: .
     env:
       - CGO_ENABLED=0
@@ -106,7 +106,7 @@ builds:
 
   - id: glitch-opencode
     binary: glitch-opencode
-    dir: ../plugins/plugins/opencode
+    dir: ../gl1tch-executors/plugins/opencode
     main: .
     env:
       - CGO_ENABLED=0
@@ -125,7 +125,7 @@ builds:
 
   - id: glitch-ollama
     binary: glitch-ollama
-    dir: ../plugins/plugins/ollama
+    dir: ../gl1tch-executors/plugins/ollama
     main: .
     env:
       - CGO_ENABLED=0
@@ -151,17 +151,17 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     # Bundle sidecar YAML files and the install script alongside the binaries.
     files:
-      - src: ../plugins/plugins/claude/claude.yaml
+      - src: ../gl1tch-executors/plugins/claude/claude.yaml
         dst: wrappers
-      - src: ../plugins/plugins/github-copilot/github-copilot.yaml
+      - src: ../gl1tch-executors/plugins/github-copilot/github-copilot.yaml
         dst: wrappers
-      - src: ../plugins/plugins/codex/codex.yaml
+      - src: ../gl1tch-executors/plugins/codex/codex.yaml
         dst: wrappers
-      - src: ../plugins/plugins/gemini/gemini.yaml
+      - src: ../gl1tch-executors/plugins/gemini/gemini.yaml
         dst: wrappers
-      - src: ../plugins/plugins/opencode/opencode.yaml
+      - src: ../gl1tch-executors/plugins/opencode/opencode.yaml
         dst: wrappers
-      - src: ../plugins/plugins/ollama/ollama.yaml
+      - src: ../gl1tch-executors/plugins/ollama/ollama.yaml
         dst: wrappers
       - src: install.sh
         dst: .
