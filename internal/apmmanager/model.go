@@ -8,11 +8,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/8op-org/gl1tch/internal/executor"
+	"github.com/8op-org/gl1tch/internal/store"
 	"github.com/8op-org/gl1tch/internal/themes"
 	"github.com/8op-org/gl1tch/internal/tuikit"
 )
@@ -87,7 +89,15 @@ type Model struct {
 	// projectRoot is the directory containing apm.yml, used to locate deployed agents.
 	projectRoot string
 
+	// configDir is the user config directory (e.g. ~/.config/glitch). When set,
+	// pipeline templates from apm.yml pipeline stanzas are materialized there.
+	configDir string
+
 	executorMgr *executor.Manager
+
+	// brainStore is optional; when set, APM agent capabilities are seeded as brain
+	// notes (run_id=0, source:apm) after each successful install.
+	brainStore *store.Store
 }
 
 // New returns an ApmManager model ready for use. projectRoot should be the
@@ -97,8 +107,22 @@ func New(projectRoot string, executorMgr *executor.Manager) Model {
 	return Model{
 		themeState:  tuikit.NewThemeState(nil),
 		projectRoot: projectRoot,
-		executorMgr:   executorMgr,
+		executorMgr: executorMgr,
 	}
+}
+
+// WithStore returns a copy of m with the given store wired in for APM capability
+// brain seeding. Call this after New() before passing the Model to BubbleTea.
+func (m Model) WithStore(s *store.Store) Model {
+	m.brainStore = s
+	return m
+}
+
+// WithConfigDir returns a copy of m with the given config directory set for
+// pipeline template materialization. Call this after New() before use.
+func (m Model) WithConfigDir(dir string) Model {
+	m.configDir = dir
+	return m
 }
 
 // Init starts the theme subscription and kicks off the initial agent scan.
@@ -227,9 +251,16 @@ func (m Model) installSelected() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.setAgentState(a.ID, StateInstalling, "")
+
+	// Look up any pipeline stanza declared in apm.yml for this agent.
+	var pipelineStanza string
+	if manifest, err := LoadApmManifest(m.projectRoot); err == nil {
+		pipelineStanza = manifest.PipelineStanza(a.ID)
+	}
+
 	return m, tea.Batch(
 		func() tea.Msg { return AgentInstallStartMsg{AgentID: a.ID} },
-		installAgentCmd(m.projectRoot, *a, m.executorMgr),
+		installAgentCmd(m.projectRoot, *a, m.executorMgr, m.brainStore, pipelineStanza, m.configDir),
 	)
 }
 
@@ -550,17 +581,17 @@ func loadAgentsCmd(projectRoot string) tea.Cmd {
 
 // installAgentCmd runs `apm install <id>` in the background, then reads the
 // deployed .agent.md and registers a CliAdapter in executorMgr.
-func installAgentCmd(projectRoot string, a Agent, executorMgr *executor.Manager) tea.Cmd {
+func installAgentCmd(projectRoot string, a Agent, executorMgr *executor.Manager, brainStore *store.Store, pipelineStanza, configDir string) tea.Cmd {
 	return func() tea.Msg {
-		agentMDPath, adapter, err := installAndWrap(context.Background(), projectRoot, a, executorMgr)
+		agentMDPath, adapter, err := installAndWrap(context.Background(), projectRoot, a, executorMgr, brainStore, pipelineStanza, configDir)
 		if err != nil {
 			return agentInstallResultMsg{agentID: a.ID, err: err}
 		}
 		_ = agentMDPath
 		return agentInstallResultMsg{
-			agentID:  a.ID,
+			agentID:    a.ID,
 			executorID: adapter.Name(),
-			adapter:  adapter,
+			adapter:    adapter,
 		}
 	}
 }
@@ -657,11 +688,18 @@ func parseAgentMD(path string) Agent {
 // installAndWrap runs `apm install <id>`, locates the deployed .agent.md, reads
 // it as a system prompt, and registers a CliAdapter in executorMgr.
 // It returns the path to the deployed file and the registered adapter.
+// If brainStore is non-nil, the agent's capabilities are seeded as brain notes
+// (run_id=0, tagged type:capability source:apm) after successful registration.
+// If pipelineStanza is non-empty and configDir is set, a pipeline template is
+// materialized to configDir/pipelines/apm.<name>.pipeline.yaml (skip if exists).
 func installAndWrap(
 	ctx context.Context,
 	projectRoot string,
 	a Agent,
 	executorMgr *executor.Manager,
+	brainStore *store.Store,
+	pipelineStanza string,
+	configDir string,
 ) (string, *executor.CliAdapter, error) {
 	// Run `apm install <id>` to fetch and deploy the agent file.
 	cmd := exec.CommandContext(ctx, "apm", "install", a.ID)
@@ -702,6 +740,41 @@ func installAndWrap(
 		// If already registered (e.g. re-install), treat as success.
 		if !strings.Contains(err.Error(), "already registered") {
 			return "", nil, fmt.Errorf("register executor %s: %w", executorID, err)
+		}
+	}
+
+	// Seed APM capabilities into the brain store (run_id=0, persistent).
+	if brainStore != nil && len(a.Capabilities) > 0 {
+		now := time.Now().UnixMilli()
+		for _, cap := range a.Capabilities {
+			note := store.BrainNote{
+				RunID:     0,
+				StepID:    "apm.capability." + executorID + "." + cap,
+				CreatedAt: now,
+				Tags:      "type:capability source:apm title:" + a.Name,
+				Body:      cap,
+			}
+			if err := brainStore.UpsertCapabilityNote(ctx, note); err != nil {
+				// Non-fatal: log and continue.
+				fmt.Fprintf(os.Stderr, "apm: seed brain note for %s/%s: %v\n", a.Name, cap, err)
+			}
+		}
+	}
+
+	// Materialize pipeline template if a stanza was declared.
+	if pipelineStanza != "" && configDir != "" {
+		pipelinesDir := filepath.Join(configDir, "pipelines")
+		if err := os.MkdirAll(pipelinesDir, 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "apm: create pipelines dir: %v\n", err)
+		} else {
+			destPath := filepath.Join(pipelinesDir, "apm."+a.Name+".pipeline.yaml")
+			if _, statErr := os.Stat(destPath); os.IsNotExist(statErr) {
+				if err := os.WriteFile(destPath, []byte(pipelineStanza), 0o644); err != nil {
+					fmt.Fprintf(os.Stderr, "apm: write pipeline template %s: %v\n", destPath, err)
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "apm: pipeline template %s already exists, skipping\n", destPath)
+			}
 		}
 	}
 

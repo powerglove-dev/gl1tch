@@ -6,6 +6,8 @@ import (
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/8op-org/gl1tch/internal/store"
 )
 
 // AgentCapabilityProvider lets glitch executors request agent capabilities at
@@ -39,10 +41,12 @@ type AgentCapabilityProvider interface {
 // AgentInstallErrMsg) so the TUI can track install state.
 type DefaultProvider struct {
 	mu          sync.RWMutex
-	agents      map[string]Agent  // keyed by Agent.ID
+	agents      map[string]Agent // keyed by Agent.ID
 	projectRoot string
+	configDir   string       // optional; forwarded for pipeline template materialization
 	send        func(tea.Msg) // may be nil; used to broadcast progress to the TUI
 	model       *Model        // non-nil when provider is wired directly to the model
+	brainStore  *store.Store  // optional; forwarded to installAndWrap for capability seeding
 }
 
 // NewDefaultProvider creates a DefaultProvider backed by the given Model.
@@ -51,8 +55,10 @@ func NewDefaultProvider(m *Model, send func(tea.Msg)) *DefaultProvider {
 	p := &DefaultProvider{
 		agents:      make(map[string]Agent),
 		projectRoot: m.projectRoot,
+		configDir:   m.configDir,
 		send:        send,
 		model:       m,
+		brainStore:  m.brainStore,
 	}
 	// Seed from the model's current agent list.
 	for _, a := range m.agents {
@@ -119,7 +125,13 @@ func (p *DefaultProvider) RequireAgent(ctx context.Context, id string) (Agent, e
 		Name: agentBaseName(id),
 	}
 
-	_, adapter, err := installAndWrap(ctx, projectRoot, a, executorMgr)
+	// Look up any pipeline stanza declared in apm.yml for this agent.
+	var pipelineStanza string
+	if manifest, err := LoadApmManifest(projectRoot); err == nil {
+		pipelineStanza = manifest.PipelineStanza(id)
+	}
+
+	_, adapter, err := installAndWrap(ctx, projectRoot, a, executorMgr, p.brainStore, pipelineStanza, p.configDir)
 	if err != nil {
 		p.mu.Lock()
 		entry := p.agents[id]

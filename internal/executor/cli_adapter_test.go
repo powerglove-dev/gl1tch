@@ -147,3 +147,4 @@ func TestCliAdapter_Execute_FilterViaEnv(t *testing.T) {
 		t.Errorf("expected jq output to contain 'orcai', got %q", buf.String())
 	}
 }
+

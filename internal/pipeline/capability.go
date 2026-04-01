@@ -63,7 +63,7 @@ func (cs *CapabilitySeeder) Seed(ctx context.Context, entries []CapabilityEntry)
 			RunID:     0,
 			StepID:    "gl1tch.capability." + e.ID,
 			CreatedAt: now,
-			Tags:      "type:capability title:" + e.Name,
+			Tags:      "type:capability source:builtin title:" + e.Name,
 			Body:      fmt.Sprintf("%s (%s): %s", e.Name, e.Category, e.Description),
 		}
 		if err := cs.store.UpsertCapabilityNote(ctx, note); err != nil {

@@ -326,6 +326,32 @@ func TestStoreBrainInjector_CapabilityNotesNotCountedAgainstRunCap(t *testing.T)
 
 // --- Section scoring via Ollama ---
 
+func TestCapabilitySeeder_NotesHaveSourceBuiltinTag(t *testing.T) {
+	s := openTestStore(t)
+	seeder := NewCapabilitySeeder(s)
+	ctx := context.Background()
+
+	entries := []CapabilityEntry{
+		{ID: "executor.shell", Category: "executor", Name: "Shell", Description: "Run shell commands"},
+	}
+	if err := seeder.Seed(ctx, entries); err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+
+	notes, err := s.CapabilityNotes(ctx)
+	if err != nil {
+		t.Fatalf("CapabilityNotes: %v", err)
+	}
+	if len(notes) == 0 {
+		t.Fatal("expected at least one capability note")
+	}
+	for _, n := range notes {
+		if !strings.Contains(n.Tags, "source:builtin") {
+			t.Errorf("seeder note missing source:builtin tag, got: %q", n.Tags)
+		}
+	}
+}
+
 func TestOllamaSectionScorer_Interface(t *testing.T) {
 	// Verifies the interface is satisfied — no network call.
 	var _ SectionScorer = (*OllamaSectionScorer)(nil)

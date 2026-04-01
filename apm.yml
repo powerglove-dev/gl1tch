@@ -7,4 +7,16 @@ description: 'GLITCH — your AI, your terminal, your rules. AI workspace orches
 dependencies:
   apm:
   - 8op-org/gl1tch
+  # Example: agent with a pipeline stanza. On install, gl1tch materializes
+  # ~/.config/glitch/pipelines/apm.bbs-site-reviewer.pipeline.yaml so the
+  # router can dispatch to this agent by intent without user-authored pipeline YAML.
+  #
+  # - id: bbs-site-reviewer
+  #   pipeline: |
+  #     name: apm.bbs-site-reviewer
+  #     description: Review the ABBS site for Dracula palette and ANSI aesthetic compliance
+  #     steps:
+  #       - id: review
+  #         executor: apm.bbs-site-reviewer
+  #         prompt: "Review all site/ changes for ABBS/ANSI aesthetic consistency. {{param.input}}"
   mcp: null
