@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	cron "github.com/8op-org/gl1tch/internal/cron"
+	glitchcron "github.com/8op-org/gl1tch/internal/cron"
 	"github.com/8op-org/gl1tch/internal/console"
 )
 
@@ -17,7 +17,7 @@ import (
 // It temporarily overrides HOME so LoadConfig finds an empty config.
 func TestBuildCronSection_Empty(t *testing.T) {
 	// Only run the empty-case assertion when the real config is empty.
-	entries, _ := orcaicron.LoadConfig()
+	entries, _ := glitchcron.LoadConfig()
 	if len(entries) > 0 {
 		t.Skip("skipping empty-case test: real cron.yaml has entries")
 	}

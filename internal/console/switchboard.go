@@ -19,7 +19,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	robfigcron "github.com/robfig/cron/v3"
@@ -348,12 +347,6 @@ type Model struct {
 	cronPanel CronPanel
 	// Pipeline bus subscription (tasks 7.2–7.8)
 	pipelineBusCh chan pipelineBusEventMsg
-	// Inline clarification reply (agent.run.clarification)
-	pendingClarification       *store.ClarificationRequest // non-nil when awaiting reply
-	pendingClarificationOutput string                      // partial output up to the question
-	clarifyInput               textinput.Model
-	clarifyActive              bool
-	clarifyNeedsResume         bool // true only when loaded from DB on startup (subprocess may be dead)
 	// TDF header art — rendered once at startup, cached for every frame.
 	tdfHeader  []string
 	tdfHeaderW int // visual width (ANSI-stripped) of the widest header line
@@ -374,10 +367,6 @@ func NewWithStore(s *store.Store) Model {
 	pipeSchedTA.SetHeight(1)
 
 	cwd, _ := os.Getwd()
-
-	clarifyTI := textinput.New()
-	clarifyTI.Placeholder = "type your answer…"
-	clarifyTI.CharLimit = 2000
 
 	agentProviders := picker.BuildProviders()
 	pipelines := ScanPipelines(pipelinesDir())
@@ -400,7 +389,6 @@ func NewWithStore(s *store.Store) Model {
 		launchCWD:             cwd,
 		inboxModel:   inbox.New(s, nil), // bundle set after registry loads
 		store:        s,
-		clarifyInput: clarifyTI,
 		activityFeed: activity.New(""),
 	}
 
@@ -1034,15 +1022,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Pending clarifications loaded from DB on startup ─────────────────────
 
 	case pendingClarificationsMsg:
-		if len(msg.reqs) > 0 {
-			m.pendingClarification = &msg.reqs[0]
-			m.pendingClarificationOutput = msg.reqs[0].Output
-			m.clarifyInput.Reset()
-			m.clarifyInput.Focus()
-			m.clarifyActive = true
-			m.clarifyNeedsResume = true // loaded from DB on startup; subprocess may be dead
+		// Forward each pending clarification to the gl1tch chat panel.
+		var cmds []tea.Cmd
+		for _, req := range msg.reqs {
+			newPanel, cmd := m.glitchChat.update(ClarificationInjectMsg{Req: req})
+			m.glitchChat = newPanel
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
-		return m, nil
+		return m, tea.Batch(cmds...)
 
 	// ── Dir picker messages ───────────────────────────────────────────────────
 
@@ -1124,7 +1113,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case FeedLineMsg:
-		wasClarifyActive := m.clarifyActive
 		m = m.appendFeedLine(msg.ID, msg.Line)
 		// For in-process (agent) jobs the log file is written here.
 		// Window-mode (pipeline) jobs write via tee in the shell — skip.
@@ -1133,13 +1121,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				appendToFile(e.logFile, stripANSI(msg.Line)+"\n")
 				break
 			}
-		}
-		// If clarification was just triggered, start cursor blink alongside the drain.
-		if m.clarifyActive && !wasClarifyActive {
-			if jh, ok := m.activeJobs[msg.ID]; ok {
-				return m, tea.Batch(drainChan(jh.ch), textinput.Blink)
-			}
-			return m, textinput.Blink
 		}
 		// Re-issue drain only for the job that produced this message.
 		// Draining all jobs would accumulate goroutines and starve channels.
@@ -1205,25 +1186,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case pipelineBusEventMsg:
-		// Intercept clarification requests before the general event dispatcher.
+		// Forward clarification requests to the gl1tch chat panel.
 		if msg.topic == topics.ClarificationRequested {
 			var req store.ClarificationRequest
 			if json.Unmarshal(msg.payload, &req) == nil {
-				m.pendingClarification = &req
-				m.pendingClarificationOutput = req.Output
-				m.clarifyInput.Reset()
-				m.clarifyInput.Focus()
-				m.clarifyActive = true
-				m.clarifyNeedsResume = false // pipeline subprocess is alive; DB write is enough
-				// Update the signal board to show the run as paused.
 				if req.RunID != "" {
 					m = m.updateFeedEntryStatusByRunID(req.RunID, FeedPaused)
 				}
+				newPanel, glitchCmd := m.glitchChat.update(ClarificationInjectMsg{Req: req})
+				m.glitchChat = newPanel
+				if m.pipelineBusCh != nil {
+					return m, tea.Batch(glitchCmd, waitForPipelineBusEvent(m.pipelineBusCh))
+				}
+				return m, glitchCmd
 			}
 			if m.pipelineBusCh != nil {
-				return m, tea.Batch(textinput.Blink, waitForPipelineBusEvent(m.pipelineBusCh))
+				return m, waitForPipelineBusEvent(m.pipelineBusCh)
 			}
-			return m, textinput.Blink
+			return m, nil
 		}
 		m = m.handlePipelineBusEvent(msg)
 		var cmds []tea.Cmd
@@ -1505,77 +1485,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	key := msg.String()
-
-	// Clarification reply input — capture keys only when detail view is open
-	// for the pending run. When the user is navigating other panels, clarifyActive
-	// just drives the ? badge; it must not steal global navigation shortcuts.
-	if m.clarifyActive && m.inboxDetailOpen {
-		switch key {
-		case "esc":
-			m.clarifyActive = false
-			m.clarifyNeedsResume = false
-			m.pendingClarification = nil
-			m.clarifyInput.Blur()
-			m.clarifyInput.Reset()
-			return m, nil
-		case "enter":
-			answer := strings.TrimSpace(m.clarifyInput.Value())
-			if answer == "" {
-				return m, nil
-			}
-			runID := ""
-			if m.pendingClarification != nil {
-				runID = m.pendingClarification.RunID
-			}
-			m.clarifyActive = false
-			m.clarifyNeedsResume = false
-			m.pendingClarification = nil
-			m.clarifyInput.Blur()
-			m.clarifyInput.Reset()
-
-			// Update the signal board to show the run as resuming.
-			if runID != "" {
-				m = m.updateFeedEntryStatusByRunID(runID, FeedRunning)
-			}
-
-			// Persist the answer to the DB so the polling pipeline subprocess
-			// can pick it up even if busd is not available.
-			if m.store != nil && runID != "" {
-				_ = m.store.AnswerClarification(runID, answer)
-			}
-
-			// Launch a resume job window only when the clarification was loaded
-			// from DB on startup (subprocess may be dead). When the pipeline is
-			// live (clarifyNeedsResume=false), the original subprocess is still
-			// polling the DB and will pick up the answer itself.
-			if runID != "" && m.clarifyNeedsResume {
-				cwd := ""
-				for _, r := range m.inboxModel.Runs() {
-					if strconv.FormatInt(r.ID, 10) == runID {
-						var rmeta struct {
-							CWD string `json:"cwd"`
-						}
-						_ = json.Unmarshal([]byte(r.Metadata), &rmeta)
-						cwd = rmeta.CWD
-						break
-					}
-				}
-				bin, _ := os.Executable()
-				shellCmd := fmt.Sprintf("%s pipeline resume --run-id %s", bin, runID)
-				feedID := "resume-" + runID
-				createJobWindow(feedID, shellCmd, "resume-"+runID, cwd)
-			}
-
-			// Publish reply so the blocking AskClarification call in the pipeline
-			// subprocess can unblock and continue execution with the user's answer.
-			reply := store.ClarificationReply{RunID: runID, Answer: answer}
-			return m, publishClarificationReplyCmd(reply)
-		default:
-			var cmd tea.Cmd
-			m.clarifyInput, cmd = m.clarifyInput.Update(msg)
-			return m, cmd
-		}
-	}
 
 	// Dir picker overlay — capture all keys when open.
 	if m.dirPickerOpen {
@@ -3972,16 +3881,10 @@ func (m Model) buildInboxSection(w, height int) []string {
 			default:
 				dot = aRed + "●" + aRst
 			}
-			// ⚠ attention marker for failed runs; ? for runs awaiting clarification.
+			// ⚠ attention marker for failed runs.
 			warn := ""
 			warnVis := 0
-			// Yellow ? for runs awaiting clarification.
-			awaitsClarification := m.pendingClarification != nil &&
-				m.pendingClarification.RunID == fmt.Sprintf("%d", run.ID)
-			if awaitsClarification {
-				warn = " " + aYlw + "?" + aRst
-				warnVis = 2
-			} else if run.ExitStatus != nil && *run.ExitStatus != 0 {
+			if run.ExitStatus != nil && *run.ExitStatus != 0 {
 				warn = " " + aRed + "⚠" + aRst
 				warnVis = 2 // " ⚠" = 2 visible columns
 			}

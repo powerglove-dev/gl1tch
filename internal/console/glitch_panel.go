@@ -68,6 +68,24 @@ type glitchModelMsg struct{ model string }
 // glitchOpenThemesMsg is returned to the switchboard to open the theme picker overlay.
 type glitchOpenThemesMsg struct{}
 
+// ClarificationInjectMsg is dispatched by pipeline_bus when a ClarificationRequested
+// busd event arrives. The root model forwards it to the glitch panel via update().
+type ClarificationInjectMsg struct{ Req store.ClarificationRequest }
+
+// clarificationUrgencyTickMsg fires every 60 seconds to re-evaluate urgency on
+// passive pending clarifications.
+type clarificationUrgencyTickMsg struct{}
+
+func clarificationUrgencyTick() tea.Cmd {
+	return tea.Tick(60*time.Second, func(time.Time) tea.Msg { return clarificationUrgencyTickMsg{} })
+}
+
+// pendingClarification tracks one unanswered pipeline question in the panel.
+type pendingClarification struct {
+	req    store.ClarificationRequest
+	urgent bool
+}
+
 // slashSuggestion is a single autocomplete entry for a slash command.
 type slashSuggestion struct {
 	cmd  string
@@ -125,9 +143,21 @@ const (
 )
 
 type glitchEntry struct {
-	who  glitchSpeaker
-	text string
-	ts   time.Time
+	who           glitchSpeaker
+	text          string
+	ts            time.Time
+	clarification *clarificationMeta // non-nil for clarification messages
+}
+
+// clarificationMeta holds the pipeline-side metadata for a clarification
+// entry rendered in the gl1tch chat thread.
+type clarificationMeta struct {
+	runID        string
+	pipelineName string
+	stepID       string
+	question     string
+	answer       string
+	resolved     bool
 }
 
 // glitchTurn is a conversation turn for multi-turn history.
@@ -585,6 +615,12 @@ type glitchChatPanel struct {
 	acCursor      int               // selected suggestion index
 	acActive      bool              // suggestion overlay visible
 	acSuppressed  bool              // true after Esc; re-enables on next input change
+
+	// Clarification routing
+	pendingClarifications []pendingClarification       // unanswered pipeline questions, oldest first
+	batchWindow           time.Time                    // time of first item in current batch window
+	batchAccum            []store.ClarificationRequest // accumulated within 3s batch window
+	clarificationUrgent   bool                         // true when any pending item has gone urgent
 }
 
 // newGlitchPanel builds the panel using the best available provider.
@@ -789,6 +825,13 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 	case glitchRunEventMsg:
 		return p.handleRunEvent(msg)
 
+	case ClarificationInjectMsg:
+		return p.injectClarification(msg.Req)
+
+	case clarificationUrgencyTickMsg:
+		p = p.reevaluateUrgency()
+		return p, clarificationUrgencyTick()
+
 	case tea.KeyMsg:
 		// Tab cycles between input focus and scroll focus (skip when picker is open).
 		if msg.String() == "tab" && !p.modelPickerOpen && !p.acActive {
@@ -897,6 +940,12 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 			}
 			p.input.SetValue("")
 			p.scrollOffset = 0 // jump to latest on send
+
+			// Clarification answer routing — intercept when a pipeline is waiting
+			// for input, unless the message looks like a question for gl1tch itself.
+			if len(p.pendingClarifications) > 0 && !strings.HasSuffix(userText, "?") {
+				return p.routeClarificationAnswer(userText)
+			}
 
 			// Wizard mode: /init phase-based onboarding.
 			if p.wizardActive {
@@ -1394,6 +1443,188 @@ func (p glitchChatPanel) buildRunAnalysisPrompt(run store.Run, failed bool) stri
 	return sb.String()
 }
 
+// ── Clarification routing ─────────────────────────────────────────────────────
+
+// injectClarification receives a ClarificationRequest and queues it for
+// display, handling batching and urgency evaluation.
+func (p glitchChatPanel) injectClarification(req store.ClarificationRequest) (glitchChatPanel, tea.Cmd) {
+	const batchDuration = 3 * time.Second
+	const urgencyThreshold = 5 * time.Minute
+
+	now := time.Now()
+
+	// Batch window: accumulate requests that arrive within 3s of the first.
+	if p.batchWindow.IsZero() {
+		p.batchWindow = now
+	}
+	p.batchAccum = append(p.batchAccum, req)
+
+	if time.Since(p.batchWindow) < batchDuration && len(p.batchAccum) > 1 {
+		// Still within batch window — re-inject later via a delayed flush tick.
+		// For now just accumulate; the next call will flush when the window closes.
+		return p, nil
+	}
+
+	// Flush: emit a batch summary if more than one item accumulated, then inject each.
+	if len(p.batchAccum) > 1 {
+		names := make([]string, 0, len(p.batchAccum))
+		for _, r := range p.batchAccum {
+			names = append(names, pipelineNameFromReq(r))
+		}
+		summary := fmt.Sprintf("%d pipelines need input: %s", len(p.batchAccum), strings.Join(names, ", "))
+		p.messages = append(p.messages, glitchEntry{
+			who:  glitchSpeakerBot,
+			text: summary,
+			ts:   now,
+		})
+	}
+
+	for _, r := range p.batchAccum {
+		urgent := time.Since(r.AskedAt) >= urgencyThreshold
+		p.pendingClarifications = append(p.pendingClarifications, pendingClarification{
+			req:    r,
+			urgent: urgent,
+		})
+		pname := pipelineNameFromReq(r)
+		text := fmt.Sprintf("[%s › %s] %s", pname, r.StepID, r.Question)
+		if r.StepID == "" {
+			text = fmt.Sprintf("[%s] %s", pname, r.Question)
+		}
+		p.messages = append(p.messages, glitchEntry{
+			who: glitchSpeakerBot,
+			ts:  now,
+			clarification: &clarificationMeta{
+				runID:        r.RunID,
+				pipelineName: pname,
+				stepID:       r.StepID,
+				question:     r.Question,
+			},
+			text: text,
+		})
+		if urgent {
+			p.clarificationUrgent = true
+		}
+	}
+
+	// Reset batch accumulator.
+	p.batchAccum = nil
+	p.batchWindow = time.Time{}
+
+	var cmds []tea.Cmd
+	if p.clarificationUrgent {
+		p.scrollOffset = 0 // scroll to bottom on urgent
+	}
+	// Start urgency ticker if not already running (first clarification injected).
+	if len(p.pendingClarifications) == 1 {
+		cmds = append(cmds, clarificationUrgencyTick())
+	}
+	return p, tea.Batch(cmds...)
+}
+
+// reevaluateUrgency promotes any passive pending clarifications that have
+// crossed the urgency threshold since they were injected.
+func (p glitchChatPanel) reevaluateUrgency() glitchChatPanel {
+	const urgencyThreshold = 5 * time.Minute
+	changed := false
+	for i := range p.pendingClarifications {
+		if !p.pendingClarifications[i].urgent && time.Since(p.pendingClarifications[i].req.AskedAt) >= urgencyThreshold {
+			p.pendingClarifications[i].urgent = true
+			p.clarificationUrgent = true
+			changed = true
+		}
+	}
+	if changed {
+		p.scrollOffset = 0 // scroll to bottom when something becomes urgent
+	}
+	return p
+}
+
+// routeClarificationAnswer routes the user's text to the oldest pending
+// clarification (or the one explicitly indexed with `N:` prefix).
+func (p glitchChatPanel) routeClarificationAnswer(userText string) (glitchChatPanel, tea.Cmd) {
+	idx, answer, warning := parseAnswerTarget(userText, p.pendingClarifications)
+
+	// Append user message.
+	p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText, ts: time.Now()})
+
+	if warning != "" {
+		p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: warning, ts: time.Now()})
+	}
+
+	target := p.pendingClarifications[idx]
+	runID := target.req.RunID
+
+	// Mark the clarification message in the thread as resolved.
+	for i := range p.messages {
+		if p.messages[i].clarification != nil && p.messages[i].clarification.runID == runID {
+			p.messages[i].clarification.resolved = true
+			p.messages[i].clarification.answer = answer
+			break
+		}
+	}
+
+	// Remove from pending slice.
+	p.pendingClarifications = append(p.pendingClarifications[:idx], p.pendingClarifications[idx+1:]...)
+
+	// Recompute urgent flag.
+	p.clarificationUrgent = false
+	for _, pc := range p.pendingClarifications {
+		if pc.urgent {
+			p.clarificationUrgent = true
+			break
+		}
+	}
+
+	// Persist to store and publish reply event.
+	var cmds []tea.Cmd
+	if p.store != nil {
+		_ = p.store.AnswerClarification(runID, answer)
+	}
+	reply := store.ClarificationReply{RunID: runID, Answer: answer}
+	cmds = append(cmds, publishClarificationReplyCmd(reply))
+	return p, tea.Batch(cmds...)
+}
+
+// parseAnswerTarget parses user input to determine which pending clarification
+// it answers. Supports plain text (routes to index 0) and `N:` prefix for
+// explicit out-of-order routing.
+func parseAnswerTarget(input string, pending []pendingClarification) (idx int, answer string, warning string) {
+	// Check for explicit "N: <answer>" prefix.
+	if colon := strings.Index(input, ":"); colon > 0 {
+		prefix := strings.TrimSpace(input[:colon])
+		allDigits := true
+		for _, r := range prefix {
+			if r < '0' || r > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits && prefix != "" {
+			n := 0
+			for _, r := range prefix {
+				n = n*10 + int(r-'0')
+			}
+			ans := strings.TrimSpace(input[colon+1:])
+			targetIdx := n - 1
+			if targetIdx >= 0 && targetIdx < len(pending) {
+				return targetIdx, ans, ""
+			}
+			return 0, ans, fmt.Sprintf("Index %d out of range — answered #1 instead", n)
+		}
+	}
+	return 0, input, ""
+}
+
+// pipelineNameFromReq extracts a display name from a ClarificationRequest.
+// Uses the pipeline name embedded in the RunID ("run-<id>") if no better
+// source is available. Falls back to "pipeline".
+func pipelineNameFromReq(req store.ClarificationRequest) string {
+	if req.RunID != "" {
+		return "run-" + req.RunID
+	}
+	return "pipeline"
+}
+
 // upsertStreamEntry updates or appends the last GLITCH entry with streamBuf content.
 func (p *glitchChatPanel) upsertStreamEntry() {
 	for i := len(p.messages) - 1; i >= 0; i-- {
@@ -1505,6 +1736,15 @@ func (p glitchChatPanel) build(height, width int, pal styles.ANSIPalette) []stri
 	// Provider subtitle with right-aligned clock.
 	timeStr := strings.ToLower(time.Now().Format("3:04pm"))
 	subtitle := ">> GL1TCH AI assistant  //  " + providerLabel
+	// Urgent clarification badge: "▶N?" when any pending item has gone urgent.
+	if n := len(p.pendingClarifications); n > 0 {
+		badge := fmt.Sprintf(" [%d?]", n)
+		if p.clarificationUrgent {
+			subtitle += pal.Error + badge + aRst
+		} else {
+			subtitle += pal.Dim + badge + aRst
+		}
+	}
 	subtitleVisW := len(subtitle) // approximate (ASCII only)
 	availW := width - hPad*2
 	clockVisW := len(timeStr)
@@ -1750,6 +1990,15 @@ func (p glitchChatPanel) renderMessages(innerW int, pal styles.ANSIPalette) []st
 	dimColor := pal.Dim
 
 	for i, e := range p.messages {
+		// Clarification entries get distinct rendering.
+		if e.clarification != nil {
+			out = append(out, p.renderClarificationEntry(e, i, innerW, pal)...)
+			if i < len(p.messages)-1 {
+				out = append(out, "")
+			}
+			continue
+		}
+
 		var prefix, contPrefix string
 		tsStr := ""
 		if !e.ts.IsZero() {
@@ -1793,6 +2042,55 @@ func (p glitchChatPanel) renderMessages(innerW int, pal styles.ANSIPalette) []st
 		}
 	}
 	return out
+}
+
+// renderClarificationEntry renders a single clarification glitchEntry with a
+// pipeline badge prefix, question text, and resolved state.
+func (p glitchChatPanel) renderClarificationEntry(e glitchEntry, idx int, innerW int, pal styles.ANSIPalette) []string {
+	c := e.clarification
+	var lines []string
+
+	// Compute the positional index among still-pending items for multi-pending display.
+	pendingIdx := -1
+	for pi, pc := range p.pendingClarifications {
+		if pc.req.RunID == c.runID {
+			pendingIdx = pi
+			break
+		}
+	}
+
+	// Badge: "▶ pipeline-name" in accent color, or "✓ pipeline-name" when resolved.
+	var badge string
+	if c.resolved {
+		badge = pal.Dim + "✓ " + c.pipelineName + aRst
+	} else if pendingIdx >= 0 && len(p.pendingClarifications) > 1 {
+		badge = pal.Accent + fmt.Sprintf("▶ %s [%d]", c.pipelineName, pendingIdx+1) + aRst
+	} else {
+		badge = pal.Accent + "▶ " + c.pipelineName + aRst
+	}
+
+	tsStr := ""
+	if !e.ts.IsZero() {
+		tsStr = pal.Dim + " " + strings.ToLower(e.ts.Format("3:04pm")) + aRst
+	}
+	header := badge + tsStr
+	lines = append(lines, header)
+
+	// Question text, wrapped.
+	textW := innerW - 2
+	if textW < 10 {
+		textW = 10
+	}
+	for _, ql := range wrapText(c.question, textW) {
+		lines = append(lines, "  "+pal.FG+ql+aRst)
+	}
+
+	// Resolved answer.
+	if c.resolved && c.answer != "" {
+		lines = append(lines, "  "+pal.Dim+"→ "+c.answer+aRst)
+	}
+	_ = idx
+	return lines
 }
 
 // wrapText wraps s into lines of at most w runes each, splitting on spaces.
