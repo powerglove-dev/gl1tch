@@ -627,7 +627,7 @@ func newGlitchPanel(cfgDir string, providers []picker.ProviderDef, s *store.Stor
 			} else {
 				for _, prov := range providers {
 					if prov.ID == providerID {
-						args := append([]string{}, prov.PipelineArgs...)
+						var args []string
 						if modelID != "" {
 							args = append(args, "--model", modelID)
 						}
@@ -836,7 +836,7 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 				} else {
 					for _, prov := range p.providers {
 						if prov.ID == provID {
-							args := append([]string{}, prov.PipelineArgs...)
+							var args []string
 							if modelID != "" {
 								args = append(args, "--model", modelID)
 							}
