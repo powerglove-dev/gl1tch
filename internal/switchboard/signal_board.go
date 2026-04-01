@@ -120,21 +120,15 @@ func (m Model) signalBoardPanelHeight(contentH int) int {
 	return sbH
 }
 
-// signalBoardVisibleRows computes the number of visible entries using the
-// same height formula as the View() layout and buildSignalBoard header count.
-// Each entry occupies 3 body rows.
+// signalBoardVisibleRows computes the number of visible entries the signal board
+// can show at the current terminal height. Each entry occupies 3 body rows.
 func (m Model) signalBoardVisibleRows() int {
 	h := m.height
 	if h <= 0 {
 		h = 40
 	}
-	contentH := max(h-2, 5) // match View(): reserve 1 for topBar + 1 for padding
-	sbHeight := m.signalBoardPanelHeight(contentH)
-
-	// Mirror header line count from buildSignalBoard:
-	// sprite path: 3 sprite lines; else boxTop = 1 line.
-	// Plus 1 filter line (always shown). Plus 1 search line when searching.
-	// Plus 1 for boxBot.
+	contentH := max(h-m.headerHeight()-1, 5)
+	// Mirror header line count from buildSignalBoard.
 	headerRows := 1 // boxTop fallback
 	if PanelHeader(m.activeBundle(), "signal_board", 80, "", "") != nil {
 		headerRows = 3 // sprite(3)
@@ -143,13 +137,11 @@ func (m Model) signalBoardVisibleRows() int {
 	if m.signalBoard.searching || m.signalBoard.query != "" {
 		headerRows++ // search input line
 	}
-	headerRows++ // boxBot
-
-	bodyH := sbHeight - headerRows
+	// -2: hint footer + boxBot
+	bodyH := contentH - headerRows - 2
 	if bodyH < 1 {
 		bodyH = 1
 	}
-	// Each entry uses 3 rows.
 	visibleEntries := bodyH / 3
 	if visibleEntries < 1 {
 		visibleEntries = 1

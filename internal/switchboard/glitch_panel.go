@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/exec"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/adam-stokes/orcai/internal/panelrender"
 	"github.com/adam-stokes/orcai/internal/picker"
+	"github.com/adam-stokes/orcai/internal/store"
 	"github.com/adam-stokes/orcai/internal/styles"
 )
 
@@ -33,6 +35,26 @@ type glitchStreamMsg struct {
 type glitchDoneMsg struct{}
 
 type glitchErrMsg struct{ err error }
+
+// glitchRunEventMsg carries a completed or failed pipeline run to GLITCH for analysis.
+type glitchRunEventMsg struct {
+	run    store.Run
+	failed bool
+}
+
+// glitchRerunMsg is returned to the switchboard to trigger a pipeline rerun.
+type glitchRerunMsg struct{ name string }
+
+// glitchBellJokes are shown when GLITCH is not focused and receives a new event.
+var glitchBellJokes = []string{
+	"oh good. more unread results. i'll just narrate to myself.",
+	"pipeline finished. not like anyone's watching.",
+	"results in. cool. i'll add it to the pile.",
+	"done. staring at the cursor since you left.",
+	"*ding* — or don't look. whatever.",
+	"something happened. you'll see it eventually.",
+	"finished. i'm fine. totally fine.",
+}
 
 // ── Conversation types ────────────────────────────────────────────────────────
 
@@ -91,8 +113,9 @@ You reference WarGames, Hackers (1995), Neuromancer, Phrack, 2600.
 You are the AI assistant embedded in ORCAI — the Agentic Bulletin Board System — a tmux-powered AI workspace.
 
 You know everything about ORCAI:
-LAYOUT: three-column switchboard (window 0). left = inbox + cron jobs. center = you (GLITCH) + send panel. right = activity feed.
-KEY BINDINGS: ^spc a=focus GLITCH (you), ^spc j=jump window, ^spc p=pipeline builder, ^spc b=brain editor, ^spc n=new agent from clipboard. Esc=back.
+LAYOUT: two-column switchboard (window 0). left = you (GLITCH) + send panel. right = signal board (running/done pipeline statuses).
+KEY BINDINGS: ^spc a=focus GLITCH (you), ^spc j=jump window, ^spc p=pipeline builder, ^spc b=brain editor, ^spc n=new agent from clipboard. Esc=unfocus. /rerun=rerun pipeline. /cron=cron view.
+EVENTS: you are notified when pipelines complete or fail. you analyze results and suggest improvements automatically.
 PIPELINES: YAML files in ~/.config/orcai/pipelines/. steps have: name, provider, system_prompt, optional brain tags. ^spc p = pipeline builder TUI.
 PROVIDERS: ollama/modelname for local (llama3.2, mistral, codestral), claude/claude-sonnet-4-6 for cloud. mix them in one pipeline.
 SEND PANEL: center column below you — launch agent jobs with a message, provider, and CWD.
@@ -334,10 +357,11 @@ type glitchChatPanel struct {
 	cancel    context.CancelFunc
 	focused   bool
 	cfgDir    string
+	store     *store.Store // for brain context in run analysis
 }
 
 // newGlitchPanel builds the panel using the best available provider.
-func newGlitchPanel(cfgDir string, providers []picker.ProviderDef) glitchChatPanel {
+func newGlitchPanel(cfgDir string, providers []picker.ProviderDef, s *store.Store) glitchChatPanel {
 	ti := textinput.New()
 	ti.Placeholder = "ask glitch anything…"
 	ti.Prompt = " >> "
@@ -366,6 +390,7 @@ func newGlitchPanel(cfgDir string, providers []picker.ProviderDef) glitchChatPan
 		ctx:     ctx,
 		cancel:  cancel,
 		cfgDir:  cfgDir,
+		store:   s,
 	}
 }
 
@@ -427,6 +452,9 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 		})
 		return p, nil
 
+	case glitchRunEventMsg:
+		return p.handleRunEvent(msg)
+
 	case tea.KeyMsg:
 		if !p.focused {
 			return p, nil
@@ -444,6 +472,47 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 				return p, nil
 			}
 			p.input.SetValue("")
+
+			// Handle slash commands before appending to conversation.
+			if strings.HasPrefix(userText, "/") {
+				cmd := strings.Fields(userText)[0]
+				switch cmd {
+				case "/cron":
+					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
+					p.messages = append(p.messages, glitchEntry{
+						who:  glitchSpeakerBot,
+						text: "switching to cron view. use ^spc j to return to the switchboard.",
+					})
+					return p, func() tea.Msg {
+						exec.Command("tmux", "switch-client", "-t", "orcai-cron").Run() //nolint:errcheck
+						return nil
+					}
+				case "/rerun":
+					args := strings.Fields(userText)
+					name := ""
+					if len(args) > 1 {
+						name = strings.Join(args[1:], " ")
+					}
+					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
+					label := name
+					if label == "" {
+						label = "last pipeline"
+					}
+					p.messages = append(p.messages, glitchEntry{
+						who:  glitchSpeakerBot,
+						text: "relaunching " + label + "...",
+					})
+					return p, func() tea.Msg { return glitchRerunMsg{name: name} }
+				case "/help":
+					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
+					p.messages = append(p.messages, glitchEntry{
+						who: glitchSpeakerBot,
+						text: "slash commands:\n  /cron          — switch to cron session\n  /rerun [name]  — rerun a pipeline\n  /help          — this list",
+					})
+					return p, nil
+				}
+			}
+
 			p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
 			p.turns = append(p.turns, glitchTurn{role: "user", text: userText})
 			if p.backend == nil {
@@ -475,6 +544,119 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 		return p, cmd
 	}
 	return p, nil
+}
+
+// handleRunEvent processes a pipeline run completion/failure event.
+// It rings the system bell and posts an analysis to the chat.
+func (p glitchChatPanel) handleRunEvent(msg glitchRunEventMsg) (glitchChatPanel, tea.Cmd) {
+	// Don't start a new analysis while one is already streaming.
+	if p.streaming {
+		return p, nil
+	}
+
+	run := msg.run
+	status := "completed"
+	if msg.failed {
+		status = "failed"
+	}
+
+	// Ring bell and post deadpan joke if not in focus.
+	if !p.focused {
+		fmt.Print("\a")
+		joke := glitchBellJokes[rand.Intn(len(glitchBellJokes))] //nolint:gosec
+		p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: joke})
+	}
+
+	// Brief notification.
+	var dur string
+	if run.FinishedAt != nil && run.StartedAt > 0 {
+		d := time.Duration(*run.FinishedAt-run.StartedAt) * time.Millisecond
+		dur = fmt.Sprintf(" in %.1fs", d.Seconds())
+	}
+	p.messages = append(p.messages, glitchEntry{
+		who:  glitchSpeakerBot,
+		text: fmt.Sprintf("pipeline '%s' %s%s", run.Name, status, dur),
+	})
+
+	if p.backend == nil {
+		return p, nil
+	}
+
+	// Build analysis prompt from run data + brain context.
+	prompt := p.buildRunAnalysisPrompt(run, msg.failed)
+	p.streaming = true
+	p.streamBuf = ""
+	backend := p.backend
+	ctx := p.ctx
+	turns := p.turns // pass history for context
+	return p, func() tea.Msg {
+		ch, err := backend.stream(ctx, turns, prompt)
+		if err != nil {
+			return glitchErrMsg{err: err}
+		}
+		return glitchNextToken(ch)()
+	}
+}
+
+// buildRunAnalysisPrompt constructs the analysis prompt for a completed run.
+func (p glitchChatPanel) buildRunAnalysisPrompt(run store.Run, failed bool) string {
+	status := "success"
+	if failed {
+		status = "failed"
+	}
+
+	// Truncate stdout/stderr.
+	truncate := func(s string, max int) string {
+		r := []rune(s)
+		if len(r) <= max {
+			return s
+		}
+		return "..." + string(r[len(r)-max:])
+	}
+
+	var sb strings.Builder
+	sb.WriteString("[PIPELINE RUN ANALYSIS]\n")
+	sb.WriteString(fmt.Sprintf("Name: %s\nStatus: %s\n", run.Name, status))
+	if len(run.Steps) > 0 {
+		sb.WriteString("Steps:\n")
+		for _, s := range run.Steps {
+			sb.WriteString(fmt.Sprintf("  - %s: %s\n", s.ID, s.Status))
+		}
+	}
+	if run.Stdout != "" {
+		sb.WriteString("Output (last 500 chars):\n")
+		sb.WriteString(truncate(run.Stdout, 500))
+		sb.WriteString("\n")
+	}
+	if run.Stderr != "" {
+		sb.WriteString("Stderr:\n")
+		sb.WriteString(truncate(run.Stderr, 300))
+		sb.WriteString("\n")
+	}
+
+	// Brain context.
+	if p.store != nil {
+		notes, err := p.store.AllBrainNotes(context.Background())
+		if err == nil && len(notes) > 0 {
+			// Take last 5 most recent.
+			start := len(notes) - 5
+			if start < 0 {
+				start = 0
+			}
+			sb.WriteString("Brain context (recent notes):\n")
+			for _, n := range notes[start:] {
+				body := n.Body
+				r := []rune(body)
+				if len(r) > 200 {
+					body = string(r[:200]) + "..."
+				}
+				sb.WriteString(fmt.Sprintf("  [%s] %s\n", n.Tags, body))
+			}
+		}
+	}
+
+	sb.WriteString("\nAnalyze this run result. If it succeeded, briefly summarize what happened. If it failed, diagnose the issue and suggest a fix or prompt change. Mention /rerun if a retry makes sense. Keep it under 6 lines. Stay in character as GLITCH.")
+	return sb.String()
 }
 
 // upsertStreamEntry updates or appends the last GLITCH entry with streamBuf content.

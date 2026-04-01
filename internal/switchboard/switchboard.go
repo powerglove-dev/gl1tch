@@ -390,7 +390,7 @@ func NewWithStore(s *store.Store) Model {
 		agent: agentSection{
 			providers: agentProviders,
 		},
-		glitchChat:            newGlitchPanel(cfgDir, agentProviders),
+		glitchChat:            newGlitchPanel(cfgDir, agentProviders, s),
 		sendPanel:             buildershared.NewSendPanel(agentProviders).SetSavedPipelineTitles(pipelines),
 		pipelineEditor:        pipelineeditor.New(agentProviders, pipelinesDir(), s),
 		brainEditor:           braineditor.New(s, agentProviders),
@@ -953,7 +953,7 @@ var _ io.Writer = (*lineWriter)(nil)
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── GLITCH chat panel: always forward stream messages; route keys when focused ──
 	switch msg.(type) {
-	case glitchStreamMsg, glitchDoneMsg, glitchErrMsg:
+	case glitchStreamMsg, glitchDoneMsg, glitchErrMsg, glitchRunEventMsg:
 		newPanel, cmd := m.glitchChat.update(msg)
 		m.glitchChat = newPanel
 		return m, cmd
@@ -1210,13 +1210,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 		}
 		m = m.handlePipelineBusEvent(msg)
-		// Also trigger an inbox refresh so new/updated runs appear immediately.
-		var inboxCmd tea.Cmd
-		m.inboxModel, inboxCmd = m.inboxModel.Update(inbox.RunCompletedMsg{})
-		if m.pipelineBusCh != nil {
-			return m, tea.Batch(inboxCmd, waitForPipelineBusEvent(m.pipelineBusCh))
+		var cmds []tea.Cmd
+		// Route pipeline run completions/failures to GLITCH for analysis.
+		if (msg.topic == topics.RunCompleted || msg.topic == topics.RunFailed) && m.store != nil {
+			var p struct {
+				RunID int64 `json:"run_id"`
+			}
+			if json.Unmarshal(msg.payload, &p) == nil && p.RunID != 0 {
+				if run, err := m.store.GetRun(p.RunID); err == nil {
+					failed := msg.topic == topics.RunFailed
+					newPanel, glitchCmd := m.glitchChat.update(glitchRunEventMsg{run: *run, failed: failed})
+					m.glitchChat = newPanel
+					cmds = append(cmds, glitchCmd)
+				}
+			}
 		}
-		return m, inboxCmd
+		if m.pipelineBusCh != nil {
+			cmds = append(cmds, waitForPipelineBusEvent(m.pipelineBusCh))
+		}
+		return m, tea.Batch(cmds...)
+
+	case glitchRerunMsg:
+		name := msg.name
+		// Fall back to the currently selected pipeline if no name given.
+		if name == "" && len(m.launcher.pipelines) > 0 {
+			name = m.launcher.pipelines[m.launcher.selected]
+		}
+		if name == "" {
+			return m, nil
+		}
+		// Find the matching pipeline (case-insensitive, then exact).
+		match := name
+		for _, p := range m.launcher.pipelines {
+			if strings.EqualFold(p, name) {
+				match = p
+				break
+			}
+		}
+		yamlPath := filepath.Join(pipelinesDir(), match+".pipeline.yaml")
+		m.pendingPipelineName = match
+		m.pendingPipelineYAML = yamlPath
+		return m.launchPendingPipeline(m.launchCWD)
 
 	case jobDoneMsg:
 		// Drain any remaining lines buffered in the channel before marking done.
@@ -1964,16 +1998,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.inboxModel.SetFocused(false)
 		m.sendPanel = m.sendPanel.Enter()
 		return m, loadAgentPromptsCmd(m.store)
-	case "c":
-		m.launcher.focused = false
-		m.agent.focused = false
-		m.sendPanel = m.sendPanel.SetFocused(false)
-		m.feedFocused = false
-		m.signalBoardFocused = false
-		m.inboxPanel.focused = false
-		m.inboxModel.SetFocused(false)
-		m.cronPanel.focused = true
-		return m, nil
 	}
 
 	switch key {
@@ -1987,13 +2011,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "tab", "shift+tab":
 		fwd := key == "tab"
-		// Tab order follows the three-column layout, left→right top→bottom:
-		//   LEFT col:   inbox → cron
-		//   CENTER col: agentsCenter → agent runner (send panel)
-		//   RIGHT col:  signalBoard → feed
-		//   wrap back to inbox
-		//
-		// When agent send panel is focused, tab cycles through its internal fields.
+		// Tab order: signalBoard → sendPanel → signalBoard (wrap).
+		// 'A' toggles GLITCH focus independently.
+		// When send panel is focused, tab cycles through its internal fields.
 		// SendTabOutMsg and SendShiftTabOutMsg signals move focus out of the panel.
 		if m.agent.focused {
 			newPanel, cmd := m.sendPanel.Update(msg)
@@ -2008,62 +2028,34 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				case buildershared.SendShiftTabOutMsg:
 					m.agent.focused = false
 					m.sendPanel = m.sendPanel.SetFocused(false)
-					m.agentsCenterFocused = true
+					m.signalBoardFocused = true
 				}
 			}
 			return m, nil
 		}
 		if fwd {
 			switch {
-			case m.inboxPanel.focused:
-				m.inboxPanel.focused = false
-				m.inboxModel.SetFocused(false)
-				m.cronPanel.focused = true
-			case m.cronPanel.focused:
-				m.cronPanel.focused = false
-				m.agentsCenterFocused = true
-			case m.agentsCenterFocused:
-				m.agentsCenterFocused = false
-				m.agent.focused = true
-				m.sendPanel = m.sendPanel.Enter()
 			case m.signalBoardFocused:
 				m.signalBoardFocused = false
 				m.signalBoard.clearSearch()
-				m.feedFocused = true
-				m.feedCursor = 0
-			case m.feedFocused:
-				m.feedFocused = false
-				m.inboxPanel.focused = true
-				m.inboxModel.SetFocused(true)
+				m.agent.focused = true
+				m.sendPanel = m.sendPanel.Enter()
 			default:
-				m.inboxPanel.focused = true
-				m.inboxModel.SetFocused(true)
+				m.agent.focused = false
+				m.sendPanel = m.sendPanel.SetFocused(false)
+				m.signalBoardFocused = true
 			}
 		} else {
 			switch {
-			case m.inboxPanel.focused:
-				m.inboxPanel.focused = false
-				m.inboxModel.SetFocused(false)
-				m.feedFocused = true
-				m.feedCursor = 0
-			case m.cronPanel.focused:
-				m.cronPanel.focused = false
-				m.inboxPanel.focused = true
-				m.inboxModel.SetFocused(true)
-			case m.agentsCenterFocused:
-				m.agentsCenterFocused = false
-				m.cronPanel.focused = true
 			case m.signalBoardFocused:
 				m.signalBoardFocused = false
 				m.signalBoard.clearSearch()
 				m.agent.focused = true
 				m.sendPanel = m.sendPanel.Enter()
-			case m.feedFocused:
-				m.feedFocused = false
-				m.signalBoardFocused = true
 			default:
-				m.inboxPanel.focused = true
-				m.inboxModel.SetFocused(true)
+				m.agent.focused = false
+				m.sendPanel = m.sendPanel.SetFocused(false)
+				m.signalBoardFocused = true
 			}
 		}
 		return m, nil
@@ -3208,13 +3200,12 @@ func (m Model) filteredFeed() []feedEntry {
 
 // ── View ──────────────────────────────────────────────────────────────────────
 
-// View renders the full-screen switchboard layout (three-column).
+// View renders the full-screen switchboard layout (two-column).
 //
-// Left column (30%): pipeline launcher, inbox, cron.
-// Center column (remainder): agents grid (top) + agent runner (bottom).
-// Right column (25%): activity feed.
+// Center column (75%): GLITCH chat + send panel.
+// Right column (25%): signal board (pipeline statuses).
 //
-// Below 80 chars total width, the right column is hidden (two-column fallback).
+// Below 80 chars total width, the right column is hidden (single-column fallback).
 func (m Model) View() string {
 	w := m.width
 	if w <= 0 {
@@ -3225,59 +3216,37 @@ func (m Model) View() string {
 		h = 40
 	}
 
-	leftW := m.leftColWidth() - 1
 	contentH := max(h-m.headerHeight()-1, 5) // reserve header height + 1 padding row
-
-	left := m.viewLeftColumn(contentH, leftW)
-	leftLines := strings.Split(left, "\n")
 
 	// header is the TDF block-art header (empty string when TDF not loaded).
 	header := m.viewTDFHeader(w)
 
 	buildBody := func() string {
 		if w < 80 {
-			// Narrow terminal: two-column fallback (left + center only).
+			// Narrow terminal: center only.
 			midW := m.midColWidth()
 			center := m.viewCenterColumn(contentH, midW)
-			totalRows := max(len(leftLines), len(center))
-			var rows []string
-			for i := range totalRows {
-				l := ""
-				if i < len(leftLines) {
-					l = leftLines[i]
-				}
-				c := ""
-				if i < len(center) {
-					c = center[i]
-				}
-				rows = append(rows, padToVis(l, leftW)+"  "+c)
-			}
-			return strings.Join(rows, "\n")
+			return strings.Join(center, "\n")
 		}
 
 		midW := m.midColWidth()
 		rightW := m.rightColWidth()
 
 		center := m.viewCenterColumn(contentH, midW)
-		feed := m.viewActivityFeed(contentH, rightW)
-		feedLines := strings.Split(feed, "\n")
+		sbLines := m.buildSignalBoard(contentH, rightW)
 
-		totalRows := max(len(leftLines), len(center), len(feedLines))
+		totalRows := max(len(center), len(sbLines))
 		var rows []string
 		for i := range totalRows {
-			l := ""
-			if i < len(leftLines) {
-				l = leftLines[i]
-			}
 			c := ""
 			if i < len(center) {
 				c = center[i]
 			}
-			f := ""
-			if i < len(feedLines) {
-				f = feedLines[i]
+			r := ""
+			if i < len(sbLines) {
+				r = sbLines[i]
 			}
-			rows = append(rows, padToVis(l, leftW)+"  "+padToVis(c, midW)+"  "+f)
+			rows = append(rows, padToVis(c, midW)+"  "+r)
 		}
 		return strings.Join(rows, "\n")
 	}
@@ -3528,46 +3497,27 @@ func (m Model) rightColWidth() int {
 	return rw
 }
 
-// midColWidth returns the width of the center (agents grid + agent runner) column.
-// Two 2-char gutters separate the three columns, so midW = w - leftW - rightW - 4.
+// midColWidth returns the width of the center (GLITCH + send panel) column.
+// One 2-char gutter separates center and right columns.
 func (m Model) midColWidth() int {
 	w := m.width
 	if w <= 0 {
 		w = 120
 	}
-	lw := m.leftColWidth()
 	rw := m.rightColWidth()
-	mw := w - lw - rw - 4
+	mw := w - rw - 2
 	if mw < 10 {
 		mw = 10
 	}
 	return mw
 }
 
-// viewLeftColumn renders the left column: inbox + cron sections.
+// viewLeftColumn renders the left column: inbox only.
 func (m Model) viewLeftColumn(height, width int) string {
 	var lines []string
 
-	// Distribute all rows between Inbox (60%) and Cron (40%), min 4 each.
-	// Agent runner is in the center column; pipeline launcher moved to sendpanel popup.
-	remaining := height - len(lines)
-	if remaining >= 4 {
-		inboxRows := remaining * 6 / 10
-		cronRows := remaining - inboxRows - 1 // 1 for blank separator
-		if inboxRows < 4 {
-			inboxRows = 4
-		}
-		if cronRows < 4 {
-			// Can't fit both — give everything to inbox.
-			inboxRows = remaining
-			cronRows = 0
-		}
-
-		lines = append(lines, m.buildInboxSection(width, inboxRows)...)
-		if cronRows >= 4 {
-			lines = append(lines, "")
-			lines = append(lines, m.buildCronSection(width, cronRows)...)
-		}
+	if height >= 4 {
+		lines = append(lines, m.buildInboxSection(width, height)...)
 	}
 
 	for len(lines) < height {
