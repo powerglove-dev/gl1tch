@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>GLITCH</title><meta name="description" content="A terminal workspace for AI-assisted development. Pipelines, agents, brain context — in your terminal."><link rel="stylesheet" href="/css/bbs.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <main class="terminal-stage"> <div class="mac-terminal" id="mac-terminal"> <div class="mac-titlebar"> <div class="mac-dots" aria-hidden="true"> <span class="mac-dot mac-dot-red"></span> <span class="mac-dot mac-dot-yellow"></span> <span class="mac-dot mac-dot-green"></span> </div> <span class="mac-title">GLITCH</span> </div> <div class="mac-body"> <div class="terminal-logo"> <pre class="ansi-logo">
+<!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>GLITCH</title><meta name="description" content="A terminal workspace for AI-assisted development. Pipelines, agents, brain context — in your terminal."><link rel="stylesheet" href="/css/bbs.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <main class="terminal-stage"> <div class="terminal-workspace" id="terminal-workspace"> <div class="mac-terminal" id="mac-terminal"> <div class="mac-titlebar"> <div class="mac-dots" aria-hidden="true"> <span class="mac-dot mac-dot-red"></span> <span class="mac-dot mac-dot-yellow"></span> <span class="mac-dot mac-dot-green"></span> </div> <span class="mac-title">GLITCH</span> </div> <div class="mac-body"> <div class="terminal-logo"> <pre class="ansi-logo">
 
 <span class="fg-purple"> ██████╗ ██╗     ██╗████████╗ ██████╗██╗  ██╗</span>
 <span class="fg-cyan">██╔════╝ ██║     ██║╚══██╔══╝██╔════╝██║  ██║</span>
@@ -6,4 +6,92 @@
 <span class="fg-cyan">██║   ██║██║     ██║   ██║   ██║     ██╔══██║</span>
 <span class="fg-purple">╚██████╔╝███████╗██║   ██║   ╚██████╗██║  ██║</span>
 <span class="fg-cyan"> ╚═════╝ ╚══════╝╚═╝   ╚═╝    ╚═════╝╚═╝  ╚═╝</span>
-  </pre> </div> <div class="terminal-output" id="terminal-output"> <div class="output-line output-system">your AI workspace</div> <div class="output-line output-dim">Type /help to see available commands.</div> </div> <div class="terminal-input-wrap"> <div class="terminal-input-row"> <span class="terminal-prompt">&gt;&gt;</span> <input type="text" id="terminal-input" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" aria-label="GLITCH terminal input"> </div> <div class="terminal-input-hint">enter send  ·  ↑↓ history  ·  tab complete  ·  /install /pipelines /screenshots</div> </div> </div> </div> <script type="module" src="/_astro/MacTerminal.astro_astro_type_script_index_0_lang.F5KaDhvG.js"></script> </main>  </body></html>
+  </pre> </div> <div class="terminal-output" id="terminal-output"> <div class="output-line output-system">your AI workspace</div> <div class="output-line output-dim">Type /help to see available commands.</div> </div> <div class="terminal-input-wrap"> <div class="terminal-input-row"> <span class="terminal-prompt">&gt;&gt;</span> <input type="text" id="terminal-input" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" aria-label="GLITCH terminal input"> </div> <div class="terminal-input-hint">enter send  ·  ↑↓ history  ·  tab complete  ·  /install /pipelines /docs</div> </div> </div> </div> <script type="module" src="/_astro/MacTerminal.astro_astro_type_script_index_0_lang.CP03Z8Er.js"></script> <div class="docs-splitbar" id="docs-splitbar" aria-hidden="true"></div> <div class="docs-panel" id="docs-panel" aria-hidden="true"> <div class="docs-panel-titlebar"> <div class="mac-dots" aria-hidden="true"> <span class="mac-dot mac-dot-red"></span> <span class="mac-dot mac-dot-yellow"></span> <span class="mac-dot mac-dot-green"></span> </div> <span class="mac-title">DOCS</span> <button class="docs-panel-close" id="docs-panel-close" aria-label="Close docs panel">×</button> </div> <div class="docs-panel-body"> <div class="term-pane-header"> <div class="tui-panel-header"><span>DOCS</span></div> </div> <div class="term-pane"> <h2 class="section-header fg-green">// the pipeline memory system //</h2> <!-- use_brain / write_brain definitions --> <div style="margin-bottom:24px"> <p style="font-size:13px;line-height:1.9;margin-bottom:16px;color:var(--fg)">
+Brain fields give your pipelines persistent, accumulated context across steps.
+      A step can <span class="fg-yellow">write</span> insights to the brain store and later steps can
+<span class="fg-yellow">read</span> from it &mdash; turning a linear pipeline into a knowledge-building loop.
+</p> <!-- use_brain --> <div class="tui-step-header"><span><span class="step-num">use_brain</span></span></div> <div style="background:var(--darkbg);border-left:3px solid var(--green);padding:14px 16px;margin:0 0 16px;font-size:13px;line-height:1.8"> <span class="fg-green" style="font-weight:bold">use_brain: true</span> <span class="fg-comment"> &mdash; type: bool &nbsp;|&nbsp; default: false</span><br> <span style="color:var(--fg)">
+When set on a pipeline or step, injects accumulated brain context into the
+        step&apos;s prompt preamble as a <span class="fg-cyan">&lt;brain&gt;</span> XML block.
+        The AI sees previous insights from earlier steps (or past runs if brain notes
+        were saved). Set at pipeline level to enable for all steps, or override per-step.
+</span> </div> <!-- write_brain --> <div class="tui-step-header"><span><span class="step-num">write_brain</span></span></div> <div style="background:var(--darkbg);border-left:3px solid var(--cyan);padding:14px 16px;margin:0 0 16px;font-size:13px;line-height:1.8"> <span class="fg-cyan" style="font-weight:bold">write_brain: true</span> <span class="fg-comment"> &mdash; type: bool &nbsp;|&nbsp; default: false</span><br> <span style="color:var(--fg)">
+When set on a step, the step&apos;s output is appended to the brain context store
+        for the current run. Subsequent steps with <span class="fg-green">use_brain: true</span> will see this
+        output in their preamble. Multiple <span class="fg-cyan">write_brain</span> steps accumulate &mdash;
+        context is concatenated in order.
+</span> </div> <!-- step-level override --> <div class="tui-step-header"><span><span class="step-num">step-level override</span></span></div> <div style="background:var(--darkbg);border-left:3px solid var(--yellow);padding:14px 16px;margin:0 0 4px;font-size:13px;line-height:1.8"> <span class="fg-yellow" style="font-weight:bold">use_brain: false</span> <span class="fg-comment"> &mdash; per-step suppression</span><br> <span style="color:var(--fg)">
+Even when <span class="fg-green">use_brain: true</span> is set at the pipeline level, you can suppress
+        injection for a specific step with <span class="fg-yellow">use_brain: false</span>.
+        Useful for data-fetch steps where brain context wastes tokens and adds noise.
+</span> </div> </div> <!-- ── SECTION 2: EXAMPLES ── --> <div class="tui-step-header" style="margin:24px 0 0"><span>EXAMPLES</span></div> <p class="fg-comment" style="font-size:11px;margin:4px 0 12px">// annotated YAML examples //</p> <p style="color:var(--fg);font-size:12px;margin-bottom:4px"> <span class="fg-yellow">&gt;&gt;</span> <span class="fg-cyan"> Example 1:</span> Brain Feedback Loop &mdash; two steps, first writes, second reads
+</p> <div class="code-wrap"> <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> brain-feedback-loop</span></span>
+<span class="line"><span style="color:#8BE9FD">version</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">1</span><span style="color:#E9F284">"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#8BE9FD">steps</span><span style="color:#FF79C6">:</span></span>
+<span class="line"><span style="color:#6272A4">  # Step 1: local model writes an insight to brain</span></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> analyze</span></span>
+<span class="line"><span style="color:#8BE9FD">    plugin</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ollama</span></span>
+<span class="line"><span style="color:#8BE9FD">    model</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> qwen2.5-coder:latest</span></span>
+<span class="line"><span style="color:#8BE9FD">    write_brain</span><span style="color:#FF79C6">:</span><span style="color:#BD93F9"> true</span><span style="color:#6272A4">          # &#x3C;- output saved to brain context</span></span>
+<span class="line"><span style="color:#8BE9FD">    prompt</span><span style="color:#FF79C6">:</span><span style="color:#FF79C6"> |</span></span>
+<span class="line"><span style="color:#F1FA8C">      Analyze the code in ./src and write one key insight</span></span>
+<span class="line"><span style="color:#F1FA8C">      about its architecture. Start with "INSIGHT:"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#6272A4">  # Step 2: cloud model uses that insight</span></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> summarize</span></span>
+<span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> claude</span></span>
+<span class="line"><span style="color:#8BE9FD">    model</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> claude-haiku-4-5-20251001</span></span>
+<span class="line"><span style="color:#8BE9FD">    use_brain</span><span style="color:#FF79C6">:</span><span style="color:#BD93F9"> true</span><span style="color:#6272A4">            # &#x3C;- receives step 1's INSIGHT in preamble</span></span>
+<span class="line"><span style="color:#8BE9FD">    prompt</span><span style="color:#FF79C6">:</span><span style="color:#FF79C6"> |</span></span>
+<span class="line"><span style="color:#F1FA8C">      Based on the architecture insight above, suggest</span></span>
+<span class="line"><span style="color:#F1FA8C">      one high-impact improvement.</span></span></code></pre> </div> <p style="color:var(--fg);font-size:12px;margin:16px 0 4px"> <span class="fg-yellow">&gt;&gt;</span> <span class="fg-cyan"> Example 2:</span> Selective brain injection &mdash; pipeline-level on, one step suppressed
+</p> <div class="code-wrap"> <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> selective-brain</span></span>
+<span class="line"><span style="color:#8BE9FD">version</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">1</span><span style="color:#E9F284">"</span></span>
+<span class="line"><span style="color:#8BE9FD">use_brain</span><span style="color:#FF79C6">:</span><span style="color:#BD93F9"> true</span><span style="color:#6272A4">               # &#x3C;- all steps receive brain context by default</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#8BE9FD">steps</span><span style="color:#FF79C6">:</span></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> fetch-data</span></span>
+<span class="line"><span style="color:#8BE9FD">    plugin</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> gh</span></span>
+<span class="line"><span style="color:#8BE9FD">    use_brain</span><span style="color:#FF79C6">:</span><span style="color:#BD93F9"> false</span><span style="color:#6272A4">           # &#x3C;- suppressed: no brain context for data fetch</span></span>
+<span class="line"><span style="color:#8BE9FD">    vars</span><span style="color:#FF79C6">:</span></span>
+<span class="line"><span style="color:#8BE9FD">      args</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">issue list --json number,title --limit 10</span><span style="color:#E9F284">"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> analyze</span></span>
+<span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> claude</span></span>
+<span class="line"><span style="color:#8BE9FD">    model</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> claude-haiku-4-5-20251001</span></span>
+<span class="line"><span style="color:#6272A4">    # use_brain: true inherited from pipeline level</span></span>
+<span class="line"><span style="color:#8BE9FD">    prompt</span><span style="color:#FF79C6">:</span><span style="color:#FF79C6"> |</span></span>
+<span class="line"><span style="color:#F1FA8C">      Given the brain context above and these issues:</span></span>
+<span class="line"><span style="color:#F1FA8C">      {{steps.fetch-data.output}}</span></span>
+<span class="line"><span style="color:#F1FA8C">      What patterns do you see?</span></span></code></pre> </div> <!-- ── SECTION 3: BRAIN TIPS ── --> <div class="tui-step-header" style="margin:28px 0 0"><span>BRAIN TIPS</span></div> <p class="fg-comment" style="font-size:11px;margin:4px 0 16px">// making your AI workspace smarter //</p> <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:8px"> <div style="display:flex;gap:12px;align-items:flex-start"> <span class="fg-yellow" style="font-family:'JetBrains Mono',monospace;font-size:13px;min-width:32px;flex-shrink:0">[1]</span> <p style="color:var(--fg);font-size:13px;line-height:1.8;margin:0"> <span style="color:var(--fg);font-weight:bold">Start writes early, reads late</span> &mdash;
+        Put <span class="fg-cyan">write_brain: true</span> on early exploratory steps (local/fast models),
+        then use <span class="fg-green">use_brain: true</span> on later synthesis steps (cloud/expensive models).
+        You get deep context without burning tokens on every step.
+</p> </div> <div style="display:flex;gap:12px;align-items:flex-start"> <span class="fg-yellow" style="font-family:'JetBrains Mono',monospace;font-size:13px;min-width:32px;flex-shrink:0">[2]</span> <p style="color:var(--fg);font-size:13px;line-height:1.8;margin:0"> <span style="color:var(--fg);font-weight:bold">Suppress on pure data-fetch steps</span> &mdash;
+        If a step just fetches JSON from an API or runs <span class="fg-cyan">gh pr list</span>,
+        add <span class="fg-yellow">use_brain: false</span>. Brain context won&apos;t help and
+        wastes the context window.
+</p> </div> <div style="display:flex;gap:12px;align-items:flex-start"> <span class="fg-yellow" style="font-family:'JetBrains Mono',monospace;font-size:13px;min-width:32px;flex-shrink:0">[3]</span> <p style="color:var(--fg);font-size:13px;line-height:1.8;margin:0"> <span style="color:var(--fg);font-weight:bold">Name your insights explicitly</span> &mdash;
+        Prompt your <span class="fg-cyan">write_brain</span> steps to start their output with
+<span class="fg-yellow">&ldquo;INSIGHT:&rdquo;</span> or <span class="fg-yellow">&ldquo;FINDING:&rdquo;</span>
+so the brain context is scannable. The AI reading it later will extract the signal faster.
+</p> </div> <div style="display:flex;gap:12px;align-items:flex-start"> <span class="fg-yellow" style="font-family:'JetBrains Mono',monospace;font-size:13px;min-width:32px;flex-shrink:0">[4]</span> <p style="color:var(--fg);font-size:13px;line-height:1.8;margin:0"> <span style="color:var(--fg);font-weight:bold">Chain local &rarr; cloud for cost control</span> &mdash;
+        Use a cheap local Ollama model (<span class="fg-cyan">qwen2.5-coder</span>, <span class="fg-cyan">llama3.2</span>)
+        to write brain notes, then a cloud model to synthesize. You get the best of both worlds:
+        local privacy + cloud reasoning.
+</p> </div> <div style="display:flex;gap:12px;align-items:flex-start"> <span class="fg-yellow" style="font-family:'JetBrains Mono',monospace;font-size:13px;min-width:32px;flex-shrink:0">[5]</span> <p style="color:var(--fg);font-size:13px;line-height:1.8;margin:0"> <span style="color:var(--fg);font-weight:bold">Brain context accumulates within a run</span> &mdash;
+        Multiple <span class="fg-cyan">write_brain</span> steps in the same pipeline run all accumulate
+        into the same context block. Step 3 sees what steps 1 and 2 wrote. Design your pipeline
+        like a conversation that builds knowledge progressively.
+</p> </div> </div> <!-- ── SECTION 4: PIPELINE YAML QUICK REFERENCE ── --> <div class="tui-step-header" style="margin:28px 0 0"><span>PIPELINE YAML REFERENCE</span></div> <p class="fg-comment" style="font-size:11px;margin:4px 0 12px">// compact field reference //</p> <pre style="font-size:12px;line-height:1.8;background:var(--darkbg);padding:16px;margin-bottom:8px;overflow-x:auto"><span class="fg-cyan">  name</span>                             string  Pipeline name, used in <span class="fg-yellow">glitch pipeline run &lt;name&gt;</span>
+<span class="fg-cyan">  version</span>                          string  Schema version, currently <span class="fg-yellow">"1"</span>
+<span class="fg-green">  use_brain</span>                        bool    Inject brain context into all steps (default: false)
+<span class="fg-green">  write_brain</span>                      bool    Append pipeline output to brain store (default: false)
+<span class="fg-cyan">  steps[].id</span>                       string  Unique step identifier, used in <span class="fg-yellow">&#123;&#123;steps.&lt;id&gt;.output&#125;&#125;</span>
+<span class="fg-cyan">  steps[].executor</span> / <span class="fg-cyan">plugin</span>        string  Agent provider (<span class="fg-yellow">claude</span>, <span class="fg-yellow">ollama</span>, <span class="fg-yellow">gh</span>, <span class="fg-yellow">jq</span>, &hellip;)
+<span class="fg-cyan">  steps[].model</span>                    string  Model ID (<span class="fg-comment">e.g. claude-haiku-4-5-20251001, qwen2.5:latest</span>)
+<span class="fg-cyan">  steps[].prompt</span>                   string  Prompt text; supports <span class="fg-yellow">&#123;&#123;steps.&lt;id&gt;.output&#125;&#125;</span> interpolation
+<span class="fg-green">  steps[].use_brain</span>                bool    Per-step override of pipeline-level use_brain
+<span class="fg-green">  steps[].write_brain</span>              bool    Per-step: save this step&apos;s output to brain context</pre> </div> </div> </div> </div> </main> <footer class="terminal-attribution">
+made with AI &middot; guided by adam s<span class="fg-purple">&dagger;</span>okes &middot; <a href="https://8op.org" target="_blank" rel="noopener">contributions welcome</a> </footer>  </body></html>
