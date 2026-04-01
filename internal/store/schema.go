@@ -91,6 +91,60 @@ const createStepCheckpointsSchema = `CREATE TABLE IF NOT EXISTS step_checkpoints
   UNIQUE(run_id, step_id)
 )`
 
+// createScoreEventsSchema is the DDL for the score_events table.
+const createScoreEventsSchema = `CREATE TABLE IF NOT EXISTS score_events (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id                INTEGER,
+  xp                    INTEGER NOT NULL DEFAULT 0,
+  input_tokens          INTEGER NOT NULL DEFAULT 0,
+  output_tokens         INTEGER NOT NULL DEFAULT 0,
+  cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+  cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+  cost_usd              REAL NOT NULL DEFAULT 0,
+  provider              TEXT NOT NULL DEFAULT '',
+  model                 TEXT NOT NULL DEFAULT '',
+  created_at            INTEGER NOT NULL
+)`
+
+// createUserScoreSchema is the DDL for the user_score table.
+const createUserScoreSchema = `CREATE TABLE IF NOT EXISTS user_score (
+  id            INTEGER PRIMARY KEY CHECK (id = 1),
+  total_xp      INTEGER NOT NULL DEFAULT 0,
+  level         INTEGER NOT NULL DEFAULT 1,
+  streak_days   INTEGER NOT NULL DEFAULT 0,
+  last_run_date TEXT NOT NULL DEFAULT '',
+  total_runs    INTEGER NOT NULL DEFAULT 0
+)`
+
+// createAchievementsSchema is the DDL for the achievements table.
+const createAchievementsSchema = `CREATE TABLE IF NOT EXISTS achievements (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  achievement_id TEXT NOT NULL UNIQUE,
+  unlocked_at    INTEGER NOT NULL
+)`
+
+// createWorkflowRunsSchema is the DDL for the workflow_runs table.
+const createWorkflowRunsSchema = `CREATE TABLE IF NOT EXISTS workflow_runs (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  name         TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'running',
+  input        TEXT,
+  output       TEXT,
+  error        TEXT,
+  created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+  completed_at DATETIME
+)`
+
+// createWorkflowCheckpointsSchema is the DDL for the workflow_checkpoints table.
+const createWorkflowCheckpointsSchema = `CREATE TABLE IF NOT EXISTS workflow_checkpoints (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id       INTEGER NOT NULL REFERENCES workflow_runs(id),
+  step_id      TEXT NOT NULL,
+  status       TEXT NOT NULL,
+  context_json TEXT NOT NULL,
+  created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+)`
+
 // applySchema runs the schema migration against db.
 func applySchema(db *sql.DB) error {
 	if _, err := db.Exec(createSchema); err != nil {
@@ -120,7 +174,22 @@ func applySchema(db *sql.DB) error {
 	if err := applyStepCheckpointsTableMigration(db); err != nil {
 		return err
 	}
-	return applyBrainVectorsTableMigration(db)
+	if err := applyBrainVectorsTableMigration(db); err != nil {
+		return err
+	}
+	if err := applyScoreEventsTableMigration(db); err != nil {
+		return err
+	}
+	if err := applyUserScoreTableMigration(db); err != nil {
+		return err
+	}
+	if err := applyAchievementsTableMigration(db); err != nil {
+		return err
+	}
+	if err := applyWorkflowRunsTableMigration(db); err != nil {
+		return err
+	}
+	return applyWorkflowCheckpointsTableMigration(db)
 }
 
 // applyStepCheckpointsTableMigration creates the step_checkpoints table if it
@@ -209,6 +278,41 @@ func applyClarificationStepIDMigration(db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// applyScoreEventsTableMigration creates the score_events table if it does not
+// already exist. CREATE TABLE IF NOT EXISTS is idempotent.
+func applyScoreEventsTableMigration(db *sql.DB) error {
+	_, err := db.Exec(createScoreEventsSchema)
+	return err
+}
+
+// applyUserScoreTableMigration creates the user_score table if it does not
+// already exist. CREATE TABLE IF NOT EXISTS is idempotent.
+func applyUserScoreTableMigration(db *sql.DB) error {
+	_, err := db.Exec(createUserScoreSchema)
+	return err
+}
+
+// applyAchievementsTableMigration creates the achievements table if it does not
+// already exist. CREATE TABLE IF NOT EXISTS is idempotent.
+func applyAchievementsTableMigration(db *sql.DB) error {
+	_, err := db.Exec(createAchievementsSchema)
+	return err
+}
+
+// applyWorkflowRunsTableMigration creates the workflow_runs table if it does not
+// already exist. CREATE TABLE IF NOT EXISTS is idempotent.
+func applyWorkflowRunsTableMigration(db *sql.DB) error {
+	_, err := db.Exec(createWorkflowRunsSchema)
+	return err
+}
+
+// applyWorkflowCheckpointsTableMigration creates the workflow_checkpoints table
+// if it does not already exist. CREATE TABLE IF NOT EXISTS is idempotent.
+func applyWorkflowCheckpointsTableMigration(db *sql.DB) error {
+	_, err := db.Exec(createWorkflowCheckpointsSchema)
+	return err
 }
 
 // applyStepsColumnMigration adds the steps column if it does not already exist.

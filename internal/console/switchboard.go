@@ -27,6 +27,7 @@ import (
 	"github.com/8op-org/gl1tch/internal/tdf"
 	orcaicron "github.com/8op-org/gl1tch/internal/cron"
 	"github.com/8op-org/gl1tch/internal/busd/topics"
+	"github.com/8op-org/gl1tch/internal/game"
 	"github.com/8op-org/gl1tch/internal/inbox"
 	"github.com/8op-org/gl1tch/internal/modal"
 	"github.com/8op-org/gl1tch/internal/panelrender"
@@ -347,6 +348,8 @@ type Model struct {
 	cronPanel CronPanel
 	// Pipeline bus subscription (tasks 7.2–7.8)
 	pipelineBusCh chan pipelineBusEventMsg
+	// narrationCh receives game narration strings from background goroutines.
+	narrationCh chan string
 	// TDF header art — rendered once at startup, cached for every frame.
 	tdfHeader  []string
 	tdfHeaderW int // visual width (ANSI-stripped) of the widest header line
@@ -415,6 +418,9 @@ func NewWithStore(s *store.Store) Model {
 
 	// Pre-render the TDF header art once at startup (theme-tinted).
 	m.refreshTDFHeader()
+
+	// Narration channel for game engine goroutine results.
+	m.narrationCh = make(chan string, 8)
 
 	return m
 }
@@ -783,7 +789,7 @@ func (m Model) Init() tea.Cmd {
 	if entries, err := orcaicron.LoadConfig(); err == nil && len(entries) > 0 {
 		go ensureCronDaemon()
 	}
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		recoverOrphanedRunsCmd(m.store), // seed runs AFTER recovery completes
 		tickCmd(),
 		m.inboxModel.Init(),
@@ -792,7 +798,11 @@ func (m Model) Init() tea.Cmd {
 		m.activityFeed.Init(),
 		loadPendingClarificationsCmd(m.store),
 		m.glitchChat.initCmd(),
-	)
+	}
+	if m.narrationCh != nil {
+		cmds = append(cmds, waitForNarrationCmd(m.narrationCh))
+	}
+	return tea.Batch(cmds...)
 }
 
 func tickCmd() tea.Cmd {
@@ -1205,6 +1215,48 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		// Handle game scoring event: fire goroutine and return immediately.
+		if msg.topic == topics.GameRunScored && m.narrationCh != nil {
+			var payload game.GameRunScoredPayload
+			if json.Unmarshal(msg.payload, &payload) == nil {
+				st := m.store
+				ch := m.narrationCh
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+
+					loader := game.APMWorldPackLoader{}
+					pack := loader.ActivePack()
+					engine := game.NewGameEngine()
+
+					runDataJSON, _ := json.Marshal(payload)
+
+					evalResult, err := engine.Evaluate(ctx, string(runDataJSON), pack)
+					if err == nil && st != nil {
+						for _, id := range evalResult.Achievements {
+							_ = st.RecordAchievement(ctx, id)
+						}
+					}
+
+					narration := engine.Narrate(ctx, string(runDataJSON), evalResult, pack)
+					if narration == "" {
+						return
+					}
+					select {
+					case ch <- narration:
+					default:
+						// Channel full — drop silently.
+					}
+				}()
+				var cmdsGame []tea.Cmd
+				cmdsGame = append(cmdsGame, waitForNarrationCmd(m.narrationCh))
+				if m.pipelineBusCh != nil {
+					cmdsGame = append(cmdsGame, waitForPipelineBusEvent(m.pipelineBusCh))
+				}
+				return m, tea.Batch(cmdsGame...)
+			}
+		}
+
 		m = m.handlePipelineBusEvent(msg)
 		var cmds []tea.Cmd
 		// Route pipeline run completions/failures to GLITCH for analysis.
@@ -1225,6 +1277,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, waitForPipelineBusEvent(m.pipelineBusCh))
 		}
 		return m, tea.Batch(cmds...)
+
+	case glitchNarrationMsg:
+		newPanel, cmd := m.glitchChat.update(msg)
+		m.glitchChat = newPanel
+		return m, cmd
 
 	case glitchRerunMsg:
 		name := msg.name

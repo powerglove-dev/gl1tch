@@ -240,7 +240,7 @@ func tryPipelineBusSubscribeCmd() tea.Cmd {
 		}
 		reg, _ := json.Marshal(map[string]any{
 			"name":      "switchboard",
-			"subscribe": []string{"pipeline.run.*", "pipeline.step.*", "cron.job.*", "cron.entry.*", topics.ClarificationRequested},
+			"subscribe": []string{"pipeline.run.*", "pipeline.step.*", "cron.job.*", "cron.entry.*", topics.ClarificationRequested, topics.GameRunScored},
 		})
 		if _, err := conn.Write(append(reg, '\n')); err != nil {
 			conn.Close()
@@ -275,6 +275,18 @@ func waitForPipelineBusEvent(ch chan pipelineBusEventMsg) tea.Cmd {
 			return pipelineBusDisconnectedMsg{}
 		}
 		return msg
+	}
+}
+
+// waitForNarrationCmd returns a tea.Cmd that blocks until a narration string is
+// available on ch, then delivers it as a glitchNarrationMsg.
+func waitForNarrationCmd(ch chan string) tea.Cmd {
+	return func() tea.Msg {
+		text, ok := <-ch
+		if !ok || text == "" {
+			return nil
+		}
+		return glitchNarrationMsg{text: text}
 	}
 }
 

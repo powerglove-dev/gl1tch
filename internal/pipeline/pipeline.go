@@ -17,6 +17,9 @@ type Pipeline struct {
 	Vars        map[string]any `yaml:"vars"` // Pipeline-level seed context available to all steps.
 	MaxParallel int            `yaml:"max_parallel"` // Maximum concurrent steps; defaults to 8 when zero.
 	WriteBrain  bool           `yaml:"write_brain"`
+	// Game controls game scoring for this pipeline.
+	// Pointer for tri-state: nil=enabled, false=disabled.
+	Game        *bool          `yaml:"game"`
 }
 
 // Step is one unit of work in a pipeline.

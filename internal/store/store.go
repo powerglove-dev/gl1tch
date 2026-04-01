@@ -13,6 +13,37 @@ import (
 	_ "modernc.org/sqlite" // register the sqlite driver
 )
 
+// ScoreEvent records the token usage and XP earned for a single pipeline run.
+type ScoreEvent struct {
+	ID                  int64
+	RunID               int64
+	XP                  int64
+	InputTokens         int64
+	OutputTokens        int64
+	CacheReadTokens     int64
+	CacheCreationTokens int64
+	CostUSD             float64
+	Provider            string
+	Model               string
+	CreatedAt           int64
+}
+
+// UserScore holds the player's cumulative game state.
+type UserScore struct {
+	TotalXP     int64
+	Level       int
+	StreakDays  int
+	LastRunDate string
+	TotalRuns   int64
+}
+
+// ProviderScore aggregates XP and run count per provider.
+type ProviderScore struct {
+	Provider  string
+	TotalXP   int64
+	TotalRuns int64
+}
+
 // StepRecord describes the persisted outcome of a single pipeline step.
 type StepRecord struct {
 	ID         string         `json:"id"`
@@ -335,6 +366,110 @@ func (s *Store) RecoverOrphanedRuns() ([]int64, error) {
 // Write operations should go through RecordRunStart/RecordRunComplete
 // to benefit from the serialized write queue.
 func (s *Store) DB() *sql.DB { return s.db }
+
+// RecordScoreEvent inserts a new score_events row.
+func (s *Store) RecordScoreEvent(ctx context.Context, e ScoreEvent) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO score_events (run_id, xp, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, provider, model, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.RunID, e.XP, e.InputTokens, e.OutputTokens, e.CacheReadTokens, e.CacheCreationTokens,
+		e.CostUSD, e.Provider, e.Model, e.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("store: record score event: %w", err)
+	}
+	return nil
+}
+
+// GetUserScore returns the player's current score, ensuring the singleton row
+// exists (id=1) before reading it.
+func (s *Store) GetUserScore(ctx context.Context) (UserScore, error) {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO user_score (id, total_xp, level, streak_days, last_run_date, total_runs) VALUES (1, 0, 1, 0, '', 0)`,
+	)
+	if err != nil {
+		return UserScore{}, fmt.Errorf("store: get user score ensure row: %w", err)
+	}
+	var us UserScore
+	row := s.db.QueryRowContext(ctx,
+		`SELECT total_xp, level, streak_days, last_run_date, total_runs FROM user_score WHERE id = 1`,
+	)
+	if err := row.Scan(&us.TotalXP, &us.Level, &us.StreakDays, &us.LastRunDate, &us.TotalRuns); err != nil {
+		return UserScore{}, fmt.Errorf("store: get user score scan: %w", err)
+	}
+	return us, nil
+}
+
+// UpdateUserScore upserts the singleton user_score row (id=1).
+func (s *Store) UpdateUserScore(ctx context.Context, us UserScore) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR REPLACE INTO user_score (id, total_xp, level, streak_days, last_run_date, total_runs) VALUES (1, ?, ?, ?, ?, ?)`,
+		us.TotalXP, us.Level, us.StreakDays, us.LastRunDate, us.TotalRuns,
+	)
+	if err != nil {
+		return fmt.Errorf("store: update user score: %w", err)
+	}
+	return nil
+}
+
+// RecordAchievement records an achievement as unlocked. Idempotent via INSERT OR IGNORE.
+func (s *Store) RecordAchievement(ctx context.Context, achievementID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO achievements (achievement_id, unlocked_at) VALUES (?, ?)`,
+		achievementID, time.Now().UnixMilli(),
+	)
+	if err != nil {
+		return fmt.Errorf("store: record achievement: %w", err)
+	}
+	return nil
+}
+
+// GetUnlockedAchievements returns all unlocked achievement IDs.
+func (s *Store) GetUnlockedAchievements(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT achievement_id FROM achievements ORDER BY unlocked_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("store: get achievements: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: get achievements scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: get achievements rows: %w", err)
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	return ids, nil
+}
+
+// ScoreEventsByProvider aggregates XP and run count grouped by provider.
+func (s *Store) ScoreEventsByProvider(ctx context.Context) (map[string]ProviderScore, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT provider, SUM(xp), COUNT(*) FROM score_events GROUP BY provider`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: score events by provider: %w", err)
+	}
+	defer rows.Close()
+	result := make(map[string]ProviderScore)
+	for rows.Next() {
+		var ps ProviderScore
+		if err := rows.Scan(&ps.Provider, &ps.TotalXP, &ps.TotalRuns); err != nil {
+			return nil, fmt.Errorf("store: score events by provider scan: %w", err)
+		}
+		result[ps.Provider] = ps
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: score events by provider rows: %w", err)
+	}
+	return result, nil
+}
 
 // Close shuts down the writer goroutine and closes the database.
 func (s *Store) Close() error {

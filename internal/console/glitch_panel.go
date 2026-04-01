@@ -86,6 +86,9 @@ type glitchOpenThemesMsg struct{}
 // busd event arrives. The root model forwards it to the glitch panel via update().
 type ClarificationInjectMsg struct{ Req store.ClarificationRequest }
 
+// glitchNarrationMsg carries a game narration string to inject as a bot message.
+type glitchNarrationMsg struct{ text string }
+
 // clarificationUrgencyTickMsg fires every 60 seconds to re-evaluate urgency on
 // passive pending clarifications.
 type clarificationUrgencyTickMsg struct{}
@@ -962,6 +965,16 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 
 	case ClarificationInjectMsg:
 		return p.injectClarification(msg.Req)
+
+	case glitchNarrationMsg:
+		if msg.text != "" {
+			p.messages = append(p.messages, glitchEntry{
+				who:  glitchSpeakerBot,
+				text: msg.text,
+				ts:   time.Now(),
+			})
+		}
+		return p, nil
 
 	case clarificationUrgencyTickMsg:
 		p = p.reevaluateUrgency()

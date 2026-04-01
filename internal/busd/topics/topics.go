@@ -29,4 +29,17 @@ const (
 	// Agent clarification request / reply
 	ClarificationRequested = "agent.run.clarification"
 	ClarificationReply     = "agent.run.clarification.reply"
+
+	// Game run scoring
+	GameRunScored = "game.run.scored"
+
+	// Workflow run lifecycle
+	WorkflowRunStarted   = "workflow.run.started"
+	WorkflowRunCompleted = "workflow.run.completed"
+	WorkflowRunFailed    = "workflow.run.failed"
+
+	// Workflow step lifecycle
+	WorkflowStepStarted = "workflow.step.started"
+	WorkflowStepDone    = "workflow.step.done"
+	WorkflowStepFailed  = "workflow.step.failed"
 )
