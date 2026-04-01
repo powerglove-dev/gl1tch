@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/powerglove-dev/gl1tch/internal/themes"
+	"github.com/8op-org/gl1tch/internal/themes"
 )
 
 // Config holds all configuration for rendering a modal.

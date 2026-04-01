@@ -3,8 +3,8 @@ package console
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/powerglove-dev/gl1tch/internal/styles"
-	"github.com/powerglove-dev/gl1tch/internal/tuikit"
+	"github.com/8op-org/gl1tch/internal/styles"
+	"github.com/8op-org/gl1tch/internal/tuikit"
 )
 
 // viewThemePicker renders the theme picker overlay.

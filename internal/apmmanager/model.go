@@ -12,9 +12,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/powerglove-dev/gl1tch/internal/executor"
-	"github.com/powerglove-dev/gl1tch/internal/themes"
-	"github.com/powerglove-dev/gl1tch/internal/tuikit"
+	"github.com/8op-org/gl1tch/internal/executor"
+	"github.com/8op-org/gl1tch/internal/themes"
+	"github.com/8op-org/gl1tch/internal/tuikit"
 )
 
 // Dracula palette constants for color-coded status indicators.

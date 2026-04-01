@@ -12,9 +12,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/powerglove-dev/gl1tch/internal/styles"
-	"github.com/powerglove-dev/gl1tch/internal/themes"
-	"github.com/powerglove-dev/gl1tch/internal/welcome"
+	"github.com/8op-org/gl1tch/internal/styles"
+	"github.com/8op-org/gl1tch/internal/themes"
+	"github.com/8op-org/gl1tch/internal/welcome"
 )
 
 // SentinelFile is the path (relative to cfgDir) that marks assistant intro as completed.

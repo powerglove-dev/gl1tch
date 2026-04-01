@@ -11,9 +11,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/powerglove-dev/gl1tch/internal/cron"
-	crontui "github.com/powerglove-dev/gl1tch/internal/crontui"
-	"github.com/powerglove-dev/gl1tch/internal/themes"
+	"github.com/8op-org/gl1tch/internal/cron"
+	crontui "github.com/8op-org/gl1tch/internal/crontui"
+	"github.com/8op-org/gl1tch/internal/themes"
 	robfigcron "github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
 )

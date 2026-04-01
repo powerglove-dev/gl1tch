@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/powerglove-dev/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/store"
 )
 
 // SaveToBrain writes the conversation turns as a brain note tagged for assistant use.

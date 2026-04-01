@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/powerglove-dev/gl1tch/internal/activity"
-	"github.com/powerglove-dev/gl1tch/internal/busd/topics"
+	"github.com/8op-org/gl1tch/internal/activity"
+	"github.com/8op-org/gl1tch/internal/busd/topics"
 	"github.com/charmbracelet/log"
 	"github.com/fsnotify/fsnotify"
 	robfigcron "github.com/robfig/cron/v3"

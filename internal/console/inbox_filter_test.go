@@ -3,7 +3,7 @@ package console
 import (
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/store"
 )
 
 func makeRun(id int64, name string) store.Run {

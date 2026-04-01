@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/powerglove-dev/gl1tch/internal/styles"
+	"github.com/8op-org/gl1tch/internal/styles"
 )
 
 func TestFuzzyPickerModel_OpenResetsState(t *testing.T) {

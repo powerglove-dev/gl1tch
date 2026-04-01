@@ -10,10 +10,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/powerglove-dev/gl1tch/internal/executor"
-	"github.com/powerglove-dev/gl1tch/internal/picker"
-	"github.com/powerglove-dev/gl1tch/internal/pipeline"
-	"github.com/powerglove-dev/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/executor"
+	"github.com/8op-org/gl1tch/internal/picker"
+	"github.com/8op-org/gl1tch/internal/pipeline"
+	"github.com/8op-org/gl1tch/internal/store"
 )
 
 func init() {

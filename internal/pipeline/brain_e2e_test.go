@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/braincontext"
-	"github.com/powerglove-dev/gl1tch/internal/brainrag"
-	"github.com/powerglove-dev/gl1tch/internal/executor"
-	"github.com/powerglove-dev/gl1tch/internal/pipeline"
-	"github.com/powerglove-dev/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/braincontext"
+	"github.com/8op-org/gl1tch/internal/brainrag"
+	"github.com/8op-org/gl1tch/internal/executor"
+	"github.com/8op-org/gl1tch/internal/pipeline"
+	"github.com/8op-org/gl1tch/internal/store"
 )
 
 // TestBrainE2E_IndexAndQuery_Ollama uses real Ollama to index pipeline source

@@ -4,7 +4,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/powerglove-dev/gl1tch/internal/tdf"
+	"github.com/8op-org/gl1tch/internal/tdf"
 )
 
 // fallbackTitle is a pre-rendered block-art "GL1TCH" rendered via figlet -f big.

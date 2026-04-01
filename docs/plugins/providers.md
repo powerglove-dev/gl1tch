@@ -43,7 +43,7 @@ session:
 Place your profile at:
 
 ```
-~/.config/orcai/providers/my-provider.yaml
+~/.config/glitch/providers/my-provider.yaml
 ```
 
 orcai scans this directory at startup via `providers.LoadUser()`. The file name does not need to match the `name` field, but keeping them consistent avoids confusion.
@@ -61,6 +61,6 @@ orcai calls `exec.LookPath(profile.Binary)` for every loaded profile. Providers 
 ## How to test your profile
 
 1. Install your provider binary and set the required API key environment variable.
-2. Drop the YAML file into `~/.config/orcai/providers/`.
+2. Drop the YAML file into `~/.config/glitch/providers/`.
 3. Run `orcai new` — your provider should appear in the picker list.
 4. Select it and verify that orcai opens a tmux window running your binary.

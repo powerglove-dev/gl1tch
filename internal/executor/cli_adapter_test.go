@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/executor"
+	"github.com/8op-org/gl1tch/internal/executor"
 )
 
 func TestCliAdapter_Name(t *testing.T) {

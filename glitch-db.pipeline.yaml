@@ -13,7 +13,7 @@ steps:
       Precise. No filler. No exclamation points. Short sentences. Backticks for commands.
       Max 4 sentences per response unless showing code.
 
-      Generate a JSON database for the powerglove.dev website terminal.
+      Generate a JSON database for the 8op.org website terminal.
       Output ONLY valid JSON. No markdown. No code fences. No explanation.
 
       Required structure:

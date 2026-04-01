@@ -14,7 +14,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/powerglove-dev/gl1tch/internal/widgetdispatch"
+	"github.com/8op-org/gl1tch/internal/widgetdispatch"
 	"gopkg.in/yaml.v3"
 )
 

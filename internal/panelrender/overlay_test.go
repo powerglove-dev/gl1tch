@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/panelrender"
+	"github.com/8op-org/gl1tch/internal/panelrender"
 )
 
 // TestOverlayCenter_TitleBarPreserved verifies that when an overlay is exactly

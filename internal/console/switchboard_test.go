@@ -12,7 +12,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/powerglove-dev/gl1tch/internal/console"
+	"github.com/8op-org/gl1tch/internal/console"
 )
 
 // ── scanPipelines ─────────────────────────────────────────────────────────────

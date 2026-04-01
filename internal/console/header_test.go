@@ -3,7 +3,7 @@ package console
 import (
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/themes"
+	"github.com/8op-org/gl1tch/internal/themes"
 )
 
 // TestDynamicHeader_FullWidth verifies that every line returned by DynamicHeader

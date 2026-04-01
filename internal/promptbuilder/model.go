@@ -1,8 +1,8 @@
 package promptbuilder
 
 import (
-	"github.com/powerglove-dev/gl1tch/internal/executor"
-	"github.com/powerglove-dev/gl1tch/internal/pipeline"
+	"github.com/8op-org/gl1tch/internal/executor"
+	"github.com/8op-org/gl1tch/internal/pipeline"
 )
 
 // argsRow is one key/value pair in the args editor.

@@ -1,7 +1,7 @@
 // Package welcome implements the GLITCH first-run onboarding TUI.
 package welcome
 
-import "github.com/powerglove-dev/gl1tch/internal/translations"
+import "github.com/8op-org/gl1tch/internal/translations"
 
 // Phase represents the current onboarding stage.
 type Phase int

@@ -10,8 +10,8 @@ frontend/package-lock.json
 frontend/package.json.md5
 
 # Compiled binaries
-orcai
-orcai-*
+glitch
+glitch-*
 
 # WASM
 assets/plugin.wasm

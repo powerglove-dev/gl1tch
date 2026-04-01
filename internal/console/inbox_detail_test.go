@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/store"
-	"github.com/powerglove-dev/gl1tch/internal/styles"
+	"github.com/8op-org/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/styles"
 )
 
 func testPalette() styles.ANSIPalette {

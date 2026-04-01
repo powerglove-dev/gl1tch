@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/powerglove-dev/gl1tch/internal/discovery"
-	"github.com/powerglove-dev/gl1tch/internal/executor"
-	"github.com/powerglove-dev/gl1tch/internal/providers"
+	"github.com/8op-org/gl1tch/internal/discovery"
+	"github.com/8op-org/gl1tch/internal/executor"
+	"github.com/8op-org/gl1tch/internal/providers"
 )
 
 // ModelOption is a selectable model within a provider.

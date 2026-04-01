@@ -2,12 +2,12 @@
 
 A theme bundle is a directory containing a `theme.yaml` manifest and an optional `splash.ans` ANSI art file. Themes control the colour palette, border style, status bar format, and welcome splash shown when orcai starts.
 
-orcai ships with the built-in ABS theme. You can override it or add entirely new themes by placing a bundle in `~/.config/orcai/themes/`.
+orcai ships with the built-in ABS theme. You can override it or add entirely new themes by placing a bundle in `~/.config/glitch/themes/`.
 
 ## Bundle directory layout
 
 ```
-~/.config/orcai/themes/
+~/.config/glitch/themes/
 └── my-theme/
     ├── theme.yaml
     └── splash.ans      (optional)
@@ -76,9 +76,9 @@ The `statusbar.bg` and `statusbar.fg` fields accept either a literal hex colour 
 
 ## User themes and override behaviour
 
-orcai loads bundled themes first, then user themes from `~/.config/orcai/themes/`. When two themes share the same `name`, the **user theme wins**. This lets you fully replace the ABS theme by creating a bundle named `abs` in your themes directory.
+orcai loads bundled themes first, then user themes from `~/.config/glitch/themes/`. When two themes share the same `name`, the **user theme wins**. This lets you fully replace the ABS theme by creating a bundle named `abs` in your themes directory.
 
-**Note:** User theme discovery (`~/.config/orcai/themes/`) is implemented and tested. Wiring it into the orcai startup sequence (so themes are selectable via `orcai theme set`) is planned for a follow-on step.
+**Note:** User theme discovery (`~/.config/glitch/themes/`) is implemented and tested. Wiring it into the orcai startup sequence (so themes are selectable via `orcai theme set`) is planned for a follow-on step.
 
 ## Switching the active theme
 
@@ -86,7 +86,7 @@ orcai loads bundled themes first, then user themes from `~/.config/orcai/themes/
 orcai theme set my-theme
 ```
 
-The active theme is persisted to `~/.config/orcai/active_theme` by `themes.Registry.SetActive()` and restored automatically on next launch. You can also switch themes via the sysop panel (when available) which publishes a `theme.changed` event to all connected widgets.
+The active theme is persisted to `~/.config/glitch/active_theme` by `themes.Registry.SetActive()` and restored automatically on next launch. You can also switch themes via the sysop panel (when available) which publishes a `theme.changed` event to all connected widgets.
 
 ## ANSI art (`splash.ans`)
 
@@ -124,7 +124,7 @@ statusbar:
 Install it:
 
 ```
-mkdir -p ~/.config/orcai/themes/midnight
-# save the YAML above as ~/.config/orcai/themes/midnight/theme.yaml
+mkdir -p ~/.config/glitch/themes/midnight
+# save the YAML above as ~/.config/glitch/themes/midnight/theme.yaml
 orcai theme set midnight
 ```

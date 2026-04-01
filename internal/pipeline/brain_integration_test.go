@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/powerglove-dev/gl1tch/internal/executor"
-	"github.com/powerglove-dev/gl1tch/internal/pipeline"
-	"github.com/powerglove-dev/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/executor"
+	"github.com/8op-org/gl1tch/internal/pipeline"
+	"github.com/8op-org/gl1tch/internal/store"
 )
 
 // openTestStore creates a fresh SQLite store in a temp directory.

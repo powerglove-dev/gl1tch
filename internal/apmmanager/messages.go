@@ -4,7 +4,7 @@
 // request and receive agent capabilities at runtime.
 package apmmanager
 
-import "github.com/powerglove-dev/gl1tch/internal/executor"
+import "github.com/8op-org/gl1tch/internal/executor"
 
 // ── Public tea.Msg types ────────────────────────────────────────────────────
 // These are exported because parent components and executors need to handle them.

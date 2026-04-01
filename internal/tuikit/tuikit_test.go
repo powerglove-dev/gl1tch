@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/powerglove-dev/gl1tch/internal/busd"
-	"github.com/powerglove-dev/gl1tch/internal/themes"
-	"github.com/powerglove-dev/gl1tch/internal/tuikit"
+	"github.com/8op-org/gl1tch/internal/busd"
+	"github.com/8op-org/gl1tch/internal/themes"
+	"github.com/8op-org/gl1tch/internal/tuikit"
 )
 
 // testSockCounter generates unique short socket paths under /tmp to stay well

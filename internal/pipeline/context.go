@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/powerglove-dev/gl1tch/internal/braincontext"
-	"github.com/powerglove-dev/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/braincontext"
+	"github.com/8op-org/gl1tch/internal/store"
 )
 
 // ExecutionContext is the shared state passed between pipeline steps.

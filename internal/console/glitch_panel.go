@@ -20,13 +20,13 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/powerglove-dev/gl1tch/internal/modal"
-	"github.com/powerglove-dev/gl1tch/internal/panelrender"
-	"github.com/powerglove-dev/gl1tch/internal/picker"
-	"github.com/powerglove-dev/gl1tch/internal/store"
-	"github.com/powerglove-dev/gl1tch/internal/styles"
-	"github.com/powerglove-dev/gl1tch/internal/systemprompts"
-	"github.com/powerglove-dev/gl1tch/internal/themes"
+	"github.com/8op-org/gl1tch/internal/modal"
+	"github.com/8op-org/gl1tch/internal/panelrender"
+	"github.com/8op-org/gl1tch/internal/picker"
+	"github.com/8op-org/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/styles"
+	"github.com/8op-org/gl1tch/internal/systemprompts"
+	"github.com/8op-org/gl1tch/internal/themes"
 )
 
 // ── Tea messages for GLITCH chat streaming ────────────────────────────────────

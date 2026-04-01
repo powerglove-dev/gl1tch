@@ -10,12 +10,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/powerglove-dev/gl1tch/internal/buildershared"
-	"github.com/powerglove-dev/gl1tch/internal/busd/topics"
-	"github.com/powerglove-dev/gl1tch/internal/executor"
-	"github.com/powerglove-dev/gl1tch/internal/picker"
-	"github.com/powerglove-dev/gl1tch/internal/pipeline"
-	"github.com/powerglove-dev/gl1tch/internal/systemprompts"
+	"github.com/8op-org/gl1tch/internal/buildershared"
+	"github.com/8op-org/gl1tch/internal/busd/topics"
+	"github.com/8op-org/gl1tch/internal/executor"
+	"github.com/8op-org/gl1tch/internal/picker"
+	"github.com/8op-org/gl1tch/internal/pipeline"
+	"github.com/8op-org/gl1tch/internal/systemprompts"
 )
 
 

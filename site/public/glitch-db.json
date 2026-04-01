@@ -1,6 +1,6 @@
 {
   "commands": {
-    "install": "go install github.com/powerglove-dev/gl1tch@latest\n\nBinary lands in $GOPATH/bin. Make sure it's on your $PATH.\n\nThen pull a local model:\n\n  ollama pull qwen2.5-coder:latest\n\nRun `glitch`. That's it.",
+    "install": "go install github.com/8op-org/gl1tch@latest\n\nBinary lands in $GOPATH/bin. Make sure it's on your $PATH.\n\nThen pull a local model:\n\n  ollama pull qwen2.5-coder:latest\n\nRun `glitch`. That's it.",
     "pipelines": "Pipelines are YAML files that chain steps. Each step runs a model or tool. Each step gets the previous step's output.\n\nname: code-review\nversion: \"1\"\nsteps:\n  - id: read\n    executor: ollama\n    model: qwen2.5-coder:latest\n    prompt: |\n      Read the diff at {{input}} and summarize\n      what changed. Be specific.\n\n  - id: review\n    executor: claude\n    model: claude-haiku-4-5-20251001\n    prompt: |\n      Based on this summary:\n      {{steps.read.output}}\n\n      Flag any bugs, security issues, or\n      patterns that look wrong.\n\nLocal model reads. Cloud model judges. Run it:\n\n  glitch pipeline run code-review.yaml\n\nOr from inside GLITCH: /pipeline code-review",
     "brain": "Brain is persistent memory that accumulates across pipeline runs.\n\nA step with write_brain: true stores its output as a vector in SQLite, tagged to your current directory. Future steps with use_brain: true get that context injected automatically.\n\nLocal model indexes. Cloud model synthesizes. The cost of reprocessing drops to zero after the first run.\n\nExample:\n\n  - id: index\n    executor: ollama\n    model: qwen2.5-coder:latest\n    write_brain: true\n    prompt: Summarize the architecture of this codebase.\n\n  - id: advise\n    executor: claude\n    model: claude-sonnet-4-6\n    use_brain: true\n    prompt: Given the architecture above, what should we tackle first?\n\nBrowse brain notes from inside GLITCH with ^space b.",
     "model": "Switch models from inside GLITCH:\n\n  /model ollama/qwen2.5-coder:latest\n  /model claude/claude-sonnet-4-6\n  /model claude/claude-haiku-4-5-20251001\n\nOr open the picker: /models\n\nLocal models (Ollama) run on your machine — zero cost, nothing leaves.\nCloud models are one flag per step. Use them when the question earns it.",
@@ -20,7 +20,7 @@
     {
       "question": "how to install glitch",
       "keywords": ["install", "setup", "brew", "download", "get", "start", "begin"],
-      "response": "go install github.com/powerglove-dev/gl1tch@latest\n\nMake sure $GOPATH/bin is on your $PATH. Then pull a local model:\n\n  ollama pull qwen2.5-coder:latest\n\nRun `glitch`. Type /install for the full walkthrough."
+      "response": "go install github.com/8op-org/gl1tch@latest\n\nMake sure $GOPATH/bin is on your $PATH. Then pull a local model:\n\n  ollama pull qwen2.5-coder:latest\n\nRun `glitch`. Type /install for the full walkthrough."
     },
     {
       "question": "how do I talk to glitch",
@@ -90,7 +90,7 @@
     {
       "question": "is glitch open source",
       "keywords": ["open", "source", "github", "license", "code", "repo"],
-      "response": "GLITCH is source-available. See github.com/powerglove-dev/gl1tch for the license and contribution guide."
+      "response": "GLITCH is source-available. See github.com/8op-org/gl1tch for the license and contribution guide."
     },
     {
       "question": "how do I configure glitch",
@@ -100,7 +100,7 @@
     {
       "question": "how do I get help",
       "keywords": ["help", "documentation", "docs", "support", "question", "stuck"],
-      "response": "Type /help to see all commands. Type a question in plain text for fuzzy search. Open an issue at github.com/powerglove-dev/gl1tch for bugs."
+      "response": "Type /help to see all commands. Type a question in plain text for fuzzy search. Open an issue at github.com/8op-org/gl1tch for bugs."
     }
   ]
 }

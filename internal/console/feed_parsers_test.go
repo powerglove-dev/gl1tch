@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/styles"
+	"github.com/8op-org/gl1tch/internal/styles"
 )
 
 var testPal = styles.ANSIPalette{

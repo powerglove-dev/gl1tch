@@ -1,6 +1,6 @@
 ---
 name: sidecar-gen
-description: Generate a ~/.config/orcai/wrappers/<name>.yaml sidecar for any CLI tool, making it a Tier 2 orcai plugin. Invoke with the tool name as argument.
+description: Generate a ~/.config/glitch/wrappers/<name>.yaml sidecar for any CLI tool, making it a Tier 2 orcai plugin. Invoke with the tool name as argument.
 disable-model-invocation: true
 ---
 
@@ -27,11 +27,11 @@ When invoked with a tool name as argument (e.g. `/sidecar-gen ripgrep`):
    output_schema: |
      <JSON Schema string if output is structured, omit if plain text>
    ```
-6. Write to: ~/.config/orcai/wrappers/<tool-name>.yaml
-   - Create directory if it doesn't exist: mkdir -p ~/.config/orcai/wrappers/
+6. Write to: ~/.config/glitch/wrappers/<tool-name>.yaml
+   - Create directory if it doesn't exist: mkdir -p ~/.config/glitch/wrappers/
 7. Print:
    - Path written
    - "Test with: orcai --plugin <name> <sample-input>"
-   - "Edit at: ~/.config/orcai/wrappers/<name>.yaml"
+   - "Edit at: ~/.config/glitch/wrappers/<name>.yaml"
 
 Reference: The sidecar is loaded by internal/discovery/discovery.go — field names must match SidecarSchema exactly.

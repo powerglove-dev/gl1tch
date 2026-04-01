@@ -31,10 +31,10 @@ subscribe:
 Place the manifest and binary together under:
 
 ```
-~/.config/orcai/widgets/my-widget/widget.yaml
+~/.config/glitch/widgets/my-widget/widget.yaml
 ```
 
-orcai scans `~/.config/orcai/widgets/` at startup, loading each subdirectory that contains a valid `widget.yaml`.
+orcai scans `~/.config/glitch/widgets/` at startup, loading each subdirectory that contains a valid `widget.yaml`.
 
 **Note:** Automatic widget discovery and launch at orcai startup is scaffolded and will be wired into the main startup sequence in an upcoming release. For now, widgets can be launched manually via `internal/widgets.Launch()` or by direct `tmux new-window` invocation.
 
@@ -106,10 +106,10 @@ SOCK="${XDG_RUNTIME_DIR:-$HOME/.cache}/orcai/bus.sock"
 echo '{"name":"hello","subscribe":["theme.changed"]}' | nc -U "$SOCK"
 ```
 
-Save as `~/.config/orcai/widgets/hello/hello-widget` (chmod +x), then create:
+Save as `~/.config/glitch/widgets/hello/hello-widget` (chmod +x), then create:
 
 ```yaml
-# ~/.config/orcai/widgets/hello/widget.yaml
+# ~/.config/glitch/widgets/hello/widget.yaml
 name: hello
 binary: hello-widget
 description: "Prints theme change events"

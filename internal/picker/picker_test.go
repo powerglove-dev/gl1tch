@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/picker"
+	"github.com/8op-org/gl1tch/internal/picker"
 )
 
 func TestProviders_NotEmpty(t *testing.T) {

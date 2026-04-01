@@ -56,5 +56,5 @@ jobs:
 
       - name: Run smoke tests
         env:
-          ORCAI_SMOKE_MODEL: llama3.2:1b
+          GLITCH_SMOKE_MODEL: llama3.2:1b
         run: go test -tags integration -timeout 5m -run TestSmoke ./internal/pipeline/...

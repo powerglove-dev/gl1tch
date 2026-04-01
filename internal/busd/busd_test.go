@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/powerglove-dev/gl1tch/internal/busd"
+	"github.com/8op-org/gl1tch/internal/busd"
 )
 
 // ---- helpers ----------------------------------------------------------------

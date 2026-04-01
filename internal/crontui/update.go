@@ -9,12 +9,12 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"gopkg.in/yaml.v3"
 
-	"github.com/powerglove-dev/gl1tch/internal/busd"
-	"github.com/powerglove-dev/gl1tch/internal/busd/topics"
-	"github.com/powerglove-dev/gl1tch/internal/cron"
-	"github.com/powerglove-dev/gl1tch/internal/jumpwindow"
-	"github.com/powerglove-dev/gl1tch/internal/themes"
-	"github.com/powerglove-dev/gl1tch/internal/tuikit"
+	"github.com/8op-org/gl1tch/internal/busd"
+	"github.com/8op-org/gl1tch/internal/busd/topics"
+	"github.com/8op-org/gl1tch/internal/cron"
+	"github.com/8op-org/gl1tch/internal/jumpwindow"
+	"github.com/8op-org/gl1tch/internal/themes"
+	"github.com/8op-org/gl1tch/internal/tuikit"
 )
 
 

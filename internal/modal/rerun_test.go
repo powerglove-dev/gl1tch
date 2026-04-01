@@ -6,10 +6,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/powerglove-dev/gl1tch/internal/modal"
-	"github.com/powerglove-dev/gl1tch/internal/picker"
-	"github.com/powerglove-dev/gl1tch/internal/store"
-	"github.com/powerglove-dev/gl1tch/internal/styles"
+	"github.com/8op-org/gl1tch/internal/modal"
+	"github.com/8op-org/gl1tch/internal/picker"
+	"github.com/8op-org/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/styles"
 )
 
 func testRun(kind string) store.Run {

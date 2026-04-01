@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/powerglove-dev/gl1tch/internal/tdf"
+	"github.com/8op-org/gl1tch/internal/tdf"
 )
 
 func main() {

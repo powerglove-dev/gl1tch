@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/executor"
-	"github.com/powerglove-dev/gl1tch/internal/picker"
-	"github.com/powerglove-dev/gl1tch/internal/pipeline"
+	"github.com/8op-org/gl1tch/internal/executor"
+	"github.com/8op-org/gl1tch/internal/picker"
+	"github.com/8op-org/gl1tch/internal/pipeline"
 )
 
 // checkModelAvailable skips the test if the named ollama model is not present.

@@ -17,7 +17,7 @@ site/src/
     BBS.astro          — Base + Nav + Footer
   components/
     Nav.astro          — Fixed top bar, activePage prop, · separators
-    Footer.astro       — [ ORCAI ABS ] [ MIT ] etc.
+    Footer.astro       — [ GLITCH ABS ] [ MIT ] etc.
     SysinfoBox.astro   — CSS-bordered table (no manual char padding)
     FeatureCard.astro  — Feature grid cards
     AnsiLogo.astro     — ANSI block logo

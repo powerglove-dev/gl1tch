@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package bridge;
 
-option go_package = "github.com/adam-stokes/orcai/proto/bridgepb";
+option go_package = "github.com/8op-org/gl1tch/proto/bridgepb";
 
 service ProviderBridge {
   rpc Describe(DescribeRequest)         returns (DescribeResponse);

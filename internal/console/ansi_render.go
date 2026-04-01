@@ -1,8 +1,8 @@
 package console
 
 import (
-	"github.com/powerglove-dev/gl1tch/internal/panelrender"
-	"github.com/powerglove-dev/gl1tch/internal/themes"
+	"github.com/8op-org/gl1tch/internal/panelrender"
+	"github.com/8op-org/gl1tch/internal/themes"
 )
 
 // visibleWidth returns the printable character count of s, stripping ANSI escapes.

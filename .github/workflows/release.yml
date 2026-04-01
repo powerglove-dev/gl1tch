@@ -29,7 +29,7 @@ jobs:
 
       - name: Clone plugins repo
         run: |
-          git clone https://github.com/powerglove-dev/plugins.git ../plugins
+          git clone https://github.com/8op-org/plugins.git ../plugins
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
@@ -43,7 +43,7 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          REPO="powerglove-dev/gl1tch"
+          REPO="8op-org/gl1tch"
           BASE="https://github.com/${REPO}/releases/download/${TAG}"
           printf '{\n  "version": "%s",\n  "repo": "%s",\n  "assets": {\n    "darwin_arm64":  "%s/glitch_%s_darwin_arm64.tar.gz",\n    "darwin_amd64":  "%s/glitch_%s_darwin_amd64.tar.gz",\n    "linux_amd64":   "%s/glitch_%s_linux_amd64.tar.gz",\n    "linux_arm64":   "%s/glitch_%s_linux_arm64.tar.gz",\n    "windows_amd64": "%s/glitch_%s_windows_amd64.zip"\n  }\n}\n' \
             "${TAG}" "${REPO}" \
@@ -147,12 +147,12 @@ jobs:
         working-directory: site
         run: npm run build
 
-      - name: Deploy to GitHub Pages (powerglove.dev)
+      - name: Deploy to GitHub Pages (8op.org)
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./site/dist
           publish_branch: gh-pages
-          cname: powerglove.dev
+          cname: 8op.org
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'

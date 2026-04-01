@@ -5,7 +5,7 @@
 // internal/welcome directly; all paths now call console.Run().
 package welcome
 
-import "github.com/powerglove-dev/gl1tch/internal/console"
+import "github.com/8op-org/gl1tch/internal/console"
 
 // Run starts the GLITCH Switchboard. The busSocket parameter is accepted but
 // ignored — bus connectivity is handled inside the console.

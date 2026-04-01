@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/bootstrap"
+	"github.com/8op-org/gl1tch/internal/bootstrap"
 )
 
 func TestWriteTmuxConf(t *testing.T) {

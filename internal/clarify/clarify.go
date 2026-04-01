@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/powerglove-dev/gl1tch/internal/systemprompts"
+	"github.com/8op-org/gl1tch/internal/systemprompts"
 )
 
 var (

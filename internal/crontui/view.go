@@ -6,12 +6,12 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/powerglove-dev/gl1tch/internal/cron"
-	"github.com/powerglove-dev/gl1tch/internal/modal"
-	"github.com/powerglove-dev/gl1tch/internal/panelrender"
-	"github.com/powerglove-dev/gl1tch/internal/styles"
-	"github.com/powerglove-dev/gl1tch/internal/themes"
-	"github.com/powerglove-dev/gl1tch/internal/tuikit"
+	"github.com/8op-org/gl1tch/internal/cron"
+	"github.com/8op-org/gl1tch/internal/modal"
+	"github.com/8op-org/gl1tch/internal/panelrender"
+	"github.com/8op-org/gl1tch/internal/styles"
+	"github.com/8op-org/gl1tch/internal/themes"
+	"github.com/8op-org/gl1tch/internal/tuikit"
 )
 
 // ansiPal returns the ANSI-escape palette for the current bundle.

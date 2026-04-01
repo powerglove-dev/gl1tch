@@ -7,8 +7,8 @@ import (
 
 	"github.com/sahilm/fuzzy"
 
-	"github.com/powerglove-dev/gl1tch/internal/chatui"
-	"github.com/powerglove-dev/gl1tch/internal/discovery"
+	"github.com/8op-org/gl1tch/internal/chatui"
+	"github.com/8op-org/gl1tch/internal/discovery"
 )
 
 // PickerItem is a single selectable row in the fuzzy picker.

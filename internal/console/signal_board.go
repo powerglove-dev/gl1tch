@@ -6,7 +6,7 @@ import (
 
 	"github.com/sahilm/fuzzy"
 
-	"github.com/powerglove-dev/gl1tch/internal/panelrender"
+	"github.com/8op-org/gl1tch/internal/panelrender"
 )
 
 // SignalBoard tracks state for the SIGNAL BOARD panel.

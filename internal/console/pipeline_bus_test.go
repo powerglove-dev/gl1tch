@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/busd/topics"
+	"github.com/8op-org/gl1tch/internal/busd/topics"
 )
 
 // ── splitStepOutput ───────────────────────────────────────────────────────────

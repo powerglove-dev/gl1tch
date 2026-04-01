@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/pipeline"
+	"github.com/8op-org/gl1tch/internal/pipeline"
 )
 
 const sampleYAML = `

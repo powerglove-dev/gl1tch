@@ -1,4 +1,4 @@
-module github.com/powerglove-dev/gl1tch
+module github.com/8op-org/gl1tch
 
 go 1.25.0
 

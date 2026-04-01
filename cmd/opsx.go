@@ -3,7 +3,7 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/powerglove-dev/gl1tch/internal/opsx"
+	"github.com/8op-org/gl1tch/internal/opsx"
 )
 
 var opsxCmd = &cobra.Command{

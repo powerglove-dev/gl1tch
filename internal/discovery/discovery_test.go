@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/discovery"
+	"github.com/8op-org/gl1tch/internal/discovery"
 )
 
 func TestScanNative_Empty(t *testing.T) {
@@ -27,7 +27,7 @@ func TestScanNative_FindsExecutable(t *testing.T) {
 	if err := os.MkdirAll(executorsDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	path := filepath.Join(executorsDir, "orcai-test-executor")
+	path := filepath.Join(executorsDir, "glitch-test-executor")
 	if err := os.WriteFile(path, []byte("#!/bin/sh\necho hi"), 0o755); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -38,12 +38,12 @@ func TestScanNative_FindsExecutable(t *testing.T) {
 	}
 	found := false
 	for _, e := range executors {
-		if e.Name == "orcai-test-executor" && e.Type == discovery.TypeNative {
+		if e.Name == "glitch-test-executor" && e.Type == discovery.TypeNative {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("expected to find orcai-test-executor, got %+v", executors)
+		t.Errorf("expected to find glitch-test-executor, got %+v", executors)
 	}
 }
 

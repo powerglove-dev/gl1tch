@@ -8,8 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	orcaicron "github.com/powerglove-dev/gl1tch/internal/cron"
-	"github.com/powerglove-dev/gl1tch/internal/console"
+	cron "github.com/8op-org/gl1tch/internal/cron"
+	"github.com/8op-org/gl1tch/internal/console"
 )
 
 // TestBuildCronSection_Empty verifies that buildCronSection renders the

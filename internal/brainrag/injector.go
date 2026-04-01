@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/powerglove-dev/gl1tch/internal/braincontext"
-	"github.com/powerglove-dev/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/braincontext"
+	"github.com/8op-org/gl1tch/internal/store"
 )
 
 // BrainInjector queries the RAG store and injects relevant brain notes into prompts.

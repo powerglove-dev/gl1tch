@@ -5,7 +5,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/powerglove-dev/gl1tch/internal/executor"
+	"github.com/8op-org/gl1tch/internal/executor"
 )
 
 // StepExecutor is the unified interface for all step types: builtins, plugins, and

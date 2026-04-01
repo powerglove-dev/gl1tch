@@ -6,7 +6,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/powerglove-dev/gl1tch/internal/busd"
+	"github.com/8op-org/gl1tch/internal/busd"
 )
 
 // busPublisher wraps busd.PublishEvent as a pipeline.EventPublisher.

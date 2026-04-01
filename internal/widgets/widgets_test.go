@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/widgets"
+	"github.com/8op-org/gl1tch/internal/widgets"
 )
 
 // writeManifest writes a widget.yaml file into dir/subdir/widget.yaml.

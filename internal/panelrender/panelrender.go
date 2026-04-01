@@ -15,9 +15,9 @@ import (
 	"github.com/muesli/ansi"
 	"github.com/muesli/reflow/truncate"
 
-	"github.com/powerglove-dev/gl1tch/internal/styles"
-	"github.com/powerglove-dev/gl1tch/internal/themes"
-	"github.com/powerglove-dev/gl1tch/internal/translations"
+	"github.com/8op-org/gl1tch/internal/styles"
+	"github.com/8op-org/gl1tch/internal/themes"
+	"github.com/8op-org/gl1tch/internal/translations"
 )
 
 // RST is the ANSI reset escape sequence.

@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/powerglove-dev/gl1tch/internal/buildershared"
+	"github.com/8op-org/gl1tch/internal/buildershared"
 )
 
 // HandleKey routes keyboard events to the correct panel/widget.

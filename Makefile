@@ -1,4 +1,4 @@
-PLUGINS_DIR := ../orcai-plugins
+PLUGINS_DIR := ../glitch-plugins
 
 .PHONY: build run plugins debug debug-tmux
 
@@ -8,7 +8,7 @@ build:
 run: build
 	./glitch
 
-# Build and install all core provider plugins from ../orcai-plugins.
+# Build and install all core provider plugins from ../glitch-plugins.
 # Run this during development whenever plugin code changes.
 plugins:
 	$(MAKE) -C $(PLUGINS_DIR) install

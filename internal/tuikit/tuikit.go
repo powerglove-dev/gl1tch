@@ -37,8 +37,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/powerglove-dev/gl1tch/internal/busd"
-	"github.com/powerglove-dev/gl1tch/internal/themes"
+	"github.com/8op-org/gl1tch/internal/busd"
+	"github.com/8op-org/gl1tch/internal/themes"
 )
 
 // ── Public message types ──────────────────────────────────────────────────────

@@ -1,11 +1,11 @@
 ---
 name: plugin-dev
-description: Generate a new orcai plugin stub that satisfies OrcaiPlugin gRPC interface and registers capabilities
+description: Generate a new orcai plugin stub that satisfies GlitchPlugin gRPC interface and registers capabilities
 disable-model-invocation: true
 ---
 
 Generate a new orcai plugin implementation. Read these files first:
-- proto/orcai/v1/plugin.proto — defines OrcaiPlugin gRPC service
+- proto/gl1tch/v1/plugin.proto — defines GlitchPlugin gRPC service
 - internal/plugin/plugin.go — Plugin interface and StubPlugin pattern
 - internal/discovery/discovery.go — how plugins are discovered
 

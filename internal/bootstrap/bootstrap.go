@@ -9,13 +9,13 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/powerglove-dev/gl1tch/internal/assistant"
-	"github.com/powerglove-dev/gl1tch/internal/busd"
-	"github.com/powerglove-dev/gl1tch/internal/keybindings"
-	"github.com/powerglove-dev/gl1tch/internal/layout"
-	"github.com/powerglove-dev/gl1tch/internal/systemprompts"
-	"github.com/powerglove-dev/gl1tch/internal/themes"
-	"github.com/powerglove-dev/gl1tch/internal/widgetdispatch"
+	"github.com/8op-org/gl1tch/internal/assistant"
+	"github.com/8op-org/gl1tch/internal/busd"
+	"github.com/8op-org/gl1tch/internal/keybindings"
+	"github.com/8op-org/gl1tch/internal/layout"
+	"github.com/8op-org/gl1tch/internal/systemprompts"
+	"github.com/8op-org/gl1tch/internal/themes"
+	"github.com/8op-org/gl1tch/internal/widgetdispatch"
 )
 
 // ErrReload is returned by Run when a reload was requested (marker file present).

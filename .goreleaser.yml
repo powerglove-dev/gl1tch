@@ -26,7 +26,7 @@ builds:
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
 
-  # Core provider plugins — cloned from github.com/powerglove-dev/plugins
+  # Core provider plugins — cloned from github.com/8op-org/plugins
   # by the release workflow before GoReleaser runs.
   - id: glitch-claude
     binary: glitch-claude

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/console"
-	"github.com/powerglove-dev/gl1tch/internal/themes"
+	"github.com/8op-org/gl1tch/internal/console"
+	"github.com/8op-org/gl1tch/internal/themes"
 )
 
 // ── RenderHeader (plain-text fallback) ───────────────────────────────────────

@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/powerglove-dev/gl1tch/internal/assets"
+	"github.com/8op-org/gl1tch/internal/assets"
 )
 
 // LoadBundled reads all provider profiles from the embedded assets.ProviderFS.

@@ -13,13 +13,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/powerglove-dev/gl1tch/internal/activity"
-	"github.com/powerglove-dev/gl1tch/internal/brainaudit"
-	"github.com/powerglove-dev/gl1tch/internal/brainrag"
-	"github.com/powerglove-dev/gl1tch/internal/busd/topics"
-	"github.com/powerglove-dev/gl1tch/internal/clarify"
-	"github.com/powerglove-dev/gl1tch/internal/executor"
-	"github.com/powerglove-dev/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/activity"
+	"github.com/8op-org/gl1tch/internal/brainaudit"
+	"github.com/8op-org/gl1tch/internal/brainrag"
+	"github.com/8op-org/gl1tch/internal/busd/topics"
+	"github.com/8op-org/gl1tch/internal/clarify"
+	"github.com/8op-org/gl1tch/internal/executor"
+	"github.com/8op-org/gl1tch/internal/store"
 )
 
 // RunOption configures a pipeline Run call.

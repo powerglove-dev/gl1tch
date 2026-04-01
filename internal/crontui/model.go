@@ -7,11 +7,11 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/log"
 
-	"github.com/powerglove-dev/gl1tch/internal/cron"
-	"github.com/powerglove-dev/gl1tch/internal/jumpwindow"
-	"github.com/powerglove-dev/gl1tch/internal/store"
-	"github.com/powerglove-dev/gl1tch/internal/themes"
-	"github.com/powerglove-dev/gl1tch/internal/tuikit"
+	"github.com/8op-org/gl1tch/internal/cron"
+	"github.com/8op-org/gl1tch/internal/jumpwindow"
+	"github.com/8op-org/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/themes"
+	"github.com/8op-org/gl1tch/internal/tuikit"
 )
 
 // Dracula palette

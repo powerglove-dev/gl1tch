@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/powerglove-dev/gl1tch/internal/panelrender"
-	"github.com/powerglove-dev/gl1tch/internal/styles"
+	"github.com/8op-org/gl1tch/internal/panelrender"
+	"github.com/8op-org/gl1tch/internal/styles"
 )
 
 // ansiPal returns the ANSI palette from the current theme bundle,

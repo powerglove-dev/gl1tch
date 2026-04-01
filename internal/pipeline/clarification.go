@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/powerglove-dev/gl1tch/internal/busd"
-	"github.com/powerglove-dev/gl1tch/internal/busd/topics"
-	store "github.com/powerglove-dev/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/busd"
+	"github.com/8op-org/gl1tch/internal/busd/topics"
+	store "github.com/8op-org/gl1tch/internal/store"
 )
 
 // clarificationTimeout is the maximum time AskClarification will block before

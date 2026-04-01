@@ -12,7 +12,7 @@ Generate a .pipeline.yaml file for orcai. Steps support:
 
 Reference internal/pipeline/pipeline.go for the Step struct schema.
 Reference internal/picker/picker.go for valid provider names from BuildProviders.
-Use `./bin/orcai pipeline --help` to verify current flags.
+Use `./bin/glitch pipeline --help` to verify current flags.
 
 When invoked with arguments, use them as the pipeline name/purpose.
 Produce a complete, valid .pipeline.yaml with at least one example step showing provider selection and optional condition branching.

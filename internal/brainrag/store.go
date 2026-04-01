@@ -11,7 +11,7 @@ import (
 	"os"
 	"sort"
 
-	"github.com/powerglove-dev/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/store"
 )
 
 // VectorEntry is a stored embedding for a brain note.

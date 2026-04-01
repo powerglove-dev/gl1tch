@@ -1,10 +1,10 @@
 ---
 name: release
-description: Cut a new ORCAI release via PR-protected main flow: branch → test → PR → merge → changelog curation → semver tag → GitHub Actions release build.
+description: Cut a new GLITCH release via PR-protected main flow: branch → test → PR → merge → changelog curation → semver tag → GitHub Actions release build.
 disable-model-invocation: true
 ---
 
-Cut a new ORCAI release following the PR-before-tag flow. Never push a semver tag before merging to `main` via PR.
+Cut a new GLITCH release following the PR-before-tag flow. Never push a semver tag before merging to `main` via PR.
 
 ---
 
@@ -137,7 +137,7 @@ Rules for highlights:
 
 Tell the developer:
 
-> Review `site/src/content/changelog/v{VERSION}.md`. These highlights will appear on the GitHub Release page and the ORCAI website changelog. Press enter when ready to commit and tag.
+> Review `site/src/content/changelog/v{VERSION}.md`. These highlights will appear on the GitHub Release page and the GLITCH website changelog. Press enter when ready to commit and tag.
 
 Wait for the developer to confirm.
 
@@ -168,7 +168,7 @@ Print:
 
 > Release v{VERSION} is building.
 >
-> Monitor GitHub Actions: https://github.com/adam-stokes/orcai/actions
+> Monitor GitHub Actions: https://github.com/8op-org/gl1tch/actions
 >
 > Once complete, the GitHub Release page will have all platform binaries and checksums.txt.
 >

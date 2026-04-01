@@ -6,8 +6,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/powerglove-dev/gl1tch/internal/panelrender"
-	"github.com/powerglove-dev/gl1tch/internal/styles"
+	"github.com/8op-org/gl1tch/internal/panelrender"
+	"github.com/8op-org/gl1tch/internal/styles"
 )
 
 // RunLineMsg carries a single line of output from the runner goroutine.

@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/powerglove-dev/gl1tch/cmd"
-	"github.com/powerglove-dev/gl1tch/internal/bootstrap"
-	"github.com/powerglove-dev/gl1tch/internal/console"
+	"github.com/8op-org/gl1tch/cmd"
+	"github.com/8op-org/gl1tch/internal/bootstrap"
+	"github.com/8op-org/gl1tch/internal/console"
 )
 
 // Build-time variables injected by GoReleaser via -ldflags.
@@ -24,7 +24,7 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "--version", "-v":
-			fmt.Printf("orcai %s (commit %s, built %s)\n", version, commit, date)
+			fmt.Printf("glitch %s (commit %s, built %s)\n", version, commit, date)
 			return
 		case "_reload":
 			bootstrap.WriteReloadMarker() //nolint:errcheck
@@ -58,12 +58,12 @@ func main() {
 			self = resolved
 		}
 		if err := syscall.Exec(self, []string{self}, os.Environ()); err != nil {
-			fmt.Fprintf(os.Stderr, "orcai: reload exec: %v\n", err)
+			fmt.Fprintf(os.Stderr, "glitch: reload exec: %v\n", err)
 			os.Exit(1)
 		}
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "orcai: %v\n", err)
+		fmt.Fprintf(os.Stderr, "glitch: %v\n", err)
 		os.Exit(1)
 	}
 }

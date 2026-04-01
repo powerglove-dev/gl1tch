@@ -153,7 +153,7 @@ function initKeyboardNav() {
         break;
       case 'g':
       case 'G':
-        window.open('https://github.com/orcai', '_blank');
+        window.open('https://https://github.com/8op-org', '_blank');
         break;
       case 'Escape':
         document.body.style.transition = 'opacity 0.4s';

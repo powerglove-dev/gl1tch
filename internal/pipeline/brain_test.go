@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/powerglove-dev/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/store"
 )
 
 func openTestStore(t *testing.T) *store.Store {

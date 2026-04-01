@@ -12,7 +12,7 @@
 #   task dev             clean-slate build from source (wipes config/data, run manually)
 #   task prod            install fresh build from source to GOPATH/bin (run manually)
 #   task run             start glitch (non-destructive, assumes already installed)
-#   task run:clean       wipe db/config, kill tmux sessions, then start orcai
+#   task run:clean       wipe db/config, kill tmux sessions, then start glitch
 #   task release:tag VERSION=v1.2.3   create signed git tag for release
 
 version: "3"
@@ -62,7 +62,7 @@ tasks:
       - "{{.BINARY}} prompt-builder"
 
   run:prompt-builder:start:
-    desc: "Open prompt builder in a new tmux window (orcai-prompt-builder)"
+    desc: "Open prompt builder in a new tmux window (glitch-prompt-builder)"
     cmds:
       - "{{.BINARY}} prompt-builder start"
 
@@ -72,7 +72,7 @@ tasks:
       - "{{.BINARY}} pipeline-builder"
 
   run:pipeline-builder:start:
-    desc: "Open pipeline builder in a new tmux window (orcai-pipeline-builder)"
+    desc: "Open pipeline builder in a new tmux window (glitch-pipeline-builder)"
     cmds:
       - "{{.BINARY}} pipeline-builder start"
 
@@ -200,11 +200,11 @@ tasks:
   # ---------------------------------------------------------------------------
 
   # ---------------------------------------------------------------------------
-  # Site — powerglove.dev
+  # Site — 8op.org
   # ---------------------------------------------------------------------------
 
   site:dev:
-    desc: "Start Astro dev server for powerglove.dev"
+    desc: "Start Astro dev server for 8op.org"
     dir: site
     cmds:
       - npm run dev
@@ -216,7 +216,7 @@ tasks:
       - task: site:astro-build
 
   site:astro-build:
-    desc: "Build Astro static site (powerglove.dev)"
+    desc: "Build Astro static site (8op.org)"
     dir: site
     cmds:
       - npm run build

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/powerglove-dev/gl1tch/internal/executor"
-	"github.com/powerglove-dev/gl1tch/internal/pipeline"
+	"github.com/8op-org/gl1tch/internal/executor"
+	"github.com/8op-org/gl1tch/internal/pipeline"
 )
 
 // TestStepOutputs_HappyPath verifies that step A's declared output is accessible

@@ -27,7 +27,7 @@ dependencies:
     # Go code reviewer — idiomatic Go patterns and best practices
     # - owner/repo/agents/go-reviewer.agent.md#v1.0.0
 
-    # ── Orcai-specific agents (authored in .apm/agents/) ─────────────────────
+    # ── GLITCH-specific agents (authored in .apm/agents/) ────────────────────
     # Local agent definitions live in .apm/agents/ and are included here
     # so APM tracks them in the lockfile and deploys to .claude/agents/.
     # Uncomment when a local agent is added:

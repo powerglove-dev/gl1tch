@@ -23,7 +23,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/powerglove-dev/gl1tch/internal/executor"
+	"github.com/8op-org/gl1tch/internal/executor"
 )
 
 // ── Example 1: a pipeline builtin step ──────────────────────────────────────
@@ -49,7 +49,7 @@ type AgentStepArgs struct {
 //
 // Patch in pipeline/builtin.go:
 //
-//	import "github.com/powerglove-dev/gl1tch/internal/apmmanager"
+//	import "github.com/8op-org/gl1tch/internal/apmmanager"
 //
 //	func NewBuiltinRegistry(provider apmmanager.AgentCapabilityProvider) map[string]BuiltinFunc {
 //	    return map[string]BuiltinFunc{
