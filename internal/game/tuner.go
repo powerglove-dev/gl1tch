@@ -10,6 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/8op-org/gl1tch/internal/store"
 	"gopkg.in/yaml.v3"
 )
@@ -245,9 +248,36 @@ Output ONLY the YAML frontmatter, starting with --- and ending with ---. No expl
 		analysisJSON, pack.GameRules, string(weightsJSON))
 }
 
+// inferTrigger returns the primary reason ShouldTune fired, for observability.
+func inferTrigger(score GameRunScoredPayload) string {
+	if score.Level > score.PrevLevel {
+		return "level_up"
+	}
+	for _, m := range streakMilestones {
+		if score.StreakDays == m {
+			return "streak_milestone"
+		}
+	}
+	if len(score.Achievements) > 0 {
+		return "achievement"
+	}
+	return "floor"
+}
+
 // Tune runs the full analyze → generate → validate → install cycle.
 // It is safe to call from a goroutine; all errors are logged, not returned.
 func (t *Tuner) Tune(ctx context.Context, stats store.GameStats, score GameRunScoredPayload) error {
+	trigger := inferTrigger(score)
+	RecordTunerInvoked(ctx, trigger)
+
+	ctx, span := otel.Tracer("gl1tch/game").Start(ctx, "game.tuner")
+	span.SetAttributes(
+		attribute.String("game.trigger", trigger),
+		attribute.Int("game.level", score.Level),
+		attribute.Int("game.streak_days", score.StreakDays),
+	)
+	defer span.End()
+
 	pack := t.packLoader.ActivePack()
 
 	// ── Step 1: analysis call ─────────────────────────────────────────────────

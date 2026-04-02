@@ -28,6 +28,7 @@ import (
 	"github.com/8op-org/gl1tch/internal/busd"
 	"github.com/8op-org/gl1tch/internal/busd/topics"
 	"github.com/8op-org/gl1tch/internal/game"
+	"github.com/8op-org/gl1tch/internal/telemetry"
 	"github.com/8op-org/gl1tch/internal/inbox"
 	"github.com/8op-org/gl1tch/internal/modal"
 	"github.com/8op-org/gl1tch/internal/panelrender"
@@ -332,6 +333,8 @@ type Model struct {
 	pipelineBusCh chan pipelineBusEventMsg
 	// narrationCh receives game narration strings from background goroutines.
 	narrationCh chan string
+	// gameFeedCh receives OTel game span events for structured game notifications.
+	gameFeedCh <-chan telemetry.FeedSpanEvent
 	// Conversation suppression + narration rate-limiting state.
 	lastUserMsgAt    time.Time // set when user submits to the glitch panel
 	lastNarrationAt  time.Time // set each time a narration is allowed through
@@ -415,6 +418,8 @@ func NewWithStore(s *store.Store) Model {
 
 	// Narration channel for game engine goroutine results.
 	m.narrationCh = make(chan string, 8)
+	// Game feed channel: OTel spans from the game engine, for structured alerts.
+	m.gameFeedCh = telemetry.FeedEvents()
 
 	// Widget and signal registries loaded from wrappers dir.
 	wrappersDir := filepath.Join(os.Getenv("HOME"), ".config", "glitch", "wrappers")
@@ -845,6 +850,9 @@ func (m Model) Init() tea.Cmd {
 	}
 	if m.narrationCh != nil {
 		cmds = append(cmds, waitForNarrationCmd(m.narrationCh))
+	}
+	if m.gameFeedCh != nil {
+		cmds = append(cmds, waitForGameFeedCmd(m.gameFeedCh))
 	}
 	return tea.Batch(cmds...)
 }
@@ -1290,8 +1298,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if json.Unmarshal(msg.payload, &payload) == nil {
 				st := m.store
 				ch := m.narrationCh
+				traceparent := msg.traceparent
 				go func() {
-					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					ctx, cancel := context.WithTimeout(
+						busd.ExtractContext(context.Background(), busd.Event{Traceparent: traceparent}),
+						30*time.Second,
+					)
 					defer cancel()
 
 					loader := game.APMWorldPackLoader{}
@@ -1300,6 +1312,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 					runDataJSON, _ := json.Marshal(payload)
 
+					// Record XP metrics immediately — these don't depend on Evaluate.
+					game.RecordXP(ctx, game.XPResult{
+						Base:         payload.XPBreakdown.Base,
+						CacheBonus:   payload.XPBreakdown.CacheBonus,
+						SpeedBonus:   payload.XPBreakdown.SpeedBonus,
+						RetryPenalty: payload.XPBreakdown.RetryPenalty,
+						Final:        payload.XP,
+					}, payload)
+
 					evalResult, err := engine.Evaluate(ctx, string(runDataJSON), pack)
 					if err == nil && st != nil {
 						sockPath, sockErr := busd.SocketPath()
@@ -1307,6 +1328,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							alreadyHave, _ := st.HasAchievement(id)
 							if !alreadyHave {
 								_ = st.RecordAchievement(ctx, id)
+								game.RecordAchievement(ctx, id)
 								if sockErr == nil {
 									_ = busd.PublishEvent(sockPath, topics.GameAchievementUnlocked, map[string]string{"achievement_id": id})
 								}
@@ -1315,6 +1337,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if evalResult.ICEClass != "" {
 							deadline := time.Now().Add(time.Duration(pack.ICEEncounter.TimeoutHours) * time.Hour)
 							_ = st.InsertICEEncounter(payload.Usage.Provider+"-"+fmt.Sprintf("%d", time.Now().UnixNano()), evalResult.ICEClass, "", deadline)
+							game.RecordICE(ctx, evalResult.ICEClass)
 							if sockErr == nil {
 								_ = busd.PublishEvent(sockPath, topics.GameICEEncountered, map[string]string{"ice_class": evalResult.ICEClass})
 							}
@@ -1446,6 +1469,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		newPanel, cmd := m.glitchChat.update(msg)
 		m.glitchChat = newPanel
 		return m, cmd
+
+	case gameAlertMsg:
+		// High-priority game events (ICE encounters) bypass narrationAllowed.
+		m.lastNarrationAt = time.Now()
+		newPanel, cmd := m.glitchChat.update(glitchNarrationMsg{text: msg.text})
+		m.glitchChat = newPanel
+		return m, cmd
+
+	case telemetry.FeedSpanEvent:
+		// Re-arm the game feed watcher unconditionally.
+		var feedCmds []tea.Cmd
+		if m.gameFeedCh != nil {
+			feedCmds = append(feedCmds, waitForGameFeedCmd(m.gameFeedCh))
+		}
+		// ICE encounters surface immediately regardless of narrationAllowed,
+		// because Ollama narration for ICE is unreliable and gated.
+		if msg.Kind == "game" && msg.GameICEClass != "" {
+			iceText := "[ICE DETECTED] " + msg.GameICEClass
+			feedCmds = append(feedCmds, func() tea.Msg { return gameAlertMsg{text: iceText} })
+		}
+		return m, tea.Batch(feedCmds...)
 
 	case glitchRerunMsg:
 		name := msg.name

@@ -8,6 +8,9 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // GameEngine calls Ollama to evaluate run data and narrate the result.
@@ -37,22 +40,31 @@ type EvaluateResult struct {
 // message, returning a structured evaluation. On JSON parse failure it retries
 // once with a stricter prompt. On second failure it returns an empty result
 // and nil error — the game system is optional.
-func (e *GameEngine) Evaluate(ctx context.Context, runDataJSON string, pack GameWorldPack) (EvaluateResult, error) {
+func (e *GameEngine) Evaluate(ctx context.Context, runDataJSON string, pack GameWorldPack) (result EvaluateResult, _ error) {
+	ctx, span := otel.Tracer("gl1tch/game").Start(ctx, "game.evaluate")
+	defer func() {
+		span.SetAttributes(
+			attribute.Int("game.achievements_count", len(result.Achievements)),
+			attribute.String("game.ice_class", result.ICEClass),
+			attribute.Int("game.quest_events_count", len(result.QuestEvents)),
+		)
+		span.End()
+	}()
+
 	userMsg := "Run data: " + runDataJSON
-	content, err := e.ollamaChat(ctx, pack.GameRules, userMsg)
-	if err != nil {
+	content, ollamaErr := e.ollamaChat(ctx, pack.GameRules, userMsg)
+	if ollamaErr != nil {
 		return EvaluateResult{}, nil //nolint:nilerr — game is optional
 	}
 
-	var result EvaluateResult
 	if jsonErr := parseEvaluateResult(content, &result); jsonErr == nil {
 		return result, nil
 	}
 
 	// Retry with a stricter prompt.
 	strictMsg := userMsg + "\n\nReturn ONLY valid JSON, nothing else."
-	content2, err2 := e.ollamaChat(ctx, pack.GameRules, strictMsg)
-	if err2 != nil {
+	content2, ollamaErr2 := e.ollamaChat(ctx, pack.GameRules, strictMsg)
+	if ollamaErr2 != nil {
 		return EvaluateResult{}, nil //nolint:nilerr
 	}
 	if jsonErr2 := parseEvaluateResult(content2, &result); jsonErr2 != nil {

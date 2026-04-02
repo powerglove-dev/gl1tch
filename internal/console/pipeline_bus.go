@@ -20,6 +20,7 @@ import (
 	"github.com/8op-org/gl1tch/internal/busd/topics"
 	"github.com/8op-org/gl1tch/internal/npcname"
 	"github.com/8op-org/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/telemetry"
 )
 
 // ── orphan recovery ───────────────────────────────────────────────────────────
@@ -214,8 +215,9 @@ func (m Model) handleFeedSeedMsg(msg feedSeedMsg) Model {
 
 // pipelineBusEventMsg carries one decoded event frame from the busd socket.
 type pipelineBusEventMsg struct {
-	topic   string
-	payload json.RawMessage
+	topic       string
+	payload     json.RawMessage
+	traceparent string
 }
 
 // pipelineBusDisconnectedMsg signals that the busd connection was lost.
@@ -259,11 +261,12 @@ func tryPipelineBusSubscribeCmd(extraTopics ...string) tea.Cmd {
 			scanner := bufio.NewScanner(conn)
 			for scanner.Scan() {
 				var frame struct {
-					Event   string          `json:"event"`
-					Payload json.RawMessage `json:"payload"`
+					Event       string          `json:"event"`
+					Payload     json.RawMessage `json:"payload"`
+					Traceparent string          `json:"traceparent,omitempty"`
 				}
 				if json.Unmarshal(scanner.Bytes(), &frame) == nil {
-					ch <- pipelineBusEventMsg{topic: frame.Event, payload: frame.Payload}
+					ch <- pipelineBusEventMsg{topic: frame.Event, payload: frame.Payload, traceparent: frame.Traceparent}
 				}
 			}
 		}()
@@ -293,6 +296,18 @@ func waitForNarrationCmd(ch chan string) tea.Cmd {
 			return nil
 		}
 		return glitchNarrationMsg{text: text}
+	}
+}
+
+// waitForGameFeedCmd returns a tea.Cmd that blocks until the next OTel game
+// span event arrives on ch (from telemetry.FeedEvents()), then delivers it.
+func waitForGameFeedCmd(ch <-chan telemetry.FeedSpanEvent) tea.Cmd {
+	return func() tea.Msg {
+		evt, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return evt
 	}
 }
 

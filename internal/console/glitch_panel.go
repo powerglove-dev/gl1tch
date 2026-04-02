@@ -114,6 +114,10 @@ type ClarificationInjectMsg struct{ Req store.ClarificationRequest }
 // glitchNarrationMsg carries a game narration string to inject as a bot message.
 type glitchNarrationMsg struct{ text string }
 
+// gameAlertMsg carries a high-priority game notification (ICE encounter, etc.)
+// that bypasses the narrationAllowed gate — these always surface to the panel.
+type gameAlertMsg struct{ text string }
+
 // clarificationUrgencyTickMsg fires every 60 seconds to re-evaluate urgency on
 // passive pending clarifications.
 type clarificationUrgencyTickMsg struct{}
@@ -1687,6 +1691,25 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					glitchSaveBrainNote(p.store, "glitch-cwd",
 						fmt.Sprintf("type:research cwd:%q title:\"working directory change\" tags:\"cwd,project\"", newCWD),
 						"working directory changed to: "+newCWD)
+					// Stream a contextual intro for the new directory.
+					if p.backend != nil {
+						backend := p.backend
+						ctx := p.ctx
+						cwd := newCWD
+						p.streaming = true
+						p.streamBuf = ""
+						return p, tea.Batch(
+							func() tea.Msg { return glitchCWDMsg{path: cwd} },
+							glitchTick(),
+							func() tea.Msg {
+								ch, err := backend.streamIntro(ctx, cwd)
+								if err != nil {
+									return glitchErrMsg{err: err}
+								}
+								return glitchStreamMsg{token: <-ch, ch: ch}
+							},
+						)
+					}
 					return p, func() tea.Msg { return glitchCWDMsg{path: newCWD} }
 				case "/pipeline":
 					args := strings.Fields(userText)
@@ -1867,7 +1890,7 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 				return p, nil
 			}
 			// Try intent routing before falling back to LLM chat.
-			// The router check runs async; glitchIntentMsg handles the result.
+			// The router owns intent classification — no pre-filtering here.
 			p.routing = true
 			p.streamBuf = ""
 			p.streamIsRunAnalysis = false
