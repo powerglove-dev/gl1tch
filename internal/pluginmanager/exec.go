@@ -12,12 +12,33 @@ import (
 
 // runCommand runs an external command and returns combined stdout+stderr output.
 func runCommand(ctx context.Context, name string, args ...string) (string, error) {
+	return runCommandEnv(ctx, nil, name, args...)
+}
+
+// runCommandEnv runs an external command with extra environment variables
+// overlaid on the current environment.
+func runCommandEnv(ctx context.Context, extraEnv []string, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = append(os.Environ(), extraEnv...)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 	err := cmd.Run()
 	return buf.String(), err
+}
+
+// moduleHost returns the hostname portion of a Go module path, e.g.
+// "github.com/adam-stokes/foo@latest" → "github.com/adam-stokes/*".
+func moduleHost(module string) string {
+	// Strip @version suffix.
+	if idx := strings.Index(module, "@"); idx >= 0 {
+		module = module[:idx]
+	}
+	parts := strings.SplitN(module, "/", 3)
+	if len(parts) < 2 {
+		return module
+	}
+	return parts[0] + "/" + parts[1] + "/*"
 }
 
 // resolveBinaryPath returns the full path to a binary after `go install`.

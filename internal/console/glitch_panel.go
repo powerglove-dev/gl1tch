@@ -159,7 +159,8 @@ var glitchSlashCommands = []slashSuggestion{
 	{cmd: "/cron",     hint: "get help scheduling recurring jobs"},
 	{cmd: "/model",    hint: "[name] — switch provider/model inline"},
 	{cmd: "/themes",   hint: "open theme picker"},
-	{cmd: "/session",  hint: "[name] — switch or create a chat session"},
+	{cmd: "/session",  hint: "[name|#] — switch or create a chat session"},
+	{cmd: "/s",        hint: "[name|#] — shorthand for /session"},
 	{cmd: "/clear",    hint: "clear chat history"},
 	{cmd: "/quit",     hint: "exit glitch"},
 	{cmd: "/help",     hint: "this list"},
@@ -1553,6 +1554,11 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 			// Handle slash commands before appending to conversation.
 			if strings.HasPrefix(userText, "/") {
 				cmd := strings.Fields(userText)[0]
+				// /s is shorthand for /session.
+				if cmd == "/s" {
+					cmd = "/session"
+					userText = "/session" + strings.TrimPrefix(userText, "/s")
+				}
 				switch cmd {
 				case "/cron":
 					cronArgs := strings.Fields(userText)
@@ -1781,8 +1787,7 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					if len(args) > 1 {
 						name := args[1]
 						// Check if pipeline file exists — if so, run it.
-						home, _ := os.UserHomeDir()
-						pipelinePath := filepath.Join(home, ".config", "glitch", "pipelines", name+".pipeline.yaml")
+						pipelinePath := filepath.Join(p.cfgDir, "pipelines", name+".pipeline.yaml")
 						if _, err := os.Stat(pipelinePath); err == nil {
 							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "launching " + name + "..."})
 							return p, func() tea.Msg { return glitchRerunMsg{name: name} }
@@ -1850,18 +1855,27 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 						// List all sessions.
 						var lines []string
 						lines = append(lines, fmt.Sprintf("%d session(s):", len(p.sessions.sessions)))
-						for _, s := range p.sessions.sessions {
+						for i, s := range p.sessions.sessions {
 							marker := "  "
 							if s.name == p.sessions.active {
 								marker = "▶ "
 							}
-							lines = append(lines, marker+s.name)
+							lines = append(lines, fmt.Sprintf("%s%d: %s", marker, i+1, s.name))
 						}
-						lines = append(lines, "\nuse /session <name> to switch or create")
+						lines = append(lines, "\nuse /session <name|#> or /s <name|#> to switch")
 						p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: strings.Join(lines, "\n")})
 						return p, nil
 					}
 					name := sessionArgs[1]
+					// Allow /session 1, /session 2, etc. to switch by index (1-based).
+					if idx, err := strconv.Atoi(name); err == nil {
+						if idx >= 1 && idx <= len(p.sessions.sessions) {
+							name = p.sessions.sessions[idx-1].name
+						} else {
+							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: fmt.Sprintf("session index %d out of range (1–%d)", idx, len(p.sessions.sessions))})
+							return p, nil
+						}
+					}
 					if name == "new" {
 						if len(sessionArgs) < 3 {
 							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "usage: /session new <name>"})
@@ -1877,6 +1891,7 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 						p.sessions.create(name)
 					}
 					p = p.switchToSession(name)
+					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "▶ session: " + name})
 					return p, nil
 				case "/clear":
 					p.messages = nil
@@ -2029,6 +2044,8 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 						msgText = "opening terminal: " + shellCmd
 					case pct != 25:
 						msgText = fmt.Sprintf("opening %d%% terminal split.", pct)
+					case left:
+						msgText = "opening left terminal split."
 					default:
 						msgText = "opening terminal split."
 					}
@@ -2130,8 +2147,9 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 			routingPrompt := enrichRoutingPrompt(userTextCopy, turns)
 			return p, tea.Batch(glitchTick(), func() tea.Msg {
 				r := buildPanelRouter(cfgDir)
-				refs, _ := pipeline.DiscoverPipelines(filepath.Join(cfgDir, "pipelines"))
-				wfRefs, _ := orchestrator.DiscoverWorkflows(filepath.Join(cfgDir, "pipelines"))
+				pDir := pipelinesDir()
+				refs, _ := pipeline.DiscoverPipelines(pDir)
+				wfRefs, _ := orchestrator.DiscoverWorkflows(pDir)
 				refs = append(refs, wfRefs...)
 				if len(refs) > 0 {
 					rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -2148,6 +2166,42 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 
 	// Forward to textinput when focused; then update autocomplete state.
 	if p.focused {
+		// BubbleTea batches consecutive printable chars into a single KeyRunes
+		// event. If that batch's String() collides with a textarea key binding
+		// (e.g. runes 'l','e','f','t' → String()=="left" matches CharacterBackward),
+		// the binding fires instead of inserting the characters. Split multi-rune
+		// batches into individual single-rune events so each rune is inserted.
+		if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyRunes && len(keyMsg.Runes) > 1 {
+			batchOldVal := p.input.Value()
+			var cmds []tea.Cmd
+			for _, r := range keyMsg.Runes {
+				single := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+				var c tea.Cmd
+				p.input, c = p.input.Update(single)
+				cmds = append(cmds, c)
+			}
+			newVal := p.input.Value()
+			if newVal != batchOldVal {
+				p.acSuppressed = false
+			}
+			if p.activeWidget != nil && newVal != "" && !p.acSuppressed {
+				results := p.filterSuggestions(newVal)
+				p.acSuggestions = results
+				p.acActive = len(results) > 0
+				p.acCursor = 0
+			} else if p.activeWidget == nil && strings.HasPrefix(newVal, "/") && !p.acSuppressed {
+				results := p.filterSuggestions(newVal)
+				p.acSuggestions = results
+				p.acActive = len(results) > 0
+				p.acCursor = 0
+			} else {
+				p.acActive = false
+				if p.activeWidget != nil || !strings.HasPrefix(newVal, "/") {
+					p.acSuppressed = false
+				}
+			}
+			return p, tea.Batch(cmds...)
+		}
 		oldVal := p.input.Value()
 		var cmd tea.Cmd
 		p.input, cmd = p.input.Update(msg)

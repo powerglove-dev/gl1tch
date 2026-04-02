@@ -71,16 +71,6 @@ tasks:
     cmds:
       - "{{.BINARY}}"
 
-  run:prompt-builder:
-    desc: "Open the interactive prompt builder TUI"
-    cmds:
-      - "{{.BINARY}} prompt-builder"
-
-  run:prompt-builder:start:
-    desc: "Open prompt builder in a new tmux window (glitch-prompt-builder)"
-    cmds:
-      - "{{.BINARY}} prompt-builder start"
-
   run:pipeline-builder:
     desc: "Open the interactive pipeline builder TUI"
     cmds:

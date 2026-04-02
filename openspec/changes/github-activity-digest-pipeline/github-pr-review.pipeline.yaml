@@ -1,0 +1,55 @@
+name: github-pr-review
+version: "1"
+description: "Fetch a GitHub pull request and produce a code review"
+trigger_phrases:
+  - "run github-pr-review"
+
+# Prerequisites:
+#   - gh CLI authenticated: gh auth status
+#   - ANTHROPIC_API_KEY set
+
+steps:
+
+  # ── 1. Fetch PR metadata ──────────────────────────────────────────────────────
+  - id: fetch-pr
+    executor: shell
+    vars:
+      cmd: >-
+        gh pr view "{{.param.input}}"
+        --json number,title,body,additions,deletions,changedFiles,reviews,comments,baseRefName,headRefName,author,labels
+
+  # ── 2. Fetch full diff ────────────────────────────────────────────────────────
+  - id: fetch-diff
+    executor: shell
+    vars:
+      cmd: gh pr diff "{{.param.input}}"
+
+  # ── 3. Review via Claude Haiku ────────────────────────────────────────────────
+  - id: review
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    needs: [fetch-pr, fetch-diff]
+    prompt: |
+      You are a senior engineer doing a thorough pull request review. Be concise and direct.
+
+      Structure your review:
+      1. **Summary** — one sentence on what this PR does
+      2. **Critical issues** — bugs, broken invariants, edge cases (flag as MUST FIX)
+      3. **Test coverage** — missing scenarios, blind spots in existing tests
+      4. **Suggestions** — naming, style, minor improvements (flag as NICE TO HAVE)
+      5. **Verdict** — APPROVE / REQUEST CHANGES / NEEDS MORE INFO
+
+      PR metadata:
+      {{get "step.fetch-pr.data.value" .}}
+
+      Full diff:
+      {{get "step.fetch-diff.data.value" .}}
+
+  - id: done
+    executor: builtin.log
+    needs: [review]
+    args:
+      message: |
+        ── PR Review ────────────────────────────────────────────────────
+        {{get "step.review.data.value" .}}
+        ─────────────────────────────────────────────────────────────────

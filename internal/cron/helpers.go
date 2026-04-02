@@ -2,6 +2,7 @@ package cron
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	robfigcron "github.com/robfig/cron/v3"
@@ -55,4 +56,74 @@ func max1(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// HumanSchedule converts a standard 5-field cron expression into a concise
+// human-readable description. Unrecognised patterns fall back to the raw expr.
+//
+// Examples:
+//
+//	"0 * * * *"  → "hourly at :00"
+//	"30 * * * *" → "hourly at :30"
+//	"0 5 * * *"  → "daily at 05:00"
+//	"*/15 * * * *" → "every 15 min"
+func HumanSchedule(expr string) string {
+	f := strings.Fields(expr)
+	if len(f) != 5 {
+		return expr
+	}
+	min, hour, dom, month, dow := f[0], f[1], f[2], f[3], f[4]
+
+	allWild := dom == "*" && month == "*" && dow == "*"
+
+	// every minute
+	if min == "*" && hour == "*" && allWild {
+		return "every minute"
+	}
+	// every N minutes  */N * * * *
+	if strings.HasPrefix(min, "*/") && hour == "*" && allWild {
+		return "every " + strings.TrimPrefix(min, "*/") + " min"
+	}
+	// hourly at :MM  — fixed minute, wildcard hour
+	if isDigits(min) && hour == "*" && allWild {
+		return fmt.Sprintf("hourly at :%s", zeroPad(min))
+	}
+	// daily at HH:MM  — fixed minute + hour, all else wildcard
+	if isDigits(min) && isDigits(hour) && allWild {
+		return fmt.Sprintf("daily at %02s:%02s", zeroPad(hour), zeroPad(min))
+	}
+	// weekly: fixed minute + hour + dow
+	if isDigits(min) && isDigits(hour) && dom == "*" && month == "*" && isDigits(dow) {
+		days := []string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
+		d := 0
+		fmt.Sscanf(dow, "%d", &d) //nolint:errcheck
+		dayName := days[d%7]
+		return fmt.Sprintf("%s at %02s:%02s", dayName, zeroPad(hour), zeroPad(min))
+	}
+	// monthly: fixed minute + hour + dom
+	if isDigits(min) && isDigits(hour) && isDigits(dom) && month == "*" && dow == "*" {
+		return fmt.Sprintf("monthly day %s at %02s:%02s", dom, zeroPad(hour), zeroPad(min))
+	}
+
+	return expr
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// zeroPad ensures a numeric string is at least 2 chars wide with a leading zero.
+func zeroPad(s string) string {
+	if len(s) < 2 {
+		return "0" + s
+	}
+	return s
 }

@@ -67,7 +67,15 @@ func installViaGo(ctx context.Context, m *PluginManifest) (string, error) {
 		module = module + "@latest"
 	}
 
-	out, err := runCommand(ctx, "go", "install", module)
+	// Derive a GOPRIVATE/GONOSUMDB pattern from the module host so that
+	// private GitHub repos (and other private hosts) can be installed without
+	// hitting the public checksum database.
+	host := moduleHost(module)
+	out, err := runCommandEnv(ctx, []string{
+		"GOPRIVATE=" + host,
+		"GONOSUMDB=" + host,
+		"GONOSUMCHECK=" + host,
+	}, "go", "install", module)
 	if err != nil {
 		return "", fmt.Errorf("go install %s: %w\n%s", module, err, out)
 	}
@@ -138,12 +146,16 @@ func installViaRelease(ctx context.Context, ref PluginRef, m *PluginManifest) (s
 }
 
 // httpGet performs a GET request and returns the response body.
+// Attaches a GitHub token if GH_TOKEN or GITHUB_TOKEN is set, or if `gh auth token` succeeds.
 func httpGet(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
+	if tok := githubToken(ctx); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -153,6 +165,21 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
 	}
 	return io.ReadAll(resp.Body)
+}
+
+// githubToken returns an auth token for GitHub API requests, checking env vars
+// first then falling back to `gh auth token`.
+func githubToken(ctx context.Context) string {
+	for _, k := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
+		if t := os.Getenv(k); t != "" {
+			return t
+		}
+	}
+	out, err := runCommand(ctx, "gh", "auth", "token")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // downloadFile streams a URL to dest atomically via a temp file.

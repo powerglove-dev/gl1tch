@@ -40,16 +40,24 @@ func (i PluginInstall) method() InstallMethod {
 	return InstallGo
 }
 
+// PluginSignal declares a BUSD topic subscription and the named handler that
+// gl1tch should invoke when the topic fires.
+type PluginSignal struct {
+	Topic   string `yaml:"topic"`
+	Handler string `yaml:"handler"`
+}
+
 // PluginSidecar is an inline sidecar definition embedded in the plugin manifest.
 // Fields map 1:1 to executor.SidecarSchema.
 type PluginSidecar struct {
-	Command      string   `yaml:"command"`
-	Args         []string `yaml:"args"`
-	Description  string   `yaml:"description"`
-	Category     string   `yaml:"category"`
-	Kind         string   `yaml:"kind"` // "agent" or "tool"
-	InputSchema  string   `yaml:"input_schema"`
-	OutputSchema string   `yaml:"output_schema"`
+	Command      string         `yaml:"command"`
+	Args         []string       `yaml:"args"`
+	Description  string         `yaml:"description"`
+	Category     string         `yaml:"category"`
+	Kind         string         `yaml:"kind"` // "agent" or "tool"
+	InputSchema  string         `yaml:"input_schema"`
+	OutputSchema string         `yaml:"output_schema"`
+	Signals      []PluginSignal `yaml:"signals,omitempty"`
 }
 
 // PluginManifest is the schema for a glitch-plugin.yaml file in a plugin repo.

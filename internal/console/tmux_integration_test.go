@@ -77,11 +77,15 @@ func waitFor(maxWait time.Duration, fn func() bool) bool {
 func newTmuxSession(t *testing.T, name, command string, env []string) func() {
 	t.Helper()
 	args := []string{"new-session", "-d", "-s", name, "-x", "220", "-y", "50"}
+	// Use -e to pass each env var explicitly into the session, overriding any
+	// stale values the tmux server may have inherited from previous test runs.
+	for _, kv := range env {
+		args = append(args, "-e", kv)
+	}
 	if command != "" {
 		args = append(args, command)
 	}
 	cmd := exec.Command("tmux", args...)
-	cmd.Env = append(os.Environ(), env...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("tmux new-session: %v\n%s", err, out)
 	}
