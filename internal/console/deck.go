@@ -332,6 +332,7 @@ type Model struct {
 	narrationCh chan string
 	// Conversation suppression + narration rate-limiting state.
 	lastUserMsgAt    time.Time // set when user submits to the glitch panel
+	lastNarrationAt  time.Time // set each time a narration is allowed through
 	recentRunCount   int       // completions in current 60s window
 	runWindowStart   time.Time // start of the current run-count window
 	// widgetRegistry holds all widget-capable sidecars loaded at startup.
@@ -488,9 +489,13 @@ func (m Model) conversationActive() bool {
 }
 
 // narrationAllowed returns false when unsolicited narration should be dropped:
-// during an active conversation, or in busy mode (≥2 run completions in 60s).
+// during an active conversation, within 5s of the last narration, or in busy
+// mode (≥2 run completions in 60s).
 func (m Model) narrationAllowed() bool {
 	if m.conversationActive() {
+		return false
+	}
+	if !m.lastNarrationAt.IsZero() && time.Since(m.lastNarrationAt) < 5*time.Second {
 		return false
 	}
 	if m.recentRunCount >= 2 && time.Since(m.runWindowStart) < 60*time.Second {
@@ -964,6 +969,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.narrationAllowed() {
 			return m, nil
 		}
+		m.lastNarrationAt = time.Now()
 		newPanel, cmd := m.glitchChat.update(msg)
 		m.glitchChat = newPanel
 		return m, cmd
@@ -1315,6 +1321,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if json.Unmarshal(msg.payload, &rsp) == nil && rsp.Pipeline != "" {
 				if !m.glitchChat.recentlyMentionedPipeline(rsp.Pipeline) && m.narrationAllowed() {
+					m.lastNarrationAt = time.Now()
 					newPanel, glitchCmd := m.glitchChat.update(glitchNarrationMsg{text: "→ " + rsp.Pipeline + " started"})
 					m.glitchChat = newPanel
 					cmds = append(cmds, glitchCmd)
@@ -1352,6 +1359,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.narrationAllowed() {
 			return m, nil
 		}
+		m.lastNarrationAt = time.Now()
 		newPanel, cmd := m.glitchChat.update(msg)
 		m.glitchChat = newPanel
 		return m, cmd
