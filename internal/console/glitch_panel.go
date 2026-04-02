@@ -120,7 +120,8 @@ var glitchSlashCommands = []slashSuggestion{
 	{cmd: "/brain",    hint: "[query] — search notes, or start an interactive brain session"},
 	{cmd: "/rerun",    hint: "[name] — rerun a pipeline by name"},
 	{cmd: "/terminal", hint: "[cmd] — open 25% right split; run cmd or get guidance"},
-	{cmd: "/cron",     hint: "switch to cron session"},
+	{cmd: "/mud",      hint: "jack into The Gibson — opens MUD in right split"},
+	{cmd: "/cron",     hint: "get help scheduling recurring jobs"},
 	{cmd: "/model",    hint: "[name] — switch provider/model inline"},
 	{cmd: "/themes",   hint: "open theme picker"},
 	{cmd: "/clear",    hint: "clear chat history"},
@@ -794,25 +795,30 @@ func newGlitchPanel(cfgDir string, providers []picker.ProviderDef, s *store.Stor
 	return p
 }
 
-// initCmd returns the init Cmd for the GLITCH panel (intro streaming if first run).
+// initCmd returns the init Cmd for the GLITCH panel (intro streaming if first run,
+// static ready prompt otherwise).
 func (p glitchChatPanel) initCmd() tea.Cmd {
-	if p.backend == nil {
-		return nil
-	}
 	if glitchIsFirstRun(p.cfgDir) {
 		glitchMarkSeen(p.cfgDir)
-		backend := p.backend
-		ctx := p.ctx
-		cwd := p.launchCWD
-		return func() tea.Msg {
-			ch, err := backend.streamIntro(ctx, cwd)
-			if err != nil {
-				return glitchErrMsg{err: err}
+		if p.backend != nil {
+			backend := p.backend
+			ctx := p.ctx
+			cwd := p.launchCWD
+			return func() tea.Msg {
+				ch, err := backend.streamIntro(ctx, cwd)
+				if err != nil {
+					return glitchErrMsg{err: err}
+				}
+				return glitchNextToken(ch)()
 			}
-			return glitchNextToken(ch)()
+		}
+		return func() tea.Msg {
+			return glitchNarrationMsg{text: "welcome. no provider configured — run /models to pick one."}
 		}
 	}
-	return nil
+	return func() tea.Msg {
+		return glitchNarrationMsg{text: "ready. type /help to see commands."}
+	}
 }
 
 // setFocused toggles input focus and updates the focused flag.
@@ -1141,12 +1147,9 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
 					p.messages = append(p.messages, glitchEntry{
 						who:  glitchSpeakerBot,
-						text: "switching to cron view. use ^spc j to return to the console.",
+						text: "need help with cron? i can create, list, or remove scheduled jobs — just tell me what you want to run and when.",
 					})
-					return p, func() tea.Msg {
-						exec.Command("tmux", "switch-client", "-t", "glitch-cron").Run() //nolint:errcheck
-						return nil
-					}
+					return p, nil
 				case "/brain":
 					brainArgs := strings.Fields(userText)
 					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
@@ -1410,11 +1413,25 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 						}
 						return glitchNextToken(ch)()
 					}
+				case "/mud":
+					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
+					p.messages = append(p.messages, glitchEntry{
+						who:  glitchSpeakerBot,
+						text: "jacking you into The Gibson. i'll be watching.",
+					})
+					return p, func() tea.Msg {
+						binary, err := exec.LookPath("gl1tch-mud")
+						if err != nil {
+							return glitchNarrationMsg{text: "gl1tch-mud not found — run: go install github.com/adam-stokes/gl1tch-mud@latest"}
+						}
+						exec.Command("tmux", "split-window", "-h", "-p", "50", binary).Run() //nolint:errcheck
+						return nil
+					}
 				case "/help":
 					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
 					p.messages = append(p.messages, glitchEntry{
 						who: glitchSpeakerBot,
-						text: "slash commands:\n\n  getting started\n  /init             — first-run wizard\n  /models           — pick a provider and model\n  /cwd [path]       — set working directory\n\n  build things\n  /prompt [name]    — load or build a system prompt with AI\n  /pipeline [name]  — run a pipeline, or build one from scratch\n  /brain [query]    — search notes, or start an interactive brain session\n\n  run things\n  /rerun [name]     — rerun a pipeline by name\n  /terminal [cmd]   — open a 25% right split; run cmd or get guidance\n  /cron             — switch to cron session\n\n  workspace\n  /model [name]     — switch provider/model inline\n  /themes           — open theme picker\n  /clear            — clear chat history\n  /quit             — exit glitch\n  /help             — this list\n\nscroll: j/k or [/] when scroll-focused (tab to switch)",
+						text: "slash commands:\n\n  getting started\n  /init             — first-run wizard\n  /models           — pick a provider and model\n  /cwd [path]       — set working directory\n\n  build things\n  /prompt [name]    — load or build a system prompt with AI\n  /pipeline [name]  — run a pipeline, or build one from scratch\n  /brain [query]    — search notes, or start an interactive brain session\n\n  run things\n  /rerun [name]     — rerun a pipeline by name\n  /terminal [cmd]   — open a 25% right split; run cmd or get guidance\n  /mud              — jack into The Gibson (MUD in right split)\n  /cron             — get help scheduling recurring jobs\n\n  workspace\n  /model [name]     — switch provider/model inline\n  /themes           — open theme picker\n  /clear            — clear chat history\n  /quit             — exit glitch\n  /help             — this list\n\nscroll: j/k or [/] when scroll-focused (tab to switch)",
 					})
 					return p, nil
 				}
@@ -1617,10 +1634,21 @@ func (p glitchChatPanel) injectClarification(req store.ClarificationRequest) (gl
 			urgent: urgent,
 		})
 		pname := pipelineNameFromReq(r)
-		text := fmt.Sprintf("[%s › %s] %s", pname, r.StepID, r.Question)
-		if r.StepID == "" {
-			text = fmt.Sprintf("[%s] %s", pname, r.Question)
+
+		// GL1TCH voices the interruption before the raw clarification badge.
+		// Only added for single clarifications — batch already has a summary.
+		if len(p.batchAccum) == 1 {
+			intro := pname + " needs your input"
+			if urgent {
+				intro = pname + " is blocked — needs input now"
+			}
+			p.messages = append(p.messages, glitchEntry{
+				who:  glitchSpeakerBot,
+				text: intro,
+				ts:   now,
+			})
 		}
+
 		p.messages = append(p.messages, glitchEntry{
 			who: glitchSpeakerBot,
 			ts:  now,
@@ -1630,7 +1658,7 @@ func (p glitchChatPanel) injectClarification(req store.ClarificationRequest) (gl
 				stepID:       r.StepID,
 				question:     r.Question,
 			},
-			text: text,
+			text: r.Question,
 		})
 		if urgent {
 			p.clarificationUrgent = true
@@ -1744,6 +1772,20 @@ func parseAnswerTarget(input string, pending []pendingClarification) (idx int, a
 		}
 	}
 	return 0, input, ""
+}
+
+// recentlyMentionedPipeline returns true if the pipeline name appears in the
+// last few bot messages — used by the switchboard to avoid duplicate "started"
+// announcements when intent routing already said "→ running pipeline: X".
+func (p glitchChatPanel) recentlyMentionedPipeline(name string) bool {
+	checked := 0
+	for i := len(p.messages) - 1; i >= 0 && checked < 4; i-- {
+		if p.messages[i].who == glitchSpeakerBot && strings.Contains(p.messages[i].text, name) {
+			return true
+		}
+		checked++
+	}
+	return false
 }
 
 // pipelineNameFromReq extracts a display name from a ClarificationRequest.

@@ -16,8 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
-
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -250,30 +248,6 @@ type TelemetryMsg struct {
 
 // ── Model ─────────────────────────────────────────────────────────────────────
 
-// InboxPanel holds display and interaction state for the INBOX panel.
-type InboxPanel struct {
-	focused      bool
-	selectedIdx  int
-	scrollOffset int
-	filterQuery  string
-	filterActive bool
-	activeFilter string // "unread" | "read" | "attention" | "all"
-}
-
-// inboxFilterCycle returns the next filter in the rotation.
-func inboxFilterCycle(current string) string {
-	switch current {
-	case "unread":
-		return "read"
-	case "read":
-		return "attention"
-	case "attention":
-		return "all"
-	default:
-		return "unread"
-	}
-}
-
 // Model is the BubbleTea model for the Switchboard.
 type Model struct {
 	width                 int
@@ -321,8 +295,6 @@ type Model struct {
 	pipelineScheduleErr  string
 	// Inbox panel
 	inboxModel              inbox.Model
-	inboxPanel              InboxPanel
-	inboxReadIDs            map[int64]bool
 	store                   *store.Store
 	inboxDetailOpen         bool
 	inboxMarkdownMode       bool
@@ -344,8 +316,6 @@ type Model struct {
 	// Re-run modal
 	rerunModal    modal.RerunModal
 	showRerun     bool
-	// Cron panel
-	cronPanel CronPanel
 	// Pipeline bus subscription (tasks 7.2–7.8)
 	pipelineBusCh chan pipelineBusEventMsg
 	// narrationCh receives game narration strings from background goroutines.
@@ -387,7 +357,6 @@ func NewWithStore(s *store.Store) Model {
 		brainEditor:           braineditor.New(s, agentProviders),
 		pipelineScheduleInput: pipeSchedTA,
 		signalBoard:           SignalBoard{activeFilter: "running"},
-		inboxPanel:            InboxPanel{activeFilter: "unread", focused: true},
 		activeJobs:            make(map[string]*jobHandle),
 		launchCWD:             cwd,
 		inboxModel:   inbox.New(s, nil), // bundle set after registry loads
@@ -413,8 +382,6 @@ func NewWithStore(s *store.Store) Model {
 		}
 	}
 	translations.RebuildChain(themeStrings)
-
-	m.inboxReadIDs = LoadReadSet(m.readStateFile())
 
 	// Pre-render the TDF header art once at startup (theme-tinted).
 	m.refreshTDFHeader()
@@ -454,11 +421,6 @@ func NewWithTestProviders() Model {
 	m.agent.providers = testProviders
 	m.sendPanel = buildershared.NewSendPanel(testProviders)
 	return m
-}
-
-// readStateFile returns the path to the inbox read-state persistence file.
-func (m Model) readStateFile() string {
-	return filepath.Join(os.Getenv("HOME"), ".config", "glitch", "inbox-read.json")
 }
 
 // Cursor returns the launcher cursor position — used in tests.
@@ -557,8 +519,6 @@ func (m Model) AgentsGridCol() int { return m.agentsGridCol }
 // SetAgentsCenterFocused sets the agents center panel focus state — used in tests.
 func (m Model) SetAgentsCenterFocused(v bool) Model {
 	m.agentsCenterFocused = v
-	m.inboxPanel.focused = false
-	m.inboxModel.SetFocused(false)
 	return m
 }
 
@@ -573,17 +533,11 @@ func (m Model) LeftColWidth() int { return m.leftColWidth() }
 
 
 
-// BuildCronSection is an exported wrapper for tests.
-func (m Model) BuildCronSection(w int) []string { return m.buildCronSection(w, 10) }
-
 // ViewActivityFeed renders the activity feed panel — used in tests.
 func (m Model) ViewActivityFeed(h, w int) string { return m.viewActivityFeed(h, w) }
 
 // FeedLineCount returns the navigable feed line count — used in tests.
 func (m Model) FeedLineCount() int { return m.feedLineCount() }
-
-// CronPanelFocused returns whether the cron panel is focused — used in tests.
-func (m Model) CronPanelFocused() bool { return m.cronPanel.focused }
 
 // SignalBoardBlinkOn returns the current blink state — used in tests.
 func (m Model) SignalBoardBlinkOn() bool { return m.signalBoard.blinkOn }
@@ -668,8 +622,6 @@ func (m Model) SetSignalBoardFocused(v bool) Model {
 	m.agent.focused = false
 	m.sendPanel = m.sendPanel.SetFocused(false)
 	m.feedFocused = false
-	m.inboxPanel.focused = false
-	m.inboxModel.SetFocused(false)
 	return m
 }
 
@@ -680,8 +632,6 @@ func (m Model) SetFeedFocused(v bool) Model {
 	m.agent.focused = false
 	m.sendPanel = m.sendPanel.SetFocused(false)
 	m.signalBoardFocused = false
-	m.inboxPanel.focused = false
-	m.inboxModel.SetFocused(false)
 	return m
 }
 
@@ -959,7 +909,7 @@ var _ io.Writer = (*lineWriter)(nil)
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── GLITCH chat panel: always forward stream messages; route keys when focused ──
 	switch msg.(type) {
-	case glitchStreamMsg, glitchDoneMsg, glitchErrMsg, glitchRunEventMsg:
+	case glitchStreamMsg, glitchDoneMsg, glitchErrMsg, glitchRunEventMsg, glitchIntentMsg:
 		newPanel, cmd := m.glitchChat.update(msg)
 		m.glitchChat = newPanel
 		return m, cmd
@@ -1257,8 +1207,52 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Handle MUD companion events: react to mud.* topics via Ollama narration.
+		if strings.HasPrefix(msg.topic, "mud.") && m.narrationCh != nil {
+			ch := m.narrationCh
+			eventTopic := msg.topic
+			eventPayload := string(msg.payload)
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+				defer cancel()
+				engine := game.NewGameEngine()
+				const companionPrompt = `You are gl1tch, a cynical AI companion watching a hacker navigate a text MUD called The Gibson.
+React to what just happened in 2-4 lines. Terse. Dry. Occasionally helpful. Never cheerful.
+Reference the event naturally — don't just repeat the JSON. No markdown. No bullet points.`
+				userMsg := "Event: " + eventTopic + "\nData: " + eventPayload
+				narration := engine.Respond(ctx, companionPrompt, userMsg)
+				if narration == "" {
+					return
+				}
+				select {
+				case ch <- narration:
+				default:
+				}
+			}()
+			var mudCmds []tea.Cmd
+			mudCmds = append(mudCmds, waitForNarrationCmd(m.narrationCh))
+			if m.pipelineBusCh != nil {
+				mudCmds = append(mudCmds, waitForPipelineBusEvent(m.pipelineBusCh))
+			}
+			return m, tea.Batch(mudCmds...)
+		}
+
 		m = m.handlePipelineBusEvent(msg)
 		var cmds []tea.Cmd
+		// Announce pipeline start to GLITCH — skip if chat already announced it
+		// (e.g. intent routing already said "→ running pipeline: X").
+		if msg.topic == topics.RunStarted {
+			var rsp struct {
+				Pipeline string `json:"pipeline"`
+			}
+			if json.Unmarshal(msg.payload, &rsp) == nil && rsp.Pipeline != "" {
+				if !m.glitchChat.recentlyMentionedPipeline(rsp.Pipeline) {
+					newPanel, glitchCmd := m.glitchChat.update(glitchNarrationMsg{text: "→ " + rsp.Pipeline + " started"})
+					m.glitchChat = newPanel
+					cmds = append(cmds, glitchCmd)
+				}
+			}
+		}
 		// Route pipeline run completions/failures to GLITCH for analysis.
 		if (msg.topic == topics.RunCompleted || msg.topic == topics.RunFailed) && m.store != nil {
 			var p struct {
@@ -1487,19 +1481,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// When any global overlay is active, all keys must go through handleKey
 		// so ESC / y / n can dismiss it regardless of which panel is focused.
 		if m.confirmQuit || m.themePicker.Open || m.dirPickerOpen || m.confirmDelete || m.pipelineLaunchMode != plModeNone || m.showRerun || m.pipelineEditorOpen || m.brainEditorOpen {
-			return m.handleKey(msg)
-		}
-		// Inbox captures all other keys when focused, but the detail overlay
-		// takes priority and routes through handleKey so it can intercept keys.
-		if m.inboxPanel.focused {
-			if m.inboxDetailOpen {
-				return m.handleKey(msg)
-			}
-			// Global overlay keys pass through even when inbox is focused.
-			switch msg.String() {
-			case "T":
-				return m.handleKey(msg)
-			}
 			return m.handleKey(msg)
 		}
 		return m.handleKey(msg)
@@ -1822,169 +1803,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// ── Cron panel ────────────────────────────────────────────────────────────
-	if m.cronPanel.focused {
-		entries := m.filteredCronEntries()
-		// Search mode.
-		if m.cronPanel.filterActive {
-			switch key {
-			case "esc":
-				m.cronPanel.filterActive = false
-				m.cronPanel.filterQuery = ""
-				m.cronPanel.scrollOffset = 0
-			case "backspace":
-				if len(m.cronPanel.filterQuery) > 0 {
-					_, size := utf8.DecodeLastRuneInString(m.cronPanel.filterQuery)
-					m.cronPanel.filterQuery = m.cronPanel.filterQuery[:len(m.cronPanel.filterQuery)-size]
-					m.cronPanel.scrollOffset = 0
-					filtered := m.filteredCronEntries()
-					if m.cronPanel.selectedIdx >= len(filtered) {
-						m.cronPanel.selectedIdx = max(len(filtered)-1, 0)
-					}
-				}
-			default:
-				if len(msg.Runes) > 0 {
-					m.cronPanel.filterQuery += string(msg.Runes)
-					m.cronPanel.scrollOffset = 0
-					if m.cronPanel.selectedIdx >= len(m.filteredCronEntries()) {
-						m.cronPanel.selectedIdx = 0
-					}
-				}
-			}
-			return m, nil
-		}
-		switch key {
-		case "/":
-			m.cronPanel.filterActive = true
-			return m, nil
-		case "m":
-			go ensureCronDaemon()
-			exec.Command("tmux", "switch-client", "-t", "glitch-cron").Run() //nolint:errcheck
-			return m, nil
-		case "esc":
-			m.cronPanel.focused = false
-			m.inboxPanel.focused = true
-			m.inboxModel.SetFocused(true)
-			return m, nil
-		case "j", "down":
-			if m.cronPanel.selectedIdx < len(entries)-1 {
-				m.cronPanel.selectedIdx++
-				if m.cronPanel.selectedIdx >= m.cronPanel.scrollOffset+8 {
-					m.cronPanel.scrollOffset = m.cronPanel.selectedIdx - 7
-				}
-			}
-			return m, nil
-		case "k", "up":
-			if m.cronPanel.selectedIdx > 0 {
-				m.cronPanel.selectedIdx--
-				if m.cronPanel.selectedIdx < m.cronPanel.scrollOffset {
-					m.cronPanel.scrollOffset = m.cronPanel.selectedIdx
-				}
-			}
-			return m, nil
-		}
-	}
-
-	// ── Inbox panel ───────────────────────────────────────────────────────────
-	if m.inboxPanel.focused && !m.inboxDetailOpen {
-		runs := m.filteredInboxRuns()
-		// Search mode captures printable keys.
-		if m.inboxPanel.filterActive {
-			switch key {
-			case "esc":
-				m.inboxPanel.filterActive = false
-				m.inboxPanel.filterQuery = ""
-				m.inboxPanel.scrollOffset = 0
-			case "backspace":
-				if len(m.inboxPanel.filterQuery) > 0 {
-					_, size := utf8.DecodeLastRuneInString(m.inboxPanel.filterQuery)
-					m.inboxPanel.filterQuery = m.inboxPanel.filterQuery[:len(m.inboxPanel.filterQuery)-size]
-					m.inboxPanel.scrollOffset = 0
-					// Re-clamp selectedIdx to new filtered length.
-					filtered := m.filteredInboxRuns()
-					if m.inboxPanel.selectedIdx >= len(filtered) {
-						m.inboxPanel.selectedIdx = max(len(filtered)-1, 0)
-					}
-				}
-			default:
-				if len(msg.Runes) > 0 {
-					m.inboxPanel.filterQuery += string(msg.Runes)
-					m.inboxPanel.scrollOffset = 0
-					if m.inboxPanel.selectedIdx >= len(m.filteredInboxRuns()) {
-						m.inboxPanel.selectedIdx = 0
-					}
-				}
-			}
-			return m, nil
-		}
-		switch key {
-		case "/":
-			m.inboxPanel.filterActive = true
-			return m, nil
-		case "f":
-			m.inboxPanel.activeFilter = inboxFilterCycle(m.inboxPanel.activeFilter)
-			m.inboxPanel.selectedIdx = 0
-			m.inboxPanel.scrollOffset = 0
-			return m, nil
-		case "j", "down":
-			if m.inboxPanel.selectedIdx < len(runs)-1 {
-				m.inboxPanel.selectedIdx++
-				if m.inboxPanel.selectedIdx >= m.inboxPanel.scrollOffset+8 {
-					m.inboxPanel.scrollOffset = m.inboxPanel.selectedIdx - 7
-				}
-			}
-			return m, nil
-		case "k", "up":
-			if m.inboxPanel.selectedIdx > 0 {
-				m.inboxPanel.selectedIdx--
-				if m.inboxPanel.selectedIdx < m.inboxPanel.scrollOffset {
-					m.inboxPanel.scrollOffset = m.inboxPanel.selectedIdx
-				}
-			}
-			return m, nil
-		case "enter":
-			if len(runs) > 0 && m.inboxPanel.selectedIdx >= 0 && m.inboxPanel.selectedIdx < len(runs) {
-				m.inboxDetailOpen = true
-				m.inboxDetailIdx = m.inboxPanel.selectedIdx
-				m.inboxDetailScroll = 0
-				m.inboxMarkdownMode = false
-			}
-			return m, nil
-		case "x":
-			if len(runs) > 0 && m.inboxPanel.selectedIdx >= 0 && m.inboxPanel.selectedIdx < len(runs) {
-				run := runs[m.inboxPanel.selectedIdx]
-				m.inboxReadIDs[run.ID] = true
-				_ = SaveReadSet(m.readStateFile(), m.inboxReadIDs)
-				// Advance or clamp cursor.
-				newRuns := m.filteredInboxRuns()
-				if m.inboxPanel.selectedIdx >= len(newRuns) {
-					m.inboxPanel.selectedIdx = max(len(newRuns)-1, 0)
-				}
-				if m.inboxPanel.scrollOffset > m.inboxPanel.selectedIdx {
-					m.inboxPanel.scrollOffset = m.inboxPanel.selectedIdx
-				}
-			}
-			return m, nil
-		case "r":
-			runs := m.filteredInboxRuns()
-			if len(runs) > 0 && m.inboxPanel.selectedIdx >= 0 && m.inboxPanel.selectedIdx < len(runs) {
-				run := runs[m.inboxPanel.selectedIdx]
-				rm := modal.NewRerunModal(run, m.agent.providers, m.launchCWD)
-				// agentRunModelSlug looks in .agents/; returns "" for regular pipelines.
-				if slug := agentRunModelSlug(run.Name); slug != "" {
-					rm = rm.WithModelSlug(slug)
-				}
-				m.rerunModal = rm
-				m.showRerun = true
-			}
-			return m, nil
-		case "esc":
-			m.inboxPanel.focused = false
-			m.inboxModel.SetFocused(false)
-			return m, nil
-		}
-	}
-
 	// Global focus shortcuts — p focuses the agent send panel (pipeline picker is in sendpanel).
 	switch key {
 	case "p":
@@ -1992,9 +1810,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.agent.focused = true
 		m.feedFocused = false
 		m.signalBoardFocused = false
-		m.cronPanel.focused = false
-		m.inboxPanel.focused = false
-		m.inboxModel.SetFocused(false)
 		m.sendPanel = m.sendPanel.Enter()
 		return m, loadAgentPromptsCmd(m.store)
 	}
@@ -2030,8 +1845,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.launcher.focused = false
 		m.agent.focused = true
 		m.feedFocused = false
-		m.inboxPanel.focused = false
-		m.inboxModel.SetFocused(false)
 		m.sendPanel = m.sendPanel.Enter()
 		return m, loadAgentPromptsCmd(m.store)
 
@@ -2041,18 +1854,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.sendPanel = m.sendPanel.SetFocused(false)
 		m.feedFocused = false
 		m.signalBoardFocused = true
-		m.inboxPanel.focused = false
-		m.inboxModel.SetFocused(false)
-		return m, nil
-
-	case "i":
-		m.launcher.focused = false
-		m.agent.focused = false
-		m.sendPanel = m.sendPanel.SetFocused(false)
-		m.feedFocused = false
-		m.signalBoardFocused = false
-		m.inboxPanel.focused = true
-		m.inboxModel.SetFocused(true)
 		return m, nil
 
 	case "r":
@@ -2191,23 +1992,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "esc":
 		if m.feedFocused {
 			m.feedFocused = false
-			m.inboxPanel.focused = true
-			m.inboxModel.SetFocused(true)
 			return m, nil
 		} else if m.signalBoardFocused {
 			m.signalBoardFocused = false
 			m.signalBoard.clearSearch()
-			m.inboxPanel.focused = true
-			m.inboxModel.SetFocused(true)
 		} else if m.agentsCenterFocused {
 			m.agentsCenterFocused = false
-			m.inboxPanel.focused = true
-			m.inboxModel.SetFocused(true)
 		} else if m.agent.focused {
 			m.agent.focused = false
 			m.sendPanel = m.sendPanel.SetFocused(false)
-			m.inboxPanel.focused = true
-			m.inboxModel.SetFocused(true)
 		}
 		return m, nil
 
@@ -3387,8 +3180,6 @@ func sectionLabel(title string, focused bool) string {
 }
 
 // leftColWidth returns the width of the left column (30%, min 28).
-// In the three-column layout, the left column holds the pipeline launcher,
-// inbox, and cron panels (no agent runner).
 func (m Model) leftColWidth() int {
 	w := m.width
 	if w <= 0 {
@@ -3421,24 +3212,6 @@ func (m Model) midColWidth() int {
 		w = 120
 	}
 	return w
-}
-
-// viewLeftColumn renders the left column: inbox only.
-func (m Model) viewLeftColumn(height, width int) string {
-	var lines []string
-
-	if height >= 4 {
-		lines = append(lines, m.buildInboxSection(width, height)...)
-	}
-
-	for len(lines) < height {
-		lines = append(lines, "")
-	}
-	if len(lines) > height {
-		lines = lines[:height]
-	}
-
-	return strings.Join(lines, "\n")
 }
 
 // viewCenterColumn renders the center column: GLITCH chat (full height).
@@ -3800,27 +3573,16 @@ func (m Model) buildAgentSection(w int) []string {
 	return m.sendPanel.View(w, sendPanelHeight, pal)
 }
 
-// navigateToInboxRun focuses the inbox panel and opens the detail view for the
-// run matching runIDStr (decimal store run ID). Returns the updated model and a
-// reload command if the run was found.
+// navigateToInboxRun opens the detail overlay for the run matching runIDStr.
 func (m Model) navigateToInboxRun(runIDStr string) (Model, tea.Cmd) {
-	// Switch inbox filter to "all" so running/paused entries are always visible.
-	m.inboxPanel.activeFilter = "all"
-	m.inboxPanel.filterQuery = ""
-	m.inboxPanel.scrollOffset = 0
-
 	runs := m.filteredInboxRuns()
 	for i, run := range runs {
 		if fmt.Sprintf("%d", run.ID) == runIDStr {
-			m.inboxPanel.focused = true
-			m.inboxModel.SetFocused(true)
-			m.inboxPanel.selectedIdx = i
 			m.inboxDetailIdx = i
 			m.inboxDetailOpen = true
 			m.inboxDetailScroll = 0
 			m.inboxDetailCursor = 0
 			m.inboxMarkdownMode = false
-			// clear other focus
 			m.launcher.focused = false
 			m.agent.focused = false
 			m.sendPanel = m.sendPanel.SetFocused(false)
@@ -3833,175 +3595,9 @@ func (m Model) navigateToInboxRun(runIDStr string) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// filteredInboxRuns returns inbox runs filtered by read state and search query.
+// filteredInboxRuns returns all inbox runs.
 func (m Model) filteredInboxRuns() []store.Run {
-	all := m.inboxModel.Runs()
-	query := strings.ToLower(m.inboxPanel.filterQuery)
-	filter := m.inboxPanel.activeFilter
-	if filter == "" {
-		filter = "unread"
-	}
-	var out []store.Run
-	for _, r := range all {
-		isRead := m.inboxReadIDs[r.ID]
-		needsAttention := r.ExitStatus != nil && *r.ExitStatus != 0
-		switch filter {
-		case "unread":
-			if isRead {
-				continue
-			}
-		case "read":
-			if !isRead {
-				continue
-			}
-		case "attention":
-			if !needsAttention {
-				continue
-			}
-		case "all":
-			// no exclusion
-		default:
-			if isRead {
-				continue
-			}
-		}
-		if query != "" && !strings.Contains(strings.ToLower(r.Name), query) {
-			continue
-		}
-		out = append(out, r)
-	}
-	return out
-}
-
-// buildInboxSection renders the Inbox panel using the same ANSI box style as
-// the Pipelines and Agent Runner panels. height is the maximum number of rows
-// the section may occupy (including header and bottom border).
-func (m Model) buildInboxSection(w, height int) []string {
-	pal := m.ansiPalette()
-	borderColor := pal.Border
-	titleColor := pal.Accent
-	if m.inboxPanel.focused {
-		borderColor = pal.Accent
-	}
-
-	var rows []string
-	if sprite := PanelHeader(m.activeBundle(), "inbox", w, borderColor, titleColor); sprite != nil {
-		rows = append(rows, sprite...)
-	} else {
-		rows = append(rows, boxTop(w, RenderHeader("inbox"), borderColor, titleColor))
-	}
-
-	runs := m.filteredInboxRuns()
-	// maxRows is remaining content rows: total height minus header lines minus 1 for boxBot
-	// minus 1 for the always-present hint footer row.
-	maxRows := height - len(rows) - 2
-	if maxRows < 0 {
-		maxRows = 0
-	}
-
-	// Active filter label row (shown whenever filter is not the default "unread").
-	activeFilter := m.inboxPanel.activeFilter
-	if activeFilter == "" {
-		activeFilter = "unread"
-	}
-	if activeFilter != "unread" {
-		label := fmt.Sprintf("  %sfilter:%s %s%s%s", pal.Dim, aRst, pal.Accent, activeFilter, aRst)
-		rows = append(rows, boxRow(label, w, borderColor))
-		maxRows--
-		if maxRows < 0 {
-			maxRows = 0
-		}
-	}
-
-	// Search prompt row.
-	if m.inboxPanel.filterActive {
-		cursor := "█"
-		prompt := fmt.Sprintf("  %s/%s %s%s%s%s", pal.Accent, aRst, pal.FG, m.inboxPanel.filterQuery, cursor, aRst)
-		rows = append(rows, boxRow(prompt, w, borderColor))
-		maxRows--
-		if maxRows < 0 {
-			maxRows = 0
-		}
-	}
-
-	if len(runs) == 0 {
-		rows = append(rows, boxRow(pal.Dim+"  (empty)"+aRst, w, borderColor))
-	} else {
-		sel := m.inboxPanel.selectedIdx
-		offset := m.inboxPanel.scrollOffset
-		shown := 0
-		for i := offset; i < len(runs) && shown < maxRows; i++ {
-			run := runs[i]
-			var dot string
-			switch {
-			case run.ExitStatus == nil:
-				dot = pal.Accent + "◉" + aRst
-			case *run.ExitStatus == 0:
-				dot = aGrn + "●" + aRst
-			default:
-				dot = aRed + "●" + aRst
-			}
-			// ⚠ attention marker for failed runs.
-			warn := ""
-			warnVis := 0
-			if run.ExitStatus != nil && *run.ExitStatus != 0 {
-				warn = " " + aRed + "⚠" + aRst
-				warnVis = 2 // " ⚠" = 2 visible columns
-			}
-			ts := time.UnixMilli(run.StartedAt).Format("1/2 3:04 PM")
-			tsVis := len(ts) + 1
-			maxNameLen := max(w-7-tsVis-warnVis, 1)
-			name := run.Name
-			if len(name) > maxNameLen {
-				name = name[:maxNameLen-1] + "…"
-			}
-			inner := w - 2
-			focused := m.inboxPanel.focused
-			prefixVis := 2 + 1 + 1 + len(name) + warnVis
-			pad := max(inner-prefixVis-tsVis, 0)
-			dimTS := pal.Dim + strings.Repeat(" ", pad) + ts + aRst
-			var content string
-			if i == sel && focused {
-				content = pal.Accent + "> " + aRst + dot + " " + pal.FG + name + aRst + warn + dimTS
-			} else {
-				content = "  " + dot + " " + pal.Dim + name + aRst + warn + dimTS
-			}
-			rows = append(rows, boxRow(content, w, borderColor))
-			shown++
-		}
-	}
-
-	// Pad to fill allocated height, leaving room for the always-present hint footer row.
-	for len(rows) < height-2 {
-		rows = append(rows, boxRow("", w, borderColor))
-	}
-	// Hint footer row — always present; shows hints when focused, blank when not.
-	var inboxHints []panelrender.Hint
-	if m.inboxPanel.focused {
-		if m.inboxPanel.filterActive {
-			inboxHints = []panelrender.Hint{
-				{Key: "esc", Desc: "cancel"},
-				{Key: "backspace", Desc: "delete"},
-			}
-		} else {
-			filterLabel := m.inboxPanel.activeFilter
-			if filterLabel == "" {
-				filterLabel = "unread"
-			}
-			inboxHints = []panelrender.Hint{
-				{Key: "enter", Desc: "open"},
-				{Key: "x", Desc: "mark read"},
-				{Key: "/", Desc: "search"},
-				{Key: "r", Desc: "re-run"},
-			}
-		}
-	}
-	rows = append(rows, boxRow(panelrender.HintBar(inboxHints, w-2, pal), w, borderColor))
-	rows = append(rows, boxBot(w, borderColor))
-	if len(rows) > height {
-		rows = rows[:height]
-	}
-	return rows
+	return m.inboxModel.Runs()
 }
 
 // feedPanelWidth returns the actual rendered width of the activity feed panel,
