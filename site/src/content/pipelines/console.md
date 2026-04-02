@@ -4,7 +4,53 @@ description: "Navigate the GL1TCH Switchboard TUI, launch pipelines, run agents,
 order: 2
 ---
 
-GL1TCH runs inside a tmux session. The **Switchboard** (window 0) is your primary control panel — a full-screen BubbleTea TUI where you launch pipelines, run agents, check activity, and navigate your workspace. Everything streams live to the Activity Feed with status badges and timestamps.
+GL1TCH runs inside a tmux session. The **Switchboard** (window 0) is your primary control panel — a full-screen BubbleTea TUI that integrates pipeline launching, agent invocation, activity monitoring, and conversational AI. You can launch pipelines or agents from the left sidebar, see live output in the Activity Feed with status badges and timestamps, chat with the GL1TCH assistant for analysis and guidance, and manage multiple named sessions for separate conversation threads.
+
+
+## Technologies
+
+The Switchboard is built on a set of mature Go libraries and local services:
+
+| Technology | Role |
+|---|---|
+| **BubbleTea** | Event-driven TUI framework for terminal rendering and input handling |
+| **Lipgloss** | ANSI styling and layout management (panels, borders, colors) |
+| **Ollama** | Local LLM inference for the GL1TCH assistant |
+| **busd** | Local Unix socket message bus for cross-component events (pipelines, steps, crons) |
+| **SQLite** (`internal/store`) | Persistence of run metadata, step details, and conversation history |
+| **FSNotify** | File system watching for pipeline `.yaml` changes in real-time |
+| **Glamour** | Markdown rendering for formatted output and documentation display |
+| **OTel** (`internal/telemetry`) | Distributed tracing for performance profiling and step-level diagnostics |
+| **Cron** (`robfig/cron`, `internal/cron`) | Scheduled pipeline execution and time-based triggers |
+
+The Switchboard delegates rendering consistency to `internal/panelrender` (header sprites, width calculations, ANSI stripping) and theming to `internal/themes` (Dracula palette, color bindings, dynamic theme switching).
+
+
+## Named Sessions and Status Badges
+
+GL1TCH supports **named chat sessions** — separate conversation threads you can switch between without losing context. Each session maintains its own message history, conversation state, and status badge. The active session is marked with a `●` indicator in the status bar (top right); background sessions show an attention badge if they have new activity.
+
+### Session States
+
+| Badge | State | Meaning |
+|-------|-------|---------|
+| `●` | **Active** | Currently visible; keyboard focus is here |
+| ` ` | **Idle** | Background session with no new activity |
+| `◐` | **Unread** | Background session has new messages since last viewed |
+| `⚠` | **Attention** | High-priority activity (errors, clarifications, game alerts) requiring action |
+
+**Switching sessions**: Press `^spc S` to cycle between open sessions. The previous session is marked idle; the new one becomes active. Sessions with unread messages or attention states remain highlighted in the footer.
+
+**Creating a session**: Press `^spc n` (new session) and type a name (e.g., "debug", "refactor", "game"). A new empty session is created and immediately becomes active.
+
+### Status Bar Session Indicators
+
+The tmux status bar (bottom right) displays:
+- Current time (always visible)
+- Chord hints: `^spc n new` (create session), `^spc p build` (prompt builder), `^spc t themes` (theme picker)
+- Attention badge if any background session needs your attention
+
+When a background session receives a new message or encounters an error, its badge changes from idle (`·`) to unread (`◐`) or attention (`⚠`), and the status bar briefly highlights it.
 
 
 ## The Switchboard Layout
@@ -42,9 +88,72 @@ The Switchboard divides into three regions:
 **Bottom Bar**: Compact keybinding reference showing the most important shortcuts.
 
 
+## Console Architecture
+
+The Switchboard is built on BubbleTea, GL1TCH's event-driven TUI framework. Understanding the architecture helps when customizing behavior or debugging layout issues.
+
+### Core Components
+
+**Deck** (`internal/console/deck.go`) — The root model. It orchestrates all panels (GL1TCH chat, pipeline launcher, agent runner, activity feed), handles keybindings, manages the session registry, and routes events. Deck is the entry point for all user input and screen rendering.
+
+**GL1TCH Panel** (`internal/console/glitch_panel.go`) — Streaming chat interface. Handles prompt input, LLM communication via Ollama, token streaming, and cancellation. Maintains conversation turns and detects intent (routing to built-in handlers or the LLM).
+
+**Signal Board** (`internal/console/signal_board.go`) — Activity feed. Subscribes to pipeline/step/cron events via `internal/busd`, maintains a ring buffer of up to 200 feed entries, supports fuzzy search and status filtering, and renders the visible portion with proper height calculations.
+
+**Session Registry** (`internal/console/session.go`) — Manages named chat sessions, each with its own message history and status badge. Sessions are in-memory; the conversation history persists in the active session until you switch or quit.
+
+### Event Flow
+
+1. **User input** → Deck's Update() method
+2. **Keypress routing** → Region-specific handlers (chat, launcher, feed)
+3. **Intent detection** → Router (built-in handlers or LLM)
+4. **Execution** → Pipeline executor, agent invocation, or LLM call
+5. **Completion** → busd event published (pipeline_done, step_complete, etc.)
+6. **Feed update** → Signal Board subscribes, adds entry, re-renders
+7. **UI re-render** → Deck's View() method calculates layout, calls region renderers, outputs ANSI
+
+### Event Bus (busd)
+
+GL1TCH uses `internal/busd` — a local Unix socket message bus — to decouple the Deck from the executor, cron scheduler, and other services. The Deck subscribes to topics like:
+
+| Topic | Event | Meaning |
+|---|---|---|
+| `pipeline.started` | A pipeline run has been launched | Add entry to Activity Feed with `[running]` badge |
+| `pipeline.completed` | A pipeline finished successfully | Update badge to `[done]`, capture final output |
+| `pipeline.failed` | A pipeline exited with error | Update badge to `[failed]`, capture error message |
+| `step.started` | A step within a pipeline began | Update Inbox detail metadata |
+| `step.completed` | A step finished | Record step duration (from OTel span or wall-clock) |
+| `step.failed` | A step encountered an error | Mark step as failed in Inbox detail |
+| `cron.executed` | A scheduled pipeline fired | Log to Activity Feed as cron job entry |
+| `clarification.requested` | A step is asking for user input | Emit question to chat panel, block pipeline until answered |
+
+Subscriptions are managed in `glitch_panel.go` and `deck.go` with message handlers that:
+1. Update the Activity Feed in real time (Signal Board updates entry, re-renders)
+2. Update the session state (new messages added to the active session)
+3. Trigger re-renders to reflect new activity
+
+This asynchronous architecture allows pipelines and crons to run independently in background processes while the TUI remains responsive to keyboard input and feed scrolling.
+
+### Styling and Themes
+
+Console styling is provided by `internal/themes` and `internal/styles`. Themes define a color palette (Dracula, Nord, Gruvbox, etc.); the active theme is stored in `~/.config/glitch/state.json` and applied on startup. Panel rendering delegates to `internal/panelrender` for consistent header rendering, ANSI sprite handling, and width calculations.
+
+### Storage
+
+Run metadata, step details, and conversation history are persisted to `internal/store` (SQLite). When you exit GL1TCH, conversation state is lost unless you save it explicitly. Pipeline outputs and OTel traces are logged to:
+- `~/.local/share/glitch/traces.jsonl` — OTel trace spans (for `/trace` inspection)
+- `~/.cache/glitch/inbox-read-state.json` — Which runs you've marked as read
+
+
 ## Sidebar and Focus Navigation
 
 The Switchboard divides into three focusable regions: **Pipeline Launcher** (top-left), **Agent Runner** (bottom-left), and **Activity Feed** (center/right).
+
+### Sidebar Toggling
+
+The sidebar (Pipeline Launcher + Agent Runner) divides the left pane into two stacked sections: the Pipeline Launcher on top and the Agent Runner below. Each section has its own focus region and keybindings.
+
+**Sidebar visibility**: The sidebar can be toggled with `^spc \` (ctrl+space backslash) to maximize the Activity Feed width when reading large amounts of output. The sidebar state is remembered across sessions.
 
 ### Region Navigation
 
@@ -182,6 +291,8 @@ The Activity Feed is scrollable. Navigate with `j`/`k` to move between entries. 
 
 Output is streamed in real time as it arrives from the pipeline or agent. The feed is throttled (50ms debounce) to avoid excessive BubbleTea re-renders on high-frequency output. Very long or complex pipelines may batch lines together.
 
+The Activity Feed maintains a **rolling history of up to 200 entries**. When the cap is reached, the oldest non-running entry is evicted first; if all entries are still running (a rare case), the feed truncates hard. This ensures the Switchboard remains responsive even during long sessions with many pipeline runs.
+
 ### Search and Filter
 
 The Signal Board (Activity Feed) supports efficient searching and filtering:
@@ -193,46 +304,83 @@ The Signal Board (Activity Feed) supports efficient searching and filtering:
 | `j`/`k` | Navigate entries (normal mode) or navigate + mark (mark mode) |
 | `m` | Toggle mark mode — hold position while marking/unmarking multiple entries |
 
-**Mark Mode** (`m`): Toggles between normal navigation and mark-while-navigate. Useful for batch operations on related runs. Press `m` again to exit mark mode.
+**Mark Mode** (`m`): Toggles through three states:
+- **Off** (normal) — `j`/`k` navigate without marking
+- **Active** — `j`/`k` navigate **and** mark/unmark lines (highlighted with a badge)
+- **Paused** — `j`/`k` navigate without marking; useful to position on an entry without toggling its mark
+Press `m` to cycle between states. Useful for batch operations on related runs.
 
 **Fuzzy Search** (`/`): Match entry titles by substring. The search resets when you select an entry or press `esc`.
 
 ### JSON Output Expansion
 
-Pipeline output containing valid JSON objects or arrays is automatically detected and rendered compactly:
+Pipeline output containing valid JSON objects or arrays is automatically detected and rendered compactly by the **feed parser** system. Detection is zero-cost: each line is checked for leading `{` or `[` and validated with `json.Valid()` before rendering.
 
+**Collapsed (default)**:
 ```
 ▸ { … } (8 keys)
+▸ [ … ] (3 items)
 ```
 
-Press `↵` on a JSON line to expand inline:
-
+**Expanded** (press `↵` to toggle):
 ```
 ▾ { … } (8 keys)
   "status": "success"
   "duration_ms": 1234
   "steps": [ 3 items ]
-  …
+  "cached": true
 ```
 
-Press `↵` again to collapse. Expanded JSON is pretty-printed with syntax highlighting (keys in accent color). Large objects are truncated at 20 lines with an overflow indicator.
+Expanded JSON is pretty-printed with syntax highlighting (keys in accent color, values in foreground). Large objects are truncated at 20 lines with an overflow indicator (`… N more lines`). Pressing `↵` again collapses the entry.
+
+**Parser Registry** (`feed_parsers.go`):
+
+The feed parser is extensible by design. The system maintains an ordered `feedParsers` slice where each parser is a `FeedLineParser` function:
+
+```go
+type FeedLineParser func(raw string, width int, pal ANSIPalette, expanded bool) (lines []string, matched bool)
+```
+
+When a feed entry is rendered:
+1. Raw ANSI-stripped output is passed to each parser in order (first match wins)
+2. If a parser matches and returns `matched=true`, its output lines are used
+3. If no parser matches, the line is rendered as plain text
+
+Built-in parsers:
+- `jsonFeedLineParser` — Detects and formats JSON objects and arrays
+
+Custom parsers can be added to the `feedParsers` slice to handle other formats (YAML, Protobuf, CSV, etc.) without modifying the core feed rendering logic.
 
 
 ## GL1TCH Chat Panel
 
-The right side of the Switchboard displays a streaming conversation with the GL1TCH AI assistant. The assistant provides analysis, suggestions, and direct answers based on your pipeline runs and prompts.
+The right side of the Switchboard displays a streaming conversation with the GL1TCH AI assistant. The assistant is powered by your local Ollama instance or a configured cloud provider, and provides analysis, suggestions, and direct answers based on your pipeline runs and prompts.
 
-### Chat Context
+### Chat Context and Assistant Awareness
 
-The assistant's context includes:
+The assistant's context automatically includes:
 - **Current environment**: Working directory, active model, pipeline paths
-- **Recent runs**: Last 5 activity feed entries, their status, output, and step details
-- **Your prompts**: Full conversation history within the session
-- **Run analysis**: OTel traces, exit codes, error messages from pipeline steps
+- **Recent runs**: Last 5 activity feed entries, their status, output, and step details (including OTel trace data)
+- **Conversation history**: Full message history within the active session (but not other sessions)
+- **Run analysis**: Exit codes, error messages, step durations, and structured output (JSON, ANSI) from pipeline steps
+- **Game state** (if applicable): Current player stats, inventory, active quests, recent narration events
 
-When a pipeline fails, the assistant automatically analyzes the failure and suggests remediation steps. When you ask a question, it answers based on recent context without necessarily triggering a new run.
+When a pipeline or agent job fails, the assistant automatically receives the failure event and can optionally analyze it, suggest debugging steps, or propose re-running with different parameters. When you ask a question, the assistant answers based on available context without necessarily triggering a new run — it's a true conversational interface, not just a command dispatcher.
 
-### Sending Messages
+### Streaming and Token Flow
+
+Responses from the assistant stream **token-by-token** with a blinking cursor (`▌`) to show activity. Very long responses are chunked and displayed in real time as they arrive from Ollama or the cloud provider. You can press `esc` at any time to cancel an in-flight stream; any partial response is preserved in the session history and you can resume the conversation immediately.
+
+Internally, streaming is driven by a pair of BubbleTea message types:
+
+- **`glitchStreamMsg`** — Carries a single token string and a channel for reading the remaining token stream. Emitted when the assistant begins responding.
+- **`glitchTickMsg`** — Fires every 120ms to drive the animation frame and pull the next token from the stream channel. Allows smooth 120ms-paced updates without blocking on I/O.
+- **`glitchDoneMsg`** — Signals that the stream has finished (channel closed).
+- **`glitchErrMsg`** — Carries an error if the stream fails (connection loss, LLM timeout, etc.).
+
+The Update() handler for these messages updates the chat pane's current message buffer, re-renders the view, and continues the `glitchTick` loop until `glitchDoneMsg` arrives. When you press `esc`, a cancellation flag is set and the stream channel is closed, stopping all further pulls and rendering the partial response to history.
+
+### Sending Messages and Intent Routing
 
 | Key | Action |
 |---|---|
@@ -246,6 +394,46 @@ You: __________________________________
     [Type your prompt here]
     [Ctrl+Enter to send]
 ```
+
+### Intent Detection and Command Dispatch
+
+When you send a message, the GL1TCH router (`internal/router`) analyzes your input and dispatches it to one of three paths:
+
+**1. Built-in intent** (no LLM call):
+Exact phrase matching triggers an immediate handler without consulting the LLM. These are parsed from the message and executed synchronously:
+
+```
+run backup                              # launch pipeline named "backup"
+launch deploy --prod                    # launch with flags passed as env vars
+create session debug                    # new named session, becomes active
+switch to refactor                      # switch to existing session
+show pipelines                          # list all available .pipeline.yaml files
+/terminal 50% left                      # open tmux pane (left, 50% width)
+```
+
+The router maintains a pattern registry of these commands. When a match is found, the handler is called immediately and the output (success/failure) is published to busd as a special event that updates the chat panel.
+
+**2. Assistant-driven intent** (full context passed to LLM):
+Free-form questions and requests are sent to the configured LLM with full conversation history and recent activity context:
+
+```
+why did the backup fail?                # analysis of last failed run
+what pipelines are running?             # query against current state
+suggest a fix for the schema error      # open-ended suggestion
+```
+
+The router recognizes that these don't match a built-in handler and packages the full context (last 5 feed entries, current session history, environment state) into a system prompt before calling Ollama. The assistant's response appears in the chat panel as an analysis, suggestion, or clarification.
+
+**3. Hybrid intent** (built-in + LLM elaboration):
+Some messages match a built-in handler but also trigger LLM analysis:
+
+```
+run backup explain                      # launch pipeline AND explain what it does
+```
+
+The pipeline runs immediately; the LLM then receives the run output and provides commentary in the chat panel.
+
+The routing decision is made in `glitch_panel.go`'s Update() method, which calls the router to parse the message and select the dispatch path.
 
 ### Response Format
 
@@ -266,19 +454,18 @@ gl1tch: I recommend running schema-sync --force to
 
 You can type `/pipeline schema-sync --force` in the chat to execute this immediately, or select it from the launcher.
 
-### Streaming
+### Clarifications and Blocking Questions
 
-Long responses stream token-by-token with a blinking cursor (`▌`) to show activity. Press `esc` to cancel the stream; any partial response is preserved in the history.
-
-### Clarifications
-
-If a pipeline reaches a step with `AskClarification` signal, the question appears in the chat panel with an input box. Answer the question directly in the chat, and execution resumes automatically.
+If a pipeline reaches a step with an `AskClarification` signal (e.g., a user-input prompt that blocks until answered), the question appears in the chat panel as a highlighted entry with an input box. Your answer is validated, stored, and published back to the pipeline via the bus (`internal/busd`), which unblocks the waiting `AskClarification` step and resumes execution automatically.
 
 ```
 glitch: Schema validation failed. Should I rollback
         to the previous version? (yes/no)
 You: __________________________________
+     [your answer is stored as a ClarificationReply]
 ```
+
+This enables interactive pipelines: a pipeline can pause mid-execution, ask a question in the UI, wait for your response, and then resume based on your answer. All clarification requests are loaded from the database on startup, so re-attaching to a GL1TCH session will show any pending questions that were unanswered.
 
 
 ## Chord Shortcuts
@@ -416,7 +603,7 @@ Each step shows duration in seconds. If OTel tracing is enabled, step durations 
 
 ### OTel Trace View
 
-When a pipeline includes instrumented steps, press `o` in the Inbox Detail to view the trace tree:
+When a pipeline includes instrumented steps, press `o` in the Inbox Detail to view the trace tree. Traces are collected by `internal/telemetry` and written as JSONL to `~/.local/share/glitch/traces.jsonl`. The trace view parses this file, matches spans to the current run by run ID, and displays the call hierarchy:
 
 ```
 fetch-schema                                    OK · 850ms
@@ -431,6 +618,8 @@ publish                                         OK · 120ms
 ```
 
 Spans are indented by depth. Each shows status (`OK` or `ERR`) and duration in milliseconds. This view is useful for diagnosing performance bottlenecks in slow pipelines.
+
+**Note**: Trace data is only available if the pipeline or agent step was instrumented with OTel calls (via `internal/telemetry`). Most built-in steps emit traces automatically; custom pipelines may need explicit instrumentation.
 
 ### Prompt Builder (`^spc p`)
 
@@ -475,12 +664,27 @@ The active theme is stored in `~/.config/glitch/state.json` and loaded automatic
 
 The Switchboard shows several status indicators to keep you aware of what's happening:
 
-### Chat Panel Subtitle
+### Session Status Badges
 
-The Switchboard window title and subtitle show:
+The status bar and chat panel footer display badges for each open session:
+
+```
+main ●  debug ◐  refactor ·
+```
+
+- `●` (solid circle) — Active session (currently visible)
+- `◐` (half circle) — Unread messages in background session
+- `·` (dot) — Idle background session
+- `⚠` (warning) — Attention required (errors, clarification, game alerts)
+
+When a background session transitions to unread or attention, it's briefly highlighted in the status bar and the footer title updates to show the session name.
+
+### Chat Panel Header
+
+The Switchboard window title and header show:
 - Current time (top right)
-- Active job badge (`[1 running]` if pipelines are active)
-- Theme indicator (brief name of the active theme)
+- Active job count (`[1 running]` if pipelines are active; `[0 running]` when idle)
+- Theme indicator (brief name of the active theme, e.g., "Dracula")
 
 ### Exit Status
 
@@ -492,6 +696,34 @@ When a pipeline or agent finishes, the Activity Feed entry shows:
 ### Provider/Model Availability
 
 If a provider is unavailable (Ollama not running, cloud API key invalid), the Agent Runner shows a warning and disables the Model dropdown until the provider is reachable again.
+
+
+## Advanced: Tmux Window Integration
+
+When a pipeline or long-running agent job completes, GL1TCH automatically creates a **detached tmux window** (if tmux is available) to display the full output scrollback. This allows you to inspect logs without blocking the Switchboard.
+
+### How It Works
+
+1. Job starts → GL1TCH creates a window named `glitch-<runID>` in the current session
+2. Output is tee'd to a log file (e.g. `/tmp/glitch-42.log`) and displayed in the window
+3. When the job finishes, the exit code is written to a done file (e.g. `/tmp/glitch-42.done`)
+4. Window stays open (via `remain-on-exit on`); `automatic-rename` is disabled so the name doesn't change
+5. You can attach to the window with: `tmux attach-session -t <target>`
+
+The tmux window target is fully-qualified, e.g. `session:@123` (using the stable window ID rather than index). You can copy this from the feed entry or the Inbox Detail modal.
+
+### Tail Output
+
+If a pane is already running when you launch a pipeline, GL1TCH can optionally tail its output live with `tail -f` on the run log file instead of embedding a full shell command. This is a fallback for agent jobs that are managed in-process.
+
+### Layout Stability
+
+The console calculates pane heights precisely to avoid layout drift:
+- `signalBoardPanelHeight()` accounts for header sprites, filter rows, search input, and footer
+- `sbFixedBodyRows` locks the visible entry count to prevent scroll jumping
+- All width calculations use `panelrender.VisibleWidth()` to strip ANSI codes
+
+If you manually resize panes, the console may need a re-render. Press `ctrl+l` to force a redraw.
 
 
 ## Tips and Patterns
