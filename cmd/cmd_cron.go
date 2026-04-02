@@ -118,7 +118,8 @@ var cronListCmd = &cobra.Command{
 		for _, e := range entries {
 			nextStr := "invalid schedule"
 			if sched, err := parser.Parse(e.Schedule); err == nil {
-				nextStr = sched.Next(now).Format("2006-01-02 15:04:05 MST")
+				next := sched.Next(now)
+				nextStr = fmt.Sprintf("%s (%s)", humanDuration(next.Sub(now)), next.Format("15:04 MST"))
 			}
 			fmt.Printf("%-24s %-20s %-12s %-30s %s\n", e.Name, e.Schedule, e.Kind, e.Target, nextStr)
 		}
@@ -145,6 +146,33 @@ var cronLogsCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+// humanDuration formats a duration as a short human-readable string like
+// "in 5m", "in 2h 30m", or "in 3d 4h".
+func humanDuration(d time.Duration) string {
+	if d < 0 {
+		return "overdue"
+	}
+	d = d.Round(time.Minute)
+	if d == 0 {
+		return "now"
+	}
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	mins := int(d.Minutes()) % 60
+	switch {
+	case days > 0 && hours > 0:
+		return fmt.Sprintf("in %dd %dh", days, hours)
+	case days > 0:
+		return fmt.Sprintf("in %dd", days)
+	case hours > 0 && mins > 0:
+		return fmt.Sprintf("in %dh %dm", hours, mins)
+	case hours > 0:
+		return fmt.Sprintf("in %dh", hours)
+	default:
+		return fmt.Sprintf("in %dm", mins)
+	}
 }
 
 // cronRunCmd is the internal daemon entry point. It is invoked by

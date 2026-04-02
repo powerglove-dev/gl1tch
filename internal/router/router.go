@@ -57,7 +57,16 @@ type RouteResult struct {
 	CronExpr string
 	// Method records which stage produced the result: "embedding", "llm", or "none".
 	Method string
+	// NearMiss is the closest pipeline ref when the score was between NearMissThreshold
+	// and the AmbiguousThreshold — i.e., a probable match that didn't clear the bar.
+	NearMiss *pipeline.PipelineRef
+	// NearMissScore is the similarity score for NearMiss.
+	NearMissScore float64
 }
+
+// NearMissThreshold is the minimum score to report a near-miss candidate.
+// Scores below this are treated as noise.
+const NearMissThreshold = 0.60
 
 // Config controls routing behavior.
 type Config struct {
@@ -127,6 +136,8 @@ func (r *HybridRouter) Route(ctx context.Context, prompt string, pipelines []pip
 	defer span.End()
 
 	// Stage 1: embedding fast path.
+	var embedNearMiss *pipeline.PipelineRef
+	var embedNearMissScore float64
 	if !r.cfg.DisableEmbeddings {
 		embedResult, err := r.embedRouter.Route(ctx, prompt, pipelines)
 		if err == nil && embedResult != nil && embedResult.Pipeline != nil {
@@ -146,6 +157,11 @@ func (r *HybridRouter) Route(ctx context.Context, prompt string, pipelines []pip
 				span.SetStatus(codes.Ok, "")
 				return embedResult, nil
 			}
+			// Track near-miss candidates for caller awareness.
+			if embedResult.Confidence >= NearMissThreshold {
+				embedNearMiss = embedResult.Pipeline
+				embedNearMissScore = embedResult.Confidence
+			}
 		}
 		// If embedding returned a result above AmbiguousThreshold (but below
 		// ConfidentThreshold), we still fall through to LLM for confirmation.
@@ -157,8 +173,8 @@ func (r *HybridRouter) Route(ctx context.Context, prompt string, pipelines []pip
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		// LLM errors are non-fatal — return safe no-match.
-		return &RouteResult{Method: "none"}, nil
+		// LLM errors are non-fatal — return safe no-match with any near-miss we found.
+		return &RouteResult{Method: "none", NearMiss: embedNearMiss, NearMissScore: embedNearMissScore}, nil
 	}
 	matched := ""
 	if result != nil && result.Pipeline != nil {
@@ -174,5 +190,10 @@ func (r *HybridRouter) Route(ctx context.Context, prompt string, pipelines []pip
 		attribute.Float64("router.confidence", confidence),
 	)
 	span.SetStatus(codes.Ok, "")
+	// If LLM found no match but we have an embedding near-miss, attach it.
+	if result != nil && result.Pipeline == nil && embedNearMiss != nil {
+		result.NearMiss = embedNearMiss
+		result.NearMissScore = embedNearMissScore
+	}
 	return result, nil
 }

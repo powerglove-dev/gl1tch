@@ -1011,7 +1011,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		newPanel, cmd := m.glitchChat.update(msg)
 		m.glitchChat = newPanel
 		return m, cmd
-	case glitchStreamMsg, glitchDoneMsg, glitchErrMsg, glitchIntentMsg:
+	case glitchStreamMsg, glitchDoneMsg, glitchErrMsg, glitchIntentMsg, glitchDiscoveryChangedMsg:
 		newPanel, cmd := m.glitchChat.update(msg)
 		m.glitchChat = newPanel
 		return m, cmd
@@ -1456,6 +1456,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if name == "" {
 			return m, nil
 		}
+
+		// Workflow dispatch: run `glitch workflow run <name>` as a tracked job.
+		if msg.kind == "workflow" {
+			feedID := fmt.Sprintf("wf-%d", time.Now().UnixNano())
+			glitchBin := glitchBinaryPath()
+			shellCmd := glitchBin + " workflow run " + name
+			if msg.input != "" {
+				shellCmd += " --input " + shellescape(msg.input)
+			}
+			windowName, logFile, doneFile := createJobWindow(feedID, shellCmd, name, m.launchCWD)
+			ch := make(chan tea.Msg, 256)
+			_, cancel := context.WithCancel(context.Background())
+			jh := &jobHandle{
+				id: feedID, cancel: cancel, ch: ch,
+				tmuxWindow: windowName, logFile: logFile, pipelineName: name,
+			}
+			m.activeJobs[feedID] = jh
+			startLogWatcher(feedID, logFile, doneFile, ch)
+			return m, drainChan(ch)
+		}
+
 		// Find the matching pipeline (case-insensitive, then exact).
 		match := name
 		for _, p := range m.launcher.pipelines {
@@ -1478,8 +1499,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case glitchQuitMsg:
-		m.confirmQuit = true
-		return m, nil
+		return m, tea.Quit
 
 	case glitchWidgetOutputMsg:
 		newPanel, cmd := m.glitchChat.update(msg)
@@ -1581,6 +1601,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 			if jh.actAgent != "" {
 				doneCmd = tea.Batch(doneCmd, appendActivityCmd(jh.actAgent, jh.actLabel, "agent_run_finished", "done"))
+			}
+		}
+		// For workflow jobs that failed, surface the error to the chat panel
+		// so it appears in the conversation thread, not just the signal board feed.
+		if strings.HasPrefix(msg.id, "wf-") && finalStatus == FeedFailed {
+			if jh, ok := m.activeJobs[msg.id]; ok {
+				var lines []string
+				for _, e := range m.feed {
+					if e.id == msg.id {
+						lines = e.lines
+						break
+					}
+				}
+				tail := ""
+				if len(lines) > 0 {
+					start := len(lines) - 10
+					if start < 0 {
+						start = 0
+					}
+					tail = "\n" + strings.Join(lines[start:], "\n")
+				}
+				errText := fmt.Sprintf("workflow '%s' failed%s", jh.pipelineName, tail)
+				newPanel, glitchCmd := m.glitchChat.update(glitchNarrationMsg{text: errText})
+				m.glitchChat = newPanel
+				doneCmd = tea.Batch(doneCmd, glitchCmd)
 			}
 		}
 		delete(m.activeJobs, msg.id)

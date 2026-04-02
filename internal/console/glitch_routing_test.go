@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/8op-org/gl1tch/internal/pipeline"
 	"github.com/8op-org/gl1tch/internal/router"
 )
@@ -154,13 +156,30 @@ func TestGlitchPanel_InitCmd_AlwaysReturnsCmd(t *testing.T) {
 	if cmd2 == nil {
 		t.Error("initCmd should return a ready-message cmd on non-first run")
 	}
-	// Verify it dispatches a narration message.
+	// Verify it dispatches a narration message (or a batch that contains one).
 	msg := cmd2()
-	narration, ok := msg.(glitchNarrationMsg)
-	if !ok {
-		t.Fatalf("expected glitchNarrationMsg from non-first-run initCmd, got %T", msg)
-	}
-	if narration.text == "" {
-		t.Error("expected non-empty narration text")
+	switch m := msg.(type) {
+	case glitchNarrationMsg:
+		if m.text == "" {
+			t.Error("expected non-empty narration text")
+		}
+	case tea.BatchMsg:
+		// initCmd now returns a tea.Batch([narration, watcher]) — execute each
+		// sub-command and look for a narration among the results.
+		found := false
+		for _, sub := range m {
+			if sub == nil {
+				continue
+			}
+			if nm, ok := sub().(glitchNarrationMsg); ok && nm.text != "" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("expected glitchNarrationMsg within BatchMsg from non-first-run initCmd")
+		}
+	default:
+		t.Fatalf("expected glitchNarrationMsg or BatchMsg from non-first-run initCmd, got %T", msg)
 	}
 }

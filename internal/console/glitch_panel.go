@@ -20,10 +20,12 @@ import (
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/fsnotify/fsnotify"
 
 	"github.com/8op-org/gl1tch/internal/cron"
 	"github.com/8op-org/gl1tch/internal/executor"
 	"github.com/8op-org/gl1tch/internal/modal"
+	"github.com/8op-org/gl1tch/internal/orchestrator"
 	"github.com/8op-org/gl1tch/internal/npcname"
 	"github.com/8op-org/gl1tch/internal/panelrender"
 	"github.com/8op-org/gl1tch/internal/picker"
@@ -59,11 +61,13 @@ type glitchRunEventMsg struct {
 	failed bool
 }
 
-// glitchRerunMsg is returned to the deck to trigger a pipeline rerun.
-// input, if non-empty, is forwarded as --input to the pipeline.
+// glitchRerunMsg is returned to the deck to trigger a pipeline or workflow run.
+// input, if non-empty, is forwarded as --input to the target.
+// kind is "pipeline" (default) or "workflow".
 type glitchRerunMsg struct {
 	name  string
 	input string
+	kind  string // "pipeline" | "workflow"
 }
 
 // glitchIntentMsg carries the result of an async intent-routing check.
@@ -76,7 +80,7 @@ type glitchIntentMsg struct {
 // glitchCWDMsg is returned to the deck to update the working directory.
 type glitchCWDMsg struct{ path string }
 
-// glitchQuitMsg is returned to the deck to trigger the quit confirmation modal.
+// glitchQuitMsg is returned to the deck to quit immediately.
 type glitchQuitMsg struct{}
 
 // glitchWidgetModeMsg is returned to the deck to toggle widget mode
@@ -99,6 +103,10 @@ type glitchOpenThemesMsg struct{}
 // currently selected feed entry.
 type glitchTraceMsg struct{}
 
+// glitchDiscoveryChangedMsg fires when the pipelines directory changes so the
+// router can pick up new or removed pipeline/workflow files on the next query.
+type glitchDiscoveryChangedMsg struct{}
+
 // ClarificationInjectMsg is dispatched by pipeline_bus when a ClarificationRequested
 // busd event arrives. The root model forwards it to the glitch panel via update().
 type ClarificationInjectMsg struct{ Req store.ClarificationRequest }
@@ -118,6 +126,13 @@ func clarificationUrgencyTick() tea.Cmd {
 type pendingClarification struct {
 	req    store.ClarificationRequest
 	urgent bool
+}
+
+// pendingCronEntry holds a scheduling request awaiting user confirmation.
+type pendingCronEntry struct {
+	name     string
+	cronExpr string
+	input    string
 }
 
 // slashSuggestion is a single autocomplete entry for a slash command.
@@ -198,8 +213,47 @@ type clarificationMeta struct {
 
 // glitchTurn is a conversation turn for multi-turn history.
 type glitchTurn struct {
-	role string // "user" | "assistant"
-	text string
+	role      string // "user" | "assistant"
+	text      string
+	transient bool // if true, evicted from context after 2 subsequent user turns
+}
+
+// trimTurns returns a copy of turns with transient entries evicted when they
+// are more than 2 user turns old, and the total token budget capped at ~6000
+// estimated tokens (len/4). This prevents context-window overflow during long
+// sessions with injected pipeline output.
+func trimTurns(turns []glitchTurn) []glitchTurn {
+	const maxTokenBudget = 6000
+	const transientTTL = 2 // user turns after which transient entries are dropped
+
+	// Count user turns from the tail to determine transient TTL.
+	usersSinceTail := 0
+	out := make([]glitchTurn, 0, len(turns))
+	for i := len(turns) - 1; i >= 0; i-- {
+		t := turns[i]
+		if t.role == "user" {
+			usersSinceTail++
+		}
+		if t.transient && usersSinceTail > transientTTL {
+			continue // drop stale pipeline output
+		}
+		out = append(out, t)
+	}
+	// Reverse back to chronological order.
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+
+	// Apply token budget: trim oldest turns until within budget.
+	total := 0
+	for _, t := range out {
+		total += len(t.text) / 4
+	}
+	for total > maxTokenBudget && len(out) > 1 {
+		total -= len(out[0].text) / 4
+		out = out[1:]
+	}
+	return out
 }
 
 // ── Streaming token relay ─────────────────────────────────────────────────────
@@ -211,6 +265,40 @@ func glitchNextToken(ch <-chan string) tea.Cmd {
 			return glitchDoneMsg{}
 		}
 		return glitchStreamMsg{token: tok, ch: ch}
+	}
+}
+
+// hasTemporalIntent returns true when the prompt contains scheduling language
+// but the router could not extract a cron expression. Used to ask a clarifying
+// question rather than running the pipeline immediately.
+func hasTemporalIntent(prompt string) bool {
+	lower := strings.ToLower(prompt)
+	for _, word := range []string{"every", "nightly", "daily", "weekly", "monthly", "hourly", "each", "schedule", "recurring", "repeat", "automatically"} {
+		if strings.Contains(lower, word) {
+			return true
+		}
+	}
+	return false
+}
+
+// watchPipelinesDir returns a tea.Cmd that blocks until the pipelines directory
+// changes (create/write/remove), then returns glitchDiscoveryChangedMsg.
+// Errors are silently ignored — the router will simply use the cached refs.
+func watchPipelinesDir(dir string) tea.Cmd {
+	return func() tea.Msg {
+		w, err := fsnotify.NewWatcher()
+		if err != nil {
+			return glitchDiscoveryChangedMsg{}
+		}
+		defer w.Close()
+		if err := w.Add(dir); err != nil {
+			return glitchDiscoveryChangedMsg{}
+		}
+		select {
+		case <-w.Events:
+		case <-w.Errors:
+		}
+		return glitchDiscoveryChangedMsg{}
 	}
 }
 
@@ -810,6 +898,10 @@ type glitchChatPanel struct {
 	// Intent routing — async pipeline dispatch before falling back to LLM chat.
 	routing bool // true while the router goroutine is running
 
+	// pendingCron holds a scheduling request awaiting user confirmation.
+	// Non-nil when gl1tch has asked "schedule X at Y? (yes/no)" and is waiting.
+	pendingCron *pendingCronEntry
+
 	// scheduledJobs is the count of entries in cron.yaml, injected from Model.
 	scheduledJobs int
 	// userScore is the player's cached game score, injected from Model.
@@ -954,9 +1046,11 @@ func (p glitchChatPanel) initCmd() tea.Cmd {
 			return glitchNarrationMsg{text: "welcome. no provider configured — run /models to pick one."}
 		}
 	}
-	return func() tea.Msg {
-		return glitchNarrationMsg{text: "ready. type /help to see commands."}
-	}
+	pipelinesPath := filepath.Join(p.cfgDir, "pipelines")
+	return tea.Batch(
+		func() tea.Msg { return glitchNarrationMsg{text: "ready. type /help to see commands."} },
+		watchPipelinesDir(pipelinesPath),
+	)
 }
 
 // IsActive returns true when the panel is mid-stream or routing an intent.
@@ -1075,6 +1169,11 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 		})
 		return p, nil
 
+	case glitchDiscoveryChangedMsg:
+		// Re-arm the watcher so future changes are picked up.
+		// The router re-discovers on every query so no explicit refresh is needed here.
+		return p, watchPipelinesDir(filepath.Join(p.cfgDir, "pipelines"))
+
 	case glitchRunEventMsg:
 		return p.handleRunEvent(msg)
 
@@ -1083,12 +1182,51 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 		if msg.result != nil && msg.result.Pipeline != nil {
 			name := msg.result.Pipeline.Name
 			input := msg.result.Input
+
+			// Temporal intent without a parseable cron expression: ask for clarification
+			// rather than silently running immediately ("run backup nightly" should
+			// schedule, not execute now).
+			if msg.result.CronExpr == "" && hasTemporalIntent(msg.prompt) {
+				p.messages = append(p.messages, glitchEntry{
+					who:  glitchSpeakerBot,
+					text: fmt.Sprintf("sounds like you want to schedule '%s'. when should it run? (e.g. 'every day at 9am', 'every weekday at midnight')", name),
+				})
+				return p, nil
+			}
+
+			// Cron scheduling: ask for confirmation before writing to cron.yaml
+			// to prevent accidental scheduling from hypothetical questions.
+			if msg.result.CronExpr != "" {
+				p.pendingCron = &pendingCronEntry{
+					name:     name,
+					cronExpr: msg.result.CronExpr,
+					input:    input,
+				}
+				p.messages = append(p.messages, glitchEntry{
+					who:  glitchSpeakerBot,
+					text: fmt.Sprintf("schedule '%s' to run at %s? (yes / no)", name, msg.result.CronExpr),
+				})
+				return p, nil
+			}
+
+			// Workflow vs pipeline dispatch.
+			kind := "pipeline"
+			label := "pipeline"
+			if strings.HasPrefix(name, "workflow:") {
+				kind = "workflow"
+				label = "workflow"
+				name = strings.TrimPrefix(name, "workflow:")
+			}
+			announcement := fmt.Sprintf("→ running %s: %s", label, name)
+			if input != "" {
+				announcement += "  ·  input: " + input
+			}
 			p.messages = append(p.messages, glitchEntry{
 				who:  glitchSpeakerBot,
-				text: fmt.Sprintf("→ running pipeline: %s", name),
+				text: announcement,
 			})
 			return p, func() tea.Msg {
-				return glitchRerunMsg{name: name, input: input}
+				return glitchRerunMsg{name: name, input: input, kind: kind}
 			}
 		}
 		// No pipeline match — fall through to LLM chat stream.
@@ -1103,10 +1241,15 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 		backend := p.backend
 		ctx := p.ctx
 		st := p.store
-		turns := msg.turns
+		turns := trimTurns(msg.turns)
 		prompt := msg.prompt
+		// Build a near-miss hint for the LLM so it can suggest the right pipeline name.
+		var nearMissHint string
+		if msg.result != nil && msg.result.NearMiss != nil {
+			nearMissHint = fmt.Sprintf("The user may be asking about the pipeline '%s' (match confidence %.0f%%). If so, suggest they say 'run %s' to trigger it directly.", msg.result.NearMiss.Name, msg.result.NearMissScore*100, msg.result.NearMiss.Name)
+		}
 		return p, tea.Batch(glitchTick(), func() tea.Msg {
-			ch, err := backend.stream(ctx, turns, prompt, glitchLoadBrainContext(st), "")
+			ch, err := backend.stream(ctx, turns, prompt, glitchLoadBrainContext(st), nearMissHint)
 			if err != nil {
 				return glitchErrMsg{err: err}
 			}
@@ -1249,6 +1392,38 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 			p.input.SetValue("")
 			p.scrollOffset = 0 // jump to latest on send
 
+			// Pending cron confirmation: intercept yes/no before normal routing.
+			if p.pendingCron != nil {
+				p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
+				reply := strings.ToLower(strings.TrimSpace(userText))
+				if reply == "yes" || reply == "y" || reply == "confirm" || reply == "ok" {
+					pc := p.pendingCron
+					p.pendingCron = nil
+					entries, _ := cron.LoadConfig()
+					e := cron.Entry{
+						Name:     pc.name,
+						Schedule: pc.cronExpr,
+						Kind:     "pipeline",
+						Target:   pc.name,
+						Input:    pc.input,
+					}
+					entries = cron.UpsertEntry(entries, e)
+					home, _ := os.UserHomeDir()
+					cronSavePath := filepath.Join(home, ".config", "glitch", "cron.yaml")
+					if err := cron.SaveConfigTo(cronSavePath, entries); err == nil {
+						p.scheduledJobs = len(entries)
+					}
+					p.messages = append(p.messages, glitchEntry{
+						who:  glitchSpeakerBot,
+						text: fmt.Sprintf("→ scheduled %s — %s", pc.name, pc.cronExpr),
+					})
+				} else {
+					p.pendingCron = nil
+					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "ok, not scheduled."})
+				}
+				return p, nil
+			}
+
 			// Clarification answer routing — intercept when a pipeline is waiting
 			// for input, unless the message looks like a question for gl1tch itself.
 			if len(p.pendingClarifications) > 0 && !strings.HasSuffix(userText, "?") {
@@ -1340,9 +1515,44 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 						p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: strings.Join(lines, "\n")})
 						return p, nil
 					}
+					if sub == "cancel" || sub == "rm" || sub == "remove" {
+						cronArgs2 := strings.Fields(userText)
+						if len(cronArgs2) < 3 {
+							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "usage: /cron cancel <name>"})
+							return p, nil
+						}
+						target := strings.Join(cronArgs2[2:], " ")
+						cancelEntries, err := cron.LoadConfig()
+						if err != nil {
+							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "cron: could not read cron.yaml: " + err.Error()})
+							return p, nil
+						}
+						var kept []cron.Entry
+						removed := false
+						for _, e := range cancelEntries {
+							if strings.EqualFold(e.Name, target) || strings.EqualFold(e.Target, target) {
+								removed = true
+								continue
+							}
+							kept = append(kept, e)
+						}
+						if !removed {
+							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "no scheduled job named '" + target + "'. run /cron list to see what's scheduled."})
+							return p, nil
+						}
+						home, _ := os.UserHomeDir()
+						cronSavePath := filepath.Join(home, ".config", "glitch", "cron.yaml")
+						if err := cron.SaveConfigTo(cronSavePath, kept); err != nil {
+							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "cron: failed to save: " + err.Error()})
+							return p, nil
+						}
+						p.scheduledJobs = len(kept)
+						p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "cancelled: " + target})
+						return p, nil
+					}
 					p.messages = append(p.messages, glitchEntry{
 						who:  glitchSpeakerBot,
-						text: "cron commands:\n  /cron list          — show scheduled jobs\n\ntell me what you want to run and when to create or modify a schedule.",
+						text: "cron commands:\n  /cron list             — show scheduled jobs\n  /cron cancel <name>    — remove a scheduled job\n\ntell me what you want to run and when to create or modify a schedule.",
 					})
 					return p, nil
 				case "/brain":
@@ -1612,7 +1822,7 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
 					p.messages = append(p.messages, glitchEntry{
 						who: glitchSpeakerBot,
-						text: "slash commands:\n\n  getting started\n  /init             — first-run wizard\n  /models           — pick a provider and model\n  /cwd [path]       — set working directory\n\n  build things\n  /prompt [name]    — load or build a system prompt with AI\n  /pipeline [name]  — run a pipeline, or build one from scratch\n  /brain [query]    — search notes, or start an interactive brain session\n\n  run things\n  /rerun [name]     — rerun a pipeline by name\n  /terminal [cmd]   — open a 25% right split; run cmd or get guidance\n  /mud              — jack into The Gibson — takes over chat as MUD terminal\n  /cron             — get help scheduling recurring jobs\n  /trace            — show OTel trace for the selected feed entry\n\n  workspace\n  /model [name]     — switch provider/model inline\n  /themes           — open theme picker\n  /clear            — clear chat history\n  /quit             — exit glitch\n  /help             — this list\n\nscroll: j/k or [/] when scroll-focused (tab to switch)",
+						text: "slash commands:\n\n  getting started\n  /init             — first-run wizard\n  /models           — pick a provider and model\n\n  build things\n  /prompt [name]    — load or build a system prompt with AI\n  /pipeline [name]  — run a pipeline, or build one from scratch\n  /brain [query]    — search notes, or start an interactive brain session\n\n  run things\n  /rerun [name]     — rerun a pipeline by name\n  /terminal [cmd]   — open a 25% right split; run cmd or get guidance\n  /cron             — get help scheduling recurring jobs\n  /trace            — show OTel trace for the selected feed entry\n\n  modes\n  /mud              — jack into The Gibson — takes over chat as MUD terminal\n\n  workspace\n  /cwd [path]       — set working directory\n  /model [name]     — switch provider/model inline\n  /themes           — open theme picker\n  /clear            — clear chat history\n  /quit             — exit glitch\n  /help             — this list\n\nscroll: j/k or [/] when scroll-focused (tab to switch)",
 					})
 					return p, nil
 				case "/trace":
@@ -1661,12 +1871,14 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 			p.routing = true
 			p.streamBuf = ""
 			p.streamIsRunAnalysis = false
-			turns := p.turns[:len(p.turns)-1]
+			turns := trimTurns(p.turns[:len(p.turns)-1])
 			userTextCopy := userText
 			cfgDir := p.cfgDir
 			return p, tea.Batch(glitchTick(), func() tea.Msg {
 				r := buildPanelRouter(cfgDir)
 				refs, _ := pipeline.DiscoverPipelines(filepath.Join(cfgDir, "pipelines"))
+				wfRefs, _ := orchestrator.DiscoverWorkflows(filepath.Join(cfgDir, "pipelines"))
+				refs = append(refs, wfRefs...)
 				if len(refs) > 0 {
 					rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 					defer cancel()
@@ -1744,7 +1956,88 @@ func (p glitchChatPanel) handleRunEvent(msg glitchRunEventMsg) (glitchChatPanel,
 		text: fmt.Sprintf("pipeline '%s' %s%s", run.Name, status, dur),
 	})
 
+	// Inject output into conversation turns so the LLM has context for follow-up questions.
+	// Include exit code, stdout, and stderr so failures are fully explainable.
+	stdout := strings.TrimSpace(run.Stdout)
+	stderr := strings.TrimSpace(run.Stderr)
+	if stdout != "" || stderr != "" {
+		const maxSection = 1500
+		trimSection := func(s string) string {
+			r := []rune(s)
+			if len(r) > maxSection {
+				return "..." + string(r[len(r)-maxSection:])
+			}
+			return s
+		}
+		var sb strings.Builder
+		if run.ExitStatus != nil {
+			sb.WriteString(fmt.Sprintf("[exit %d]\n", *run.ExitStatus))
+		}
+		if stdout != "" {
+			sb.WriteString(trimSection(stdout))
+		}
+		if stderr != "" {
+			if stdout != "" {
+				sb.WriteString("\n--- stderr ---\n")
+			}
+			sb.WriteString(trimSection(stderr))
+		}
+		p.turns = append(p.turns, glitchTurn{
+			role:      "assistant",
+			text:      fmt.Sprintf("[pipeline '%s' output]\n%s", run.Name, sb.String()),
+			transient: true,
+		})
+	}
+
+	// Write last_run.json so `glitch ask` can pick up context even outside the TUI.
+	writeLastRunJSON(run)
+
+	// Stream a contextual reply if a backend is available.
+	if p.backend != nil {
+		prompt := p.buildRunAnalysisPrompt(run, msg.failed)
+		backend := p.backend
+		ctx := p.ctx
+		p.streaming = true
+		p.streamBuf = ""
+		p.streamIsRunAnalysis = true
+		return p, tea.Batch(glitchTick(), func() tea.Msg {
+			ch, err := backend.stream(ctx, nil, prompt, "", "")
+			if err != nil {
+				return glitchErrMsg{err: err}
+			}
+			return glitchStreamMsg{token: <-ch, ch: ch}
+		})
+	}
+
 	return p, nil
+}
+
+// writeLastRunJSON persists a compact summary of the run to
+// ~/.config/glitch/last_run.json so `glitch ask` can inject context for
+// postmortem questions ("why did the last run fail?").
+func writeLastRunJSON(run store.Run) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	type lastRunJSON struct {
+		Name       string `json:"name"`
+		ExitStatus *int   `json:"exit_status"`
+		Stdout     string `json:"stdout"`
+		Stderr     string `json:"stderr"`
+	}
+	lr := lastRunJSON{
+		Name:       run.Name,
+		ExitStatus: run.ExitStatus,
+		Stdout:     run.Stdout,
+		Stderr:     run.Stderr,
+	}
+	data, err := json.Marshal(lr)
+	if err != nil {
+		return
+	}
+	path := filepath.Join(home, ".config", "glitch", "last_run.json")
+	os.WriteFile(path, data, 0o644) //nolint:errcheck
 }
 
 // buildRunAnalysisPrompt constructs the analysis prompt for a completed run.
@@ -2055,6 +2348,15 @@ func (p glitchChatPanel) build(height, width int, pal styles.ANSIPalette) []stri
 		sugRowCount = len(p.acSuggestions)
 		if sugRowCount > 5 {
 			sugRowCount = 5
+		}
+		// Never let autocomplete rows push the send panel off-screen.
+		// Reserve 9 rows for the send panel + at least 1 row for messages.
+		if maxSug := height - 10; sugRowCount > maxSug {
+			if maxSug < 0 {
+				sugRowCount = 0
+			} else {
+				sugRowCount = maxSug
+			}
 		}
 	}
 	fixedRows := 9 + sugRowCount

@@ -138,6 +138,13 @@ var askCmd = &cobra.Command{
 		}
 
 		// ── one-shot fallback ─────────────────────────────────────────────────────
+		// Inject last_run.json context when the question is about a recent pipeline run.
+		if lastRunCtx := loadLastRunContext(prompt); lastRunCtx != "" {
+			if inputVars == nil {
+				inputVars = make(map[string]string)
+			}
+			inputVars["_last_run_context"] = lastRunCtx
+		}
 		return runOneShot(cmd, prompt, providerID, resolvedModel, mgr, inputVars)
 	},
 }
@@ -581,6 +588,60 @@ func parseInputVars(raw []string) (map[string]string, error) {
 		out[k] = v
 	}
 	return out, nil
+}
+
+// loadLastRunContext reads ~/.config/glitch/last_run.json and returns a
+// formatted context string when the prompt appears to be asking about a recent
+// pipeline run. Returns "" when the file is absent or the prompt is unrelated.
+func loadLastRunContext(prompt string) string {
+	lower := strings.ToLower(prompt)
+	triggers := []string{"last run", "last pipeline", "why did it fail", "what happened", "that pipeline", "previous run", "failed run"}
+	matched := false
+	for _, t := range triggers {
+		if strings.Contains(lower, t) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".config", "glitch", "last_run.json"))
+	if err != nil {
+		return ""
+	}
+	var lr struct {
+		Name       string `json:"name"`
+		ExitStatus *int   `json:"exit_status"`
+		Stdout     string `json:"stdout"`
+		Stderr     string `json:"stderr"`
+	}
+	if err := json.Unmarshal(data, &lr); err != nil {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("[last pipeline run: %s]", lr.Name))
+	if lr.ExitStatus != nil {
+		sb.WriteString(fmt.Sprintf(" exit=%d", *lr.ExitStatus))
+	}
+	trim := func(s string, max int) string {
+		r := []rune(strings.TrimSpace(s))
+		if len(r) > max {
+			return "..." + string(r[len(r)-max:])
+		}
+		return string(r)
+	}
+	if out := trim(lr.Stdout, 1500); out != "" {
+		sb.WriteString("\nstdout:\n" + out)
+	}
+	if err := trim(lr.Stderr, 1000); err != "" {
+		sb.WriteString("\nstderr:\n" + err)
+	}
+	return sb.String()
 }
 
 func printJSON(response, providerID, model, brainEntryID string) error {
