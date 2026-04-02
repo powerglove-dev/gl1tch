@@ -13,13 +13,18 @@ type Pipeline struct {
 	Name        string         `yaml:"name"`
 	Version     string         `yaml:"version"`
 	Description string         `yaml:"description"` // Human-readable summary; used by the intent router.
-	Steps       []Step         `yaml:"steps"`
-	Vars        map[string]any `yaml:"vars"` // Pipeline-level seed context available to all steps.
-	MaxParallel int            `yaml:"max_parallel"` // Maximum concurrent steps; defaults to 8 when zero.
-	WriteBrain  bool           `yaml:"write_brain"`
+	// TriggerPhrases lists example imperative phrasings a user would type to invoke this
+	// pipeline ("run git pulse", "review my PR", etc.). When present, the intent router
+	// embeds these phrases instead of the description so matching is driven by invocation
+	// patterns rather than behavioral prose. This prevents topic-overlap misfires.
+	TriggerPhrases []string       `yaml:"trigger_phrases"`
+	Steps          []Step         `yaml:"steps"`
+	Vars           map[string]any `yaml:"vars"` // Pipeline-level seed context available to all steps.
+	MaxParallel    int            `yaml:"max_parallel"` // Maximum concurrent steps; defaults to 8 when zero.
+	WriteBrain     bool           `yaml:"write_brain"`
 	// Game controls game scoring for this pipeline.
 	// Pointer for tri-state: nil=enabled, false=disabled.
-	Game        *bool          `yaml:"game"`
+	Game *bool `yaml:"game"`
 }
 
 // Step is one unit of work in a pipeline.

@@ -173,6 +173,27 @@ func TestBuildPrompt_HasFewShotExamples(t *testing.T) {
 	}
 }
 
+func TestBuildPrompt_ContainsIntentGate(t *testing.T) {
+	prompt := buildPrompt("test request", nil)
+	// Step 1 intent gate must be present.
+	if !strings.Contains(prompt, "Step 1") {
+		t.Error("prompt missing Step 1 intent gate")
+	}
+	if !strings.Contains(prompt, "Step 2") {
+		t.Error("prompt missing Step 2 pipeline selection")
+	}
+}
+
+func TestBuildPrompt_ContainsQuestionExamples(t *testing.T) {
+	prompt := buildPrompt("test request", nil)
+	// At least 3 non-command (question/observation) examples must appear.
+	// Each example has confidence:0.05 to signal forced NONE.
+	count := strings.Count(prompt, `"confidence":0.05`)
+	if count < 3 {
+		t.Errorf("expected at least 3 non-command NONE examples (confidence:0.05), found %d", count)
+	}
+}
+
 // ── LLMClassifier ─────────────────────────────────────────────────────────────
 
 func makeLLMClassifier(t *testing.T, responseJSON string) (*LLMClassifier, *executor.Manager) {

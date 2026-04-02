@@ -68,6 +68,8 @@ var tokenParsers = map[string]TokenParser{
 	"providers.codex":   parseCodexTokens,
 	"providers.copilot": parseCopilotTokens,
 	"providers.gemini":  parseGeminiTokens,
+	"ollama":            parseOllamaTokens,
+	"ollama-complete":   parseOllamaTokens,
 }
 
 // ── Claude ───────────────────────────────────────────────────────────────────
@@ -204,6 +206,39 @@ func parseGeminiTokens(data []byte) TokenUsage {
 			usage.CacheReadTokens = record.CachedContentTokenCount
 			return usage
 		}
+	}
+	return usage
+}
+
+// ── Ollama ───────────────────────────────────────────────────────────────────
+
+// parseOllamaTokens scans output for the "gl1tch-stats" JSON line emitted by
+// the gl1tch-ollama plugin after the response text.  Fields map directly from
+// the Ollama /api/generate response: prompt_eval_count → InputTokens,
+// eval_count → OutputTokens, total_duration (ns) → DurationMS.
+func parseOllamaTokens(data []byte) TokenUsage {
+	var usage TokenUsage
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		var record struct {
+			Type         string `json:"type"`
+			Model        string `json:"model"`
+			InputTokens  int64  `json:"input_tokens"`
+			OutputTokens int64  `json:"output_tokens"`
+			DurationMS   int64  `json:"duration_ms"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+			continue
+		}
+		if record.Type != "gl1tch-stats" {
+			continue
+		}
+		usage.Provider = "ollama"
+		usage.Model = record.Model
+		usage.InputTokens = record.InputTokens
+		usage.OutputTokens = record.OutputTokens
+		usage.DurationMS = record.DurationMS
+		return usage
 	}
 	return usage
 }

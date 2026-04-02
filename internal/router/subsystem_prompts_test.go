@@ -32,28 +32,12 @@ var subsystemPipelines = []pipeline.PipelineRef{
 	},
 }
 
-// subsystemDescVecs gives each pipeline a distinct axis so the query vector
-// {0,0,0,1} is orthogonal to all of them — forcing every case through the LLM stub.
-var subsystemDescVecs = map[string][]float32{
-	"Analyze and summarize support emails into a digest doc":      {1, 0, 0, 0},
-	"Generate a multistep pipeline using claude haiku with clarifying prompts": {0, 1, 0, 0},
-	"Fetch and display support email content for glab testing":                 {0, 0, 1, 0},
-}
-
-func subsystemEmbedder() *funcEmbedder {
-	return &funcEmbedder{fn: func(text string) []float32 {
-		if v, ok := subsystemDescVecs[text]; ok {
-			return v
-		}
-		return []float32{0, 0, 0, 1} // orthogonal to all descriptions → cosine=0 → LLM path
-	}}
-}
-
 func TestRouter_SubsystemPrompts(t *testing.T) {
 	cfg := Config{
 		ConfidentThreshold: 0.85,
 		AmbiguousThreshold: 0.65,
 		Model:              "test-model",
+		DisableEmbeddings:  true, // exercise LLM stage directly; embedding is covered elsewhere
 	}
 
 	cases := []struct {
@@ -377,13 +361,85 @@ func TestRouter_SubsystemPrompts(t *testing.T) {
 			wantPipeline: "",
 			wantMethod:   "llm",
 		},
+
+		// ── Questions and observations ── must never route ────────────────────────
+		{
+			// The original misfire that drove this redesign
+			source:       "regression",
+			prompt:       "looks like there are merge conflicts?",
+			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
+			wantPipeline: "",
+			wantMethod:   "llm",
+		},
+		{
+			source:       "regression",
+			prompt:       "why did support-digest fail?",
+			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
+			wantPipeline: "",
+			wantMethod:   "llm",
+		},
+		{
+			source:       "regression",
+			prompt:       "is the digest pipeline working?",
+			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
+			wantPipeline: "",
+			wantMethod:   "llm",
+		},
+		{
+			source:       "regression",
+			prompt:       "seems slow today",
+			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
+			wantPipeline: "",
+			wantMethod:   "llm",
+		},
+		{
+			source:       "regression",
+			prompt:       "it looks like the test-glab-after pipeline is stuck",
+			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
+			wantPipeline: "",
+			wantMethod:   "llm",
+		},
+		{
+			source:       "regression",
+			prompt:       "any idea why clarify-haiku isn't running?",
+			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
+			wantPipeline: "",
+			wantMethod:   "llm",
+		},
+		{
+			source:       "regression",
+			prompt:       "i think the support digest ran yesterday",
+			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
+			wantPipeline: "",
+			wantMethod:   "llm",
+		},
+		{
+			source:       "regression",
+			prompt:       "are there any pipelines that could do this?",
+			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
+			wantPipeline: "",
+			wantMethod:   "llm",
+		},
+		{
+			source:       "regression",
+			prompt:       "what would happen if I ran the digest now?",
+			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
+			wantPipeline: "",
+			wantMethod:   "llm",
+		},
+		{
+			source:       "regression",
+			prompt:       "i noticed the haiku pipeline didn't finish",
+			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
+			wantPipeline: "",
+			wantMethod:   "llm",
+		},
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.prompt, func(t *testing.T) {
 			mgr := makeMgr(t, tc.llmJSON)
-			r := New(mgr, subsystemEmbedder(), cfg)
+			r := New(mgr, &fixedEmbedder{vec: []float32{1, 0}}, cfg)
 
 			result, err := r.Route(context.Background(), tc.prompt, subsystemPipelines)
 			if err != nil {

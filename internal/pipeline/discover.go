@@ -11,17 +11,21 @@ import (
 
 // PipelineRef is a lightweight reference to a discovered pipeline file.
 type PipelineRef struct {
-	Name        string
-	Description string
-	Path        string
+	Name           string
+	Description    string
+	Path           string
+	// TriggerPhrases holds example imperative invocation phrases from the pipeline YAML.
+	// When non-empty, the intent router embeds these instead of the description.
+	TriggerPhrases []string
 }
 
 // pipelineMeta is the minimal struct used for partial YAML unmarshal during discovery.
 // Using a minimal struct (not pipeline.Load) keeps discovery fast and tolerant of
 // partially-authored or future-schema pipeline files.
 type pipelineMeta struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
+	Name           string   `yaml:"name"`
+	Description    string   `yaml:"description"`
+	TriggerPhrases []string `yaml:"trigger_phrases"`
 }
 
 // DiscoverPipelines scans dir for *.pipeline.yaml files and returns a PipelineRef
@@ -79,9 +83,10 @@ func loadPipelineRef(path string) (PipelineRef, bool) {
 	}
 
 	return PipelineRef{
-		Name:        meta.Name,
-		Description: desc,
-		Path:        path,
+		Name:           meta.Name,
+		Description:    desc,
+		Path:           path,
+		TriggerPhrases: meta.TriggerPhrases,
 	}, true
 }
 

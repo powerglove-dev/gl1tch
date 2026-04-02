@@ -237,6 +237,148 @@ func TestEmbeddingRouter_DiskCache(t *testing.T) {
 	}
 }
 
+// ── TriggerPhrases ────────────────────────────────────────────────────────────
+
+func TestEmbeddingRouter_TriggerPhrases_EmbeddedAsCentroid(t *testing.T) {
+	// Pipeline has two trigger phrases whose embeddings are axis-0 and axis-1 unit
+	// vectors. The centroid is {0.5, 0.5}, so a query of {0.707, 0.707} has cosine
+	// ≈ 1.0 against the centroid.
+	axis0 := []float32{1, 0}
+	axis1 := []float32{0, 1}
+
+	p := pipeline.PipelineRef{
+		Name:           "tp-pipeline",
+		Description:    "should not be embedded",
+		TriggerPhrases: []string{"phrase one", "phrase two"},
+	}
+
+	embedFn := func(text string) []float32 {
+		switch text {
+		case "phrase one":
+			return axis0
+		case "phrase two":
+			return axis1
+		default: // query — close to centroid direction
+			return []float32{0.707, 0.707}
+		}
+	}
+
+	emb := &funcEmbedder{fn: embedFn}
+	cfg := Config{AmbiguousThreshold: 0.5}
+	router := newEmbeddingRouter(emb, cfg)
+
+	result, err := router.Route(context.Background(), "query", []pipeline.PipelineRef{p})
+	if err != nil {
+		t.Fatalf("Route error: %v", err)
+	}
+	if result.Pipeline == nil {
+		t.Fatal("expected pipeline match via trigger phrase centroid, got nil")
+	}
+	if result.Pipeline.Name != "tp-pipeline" {
+		t.Errorf("expected tp-pipeline, got %q", result.Pipeline.Name)
+	}
+}
+
+func TestEmbeddingRouter_TriggerPhrases_CacheInvalidates(t *testing.T) {
+	// Changing trigger phrases must invalidate the cached embedding.
+	ce := &countingEmbedder{vec: []float32{1, 0}}
+	cfg := Config{AmbiguousThreshold: 0.5}
+	router := newEmbeddingRouter(ce, cfg)
+
+	p1 := pipeline.PipelineRef{
+		Name:           "tp-p",
+		Description:    "desc",
+		TriggerPhrases: []string{"invoke alpha"},
+	}
+	_, _ = router.Route(context.Background(), "q", []pipeline.PipelineRef{p1})
+	countAfterFirst := ce.count
+
+	// Same trigger phrases — cache hit, no re-embed.
+	_, _ = router.Route(context.Background(), "q", []pipeline.PipelineRef{p1})
+	if ce.count != countAfterFirst+1 { // only query re-embeds
+		t.Errorf("expected only query embed on cache hit, got %d extra calls", ce.count-countAfterFirst)
+	}
+
+	// Changed trigger phrase — must re-embed.
+	p2 := pipeline.PipelineRef{
+		Name:           "tp-p",
+		Description:    "desc",
+		TriggerPhrases: []string{"invoke beta"},
+	}
+	countBefore := ce.count
+	_, _ = router.Route(context.Background(), "q", []pipeline.PipelineRef{p2})
+	added := ce.count - countBefore
+	if added < 2 { // at least: 1 trigger phrase + 1 query
+		t.Errorf("expected re-embed after trigger phrase change, got only %d new embed calls", added)
+	}
+}
+
+func TestEmbeddingRouter_FindCandidates_BelowGate(t *testing.T) {
+	// cosine = 0 < gate (0.40) → FindCandidates returns empty slice.
+	embedFn := func(text string) []float32 {
+		if text == "alpha pipeline" {
+			return []float32{1, 0}
+		}
+		return []float32{0, 1} // orthogonal → cosine = 0
+	}
+	emb := &funcEmbedder{fn: embedFn}
+	cfg := Config{CandidateGateThreshold: 0.40}
+	router := newEmbeddingRouter(emb, cfg)
+
+	pipelines := []pipeline.PipelineRef{
+		{Name: "alpha", Description: "alpha pipeline"},
+	}
+	candidates, err := router.FindCandidates(context.Background(), "query", pipelines, 0.40)
+	if err != nil {
+		t.Fatalf("FindCandidates error: %v", err)
+	}
+	if len(candidates) != 0 {
+		t.Errorf("expected 0 candidates below gate, got %d", len(candidates))
+	}
+}
+
+func TestEmbeddingRouter_FindCandidates_MultipleAboveGate(t *testing.T) {
+	// Three pipelines; query vector is {1,0,0}.
+	// "high match" is identical → cosine=1.0.
+	// "partial match" is cos60 away → cosine=0.5 (above gate 0.40).
+	// "no match" is orthogonal → cosine=0 (below gate).
+	// Returned candidates must be sorted descending by score: high before partial.
+	embedFn := func(text string) []float32 {
+		switch text {
+		case "high match":
+			return []float32{1, 0, 0}
+		case "partial match":
+			return []float32{0.5, 0.866, 0} // cosine=0.5 with query {1,0,0}
+		case "no match":
+			return []float32{0, 0, 1} // orthogonal to query
+		default: // query
+			return []float32{1, 0, 0}
+		}
+	}
+	emb := &funcEmbedder{fn: embedFn}
+	cfg := Config{}
+	router := newEmbeddingRouter(emb, cfg)
+
+	pipelines := []pipeline.PipelineRef{
+		{Name: "high", Description: "high match"},
+		{Name: "partial", Description: "partial match"},
+		{Name: "none", Description: "no match"},
+	}
+	candidates, err := router.FindCandidates(context.Background(), "query", pipelines, 0.40)
+	if err != nil {
+		t.Fatalf("FindCandidates error: %v", err)
+	}
+	if len(candidates) != 2 {
+		t.Fatalf("expected 2 candidates above gate, got %d", len(candidates))
+	}
+	if candidates[0].Score < candidates[1].Score {
+		t.Error("candidates must be sorted descending by score")
+	}
+	if candidates[0].Ref.Name != "high" {
+		t.Errorf("expected top candidate 'high', got %q", candidates[0].Ref.Name)
+	}
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // fixedEmbedder always returns the same vector.

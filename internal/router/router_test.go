@@ -143,8 +143,9 @@ func TestHybridRouter_EmbeddingFastPath(t *testing.T) {
 	}
 }
 
-func TestHybridRouter_EmbeddingAmbiguous_FallsToLLM(t *testing.T) {
-	// Orthogonal vectors → cosine = 0 < 0.65 threshold → falls to LLM
+func TestHybridRouter_NoCandidates_SkipsLLM(t *testing.T) {
+	// Orthogonal vectors → cosine = 0 < CandidateGateThreshold (0.40) → negative
+	// filter fires immediately. LLM must NOT be called; result is method="none".
 	llmCalled := int64(0)
 	mgr := executor.NewManager()
 	if err := mgr.Register(&executor.StubExecutor{
@@ -162,12 +163,12 @@ func TestHybridRouter_EmbeddingAmbiguous_FallsToLLM(t *testing.T) {
 		{Name: "pipeline-a", Description: "alpha"},
 	}
 
-	// Description gets one vector, query gets orthogonal vector
+	// Description gets one vector, query gets orthogonal vector → cosine = 0 < gate
 	embedFn := func(text string) []float32 {
 		if text == "alpha" {
 			return []float32{1, 0}
 		}
-		return []float32{0, 1} // orthogonal → cosine = 0
+		return []float32{0, 1}
 	}
 	emb := &funcEmbedder{fn: embedFn}
 
@@ -182,11 +183,14 @@ func TestHybridRouter_EmbeddingAmbiguous_FallsToLLM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route error: %v", err)
 	}
-	if atomic.LoadInt64(&llmCalled) == 0 {
-		t.Error("expected LLM to be called on ambiguous embedding, but it was not")
+	if atomic.LoadInt64(&llmCalled) != 0 {
+		t.Error("LLM must not be called when no candidates clear the gate threshold")
 	}
-	if result.Method != "llm" {
-		t.Errorf("expected method 'llm', got %q", result.Method)
+	if result.Method != "none" {
+		t.Errorf("expected method 'none' from negative filter, got %q", result.Method)
+	}
+	if result.Pipeline != nil {
+		t.Errorf("expected nil pipeline from negative filter, got %q", result.Pipeline.Name)
 	}
 }
 
@@ -201,7 +205,7 @@ func TestHybridRouter_LLMMatch(t *testing.T) {
 		if text == "Push changes to remote" {
 			return []float32{1, 0}
 		}
-		return []float32{0, 1} // query orthogonal → cosine = 0
+		return []float32{0.6, 0.8} // cosine=0.6 > gate(0.40), < fast-path(0.85) → LLM
 	}
 
 	cfg := Config{
@@ -238,7 +242,7 @@ func TestHybridRouter_LLMReturnsNONE(t *testing.T) {
 		if text == "Push changes to remote" {
 			return []float32{1, 0}
 		}
-		return []float32{0, 1}
+		return []float32{0.6, 0.8} // above gate → passes to LLM which returns NONE
 	}
 
 	cfg := Config{
@@ -266,7 +270,7 @@ func TestHybridRouter_LLMError_ReturnsNone(t *testing.T) {
 		if text == "Push changes" {
 			return []float32{1, 0}
 		}
-		return []float32{0, 1}
+		return []float32{0.6, 0.8} // above gate → candidate passes to LLM which errors
 	}
 
 	cfg := Config{
@@ -329,7 +333,7 @@ func TestHybridRouter_ConfidenceThreshold(t *testing.T) {
 		if text == "Push changes" {
 			return []float32{1, 0}
 		}
-		return []float32{0, 1}
+		return []float32{0.6, 0.8} // above gate → passes to LLM (prompt ends with "?" → not fast path)
 	}
 
 	cfg := Config{
@@ -357,7 +361,7 @@ func TestHybridRouter_ExtractsInput(t *testing.T) {
 		if text == "Improve documentation" {
 			return []float32{1, 0}
 		}
-		return []float32{0, 1}
+		return []float32{0.6, 0.8} // above gate, below fast-path → LLM
 	}
 
 	cfg := Config{
@@ -385,7 +389,7 @@ func TestHybridRouter_ExtractsCron(t *testing.T) {
 		if text == "Improve documentation" {
 			return []float32{1, 0}
 		}
-		return []float32{0, 1}
+		return []float32{0.6, 0.8} // above gate, below fast-path → LLM
 	}
 
 	cfg := Config{
@@ -405,7 +409,7 @@ func TestHybridRouter_ExtractsCron(t *testing.T) {
 }
 
 func TestHybridRouter_DefaultThresholds(t *testing.T) {
-	// Zero Config → New() fills in DefaultConfidentThreshold and DefaultAmbiguousThreshold.
+	// Zero Config → New() fills in all three default thresholds.
 	mgr := makeMgr(t, `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`)
 	emb := &fixedEmbedder{vec: []float32{1, 0}}
 	r := New(mgr, emb, Config{Model: "test-model"})
@@ -414,6 +418,9 @@ func TestHybridRouter_DefaultThresholds(t *testing.T) {
 	}
 	if r.cfg.AmbiguousThreshold != DefaultAmbiguousThreshold {
 		t.Errorf("AmbiguousThreshold = %f, want %f", r.cfg.AmbiguousThreshold, DefaultAmbiguousThreshold)
+	}
+	if r.cfg.CandidateGateThreshold != DefaultCandidateGateThreshold {
+		t.Errorf("CandidateGateThreshold = %f, want %f", r.cfg.CandidateGateThreshold, DefaultCandidateGateThreshold)
 	}
 }
 
@@ -522,7 +529,7 @@ func TestHybridRouter_LLMHallucination(t *testing.T) {
 		if text == "Push changes" {
 			return []float32{1, 0}
 		}
-		return []float32{0, 1}
+		return []float32{0.6, 0.8} // above gate → passes to LLM which hallucinates
 	}
 
 	cfg := Config{
@@ -538,5 +545,50 @@ func TestHybridRouter_LLMHallucination(t *testing.T) {
 	}
 	if result.Pipeline != nil {
 		t.Errorf("expected nil pipeline for hallucinated name, got %q", result.Pipeline.Name)
+	}
+}
+
+func TestHybridRouter_HighConfQuestion_GoesToLLM(t *testing.T) {
+	// High cosine similarity (≥ ConfidentThreshold) but the prompt is a question.
+	// isImperativeInput must block the fast path, forcing the LLM stage.
+	llmCalled := int64(0)
+	mgr := executor.NewManager()
+	if err := mgr.Register(&executor.StubExecutor{
+		ExecutorName: "ollama",
+		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
+			atomic.AddInt64(&llmCalled, 1)
+			_, err := fmt.Fprint(w, `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`)
+			return err
+		},
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	pipelines := []pipeline.PipelineRef{
+		{Name: "pipeline-a", Description: "alpha unit"},
+	}
+
+	// Query vector identical to description → cosine = 1.0 ≥ ConfidentThreshold (0.85).
+	// But prompt ends with "?" → isImperativeInput = false → fast path blocked → LLM called.
+	embedFn := func(text string) []float32 {
+		return []float32{1, 0} // same for both description and query
+	}
+
+	cfg := Config{
+		ConfidentThreshold: 0.85,
+		AmbiguousThreshold: 0.65,
+		Model:              "test-model",
+	}
+	r := New(mgr, &funcEmbedder{fn: embedFn}, cfg)
+
+	result, err := r.Route(context.Background(), "why is pipeline-a failing?", pipelines)
+	if err != nil {
+		t.Fatalf("Route error: %v", err)
+	}
+	if atomic.LoadInt64(&llmCalled) == 0 {
+		t.Error("LLM must be called for high-conf questions — fast path requires isImperativeInput")
+	}
+	if result.Method != "llm" {
+		t.Errorf("expected method 'llm', got %q", result.Method)
 	}
 }

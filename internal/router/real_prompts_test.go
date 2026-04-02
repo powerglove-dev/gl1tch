@@ -152,33 +152,18 @@ func TestRouter_RealWorldPrompts_LLMPath(t *testing.T) {
 		},
 	}
 
-	// Description vectors are axis-aligned unit vectors; the query vector
-	// uses the 4th dimension so cosine(query, any_description) == 0.
-	// This guarantees every case falls through to the LLM stub.
-	descVecsLLM := map[string][]float32{
-		"Analyze and summarize support emails into a digest doc":      {1, 0, 0, 0},
-		"Generate a multistep pipeline using claude haiku with clarifying prompts": {0, 1, 0, 0},
-		"Fetch and display support email content for glab testing":                 {0, 0, 1, 0},
-	}
-
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.prompt, func(t *testing.T) {
 			resp := tc.llmJSON
 			mgr := makeMgr(t, resp)
 
-			embedFn := func(text string) []float32 {
-				if v, ok := descVecsLLM[text]; ok {
-					return v
-				}
-				return []float32{0, 0, 0, 1} // orthogonal to all descriptions → cosine=0
-			}
 			cfg := Config{
 				ConfidentThreshold: 0.85,
 				AmbiguousThreshold: 0.65,
 				Model:              "test-model",
+				DisableEmbeddings:  true, // exercise LLM stage directly
 			}
-			r := New(mgr, &funcEmbedder{fn: embedFn}, cfg)
+			r := New(mgr, &fixedEmbedder{vec: []float32{1, 0}}, cfg)
 
 			result, err := r.Route(context.Background(), tc.prompt, realPipelines)
 			if err != nil {

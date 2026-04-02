@@ -2786,8 +2786,10 @@ func (p glitchChatPanel) renderMessages(innerW int, pal styles.ANSIPalette) []st
 			}
 		}
 
-		// Streaming cursor on last GLITCH entry.
-		if p.streaming && i == len(p.messages)-1 && e.who == glitchSpeakerBot {
+		// Streaming cursor on last GLITCH entry — only once content is arriving
+		// so the cursor doesn't float below an older message while waiting for
+		// the first token.
+		if p.streaming && p.streamBuf != "" && i == len(p.messages)-1 && e.who == glitchSpeakerBot {
 			out = append(out, contPrefix+pal.Accent+"▋"+aRst)
 		}
 

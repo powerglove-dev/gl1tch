@@ -92,22 +92,36 @@ func (c *LLMClassifier) Classify(ctx context.Context, prompt string, pipelines [
 
 // ── prompt building ───────────────────────────────────────────────────────────
 
-// buildPrompt creates the structured LLM prompt with few-shot examples.
+// buildPrompt creates the structured LLM prompt with a two-step intent gate.
+// Step 1 gates on whether the input is an actionable command. Questions,
+// observations, and conversational statements must return NONE immediately
+// without proceeding to pipeline selection.
 func buildPrompt(userPrompt string, pipelines []pipeline.PipelineRef) string {
 	var sb strings.Builder
 
-	sb.WriteString(`You are an intent router. Given a user request and a list of available pipelines, output a single JSON object selecting the best pipeline.
+	sb.WriteString(`You are deciding whether a user message is an actionable command to run an automated workflow, or is instead a question, observation, or conversational statement.
 
-Rules:
-- If no pipeline matches well, set "pipeline" to "NONE".
-- "confidence" must be between 0.0 and 1.0.
-- "input" is the topic or focus the user wants, or "" if none.
-- "cron" is a 5-field cron expression if the user wants a schedule, or "" if not.
+Step 1 — Intent check: Is this an explicit command? The user must be directing you to perform an action (run, review, generate, check, scan, fix, build, deploy, start, launch, etc.).
+If the message is phrased as a question, observation, speculation, or statement of uncertainty, output {"pipeline":"NONE","confidence":0.05,"input":"","cron":""} immediately without reading Step 2.
 
-Examples:
-{"pipeline":"git-push","confidence":0.93,"input":"","cron":""}
+Step 2 — Only if it IS a command: select the best matching pipeline from the list below.
+- "pipeline" must be a name from the list, or "NONE" if no pipeline fits the command.
+- "confidence" is between 0.0 and 1.0.
+- "input" is the topic, URL, or focus the user wants acted on, or "".
+- "cron" is a 5-field cron expression if the user wants a schedule, or "".
+
+Non-command examples — always output NONE regardless of topic:
+{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "looks like there are merge conflicts?"
+{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "why is the build failing?"
+{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "seems like the deploy is slow"
+{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "I wonder if this worked"
+{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "any open PRs?"
+{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "is the pipeline running?"
+
+Command examples — match a pipeline or NONE if no pipeline fits:
+{"pipeline":"pr-review","confidence":0.93,"input":"https://github.com/org/repo/pull/42","cron":""}
 {"pipeline":"docs-improve","confidence":0.87,"input":"executor package","cron":"0 */2 * * *"}
-{"pipeline":"NONE","confidence":0.10,"input":"","cron":""}
+{"pipeline":"NONE","confidence":0.10,"input":"","cron":""}  // command with no matching pipeline
 
 Available pipelines:
 `)
@@ -125,14 +139,13 @@ Available pipelines:
 // ── response parsing ──────────────────────────────────────────────────────────
 
 // parseClassifyResponse extracts a classifyResponse from the raw LLM output.
-// It handles model verbosity by finding the first { and last } in the string.
+// It finds the first balanced { ... } object so any trailing metadata lines
+// (e.g. gl1tch-stats emitted by the ollama plugin) do not confuse the parse.
 func parseClassifyResponse(raw string) (classifyResponse, error) {
-	start := strings.Index(raw, "{")
-	end := strings.LastIndex(raw, "}")
-	if start == -1 || end == -1 || end <= start {
+	jsonStr := extractFirstJSONObject(raw)
+	if jsonStr == "" {
 		return classifyResponse{}, fmt.Errorf("no JSON object found in response")
 	}
-	jsonStr := raw[start : end+1]
 
 	var resp classifyResponse
 	if err := json.Unmarshal([]byte(jsonStr), &resp); err != nil {
@@ -164,6 +177,28 @@ func validateCron(s string) string {
 		return ""
 	}
 	return strings.Join(fields, " ")
+}
+
+// extractFirstJSONObject returns the first balanced { ... } substring in s,
+// allowing the caller to ignore any text or metadata that follows the JSON.
+func extractFirstJSONObject(s string) string {
+	depth := 0
+	start := -1
+	for i, c := range s {
+		switch c {
+		case '{':
+			if depth == 0 {
+				start = i
+			}
+			depth++
+		case '}':
+			depth--
+			if depth == 0 && start != -1 {
+				return s[start : i+1]
+			}
+		}
+	}
+	return ""
 }
 
 // sanitizeFocus strips surrounding quotes and periods from focus, and returns

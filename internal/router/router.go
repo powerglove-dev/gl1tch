@@ -1,13 +1,21 @@
 // Package router provides intent routing for gl1tch prompts to matching pipelines.
 // It implements a two-stage hybrid strategy:
-//   - Stage 1 (embedding fast path): cosine similarity against cached pipeline
-//     description vectors. If similarity >= ConfidentThreshold, dispatch immediately.
-//   - Stage 2 (LLM fallback): a single structured JSON LLM call returning
-//     {pipeline, confidence, input, cron}. Used when embeddings are ambiguous.
+//   - Stage 1 (embedding negative filter): cosine similarity against cached pipeline
+//     vectors. If NO pipeline clears the candidate gate threshold, return none immediately
+//     (skip LLM). If at least one clears it, check for fast-path or fall through to LLM.
+//   - Stage 2 (LLM classifier): a single structured JSON call that gates on intent
+//     type (command vs. question/observation) before selecting a pipeline.
+//
+// The embedding stage is intentionally a negative filter — it only short-circuits on
+// the "nothing relevant" case, never on a positive match alone. This prevents
+// topic-overlap misfires where questions about a topic route to a pipeline covering
+// that topic. The fast path (skip LLM) fires only when embedding confidence is very
+// high AND the input is syntactically imperative.
 package router
 
 import (
 	"context"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -19,9 +27,9 @@ import (
 )
 
 var (
-	routerTracer        = otel.Tracer("gl1tch/router")
-	routerSimilarity    metric.Float64Histogram
-	routerStrategyUsed  metric.Int64Counter
+	routerTracer       = otel.Tracer("gl1tch/router")
+	routerSimilarity   metric.Float64Histogram
+	routerStrategyUsed metric.Int64Counter
 )
 
 func init() {
@@ -34,13 +42,18 @@ func init() {
 	)
 }
 
-// DefaultConfidentThreshold is the cosine similarity above which a match is
-// treated as definitive and the LLM stage is skipped.
+// DefaultConfidentThreshold is the minimum cosine similarity at which a match may
+// use the embedding fast path — but only when isImperativeInput is also true.
 const DefaultConfidentThreshold = 0.85
 
-// DefaultAmbiguousThreshold is the minimum cosine similarity (or LLM confidence)
-// below which a match is rejected.
+// DefaultAmbiguousThreshold is the minimum LLM confidence for a match to be accepted.
 const DefaultAmbiguousThreshold = 0.65
+
+// DefaultCandidateGateThreshold is the minimum cosine similarity to admit a pipeline
+// as a candidate for LLM classification. Pipelines below this threshold are considered
+// topically unrelated and are excluded. When no pipeline clears this gate, the LLM
+// call is skipped entirely — this is the primary misfire prevention mechanism.
+const DefaultCandidateGateThreshold = 0.40
 
 // DefaultEmbeddingModel is the local Ollama model used for fast-path routing.
 const DefaultEmbeddingModel = "nomic-embed-text"
@@ -76,14 +89,17 @@ type Config struct {
 	EmbeddingModel string
 	// OllamaBaseURL is the base URL for Ollama (defaults to http://localhost:11434).
 	OllamaBaseURL string
-	// ConfidentThreshold: >= this score → dispatch without LLM (default 0.85).
+	// ConfidentThreshold: combined with isImperativeInput, score >= this → fast path (default 0.85).
 	ConfidentThreshold float64
-	// AmbiguousThreshold: >= this score (but < ConfidentThreshold) → dispatch with confirm (default 0.65).
+	// AmbiguousThreshold: minimum LLM confidence for a match to be accepted (default 0.65).
 	AmbiguousThreshold float64
+	// CandidateGateThreshold: minimum cosine similarity to admit a pipeline as an LLM
+	// candidate. When no pipeline clears this, the LLM call is skipped (default 0.40).
+	CandidateGateThreshold float64
 	// CacheDir is the directory for the on-disk embedding cache.
 	// If empty, the disk cache is disabled (in-memory only).
 	CacheDir string
-	// DisableEmbeddings skips the embedding fast-path entirely.
+	// DisableEmbeddings skips the embedding stage entirely and always uses the LLM.
 	DisableEmbeddings bool
 }
 
@@ -97,7 +113,7 @@ type Router interface {
 	Route(ctx context.Context, prompt string, pipelines []pipeline.PipelineRef) (*RouteResult, error)
 }
 
-// HybridRouter implements the two-stage embedding + LLM routing strategy.
+// HybridRouter implements the two-stage negative-filter + LLM routing strategy.
 type HybridRouter struct {
 	embedRouter *EmbeddingRouter
 	classifier  *LLMClassifier
@@ -113,6 +129,9 @@ func New(mgr *executor.Manager, embedder Embedder, cfg Config) *HybridRouter {
 	if cfg.AmbiguousThreshold == 0 {
 		cfg.AmbiguousThreshold = DefaultAmbiguousThreshold
 	}
+	if cfg.CandidateGateThreshold == 0 {
+		cfg.CandidateGateThreshold = DefaultCandidateGateThreshold
+	}
 	return &HybridRouter{
 		embedRouter: newEmbeddingRouter(embedder, cfg),
 		classifier:  NewLLMClassifier(mgr, cfg),
@@ -123,10 +142,14 @@ func New(mgr *executor.Manager, embedder Embedder, cfg Config) *HybridRouter {
 // Route routes prompt to the best matching pipeline.
 //
 // Algorithm:
-//  1. If DisableEmbeddings is false, try embedding fast path.
-//     If cosine similarity >= ConfidentThreshold → return result immediately.
-//  2. Fall through to LLM classifier.
-//  3. On LLM error, return safe no-match result (no error surfaced to caller).
+//  1. Empty pipeline list → none.
+//  2. Embedding negative filter (unless DisableEmbeddings):
+//     a. Find all candidates with cosine >= CandidateGateThreshold.
+//     b. Empty candidates → return none immediately (no LLM call).
+//     c. Top candidate >= ConfidentThreshold AND isImperativeInput(prompt) → fast path.
+//     d. Otherwise fall through to LLM with the candidate subset.
+//  3. LLM classifier on candidate subset (intent gate + pipeline selection).
+//     LLM errors are non-fatal — return safe no-match result.
 func (r *HybridRouter) Route(ctx context.Context, prompt string, pipelines []pipeline.PipelineRef) (*RouteResult, error) {
 	if len(pipelines) == 0 {
 		return &RouteResult{Method: "none"}, nil
@@ -135,47 +158,72 @@ func (r *HybridRouter) Route(ctx context.Context, prompt string, pipelines []pip
 	ctx, span := routerTracer.Start(ctx, "router.classify")
 	defer span.End()
 
-	// Stage 1: embedding fast path.
-	var embedNearMiss *pipeline.PipelineRef
-	var embedNearMissScore float64
+	// candidatePipelines is what gets passed to the LLM. Starts as the full list
+	// (for DisableEmbeddings) but is narrowed to candidates when embeddings run.
+	candidatePipelines := pipelines
+	var nearMiss *pipeline.PipelineRef
+	var nearMissScore float64
+
 	if !r.cfg.DisableEmbeddings {
-		embedResult, err := r.embedRouter.Route(ctx, prompt, pipelines)
-		if err == nil && embedResult != nil && embedResult.Pipeline != nil {
-			routerSimilarity.Record(ctx, embedResult.Confidence)
-			if embedResult.Confidence >= r.cfg.ConfidentThreshold {
-				embedResult.Method = "embedding"
-				routerStrategyUsed.Add(ctx, 1, metric.WithAttributes(attribute.String("strategy", "embedding")))
-				matched := ""
-				if embedResult.Pipeline != nil {
-					matched = embedResult.Pipeline.Name
-				}
+		candidates, err := r.embedRouter.FindCandidates(ctx, prompt, pipelines, r.cfg.CandidateGateThreshold)
+		if err == nil {
+			if len(candidates) == 0 {
+				// Negative filter: no pipeline is topically relevant — skip LLM entirely.
+				routerSimilarity.Record(ctx, 0)
+				routerStrategyUsed.Add(ctx, 1, metric.WithAttributes(attribute.String("strategy", "embedding-negative")))
 				span.SetAttributes(
-					attribute.String("router.strategy", "embedding"),
-					attribute.String("router.matched_pipeline", matched),
-					attribute.Float64("router.confidence", embedResult.Confidence),
+					attribute.String("router.strategy", "embedding-negative"),
+					attribute.Float64("router.confidence", 0),
 				)
 				span.SetStatus(codes.Ok, "")
-				return embedResult, nil
+				return &RouteResult{Method: "none"}, nil
 			}
-			// Track near-miss candidates for caller awareness.
-			if embedResult.Confidence >= NearMissThreshold {
-				embedNearMiss = embedResult.Pipeline
-				embedNearMissScore = embedResult.Confidence
+
+			topScore := candidates[0].Score
+			routerSimilarity.Record(ctx, topScore)
+
+			// Fast path: high confidence AND clearly imperative — skip LLM for latency.
+			if topScore >= r.cfg.ConfidentThreshold && isImperativeInput(prompt) {
+				best := &candidates[0].Ref
+				routerStrategyUsed.Add(ctx, 1, metric.WithAttributes(attribute.String("strategy", "embedding")))
+				span.SetAttributes(
+					attribute.String("router.strategy", "embedding"),
+					attribute.String("router.matched_pipeline", best.Name),
+					attribute.Float64("router.confidence", topScore),
+				)
+				span.SetStatus(codes.Ok, "")
+				return &RouteResult{
+					Pipeline:   best,
+					Confidence: topScore,
+					Method:     "embedding",
+				}, nil
+			}
+
+			// Narrow the LLM candidate list to only topically relevant pipelines.
+			// This reduces hallucination surface and focuses the LLM on real choices.
+			candidatePipelines = make([]pipeline.PipelineRef, len(candidates))
+			for i, c := range candidates {
+				candidatePipelines[i] = c.Ref
+			}
+
+			// Track near-miss: candidate that almost made it but fell below AmbiguousThreshold.
+			if topScore >= NearMissThreshold && topScore < r.cfg.AmbiguousThreshold {
+				nearMiss = &candidates[0].Ref
+				nearMissScore = topScore
 			}
 		}
-		// If embedding returned a result above AmbiguousThreshold (but below
-		// ConfidentThreshold), we still fall through to LLM for confirmation.
 	}
 
 	// Stage 2: LLM classifier.
 	routerStrategyUsed.Add(ctx, 1, metric.WithAttributes(attribute.String("strategy", "llm")))
-	result, err := r.classifier.Classify(ctx, prompt, pipelines)
+	result, err := r.classifier.Classify(ctx, prompt, candidatePipelines)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		// LLM errors are non-fatal — return safe no-match with any near-miss we found.
-		return &RouteResult{Method: "none", NearMiss: embedNearMiss, NearMissScore: embedNearMissScore}, nil
+		return &RouteResult{Method: "none", NearMiss: nearMiss, NearMissScore: nearMissScore}, nil
 	}
+
 	matched := ""
 	if result != nil && result.Pipeline != nil {
 		matched = result.Pipeline.Name
@@ -190,10 +238,36 @@ func (r *HybridRouter) Route(ctx context.Context, prompt string, pipelines []pip
 		attribute.Float64("router.confidence", confidence),
 	)
 	span.SetStatus(codes.Ok, "")
-	// If LLM found no match but we have an embedding near-miss, attach it.
-	if result != nil && result.Pipeline == nil && embedNearMiss != nil {
-		result.NearMiss = embedNearMiss
-		result.NearMissScore = embedNearMissScore
+
+	// Attach near-miss to LLM no-match results for caller awareness.
+	if result != nil && result.Pipeline == nil && nearMiss != nil {
+		result.NearMiss = nearMiss
+		result.NearMissScore = nearMissScore
 	}
 	return result, nil
+}
+
+// isImperativeInput returns false when the prompt is clearly a question or observation,
+// blocking the embedding fast path in those cases. It is deliberately conservative:
+// when in doubt it returns true, keeping the fast path available. The LLM stage handles
+// all ambiguous intent classification regardless.
+func isImperativeInput(s string) bool {
+	s = strings.TrimSpace(strings.ToLower(s))
+	// Explicit question mark at end of prompt.
+	if strings.HasSuffix(s, "?") {
+		return false
+	}
+	// Interrogative and observational starters that signal non-command intent.
+	questionStarters := []string{
+		"what ", "what's ", "why ", "how ", "is ", "are ", "was ", "were ",
+		"can ", "could ", "should ", "would ", "will ", "do ", "does ", "did ",
+		"looks like", "it looks", "seems like", "i think", "i noticed",
+		"any idea", "any thoughts",
+	}
+	for _, prefix := range questionStarters {
+		if strings.HasPrefix(s, prefix) {
+			return false
+		}
+	}
+	return true
 }
