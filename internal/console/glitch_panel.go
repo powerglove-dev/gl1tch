@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/8op-org/gl1tch/internal/cron"
 	"github.com/8op-org/gl1tch/internal/executor"
 	"github.com/8op-org/gl1tch/internal/modal"
 	"github.com/8op-org/gl1tch/internal/npcname"
@@ -1300,10 +1301,37 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 				cmd := strings.Fields(userText)[0]
 				switch cmd {
 				case "/cron":
+					cronArgs := strings.Fields(userText)
 					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
+					sub := ""
+					if len(cronArgs) > 1 {
+						sub = strings.ToLower(cronArgs[1])
+					}
+					if sub == "list" || sub == "ls" {
+						entries, err := cron.LoadConfig()
+						if err != nil {
+							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "cron: could not read cron.yaml: " + err.Error()})
+							return p, nil
+						}
+						if len(entries) == 0 {
+							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "no scheduled jobs configured. tell me what you want to run and when."})
+							return p, nil
+						}
+						var lines []string
+						lines = append(lines, fmt.Sprintf("%d scheduled job(s):\n", len(entries)))
+						for _, e := range entries {
+							line := "  " + e.Schedule + "  " + e.Name + "  [" + e.Kind + ": " + e.Target + "]"
+							if e.WorkingDir != "" {
+								line += "  " + e.WorkingDir
+							}
+							lines = append(lines, line)
+						}
+						p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: strings.Join(lines, "\n")})
+						return p, nil
+					}
 					p.messages = append(p.messages, glitchEntry{
 						who:  glitchSpeakerBot,
-						text: "need help with cron? i can create, list, or remove scheduled jobs — just tell me what you want to run and when.",
+						text: "cron commands:\n  /cron list          — show scheduled jobs\n\ntell me what you want to run and when to create or modify a schedule.",
 					})
 					return p, nil
 				case "/brain":
@@ -2384,30 +2412,30 @@ func (p glitchChatPanel) renderMessages(innerW int, pal styles.ANSIPalette) []st
 
 		var prefix, contPrefix string
 		tsStr := ""
+		tsVisLen := 0 // visible character width of the timestamp portion (including leading space)
 		if !e.ts.IsZero() {
-			tsStr = pal.Dim + " " + strings.ToLower(e.ts.Format("3:04pm")) + aRst
+			formatted := strings.ToLower(e.ts.Format("3:04pm"))
+			tsStr = pal.Dim + " " + formatted + aRst
+			tsVisLen = 1 + len(formatted) // " " + "2:20am"
 		}
 		switch e.who {
 		case glitchSpeakerBot:
 			prefix = glitchLabel + tsStr + " " + aRst
-			contPrefix = "              "
+			contPrefix = strings.Repeat(" ", 6+tsVisLen+1) // "GL1TCH" + ts + " "
 		case glitchSpeakerUser:
 			prefix = userLabel + tsStr + " " + aRst
-			contPrefix = "              "
+			contPrefix = strings.Repeat(" ", 6+tsVisLen+1) // "YOU   " + ts + " "
 		case glitchSpeakerGame:
 			label := "GIBSON"
 			if e.widgetLabel != "" {
 				label = e.widgetLabel
 			}
 			prefix = pal.Success + label + aRst + tsStr + " " + aRst
-			contPrefix = strings.Repeat(" ", len(label)+1)
+			contPrefix = strings.Repeat(" ", len(label)+tsVisLen+1)
 		}
 
-		// Word-wrap the text to fit innerW minus prefix width.
-		prefixVisW := 9 // "GL1TCH " or "YOU    " = 7 visible chars + 2 spaces
-		if !e.ts.IsZero() {
-			prefixVisW = 15 // "GL1TCH 3:04pm " = 14 visible + some buffer
-		}
+		// Word-wrap the text to fit innerW minus the visible prefix width.
+		prefixVisW := len(contPrefix)
 		textW := innerW - prefixVisW
 		if textW < 10 {
 			textW = 10
