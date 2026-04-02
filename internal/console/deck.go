@@ -3298,7 +3298,11 @@ func (m Model) View() string {
 		h = 40
 	}
 
-	contentH := max(h-m.headerHeight()-1, 5) // reserve header height + 1 padding row
+	footerH := 0
+	if m.glitchChat.sessions != nil && m.glitchChat.sessions.NeedsFooter() {
+		footerH = 1
+	}
+	contentH := max(h-m.headerHeight()-1-footerH, 5) // reserve header + padding + optional footer
 
 	// header is the TDF block-art header (empty string when TDF not loaded).
 	header := m.viewTDFHeader(w)
@@ -3379,7 +3383,45 @@ func (m Model) View() string {
 		return header +m.viewInboxDetail(w, h, m.inboxMarkdownMode)
 	}
 
-	return header +body
+	if footerH > 0 {
+		return header + body + "\n" + m.renderSessionFooter(w)
+	}
+	return header + body
+}
+
+// renderSessionFooter renders a single-line footer showing named sessions and
+// attention badges. Only called when 2+ sessions exist.
+func (m Model) renderSessionFooter(w int) string {
+	pal := m.ansiPalette()
+	reg := m.glitchChat.sessions
+
+	var parts []string
+	for _, s := range reg.sessions {
+		var label string
+		switch {
+		case s.name == reg.active:
+			label = pal.Accent + "▶ " + s.name + panelrender.RST
+		case s.status == SessionAttention:
+			label = pal.Error + "● " + s.name + panelrender.RST
+		case s.status == SessionUnread:
+			label = pal.Accent + "○ " + s.name + panelrender.RST
+		default:
+			label = pal.Dim + s.name + panelrender.RST
+		}
+		parts = append(parts, label)
+	}
+
+	line := pal.Dim + " sessions: " + panelrender.RST + strings.Join(parts, pal.Dim+" · "+panelrender.RST)
+	if attn := reg.AttentionSession(); attn != "" {
+		line += pal.Dim + "  →  /session " + attn + panelrender.RST
+	}
+
+	// Pad to full terminal width.
+	visible := lipgloss.Width(line)
+	if visible < w {
+		line += strings.Repeat(" ", w-visible)
+	}
+	return line
 }
 
 // viewQuitModalBox renders the quit confirmation popup box.

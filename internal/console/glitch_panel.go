@@ -159,6 +159,7 @@ var glitchSlashCommands = []slashSuggestion{
 	{cmd: "/cron",     hint: "get help scheduling recurring jobs"},
 	{cmd: "/model",    hint: "[name] — switch provider/model inline"},
 	{cmd: "/themes",   hint: "open theme picker"},
+	{cmd: "/session",  hint: "[name] — switch or create a chat session"},
 	{cmd: "/clear",    hint: "clear chat history"},
 	{cmd: "/quit",     hint: "exit glitch"},
 	{cmd: "/help",     hint: "this list"},
@@ -938,6 +939,9 @@ type glitchChatPanel struct {
 	scheduledJobs int
 	// userScore is the player's cached game score, injected from Model.
 	userScore store.UserScore
+
+	// sessions manages named conversation contexts.
+	sessions *SessionRegistry
 }
 
 // widgetExecCmd runs a widget's binary with input on stdin and returns the
@@ -1051,9 +1055,26 @@ func newGlitchPanel(cfgDir string, providers []picker.ProviderDef, s *store.Stor
 		launchCWD: launchCWD,
 		registry:  reg,
 		providers: providers,
+		sessions:  newSessionRegistry(),
 	}
 	// Start focused so users can type immediately.
 	p = p.setFocused(true)
+	return p
+}
+
+// switchToSession saves the current session's messages/turns into the registry,
+// switches the active session to name, and loads that session's state.
+func (p glitchChatPanel) switchToSession(name string) glitchChatPanel {
+	if cur := p.sessions.Active(); cur != nil {
+		cur.messages = p.messages
+		cur.turns = p.turns
+	}
+	p.sessions.switchTo(name)
+	next := p.sessions.Active()
+	p.messages = next.messages
+	p.turns = next.turns
+	p.scrollOffset = 0
+	p.scrollFocused = false
 	return p
 }
 
@@ -1822,9 +1843,49 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 						text: "what should this prompt do? describe what you want the AI to be or accomplish.",
 					})
 					return p, nil
+				case "/session":
+					sessionArgs := strings.Fields(userText)
+					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
+					if len(sessionArgs) < 2 {
+						// List all sessions.
+						var lines []string
+						lines = append(lines, fmt.Sprintf("%d session(s):", len(p.sessions.sessions)))
+						for _, s := range p.sessions.sessions {
+							marker := "  "
+							if s.name == p.sessions.active {
+								marker = "▶ "
+							}
+							lines = append(lines, marker+s.name)
+						}
+						lines = append(lines, "\nuse /session <name> to switch or create")
+						p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: strings.Join(lines, "\n")})
+						return p, nil
+					}
+					name := sessionArgs[1]
+					if name == "new" {
+						if len(sessionArgs) < 3 {
+							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "usage: /session new <name>"})
+							return p, nil
+						}
+						name = sessionArgs[2]
+						if p.sessions.get(name) != nil {
+							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "session '" + name + "' already exists. use /session " + name + " to switch."})
+							return p, nil
+						}
+						p.sessions.create(name)
+					} else if p.sessions.get(name) == nil {
+						p.sessions.create(name)
+					}
+					p = p.switchToSession(name)
+					return p, nil
 				case "/clear":
 					p.messages = nil
 					p.turns = nil
+					// Keep the active session's stored state in sync.
+					if cur := p.sessions.Active(); cur != nil {
+						cur.messages = nil
+						cur.turns = nil
+					}
 					p.scrollOffset = 0
 					p.scrollFocused = false
 					p.streaming = false
@@ -2012,7 +2073,7 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
 					p.messages = append(p.messages, glitchEntry{
 						who: glitchSpeakerBot,
-						text: "slash commands:\n\n  getting started\n  /init             — first-run wizard\n  /models           — pick a provider and model\n\n  build things\n  /prompt [name]    — load or build a system prompt with AI\n  /pipeline [name]  — run a pipeline, or build one from scratch\n  /brain [query]    — search notes, or start an interactive brain session\n\n  run things\n  /rerun [name]     — rerun a pipeline by name\n  /terminal [cmd]   — open split (-v bottom, -left, -p N%); or: list kill equalize focus\n  /cron             — get help scheduling recurring jobs\n  /trace            — show OTel trace for the selected feed entry\n\n  modes\n  /mud              — jack into The Gibson — takes over chat as MUD terminal\n\n  workspace\n  /cwd [path]       — set working directory\n  /model [name]     — switch provider/model inline\n  /themes           — open theme picker\n  /clear            — clear chat history\n  /quit             — exit glitch\n  /help             — this list\n\nscroll: j/k or [/] when scroll-focused (tab to switch)",
+						text: "slash commands:\n\n  getting started\n  /init             — first-run wizard\n  /models           — pick a provider and model\n\n  build things\n  /prompt [name]    — load or build a system prompt with AI\n  /pipeline [name]  — run a pipeline, or build one from scratch\n  /brain [query]    — search notes, or start an interactive brain session\n\n  run things\n  /rerun [name]     — rerun a pipeline by name\n  /terminal [cmd]   — open split (-v bottom, -left, -p N%); or: list kill equalize focus\n  /cron             — get help scheduling recurring jobs\n  /trace            — show OTel trace for the selected feed entry\n\n  modes\n  /mud              — jack into The Gibson — takes over chat as MUD terminal\n\n  workspace\n  /session [name]   — switch or create a named session\n  /cwd [path]       — set working directory\n  /model [name]     — switch provider/model inline\n  /themes           — open theme picker\n  /clear            — clear chat history\n  /quit             — exit glitch\n  /help             — this list\n\nscroll: j/k or [/] when scroll-focused (tab to switch)",
 					})
 					return p, nil
 				case "/trace":
