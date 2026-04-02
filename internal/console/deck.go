@@ -340,6 +340,9 @@ type Model struct {
 	lastNarrationAt  time.Time // set each time a narration is allowed through
 	recentRunCount   int       // completions in current 60s window
 	runWindowStart   time.Time // start of the current run-count window
+	// lastPipelinePane is the tmux pane ID (%N) of the most recently launched
+	// pipeline pane. Used to stack subsequent pipelines below it.
+	lastPipelinePane string
 	// widgetRegistry holds all widget-capable sidecars loaded at startup.
 	widgetRegistry *WidgetRegistry
 	// signalHandlers maps handler names to dispatch functions.
@@ -1019,7 +1022,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		newPanel, cmd := m.glitchChat.update(msg)
 		m.glitchChat = newPanel
 		return m, cmd
-	case glitchStreamMsg, glitchDoneMsg, glitchErrMsg, glitchIntentMsg, glitchDiscoveryChangedMsg:
+	case glitchStreamMsg, glitchDoneMsg, glitchErrMsg, glitchIntentMsg, glitchDiscoveryChangedMsg,
+		glitchTickMsg:
 		newPanel, cmd := m.glitchChat.update(msg)
 		m.glitchChat = newPanel
 		return m, cmd
@@ -1153,6 +1157,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		leftW := m.leftColWidth()
 		m.inboxModel.SetSize(leftW, msg.Height)
 		m.clampFeedScroll()
+		// Sync the textarea width to the actual rendered panel width so the
+		// internal viewport tracks cursor position correctly. Without this,
+		// typing long messages causes blank input because the viewport is
+		// computed at zero width (build() uses a value receiver copy).
+		const glitchHPad = 3
+		chatW := m.midColWidth()
+		sendW := chatW - glitchHPad*2
+		if sendW > 4 {
+			m.glitchChat.input.SetWidth(sendW - 4)
+		}
 		return m, nil
 
 	case tickMsg:
@@ -1509,7 +1523,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.input != "" {
 				shellCmd += " --input " + shellescape(msg.input)
 			}
-			windowName, logFile, doneFile := createJobWindow(feedID, shellCmd, name, m.launchCWD)
+			windowName, logFile, doneFile := createJobPane(feedID, shellCmd, name, m.launchCWD, m.lastPipelinePane)
+			if windowName != "" {
+				m.lastPipelinePane = windowName
+			}
 			ch := make(chan tea.Msg, 256)
 			_, cancel := context.WithCancel(context.Background())
 			jh := &jobHandle{
@@ -2310,7 +2327,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 					if jh, ok := m.activeJobs[entry.id]; ok {
 						jh.cancel()
 						if jh.tmuxWindow != "" {
-							exec.Command("tmux", "kill-window", "-t", jh.tmuxWindow).Run() //nolint:errcheck
+							if strings.HasPrefix(jh.tmuxWindow, "%") {
+								exec.Command("tmux", "kill-pane", "-t", jh.tmuxWindow).Run() //nolint:errcheck
+							} else {
+								exec.Command("tmux", "kill-window", "-t", jh.tmuxWindow).Run() //nolint:errcheck
+							}
 						}
 						if jh.storeRunID != 0 && m.store != nil {
 							var out string
@@ -2754,7 +2775,11 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 		if len(filtered) > 0 && m.signalBoard.selectedIdx < len(filtered) {
 			tw := filtered[m.signalBoard.selectedIdx].tmuxWindow
 			if tw != "" {
-				exec.Command("tmux", "select-window", "-t", tw).Run() //nolint:errcheck
+				if strings.HasPrefix(tw, "%") {
+					exec.Command("tmux", "select-pane", "-t", tw).Run() //nolint:errcheck
+				} else {
+					exec.Command("tmux", "select-window", "-t", tw).Run() //nolint:errcheck
+				}
 			}
 		}
 		return m, nil
@@ -2837,7 +2862,10 @@ func (m Model) launchPendingPipeline(cwd string) (Model, tea.Cmd) {
 		shellCmd += " --input " + shellescape(m.pendingPipelineInput)
 		m.pendingPipelineInput = ""
 	}
-	windowName, logFile, doneFile := createJobWindow(feedID, shellCmd, name, cwd)
+	windowName, logFile, doneFile := createJobPane(feedID, shellCmd, name, cwd, m.lastPipelinePane)
+	if windowName != "" {
+		m.lastPipelinePane = windowName
+	}
 
 	ch := make(chan tea.Msg, 256)
 	_, cancel := context.WithCancel(context.Background())
@@ -3073,7 +3101,10 @@ func (m Model) submitRerun(msg modal.RerunConfirmedMsg) (Model, tea.Cmd) {
 			escaped := strings.ReplaceAll(additionalContext, "'", `'\''`)
 			shellCmd = "GLITCH_CONTEXT='" + escaped + "' " + shellCmd
 		}
-		windowName, logFile, doneFile := createJobWindow(feedID, shellCmd, run.Name, cwd)
+		windowName, logFile, doneFile := createJobPane(feedID, shellCmd, run.Name, cwd, m.lastPipelinePane)
+		if windowName != "" {
+			m.lastPipelinePane = windowName
+		}
 		ch := make(chan tea.Msg, 256)
 		_, cancel := context.WithCancel(context.Background())
 		jh := &jobHandle{id: feedID, cancel: cancel, ch: ch, tmuxWindow: windowName, logFile: logFile, pipelineName: run.Name}

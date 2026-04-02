@@ -157,6 +157,67 @@ func startLogWatcher(feedID, logFile, doneFile string, ch chan<- tea.Msg) {
 	}()
 }
 
+// currentTmuxPane returns the pane ID of the running process as set by tmux
+// in the TMUX_PANE environment variable (e.g. "%42"). Empty when not in tmux.
+func currentTmuxPane() string {
+	return strings.TrimSpace(os.Getenv("TMUX_PANE"))
+}
+
+// createJobPane creates an inline tmux pane for a pipeline job instead of a
+// separate window. The first pipeline is split horizontally from the glitch
+// pane at 50 % (side-by-side). Subsequent pipelines are split vertically
+// below lastPaneID so they stack evenly on the right side of the screen.
+//
+// Returns (paneID, logFile, doneFile). All empty strings if tmux is
+// unavailable or no TMUX_PANE is set for the first split.
+func createJobPane(feedID, shellCmd, label, startDir, lastPaneID string) (paneID, logFile, doneFile string) {
+	if strings.HasSuffix(os.Args[0], ".test") {
+		return "", "", ""
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		return "", "", ""
+	}
+	glitchPane := currentTmuxPane()
+	if glitchPane == "" && lastPaneID == "" {
+		return "", "", ""
+	}
+
+	logFile = fmt.Sprintf("%s/glitch-%s.log", os.TempDir(), feedID)
+	doneFile = fmt.Sprintf("%s/glitch-%s.done", os.TempDir(), feedID)
+	os.WriteFile(logFile, nil, 0o600) //nolint:errcheck
+
+	windowCmd := fmt.Sprintf("{ %s ; } 2>&1 | tee %s ; echo $? > %s ; exec $SHELL", shellCmd, logFile, doneFile)
+
+	var args []string
+	if lastPaneID == "" {
+		// First pipeline: split the glitch pane in half horizontally (left=glitch, right=pipeline).
+		args = []string{"split-window", "-h", "-l", "50%", "-t", glitchPane, "-P", "-F", "#{pane_id}"}
+	} else {
+		// Subsequent pipelines: split vertically below the last pipeline pane.
+		args = []string{"split-window", "-v", "-t", lastPaneID, "-P", "-F", "#{pane_id}"}
+	}
+	if startDir != "" {
+		args = append(args, "-c", startDir)
+	}
+	args = append(args, windowCmd)
+
+	out, err := exec.Command("tmux", args...).Output()
+	if err != nil {
+		return "", logFile, doneFile
+	}
+	paneID = strings.TrimSpace(string(out))
+	if paneID == "" {
+		return "", logFile, doneFile
+	}
+
+	// Keep pane alive after command exits so the user can inspect output.
+	exec.Command("tmux", "set-option", "-pt", paneID, "remain-on-exit", "on").Run() //nolint:errcheck
+	if label != "" {
+		exec.Command("tmux", "select-pane", "-t", paneID, "-T", label).Run() //nolint:errcheck
+	}
+	return paneID, logFile, doneFile
+}
+
 var ansiEscRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
 // stripANSI removes ANSI escape sequences from s.

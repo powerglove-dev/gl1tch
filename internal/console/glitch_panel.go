@@ -488,7 +488,8 @@ what you know about the system:
 help the user build pipelines, understand their codebase, automate tasks, debug runs, manage brain notes.
 keep answers short — a few sentences unless more is clearly needed.
 no markdown headers, no bullet lists. write in sentences.
-don't narrate your own personality. just be it.`
+don't narrate your own personality. just be it.
+when pipeline output appears in the conversation as [pipeline '...' output], use it as context to answer questions — but never repeat or quote the raw output. summarize or reference it by what it means, not what it says.`
 
 type glitchBackend interface {
 	streamIntro(ctx context.Context, cwd string) (<-chan string, error)
@@ -1098,6 +1099,7 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 	case glitchDoneMsg:
 		p.streaming = false
 		p.animFrame = 0
+		p = p.setFocused(true) // restore input focus after every stream
 		if p.streamBuf != "" {
 			p.upsertStreamEntry()
 			response := p.streamBuf
@@ -1897,6 +1899,9 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 			turns := trimTurns(p.turns[:len(p.turns)-1])
 			userTextCopy := userText
 			cfgDir := p.cfgDir
+			// For short follow-ups that lack a URL/target, enrich the routing prompt
+			// with recent context so the classifier can extract the right input.
+			routingPrompt := enrichRoutingPrompt(userTextCopy, turns)
 			return p, tea.Batch(glitchTick(), func() tea.Msg {
 				r := buildPanelRouter(cfgDir)
 				refs, _ := pipeline.DiscoverPipelines(filepath.Join(cfgDir, "pipelines"))
@@ -1905,7 +1910,7 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 				if len(refs) > 0 {
 					rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 					defer cancel()
-					result, err := r.Route(rctx, userTextCopy, refs)
+					result, err := r.Route(rctx, routingPrompt, refs)
 					if err == nil && result != nil && result.Pipeline != nil {
 						return glitchIntentMsg{result: result, prompt: userTextCopy, turns: turns}
 					}
@@ -2349,6 +2354,28 @@ func (p *glitchChatPanel) upsertStreamEntry() {
 		}
 	}
 	p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: p.streamBuf, ts: time.Now()})
+}
+
+// enrichRoutingPrompt appends recent conversational context to a short user message
+// so the intent router's LLM classifier can extract the right input (e.g. a PR URL
+// mentioned two turns ago). Only applied when the current message is a short follow-up
+// without an explicit URL or target.
+func enrichRoutingPrompt(msg string, turns []glitchTurn) string {
+	// If the message already contains a URL or is long enough to be self-contained, skip.
+	if strings.Contains(msg, "://") || len(msg) > 80 {
+		return msg
+	}
+	// Scan recent turns (newest first) for URLs or other specific targets the user
+	// has already mentioned. Stop once we find one.
+	for i := len(turns) - 1; i >= 0 && i >= len(turns)-6; i-- {
+		t := turns[i]
+		for _, word := range strings.Fields(t.text) {
+			if strings.HasPrefix(word, "http://") || strings.HasPrefix(word, "https://") {
+				return msg + " [context: " + word + "]"
+			}
+		}
+	}
+	return msg
 }
 
 // build renders the GLITCH panel as a slice of lines for the center column.
