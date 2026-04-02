@@ -151,9 +151,14 @@ func (c *CliAdapter) Models() []SidecarModel { return c.models }
 // appended to the command arguments for backwards compatibility with AI provider
 // CLIs (e.g. claude, opencode) that accept the model as a flag.
 func (c *CliAdapter) Execute(ctx context.Context, input string, vars map[string]string, w io.Writer) error {
-	args := c.args
+	args := append([]string{}, c.args...)
 	if model := vars["model"]; model != "" {
-		args = append(append([]string{}, args...), "--model", model)
+		args = append(args, "--model", model)
+	}
+	// "flags" var: space-separated raw CLI flags appended after model.
+	// Use for step-level overrides like flags: "--no-tools".
+	if flags := vars["flags"]; flags != "" {
+		args = append(args, strings.Fields(flags)...)
 	}
 	cmd := exec.CommandContext(ctx, c.cmd, args...)
 	cmd.Stdin = strings.NewReader(input)

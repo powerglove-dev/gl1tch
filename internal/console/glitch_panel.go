@@ -1911,6 +1911,19 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 						}
 					}
 
+					// ── natural-language request (no leading flag) ───────────────────
+					if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+						if splits, isNL := parseTerminalNL(strings.Join(args, " ")); isNL {
+							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: termSplitsDesc(splits)})
+							return p, func() tea.Msg {
+								for _, sp := range splits {
+									exec.Command("tmux", sp.tmuxArgs()...).Run() //nolint:errcheck
+								}
+								return nil
+							}
+						}
+					}
+
 					// ── split: parse -v/-bottom, -left, -p N, then optional command ──
 					pct := 25
 					vertical := false

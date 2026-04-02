@@ -64,14 +64,22 @@ func glitchPane(session string) string {
 // termCmd sends a /terminal command to the gl1tch pane (pane 0) regardless of
 // which pane is currently focused.
 // args is appended after "/terminal " (pass "" for bare /terminal).
+//
+// The literal text is sent with -l so that words like "left", "bottom", "end"
+// are not misinterpreted as tmux key names. Escape and Enter are sent
+// separately as actual keys so autocomplete is dismissed and the command fires.
 func termCmd(t *testing.T, session, args string) {
 	t.Helper()
 	input := "/terminal"
 	if args != "" {
 		input += " " + args
 	}
-	if err := exec.Command("tmux", "send-keys", "-t", glitchPane(session), input, "Escape", "Enter").Run(); err != nil {
-		t.Fatalf("send %q: %v", input, err)
+	// -l must precede -t so tmux's getopt treats it as a flag, not a key name.
+	if err := exec.Command("tmux", "send-keys", "-l", "-t", glitchPane(session), input).Run(); err != nil {
+		t.Fatalf("send-keys -l %q: %v", input, err)
+	}
+	if err := exec.Command("tmux", "send-keys", "-t", glitchPane(session), "Escape", "Enter").Run(); err != nil {
+		t.Fatalf("send-keys Escape Enter: %v", err)
 	}
 }
 

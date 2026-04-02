@@ -42,29 +42,37 @@ The Switchboard divides into three regions:
 **Bottom Bar**: Compact keybinding reference showing the most important shortcuts.
 
 
-## Navigation
+## Sidebar and Focus Navigation
 
-### Focus Movement
+The Switchboard divides into three focusable regions: **Pipeline Launcher** (top-left), **Agent Runner** (bottom-left), and **Activity Feed** (center/right).
 
-| Key | Action |
-|---|---|
-| `tab` | Cycle focus between left sidebar sections and the Activity Feed |
-| `shift+tab` | Cycle focus backwards |
-
-### Selection
+### Region Navigation
 
 | Key | Action |
 |---|---|
-| `j` | Move selection down (in lists, left sidebar) |
-| `k` | Move selection up (in lists, left sidebar) |
+| `tab` | Cycle focus forward: Launcher → Agent Runner → Activity Feed → Launcher |
+| `shift+tab` | Cycle focus backward |
+| `h` or arrow-left | Shift focus to the left sidebar (from Activity Feed) |
+| `l` or arrow-right | Shift focus to the Activity Feed (from sidebar) |
+
+When you press `tab` in the Launcher, focus moves to the Agent Runner. Press `tab` again to move to the Activity Feed. From the Feed, `tab` wraps back to the Launcher.
+
+### Selection Within Regions
+
+| Key | Action |
+|---|---|
+| `j` | Move selection down (in lists, left sidebar, or Activity Feed) |
+| `k` | Move selection up |
 | `↵` (Enter) | Launch or open the selected item |
-| `esc` | Close overlay / return to Switchboard |
+| `esc` | Cancel or deselect |
 
 ### Visual Controls
 
 | Key | Action |
 |---|---|
-| `T` | Open theme picker modal |
+| `T` or `^spc t` | Open theme picker modal |
+| `?` or `h` | Show help (keybinding reference) |
+| `R` | Reload providers/models (refresh from disk) |
 
 
 ## Pipeline Launcher
@@ -72,6 +80,18 @@ The Switchboard divides into three regions:
 The **Pipeline Launcher** scans `~/.config/glitch/pipelines/` for saved `.pipeline.yaml` files and displays them as a scrollable list in the left sidebar.
 
 ### Launch a Pipeline
+
+You can launch a pipeline from the sidebar list or by typing in the chat. Chat-based dispatch requires an explicit run-verb — GL1TCH only routes to a pipeline when you clearly ask it to:
+
+```
+run backup
+launch deploy
+execute sync-repos on https://github.com/org/repo
+```
+
+Questions and generic task requests (`check the logs`, `review my PR`) are answered by the AI directly without triggering a pipeline.
+
+To launch from the sidebar:
 
 1. Use `j`/`k` to navigate to the pipeline you want
 2. Press `↵` to launch it
@@ -118,6 +138,8 @@ Prompt:   ____________________________
 6. Output appears in the Activity Feed with a `[running]` badge
 7. When the agent responds, the badge updates to `[done]` or `[failed]`
 
+Press `Esc` at any time while GL1TCH is responding to cancel the in-flight stream. Any partial response is saved to the history and input focus is restored immediately.
+
 ### Providers and Models
 
 GL1TCH auto-detects installed Ollama sidescar via `~/.local/share/ollama/models` and registered cloud providers from `apm.yml`. Available models are pulled at startup.
@@ -160,6 +182,104 @@ The Activity Feed is scrollable. Navigate with `j`/`k` to move between entries. 
 
 Output is streamed in real time as it arrives from the pipeline or agent. The feed is throttled (50ms debounce) to avoid excessive BubbleTea re-renders on high-frequency output. Very long or complex pipelines may batch lines together.
 
+### Search and Filter
+
+The Signal Board (Activity Feed) supports efficient searching and filtering:
+
+| Key | Action |
+|---|---|
+| `f` | Cycle through status filters: `running` → `all` → `done` → `failed` → `archived` |
+| `/` | Enter fuzzy search mode; type to match entry titles; `Esc` to clear search |
+| `j`/`k` | Navigate entries (normal mode) or navigate + mark (mark mode) |
+| `m` | Toggle mark mode — hold position while marking/unmarking multiple entries |
+
+**Mark Mode** (`m`): Toggles between normal navigation and mark-while-navigate. Useful for batch operations on related runs. Press `m` again to exit mark mode.
+
+**Fuzzy Search** (`/`): Match entry titles by substring. The search resets when you select an entry or press `esc`.
+
+### JSON Output Expansion
+
+Pipeline output containing valid JSON objects or arrays is automatically detected and rendered compactly:
+
+```
+▸ { … } (8 keys)
+```
+
+Press `↵` on a JSON line to expand inline:
+
+```
+▾ { … } (8 keys)
+  "status": "success"
+  "duration_ms": 1234
+  "steps": [ 3 items ]
+  …
+```
+
+Press `↵` again to collapse. Expanded JSON is pretty-printed with syntax highlighting (keys in accent color). Large objects are truncated at 20 lines with an overflow indicator.
+
+
+## GL1TCH Chat Panel
+
+The right side of the Switchboard displays a streaming conversation with the GL1TCH AI assistant. The assistant provides analysis, suggestions, and direct answers based on your pipeline runs and prompts.
+
+### Chat Context
+
+The assistant's context includes:
+- **Current environment**: Working directory, active model, pipeline paths
+- **Recent runs**: Last 5 activity feed entries, their status, output, and step details
+- **Your prompts**: Full conversation history within the session
+- **Run analysis**: OTel traces, exit codes, error messages from pipeline steps
+
+When a pipeline fails, the assistant automatically analyzes the failure and suggests remediation steps. When you ask a question, it answers based on recent context without necessarily triggering a new run.
+
+### Sending Messages
+
+| Key | Action |
+|---|---|
+| `c` | Focus the chat input area (from any Switchboard region) |
+| `ctrl+↵` | Send your message (normal `↵` adds a newline) |
+| `esc` | Cancel an in-flight stream and return focus to the Switchboard |
+
+**Input area**:
+```
+You: __________________________________
+    [Type your prompt here]
+    [Ctrl+Enter to send]
+```
+
+### Response Format
+
+Responses appear as timestamped entries in the chat panel:
+
+```
+gl1tch: The deployment finished with exit code 0. All
+        three steps completed in 2m 15s. The manifest
+        was successfully applied to prod.
+```
+
+If the assistant suggests running a pipeline, it formats the suggestion as an action:
+
+```
+gl1tch: I recommend running schema-sync --force to
+        resolve the schema validation error.
+```
+
+You can type `/pipeline schema-sync --force` in the chat to execute this immediately, or select it from the launcher.
+
+### Streaming
+
+Long responses stream token-by-token with a blinking cursor (`▌`) to show activity. Press `esc` to cancel the stream; any partial response is preserved in the history.
+
+### Clarifications
+
+If a pipeline reaches a step with `AskClarification` signal, the question appears in the chat panel with an input box. Answer the question directly in the chat, and execution resumes automatically.
+
+```
+glitch: Schema validation failed. Should I rollback
+        to the previous version? (yes/no)
+You: __________________________________
+```
+
 
 ## Chord Shortcuts
 
@@ -168,11 +288,10 @@ Chord shortcuts start with `^spc` (ctrl+space) followed by a key. This is the pr
 | Chord | Action |
 |---|---|
 | `^spc h` | Show help screen (full keybinding reference) |
-| `^spc j` | Jump to any window (tmux window switcher) |
 | `^spc c` | Create a new window |
 | `^spc d` | Detach from the session (safely exit tmux) |
 | `^spc r` | Reload GL1TCH (pick up a new binary without restarting) |
-| `^spc q` | Quit GL1TCH entirely (close the session) |
+| `^spc q` | Quit GL1TCH entirely (tears down all tmux sessions) |
 | `^spc [` | Previous window in the session |
 | `^spc ]` | Next window in the session |
 | `^spc x` | Kill the current pane |
@@ -182,16 +301,57 @@ Chord shortcuts start with `^spc` (ctrl+space) followed by a key. This is the pr
 | `^spc n` | New workspace session (alternative to `^spc c` for named sessions) |
 | `^spc p` | Open the pipeline/prompt builder |
 
-### Jump Window (`^spc j`)
+### Terminal and Pipeline Commands
 
-`^spc j` opens a modal showing all active windows in your GL1TCH session. Use `j`/`k` to navigate, press `↵` to jump. Windows include:
+The `/terminal` and `/pipeline` commands control your workspace without requiring modal dialogs or leaving the Switchboard.
 
-- **switchboard** — This control panel
-- **assistant** — Shell prompt where you can type commands directly
-- **inbox** — Full-screen inbox modal (from `^spc j`, select "inbox")
-- **themes** — Theme picker modal
-- **prompts** — Prompt manager (view/edit saved prompts)
-- Any custom windows you've created with `^spc c`
+#### `/terminal` — Open Panes with Natural Language
+
+The `/terminal` command supports natural-language syntax for opening and laying out tmux panes:
+
+```
+/terminal                              # bottom pane, 25%
+/terminal 50%                          # 50% size
+/terminal half                         # 50% (alias)
+/terminal third bottom                 # bottom 33%, vertical split
+/terminal left 40%                     # left side, 40%
+/terminal 3 shells                     # open 3 panes stacked
+/terminal in /tmp                      # pane in /tmp
+/terminal cwd to ~/a ~/b ~/c           # 3 panes, different directories
+/terminal htop                         # pane runs `htop` (shell fallback)
+```
+
+**Size keywords**: `25%`, `50%`, `half`, `third`, `quarter`, `full` (or raw percentage).
+
+**Direction keywords**: `bottom`, `vertical`, `below` (v-split); `left` (h-split to the left).
+
+**Count**: `<N> shells`, `<N> terminals`, `<N> panes` (opens that many splits).
+
+**Working directory**: `in <path>` (single); `cwd to <path1> <path2> …` (per-pane).
+
+If the input doesn't match any natural-language pattern, it's treated as a raw shell command and executed in a new pane.
+
+#### `/pipeline` — Run and Schedule Pipelines
+
+Run a saved pipeline with optional input and scheduling:
+
+```
+/pipeline backup                           # run with defaults
+/pipeline deploy --prod                    # run with flags
+/pipeline backup --input "weekly"          # pass input data
+/pipeline schema-sync --at "2pm tomorrow"  # schedule for later
+```
+
+Output streams to the Activity Feed. If the pipeline takes longer than a few seconds, a dedicated tmux window opens so you can tail scrollback while continuing other work in the Switchboard.
+
+#### Other `/` Commands
+
+| Command | Action |
+|---|---|
+| `/help` | Show command reference |
+| `/quit` | Exit GL1TCH and tear down all tmux windows |
+
+Pipeline panes (opened when you run a pipeline) are laid out automatically: first job splits horizontally, subsequent jobs stack vertically on the right. Use `/terminal equalize` to rebalance panes after several runs.
 
 
 ## Modal Workflows
@@ -212,28 +372,65 @@ Currently available themes:
 Selecting an entry in the Activity Feed and pressing `↵` opens the **Inbox Detail Modal**:
 
 ```
-┌─────────────────────────────────────────────────┐
-│ Pipeline: backup.yaml                      [12 of 47]│
-│ Status: done | Exited: 0 | Runtime: 12.3s      │
-├─────────────────────────────────────────────────┤
-│                                                 │
-│ STDOUT:                                         │
-│ ─────────────────────────────────────────────── │
-│ $ Starting backup...                            │
-│ $ Database backed up to /data/backup.tar.gz    │
-│ $ Compressing files...                          │
-│ $ Done.                                         │
-│                                                 │
-│ [p]revious  [n]ext  [d]elete  [r]erun  [esc]back │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│ Pipeline: backup.yaml                   [12 of 47]│
+│ Status: done | Exit: 0 | Duration: 12.3s        │
+├──────────────────────────────────────────────────┤
+│ started:   2026-04-02 3:45:22 PM                 │
+│ finished:  2026-04-02 3:48:45 PM                 │
+│ cwd:       ~/projects/myapp                      │
+│ model:     neural-chat:7b                        │
+│ ────────────────────────────────────────────────│
+│ steps:                                           │
+│   ├ ✓ backup-database      2.1s                  │
+│   ├ ✓ compress-files       1.5s                  │
+│   ├ ✓ verify-integrity     0.8s                  │
+│   └ ✓ upload-to-archive    7.9s                  │
+│                                                  │
+│ [p]rev [n]ext [d]elete [r]erun [o]tel [esc]back │
+└──────────────────────────────────────────────────┘
 ```
 
+**Run Metadata**:
+- **started** / **finished**: Timestamps when the run began and completed
+- **duration**: Wall-clock time elapsed
+- **exit**: Exit status (0 = success, non-zero = failure)
+- **cwd**: Working directory the pipeline ran in
+- **model**: LLM model used (if applicable)
+
+**Steps Section**: Shows each pipeline step with a badge:
+- `✓` (green) — completed successfully
+- `✗` (red) — failed with error
+- `·` (dim) — pending or in progress
+
+Each step shows duration in seconds. If OTel tracing is enabled, step durations come from span timings (more accurate than wall-clock).
+
 **Navigation inside the modal**:
+- `j`/`k` or arrows — Scroll through the output
 - `p` — Jump to the previous result in the Inbox
 - `n` — Jump to the next result in the Inbox
-- `d` — Delete the current result
+- `d` — Delete the current result (removes from Inbox)
 - `r` — Re-run the pipeline or agent with the same parameters
+- `o` — Open the OTel trace tree (if traces are available)
 - `esc` — Close and return to the Switchboard
+
+### OTel Trace View
+
+When a pipeline includes instrumented steps, press `o` in the Inbox Detail to view the trace tree:
+
+```
+fetch-schema                                    OK · 850ms
+  ├ http.request                                OK · 145ms
+  ├ http.response                               OK · 12ms
+  └ json.parse                                  OK · 3ms
+transform                                       OK · 680ms
+  ├ schema.validate                             OK · 450ms
+  └ schema.transform                            OK · 230ms
+publish                                         OK · 120ms
+  └ http.request                                OK · 115ms
+```
+
+Spans are indented by depth. Each shows status (`OK` or `ERR`) and duration in milliseconds. This view is useful for diagnosing performance bottlenecks in slow pipelines.
 
 ### Prompt Builder (`^spc p`)
 
@@ -337,8 +534,8 @@ Pipeline outputs are automatically saved to the **Inbox**. To re-run an old pipe
 
 ## See Also
 
-- [Pipelines](./pipelines/overview.md) — Author and structure pipeline YAML
-- [Agents](./agents/overview.md) — Configure providers and models
-- [Shortcuts](./keyboard.md) — Full keybinding reference
-- [Themes](./themes.md) — Customize colors and appearance
-- [Inbox](./inbox.md) — Manage pipeline results
+- [Pipelines](./pipelines.md) — Author and structure `.pipeline.yaml` files
+- [Sidecars & Agents](./sidecars.md) — Configure AI providers and models
+- [Router & Intent Dispatch](./router.md) — How the assistant interprets your prompts and commands
+- [Signals & Handlers](./signals.md) — Set up narration, achievements, and game events
+- [Themes & Colors](./themes.md) — Customize the Switchboard appearance

@@ -44,18 +44,40 @@ Press `^spc` (ctrl+space) then a key:
 | `^spc h` | This help screen |
 | `^spc t` | Switch to Switchboard |
 | `^spc m` | Theme picker |
-| `^spc j` | Jump to any window |
 | `^spc c` | New window |
 | `^spc d` | Detach session |
 | `^spc r` | Reload GL1TCH (picks up new binary) |
-| `^spc q` | Quit |
+| `^spc q` | Quit (tears down all tmux sessions) |
 | `^spc [` / `]` | Previous / next window |
 | `^spc x` / `X` | Kill pane / window |
 | `^spc a` | Jump to GL1TCH assistant |
 
 ### Pipelines
 
-Pipelines live in `~/.config/glitch/pipelines/`. Each is a `.pipeline.yaml` file. Ask GL1TCH to run one, or use the pipeline launcher overlay.
+Pipelines live in `~/.config/glitch/pipelines/`. Each is a `.pipeline.yaml` file.
+
+To run a pipeline, use an explicit run-verb in the chat:
+
+```
+run backup
+launch deploy every morning at 8am
+execute sync-repos on https://github.com/org/repo
+```
+
+GL1TCH only dispatches pipelines when you explicitly ask. Questions, observations, and generic task requests (`review my PR`, `check the logs`) are handled by the AI directly — they never trigger an automated pipeline.
+
+### Terminal Panes
+
+The `/terminal` command manages inline tmux panes without leaving the Switchboard:
+
+| Command | Action |
+|---|---|
+| `/terminal` | Open a new terminal pane (horizontal split) |
+| `/terminal <cmd>` | Open a pane running `<cmd>` |
+| `/terminal list` | List open terminal panes |
+| `/terminal kill` | Kill the most recently opened terminal pane |
+| `/terminal focus <n>` | Focus terminal pane `n` |
+| `/terminal equalize` | Equalize all pane sizes |
 
 ### Themes
 
