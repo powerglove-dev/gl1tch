@@ -22,7 +22,7 @@ cron_panel_title: "▓▒░ SCHEDULED ░▒▓"
 
 # ── Header + modal titles ─────────────────────────────────────────────────────
 
-switchboard_header_title: "\e[38;2;189;147;249m✦ GL1TCH ✦\e[0m"
+deck_header_title: "\e[38;2;189;147;249m✦ GL1TCH ✦\e[0m"
 quit_modal_title: ">>> BAIL OUT <<<"
 help_modal_title: ">>> GETTING STARTED <<<"
 theme_picker_title: ">>> SELECT THEME <<<"
@@ -128,7 +128,7 @@ welcome_phase_nav: |
   ^spc n  →  new agent from clipboard
   Esc     →  back / cancel
 
-  the switchboard (window 0) is GL1TCH — talk to me to run pipelines,
+  the deck (window 0) is GL1TCH — talk to me to run pipelines,
   launch agents, check job status, or navigate the system.
 
   ready to hear about the brain?

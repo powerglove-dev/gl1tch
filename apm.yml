@@ -7,6 +7,8 @@ description: 'GLITCH — your AI, your terminal, your rules. AI workspace orches
 dependencies:
   apm:
   - 8op-org/gl1tch
+  - affaan-m/everything-claude-code/skills/golang-patterns
+  - affaan-m/everything-claude-code/skills/golang-testing
   # Example: agent with a pipeline stanza. On install, gl1tch materializes
   # ~/.config/glitch/pipelines/apm.bbs-site-reviewer.pipeline.yaml so the
   # router can dispatch to this agent by intent without user-authored pipeline YAML.
