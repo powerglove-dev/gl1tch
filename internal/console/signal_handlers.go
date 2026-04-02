@@ -22,9 +22,10 @@ type SignalHandlerRegistry map[string]func(topic, payload string)
 func BuildSignalHandlerRegistry(narrationCh chan<- string, st *store.Store) SignalHandlerRegistry {
 	eng := game.NewGameEngine()
 	return SignalHandlerRegistry{
-		"companion": companionHandler(eng, narrationCh),
-		"score":     scoreHandler(st),
-		"log":       logHandler(),
+		"companion":  companionHandler(eng, narrationCh),
+		"score":      scoreHandler(st),
+		"log":        logHandler(),
+		"npc-memory": npcMemoryHandler(st),
 	}
 }
 
@@ -93,6 +94,48 @@ func scoreHandler(st *store.Store) func(topic, payload string) {
 		defer cancel()
 		if err := st.RecordScoreEvent(ctx, ev); err != nil {
 			log.Printf("[DEBUG] signal_handlers: score handler: record event: %v", err)
+		}
+	}
+}
+
+// npcMemoryPayload is the expected JSON shape for the npc-memory handler.
+type npcMemoryPayload struct {
+	NPCID        string `json:"npc_id"`
+	NPCName      string `json:"npc_name"`
+	Trigger      string `json:"trigger"`
+	Text         string `json:"text"`
+	StealthLevel int    `json:"stealth_level"`
+}
+
+func npcMemoryHandler(st *store.Store) func(topic, payload string) {
+	return func(topic, payload string) {
+		if st == nil {
+			return
+		}
+		var p npcMemoryPayload
+		if err := json.Unmarshal([]byte(payload), &p); err != nil {
+			fmt.Fprintf(os.Stderr, "[npc-memory] cannot parse payload for %s: %v\n", topic, err)
+			return
+		}
+		if p.NPCID == "" || p.NPCName == "" {
+			fmt.Fprintf(os.Stderr, "[npc-memory] missing required fields (npc_id, npc_name) for %s\n", topic)
+			return
+		}
+		body := fmt.Sprintf(
+			"Player triggered %q with NPC %s (%s). NPC said: %q. Stealth: %d.",
+			p.Trigger, p.NPCName, p.NPCID, p.Text, p.StealthLevel,
+		)
+		note := store.BrainNote{
+			RunID:     0,
+			StepID:    "npc-" + p.NPCID,
+			CreatedAt: time.Now().Unix(),
+			Tags:      "mud,npc-" + p.NPCID,
+			Body:      body,
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := st.InsertBrainNote(ctx, note); err != nil {
+			fmt.Fprintf(os.Stderr, "[npc-memory] failed to write brain note: %v\n", err)
 		}
 	}
 }
