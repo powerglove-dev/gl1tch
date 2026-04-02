@@ -705,8 +705,8 @@ When a pipeline or long-running agent job completes, GL1TCH automatically create
 ### How It Works
 
 1. Job starts → GL1TCH creates a window named `glitch-<runID>` in the current session
-2. Output is tee'd to `/tmp/glitch-<runID>.log` and displayed in the window
-3. When the job finishes, the exit code is written to `/tmp/glitch-<runID>.done`
+2. Output is tee'd to a log file (e.g. `/tmp/glitch-42.log`) and displayed in the window
+3. When the job finishes, the exit code is written to a done file (e.g. `/tmp/glitch-42.done`)
 4. Window stays open (via `remain-on-exit on`); `automatic-rename` is disabled so the name doesn't change
 5. You can attach to the window with: `tmux attach-session -t <target>`
 
@@ -714,7 +714,7 @@ The tmux window target is fully-qualified, e.g. `session:@123` (using the stable
 
 ### Tail Output
 
-If a pane is already running when you launch a pipeline, GL1TCH can optionally tail its output live with `tail -f /tmp/glitch-<runID>.log` instead of embedding a full shell command. This is a fallback for agent jobs that are managed in-process.
+If a pane is already running when you launch a pipeline, GL1TCH can optionally tail its output live with `tail -f` on the run log file instead of embedding a full shell command. This is a fallback for agent jobs that are managed in-process.
 
 ### Layout Stability
 
