@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/8op-org/gl1tch/internal/executor"
 	"github.com/8op-org/gl1tch/internal/game"
+	"github.com/8op-org/gl1tch/internal/pipeline"
 	"github.com/8op-org/gl1tch/internal/store"
 )
 
@@ -22,10 +24,11 @@ type SignalHandlerRegistry map[string]func(topic, payload string)
 func BuildSignalHandlerRegistry(narrationCh chan<- string, st *store.Store) SignalHandlerRegistry {
 	eng := game.NewGameEngine()
 	return SignalHandlerRegistry{
-		"companion":  companionHandler(eng, narrationCh),
-		"score":      scoreHandler(st),
-		"log":        logHandler(),
-		"npc-memory": npcMemoryHandler(st),
+		"companion":   companionHandler(eng, narrationCh),
+		"score":       scoreHandler(st),
+		"log":         logHandler(),
+		"npc-memory":  npcMemoryHandler(st),
+		"npc-narrate": npcNarrateHandler(narrationCh, st),
 	}
 }
 
@@ -137,6 +140,66 @@ func npcMemoryHandler(st *store.Store) func(topic, payload string) {
 		if _, err := st.InsertBrainNote(ctx, note); err != nil {
 			fmt.Fprintf(os.Stderr, "[npc-memory] failed to write brain note: %v\n", err)
 		}
+	}
+}
+
+// npcNarrateHandler runs the mud-npc-narrate pipeline with brain injection so
+// the Ollama narration has access to prior interaction notes for this NPC.
+func npcNarrateHandler(narrationCh chan<- string, st *store.Store) func(topic, payload string) {
+	pipelinePath := filepath.Join(os.Getenv("HOME"), "Projects", "gl1tch-mud", "pipelines", "mud-npc-narrate.pipeline.yaml")
+	wrappersDir := filepath.Join(os.Getenv("HOME"), ".config", "glitch", "wrappers")
+
+	return func(topic, payload string) {
+		if narrationCh == nil {
+			return
+		}
+		var p npcMemoryPayload
+		if err := json.Unmarshal([]byte(payload), &p); err != nil || p.NPCID == "" {
+			return
+		}
+		go func() {
+			f, err := os.Open(pipelinePath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[npc-narrate] pipeline not found: %v\n", err)
+				return
+			}
+			defer f.Close()
+
+			pipe, err := pipeline.Load(f)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[npc-narrate] pipeline load error: %v\n", err)
+				return
+			}
+
+			mgr := executor.NewManager()
+			if errs := mgr.LoadWrappersFromDir(wrappersDir); len(errs) > 0 {
+				for _, e := range errs {
+					fmt.Fprintf(os.Stderr, "[npc-narrate] sidecar warn: %v\n", e)
+				}
+			}
+
+			userInput := fmt.Sprintf("NPC: %s\nWhat they said: %q\nTrigger: %s\nPlayer stealth: %d",
+				p.NPCName, p.Text, p.Trigger, p.StealthLevel)
+
+			var opts []pipeline.RunOption
+			opts = append(opts, pipeline.WithNoClarification())
+			if st != nil {
+				opts = append(opts, pipeline.WithRunStore(st))
+				opts = append(opts, pipeline.WithBrainInjector(pipeline.NewStoreBrainInjector(st)))
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			result, err := pipeline.Run(ctx, pipe, mgr, userInput, opts...)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[npc-narrate] run error: %v\n", err)
+				return
+			}
+			if result != "" {
+				narrationCh <- result
+			}
+		}()
 	}
 }
 
