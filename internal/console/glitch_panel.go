@@ -1279,6 +1279,20 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 				return p.handlePipelineFlowInput(userText)
 			}
 
+			// Widget mode: route ALL input to the active widget binary before any
+			// glitch slash-command handling so /help, /quit, etc. are not intercepted.
+			if p.activeWidget != nil {
+				cfg := p.activeWidget
+				if userText == cfg.Schema.Mode.ExitCommand {
+					p.activeWidget = nil
+					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
+					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: cfg.Schema.Name + " deactivated."})
+					return p, func() tea.Msg { return glitchWidgetModeMsg{cfg: nil} }
+				}
+				p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
+				return p, widgetExecCmd(cfg, userText)
+			}
+
 			// Handle slash commands before appending to conversation.
 			if strings.HasPrefix(userText, "/") {
 				cmd := strings.Fields(userText)[0]
@@ -1590,19 +1604,6 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 						}
 					}
 				}
-			}
-
-			// Widget mode: route input to the active widget binary instead of AI.
-			if p.activeWidget != nil {
-				cfg := p.activeWidget
-				if userText == cfg.Schema.Mode.ExitCommand {
-					p.activeWidget = nil
-					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
-					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: cfg.Schema.Name + " deactivated."})
-					return p, func() tea.Msg { return glitchWidgetModeMsg{cfg: nil} }
-				}
-				p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
-				return p, widgetExecCmd(cfg, userText)
 			}
 
 			p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText, ts: time.Now()})
