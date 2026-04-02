@@ -137,14 +137,20 @@ func (inst *Installer) writeSidecar(m *PluginManifest, binPath string) (string, 
 
 // sidecarOut mirrors executor.SidecarSchema for marshalling without importing that package.
 type sidecarOut struct {
-	Name         string   `yaml:"name"`
-	Description  string   `yaml:"description,omitempty"`
-	Command      string   `yaml:"command"`
-	Args         []string `yaml:"args,omitempty"`
-	Category     string   `yaml:"category,omitempty"`
-	Kind         string   `yaml:"kind,omitempty"`
-	InputSchema  string   `yaml:"input_schema,omitempty"`
-	OutputSchema string   `yaml:"output_schema,omitempty"`
+	Name         string      `yaml:"name"`
+	Description  string      `yaml:"description,omitempty"`
+	Command      string      `yaml:"command"`
+	Args         []string    `yaml:"args,omitempty"`
+	Category     string      `yaml:"category,omitempty"`
+	Kind         string      `yaml:"kind,omitempty"`
+	InputSchema  string      `yaml:"input_schema,omitempty"`
+	OutputSchema string      `yaml:"output_schema,omitempty"`
+	Signals      []signalOut `yaml:"signals,omitempty"`
+}
+
+type signalOut struct {
+	Topic   string `yaml:"topic"`
+	Handler string `yaml:"handler"`
 }
 
 func buildSidecarSchema(m *PluginManifest, binPath string) sidecarOut {
@@ -163,6 +169,11 @@ func buildSidecarSchema(m *PluginManifest, binPath string) sidecarOut {
 		desc = m.Description
 	}
 
+	var sigs []signalOut
+	for _, s := range m.Sidecar.Signals {
+		sigs = append(sigs, signalOut{Topic: s.Topic, Handler: s.Handler})
+	}
+
 	return sidecarOut{
 		Name:         m.Name,
 		Description:  desc,
@@ -172,5 +183,6 @@ func buildSidecarSchema(m *PluginManifest, binPath string) sidecarOut {
 		Kind:         kind,
 		InputSchema:  m.Sidecar.InputSchema,
 		OutputSchema: m.Sidecar.OutputSchema,
+		Signals:      sigs,
 	}
 }

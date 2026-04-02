@@ -20,9 +20,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+// glitchPaneIDs maps session name → tmux pane ID (%N) of the gl1tch TUI pane.
+// Captured at session creation, stable across split-window -b renumbering.
+var glitchPaneIDs sync.Map
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -44,6 +49,11 @@ func setupTerminalSession(t *testing.T, suffix string) (session string, cleanup 
 		"TERM=xterm-256color",
 	})
 
+	// Capture the pane ID before any splits so it stays valid after -b renumbering.
+	if out, err := exec.Command("tmux", "list-panes", "-t", session, "-F", "#{pane_id}").Output(); err == nil {
+		glitchPaneIDs.Store(session, strings.TrimSpace(string(out)))
+	}
+
 	if !waitFor(5*time.Second, func() bool {
 		return strings.Contains(captureGlitch(t, session), "ready")
 	}) {
@@ -54,11 +64,14 @@ func setupTerminalSession(t *testing.T, suffix string) (session string, cleanup 
 	return session, cleanup
 }
 
-// glitchPane returns the tmux target for the gl1tch TUI pane (always pane 0
-// in window 0). After /terminal splits the window, focus moves to the new pane;
-// using this target keeps sends and captures anchored to gl1tch.
+// glitchPane returns the tmux target for the gl1tch TUI pane. Uses the stable
+// pane ID (%N) captured at session creation so it stays correct after
+// split-window -b renumbers pane indices.
 func glitchPane(session string) string {
-	return session + ":0.0"
+	if id, ok := glitchPaneIDs.Load(session); ok {
+		return id.(string)
+	}
+	return session + ":0.0" // fallback for sessions not created via setupTerminalSession
 }
 
 // termCmd sends a /terminal command to the gl1tch pane (pane 0) regardless of

@@ -1891,6 +1891,7 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 						p.sessions.create(name)
 					}
 					p = p.switchToSession(name)
+					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "▶ session: " + name})
 					return p, nil
 				case "/clear":
 					p.messages = nil
@@ -2165,6 +2166,42 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 
 	// Forward to textinput when focused; then update autocomplete state.
 	if p.focused {
+		// BubbleTea batches consecutive printable chars into a single KeyRunes
+		// event. If that batch's String() collides with a textarea key binding
+		// (e.g. runes 'l','e','f','t' → String()=="left" matches CharacterBackward),
+		// the binding fires instead of inserting the characters. Split multi-rune
+		// batches into individual single-rune events so each rune is inserted.
+		if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyRunes && len(keyMsg.Runes) > 1 {
+			batchOldVal := p.input.Value()
+			var cmds []tea.Cmd
+			for _, r := range keyMsg.Runes {
+				single := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+				var c tea.Cmd
+				p.input, c = p.input.Update(single)
+				cmds = append(cmds, c)
+			}
+			newVal := p.input.Value()
+			if newVal != batchOldVal {
+				p.acSuppressed = false
+			}
+			if p.activeWidget != nil && newVal != "" && !p.acSuppressed {
+				results := p.filterSuggestions(newVal)
+				p.acSuggestions = results
+				p.acActive = len(results) > 0
+				p.acCursor = 0
+			} else if p.activeWidget == nil && strings.HasPrefix(newVal, "/") && !p.acSuppressed {
+				results := p.filterSuggestions(newVal)
+				p.acSuggestions = results
+				p.acActive = len(results) > 0
+				p.acCursor = 0
+			} else {
+				p.acActive = false
+				if p.activeWidget != nil || !strings.HasPrefix(newVal, "/") {
+					p.acSuppressed = false
+				}
+			}
+			return p, tea.Batch(cmds...)
+		}
 		oldVal := p.input.Value()
 		var cmd tea.Cmd
 		p.input, cmd = p.input.Update(msg)
