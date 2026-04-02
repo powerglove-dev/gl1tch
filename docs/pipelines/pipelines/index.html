@@ -1,0 +1,106 @@
+<!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Pipelines — GLITCH</title><meta name="description" content="Declarative multi-step workflows as a DAG with dependency injection, parallel execution, and structured output context."><link rel="stylesheet" href="/css/bbs.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <div class="docs-page" id="docs-page"> <button class="docs-hamburger" id="docs-hamburger" aria-label="Toggle sidebar"> <span class="docs-hamburger-icon">[=]</span> </button> <aside class="docs-sidebar" id="docs-sidebar"> <div class="docs-sidebar-header"> <a href="/" class="docs-logo-link"> <span class="fg-purple bold">GL1TCH</span> </a> <a href="/" class="docs-back-link">&larr; back to terminal</a> </div> <nav class="docs-nav"> <a class="docs-nav-link" href="/docs/">
+INDEX
+</a> <div class="docs-nav-section"> <div class="docs-nav-section-label"> <span class="fg-comment">&#x250C;&#x2500;</span> PIPELINES </div> <a class="docs-nav-link" href="/docs/pipelines/philosophy"> GL1TCH Philosophy </a><a class="docs-nav-link" href="/docs/pipelines/quickstart"> Your First Pipeline </a><a class="docs-nav-link" href="/docs/pipelines/console"> Console — The Switchboard </a><a class="docs-nav-link active" href="/docs/pipelines/pipelines"> Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/yaml-reference"> Pipeline YAML Reference </a><a class="docs-nav-link" href="/docs/pipelines/executors"> Executors and Plugins </a><a class="docs-nav-link" href="/docs/pipelines/brain"> The Brain System </a><a class="docs-nav-link" href="/docs/pipelines/examples"> Real-World Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/workflows"> Workflows </a><a class="docs-nav-link" href="/docs/pipelines/cli-reference"> CLI Reference </a><a class="docs-nav-link" href="/docs/pipelines/cron"> Cron Scheduling </a><a class="docs-nav-link" href="/docs/pipelines/architecture"> Architecture </a><a class="docs-nav-link" href="/docs/pipelines/technologies"> Technologies </a><a class="docs-nav-link" href="/docs/pipelines/themes"> Themes </a><a class="docs-nav-link" href="/docs/pipelines/plugins"> Plugins </a><a class="docs-nav-link" href="/docs/pipelines/prompts"> Prompts </a><a class="docs-nav-link" href="/docs/pipelines/telemetry"> Telemetry </a> <div class="docs-nav-section-end"> <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span> </div> </div> </nav> </aside> <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div> <main class="docs-main"> <div class="docs-content"> <div class="docs-breadcrumb"> <a href="/docs/">docs</a> <span class="fg-comment"> / </span> <a href="/docs/">pipelines</a> </div> <article>  <h1 class="docs-page-title">Pipelines</h1> <p class="docs-page-desc">Declarative multi-step workflows as a DAG with dependency injection, parallel execution, and structured output context.</p> <div class="docs-article"> <p>Pipelines are declarative workflows defined in YAML that gl1tch executes as a directed acyclic graph (DAG). Each step runs an executor—shell command, LLM model, builtin function, or plugin—and its output becomes context for downstream steps. Pipelines are auditable, repeatable, and chainable: once a pipeline finishes, its outputs feed the brain so the next pipeline runs smarter.</p>
+<h2 id="architecture-overview">Architecture Overview</h2>
+<p>A pipeline lives in <code>~/.config/glitch/pipelines/&#x3C;name>.pipeline.yaml</code> and is executed by the runner in <code>internal/pipeline/runner.go</code>. The runner constructs a DAG from step <code>Needs</code> declarations, executes independent steps concurrently with goroutines, and manages an <code>ExecutionContext</code> that threads data between steps via template expressions.</p>
+<p><strong>Data flow:</strong></p>
+<ol>
+<li>Runner loads pipeline YAML → validates DAG (cycle detection, unknown references)</li>
+<li>Builds adjacency list mapping each step to its dependents</li>
+<li>Starts all steps with no dependencies</li>
+<li>As each step completes, enqueues its dependents if all their <code>Needs</code> are satisfied</li>
+<li>Collects step outputs into a shared context map: <code>step.&#x3C;id>.data.&#x3C;key></code></li>
+<li>Passes context to downstream steps via template interpolation</li>
+<li>Persists final outputs and brain notes to the store</li>
+</ol>
+<p><strong>Packages:</strong></p>
+<ul>
+<li><code>internal/pipeline</code> — core DAG builder, runner, executor interface, and builtins</li>
+<li><code>internal/executor</code> — registered executors (shell, LLM, plugins)</li>
+<li><code>internal/store</code> — SQLite checkpoint of runs and brain notes</li>
+<li><code>internal/brainrag</code> — optional RAG-based context injection</li>
+</ul>
+<h2 id="technologies">Technologies</h2>
+<ul>
+<li><strong>YAML</strong> — declarative, version-controllable step definitions</li>
+<li><strong>Goroutines</strong> — parallel step execution within max_parallel bounds</li>
+<li><strong>Go templates</strong> — interpolation of <code>{ {steps.&#x3C;id>.&#x3C;key>}}</code> and builtin functions</li>
+<li><strong>SQLite</strong> — persistent storage of run history and brain output</li>
+</ul>
+<h2 id="concepts">Concepts</h2>
+<p><strong>Step</strong>
+A single unit of work: shell command, LLM prompt, user input, output write, or builtin action. Steps run within a lifecycle (Init → Execute → Cleanup) and can declare retry policies, failure handlers, and forwarding expressions.</p>
+<p><strong>Executor</strong>
+A handler that runs a step: <code>shell</code>, <code>claude</code>, <code>ollama</code>, <code>builtin.assert</code>, <code>builtin.log</code>, etc. Executors are registered in <code>internal/executor</code> and identified by hierarchical name: <code>category.action</code>.</p>
+<p><strong>DAG (Directed Acyclic Graph)</strong>
+The dependency graph formed by step <code>Needs</code> declarations. The runner detects cycles at load time and executes steps as soon as all their dependencies complete.</p>
+<p><strong>Needs</strong>
+A list of step IDs that must complete before this step runs. Used to declare sequential or parallel chains. If <code>needs: []</code> (or omitted), the step runs immediately.</p>
+<p><strong>Condition</strong>
+An expression evaluated after a step completes to decide whether to run the next step, skip it, or route to a failure handler. Syntax: <code>always</code>, <code>not_empty</code>, <code>contains:&#x3C;string></code>, <code>matches:&#x3C;regex></code>, <code>len > &#x3C;n></code>.</p>
+<p><strong>ExecutionContext</strong>
+Shared mutable state (map[string]any) passed between steps. Accessed via dot-separated paths: <code>step.fetch.data.url</code>. Step outputs are stored as <code>step.&#x3C;id>.data.&#x3C;key></code>.</p>
+<p><strong>Template Expression</strong>
+Interpolation syntax in step Prompt, Input, Args, and Vars fields:</p>
+<ul>
+<li><code>{ {steps.&#x3C;id>.&#x3C;key>}}</code> — access step output by ID and key</li>
+<li><code>{{.param.&#x3C;name>}}</code> — access pipeline-level var</li>
+<li><code>{{env "VAR_NAME"}}</code> — read environment variable</li>
+<li><code>{{"&#x3C;expr>" | upper | trim}}</code> — builtin functions (replace, split, join, default, get, etc.)</li>
+</ul>
+<p><strong>ForEach</strong>
+When a step declares <code>for_each: &#x3C;list></code>, the runner clones it N times (one per item) and collects outputs into an array. Items are newline-separated strings or a template expression that resolves to a list.</p>
+<p><strong>Brain</strong>
+Persistent embedding store (<code>internal/store</code>) that checkpoints step outputs and LLM reasoning blocks (<code>&#x3C;brain></code> XML) from past runs. Pipelines can inject brain context into prompts so later steps see historical knowledge without manual threading.</p>
+<h2 id="configuration--yaml-reference">Configuration / YAML Reference</h2>
+<p><strong>Pipeline top-level:</strong></p>
+<ul>
+<li><code>name</code> (required, string) — pipeline identifier; used in discovery and routing</li>
+<li><code>version</code> (string) — semantic version; reserved for schema evolution</li>
+<li><code>description</code> (string) — one-sentence summary for discovery and routing</li>
+<li><code>trigger_phrases</code> (array of strings) — example imperative invocations (“run git pulse”, “review my PR”) embedded in the intent router instead of description when present</li>
+<li><code>steps</code> (array of Step) — ordered step definitions</li>
+<li><code>vars</code> (map) — pipeline-level context available to all steps as <code>{{.param.&#x3C;name>}}</code></li>
+<li><code>max_parallel</code> (integer) — maximum concurrent steps; defaults to 8 when zero</li>
+<li><code>write_brain</code> (boolean) — if true, all steps inject brain write instructions (can be overridden per step)</li>
+<li><code>game</code> (tri-state boolean, pointer) — nil=enabled, false=disabled; gates game scoring for this pipeline</li>
+</ul>
+<p><strong>Step fields:</strong></p>
+<p>Core execution:</p>
+<ul>
+<li><code>id</code> (required, string) — unique step identifier within the pipeline</li>
+<li><code>executor</code> (string) — executor name: <code>shell</code>, <code>claude</code>, <code>ollama</code>, <code>builtin.assert</code>, <code>category.action</code>, etc. Defaults to LLM if omitted and model is set.</li>
+<li><code>model</code> (string) — Ollama or Claude model name; required for LLM steps</li>
+<li><code>type</code> (string) — <code>input</code> (user prompt), <code>output</code> (write to disk), or omitted (executor step)</li>
+</ul>
+<p>Input &#x26; output:</p>
+<ul>
+<li><code>prompt</code> (string) — LLM prompt or shell command body; supports template syntax</li>
+<li><code>input</code> (string) — user-facing prompt for <code>type: input</code> steps</li>
+<li><code>args</code> (map) — structured arguments passed to executor; supports nested objects and template expressions (supersedes <code>vars</code>)</li>
+<li><code>vars</code> (map[string]string) — flat string variables passed to executor; used when <code>args</code> is not set</li>
+<li><code>inputs</code> (map[string]string) — explicit mapping of input names to template expressions, resolved before execution</li>
+<li><code>outputs</code> (map[string]string) — declares output keys that this step produces; full output string stored under each key</li>
+<li><code>publish_to</code> (string) — event bus topic to forward this step’s output (e.g., <code>orcai.pipeline.step.done</code>)</li>
+</ul>
+<p>Branching &#x26; control flow:</p>
+<ul>
+<li><code>needs</code> (array of strings) — list of step IDs that must complete before this step runs; empty or omitted means run immediately</li>
+<li><code>condition</code> (string) — post-execution branch condition: <code>always</code>, <code>not_empty</code>, <code>contains:&#x3C;str></code>, <code>matches:&#x3C;re></code>, <code>len > &#x3C;n></code>; if false, skip downstream dependents</li>
+<li><code>retry</code> (object) — retry policy with <code>max_attempts</code> (int), <code>interval</code> (duration string), <code>backoff</code> (bool); applied on executor error</li>
+<li><code>on_failure</code> (string) — step ID to run if this step fails after all retries; exclusive with condition routing</li>
+<li><code>for_each</code> (string) — newline-separated list or template expression resolving to array; clones step N times and collects outputs</li>
+</ul>
+<p>Brain &#x26; context:</p>
+<ul>
+<li><code>no_brain</code> (boolean) — if true, suppress brain context injection (use for output-generation steps where brain markup would leak into content)</li>
+<li><code>write_brain</code> (tri-state boolean, pointer) — nil=inherit pipeline setting, true=force on, false=force off</li>
+<li><code>no_clarify</code> (boolean) — if true, suppress GLITCH_CLARIFY instruction for automated steps</li>
+<li><code>prompt_id</code> (string) — title of a saved prompt in the store; prepended to prompt body with blank-line separator (case-insensitive matching)</li>
+</ul>
+<p><strong>Retry policy:</strong></p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">retry</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  max_attempts</span><span style="color:#E1E4E8">: </span><span style="color:#79B8FF">3</span></span>
+<span class="line"><span style="color:#85E89D">  interval</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"5s"</span></span>
+<span class="line"><span style="color:#85E89D">  backoff</span><span style="color:#E1E4E8">: </span><span style="color:#79B8FF">true</span><span style="color:#6A737D">     # exponential backoff (not implemented yet, reserved)</span></span>
+<span class="line"><span style="color:#79B8FF">  on</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"always"</span><span style="color:#6A737D">      # or "on_failure" (implicit default)</span></span></code></pre> </div>  </article> <nav class="docs-prev-next"> <a class="docs-prev-next-link prev" href="/docs/pipelines/console"> <span class="docs-prev-next-label fg-comment">&larr; prev</span> <span class="docs-prev-next-title">Console — The Switchboard</span> </a> <a class="docs-prev-next-link next" href="/docs/pipelines/yaml-reference"> <span class="docs-prev-next-label fg-comment">next &rarr;</span> <span class="docs-prev-next-title">Pipeline YAML Reference</span> </a> </nav> </div> </main> </div> <script type="module">const d=document.getElementById("docs-hamburger"),n=document.getElementById("docs-sidebar"),e=document.getElementById("docs-sidebar-overlay");function t(){n?.classList.toggle("open"),e?.classList.toggle("open")}d?.addEventListener("click",t);e?.addEventListener("click",t);</script>  </body></html>

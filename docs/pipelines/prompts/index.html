@@ -1,0 +1,104 @@
+<!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Prompts — GLITCH</title><meta name="description" content="Save and test reusable prompts, inject them into pipelines, and iterate interactively."><link rel="stylesheet" href="/css/bbs.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <div class="docs-page" id="docs-page"> <button class="docs-hamburger" id="docs-hamburger" aria-label="Toggle sidebar"> <span class="docs-hamburger-icon">[=]</span> </button> <aside class="docs-sidebar" id="docs-sidebar"> <div class="docs-sidebar-header"> <a href="/" class="docs-logo-link"> <span class="fg-purple bold">GL1TCH</span> </a> <a href="/" class="docs-back-link">&larr; back to terminal</a> </div> <nav class="docs-nav"> <a class="docs-nav-link" href="/docs/">
+INDEX
+</a> <div class="docs-nav-section"> <div class="docs-nav-section-label"> <span class="fg-comment">&#x250C;&#x2500;</span> PIPELINES </div> <a class="docs-nav-link" href="/docs/pipelines/philosophy"> GL1TCH Philosophy </a><a class="docs-nav-link" href="/docs/pipelines/quickstart"> Your First Pipeline </a><a class="docs-nav-link" href="/docs/pipelines/console"> Console — The Switchboard </a><a class="docs-nav-link" href="/docs/pipelines/pipelines"> Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/yaml-reference"> Pipeline YAML Reference </a><a class="docs-nav-link" href="/docs/pipelines/executors"> Executors and Plugins </a><a class="docs-nav-link" href="/docs/pipelines/brain"> The Brain System </a><a class="docs-nav-link" href="/docs/pipelines/examples"> Real-World Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/workflows"> Workflows </a><a class="docs-nav-link" href="/docs/pipelines/cli-reference"> CLI Reference </a><a class="docs-nav-link" href="/docs/pipelines/cron"> Cron Scheduling </a><a class="docs-nav-link" href="/docs/pipelines/architecture"> Architecture </a><a class="docs-nav-link" href="/docs/pipelines/technologies"> Technologies </a><a class="docs-nav-link" href="/docs/pipelines/themes"> Themes </a><a class="docs-nav-link" href="/docs/pipelines/plugins"> Plugins </a><a class="docs-nav-link active" href="/docs/pipelines/prompts"> Prompts </a><a class="docs-nav-link" href="/docs/pipelines/telemetry"> Telemetry </a> <div class="docs-nav-section-end"> <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span> </div> </div> </nav> </aside> <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div> <main class="docs-main"> <div class="docs-content"> <div class="docs-breadcrumb"> <a href="/docs/">docs</a> <span class="fg-comment"> / </span> <a href="/docs/">pipelines</a> </div> <article>  <h1 class="docs-page-title">Prompts</h1> <p class="docs-page-desc">Save and test reusable prompts, inject them into pipelines, and iterate interactively.</p> <div class="docs-article"> <p>Prompts are persistent, searchable templates for AI interactions. gl1tch lets you author prompts once, test them interactively against live models, and inject them into pipeline steps—eliminating copy-paste, enabling fast iteration, and building a library of proven instructions.</p>
+<h2 id="architecture">Architecture</h2>
+<p>The prompt system has three layers: <strong>storage</strong> (SQLite table), <strong>authoring</strong> (interactive TUI modal), and <strong>injection</strong> (pipeline step field).</p>
+<p>Prompts live in the <code>prompts</code> table in gl1tch’s SQLite database. When you create or edit a prompt via the prompt manager TUI (<code>internal/promptmgr/</code>), changes persist immediately. Pipeline steps reference saved prompts by <code>prompt_id</code>; during execution, the <code>internal/pipeline/runner.go</code> resolves the prompt body from the store and prepends it to the step’s input before execution.</p>
+<p>The prompt manager is a full-screen modal accessible from the jump window (press <code>j</code> then type “prompts”) or via a configurable keybinding. It mirrors the architecture of other gl1tch modals: a BubbleTea model with independent panels for list navigation, editing, and live test output.</p>
+<h2 id="technologies">Technologies</h2>
+<ul>
+<li><strong>SQLite</strong> — Persistent storage with additive schema migrations; prompts are queried by ID or title.</li>
+<li><strong>BubbleTea</strong> — TUI framework for the three-panel prompt manager modal.</li>
+<li><strong>Streaming executor</strong> — The test runner panel streams model responses into a scrollable viewport without blocking the TUI.</li>
+</ul>
+<h2 id="concepts">Concepts</h2>
+<p><strong>Prompt ID</strong> — The unique identifier for a saved prompt. Used in pipeline <code>prompt_id</code> fields to reference the prompt.</p>
+<p><strong>Prompt Title</strong> — Human-readable name (e.g., “Summarize code review”). Titles are displayed in the prompt manager list and fuzzy-searchable.</p>
+<p><strong>Prompt Body</strong> — The instruction text sent to the model. When a prompt is injected via <code>prompt_id</code>, the full body is prepended to the step’s input.</p>
+<p><strong>Model Slug</strong> — The executor/model name (e.g., “openai”, “ollama:mistral”) associated with the prompt. The prompt manager shows this in the list so you can filter or browse prompts by their intended model.</p>
+<p><strong>Prompt Test Runner</strong> — The inline panel in the prompt manager where you run a prompt against a selected model in real-time, view streamed output, and refine the prompt without leaving the TUI.</p>
+<p><strong>Fuzzy Search</strong> — In the prompt manager list, press <code>/</code> to filter prompts by title or model slug. Search is incremental and case-insensitive.</p>
+<h2 id="configuration--yaml-reference">Configuration / YAML Reference</h2>
+<h3 id="pipeline-step-prompt_id-field">Pipeline Step <code>prompt_id</code> Field</h3>
+<p>Add an optional <code>prompt_id</code> field to any pipeline step that executes an agent or model call:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">steps</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">generate_code</span></span>
+<span class="line"><span style="color:#85E89D">    executor</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">openai</span></span>
+<span class="line"><span style="color:#85E89D">    model</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">gpt-4</span></span>
+<span class="line"><span style="color:#85E89D">    prompt_id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Code generation best practices"</span></span>
+<span class="line"><span style="color:#85E89D">    input</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Generate a function that..."</span></span></code></pre>
+<p>When the step runs, gl1tch resolves the prompt body from the store and prepends it to <code>input</code>. The executor receives:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>[prompt body from store]</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>[step input]</span></span></code></pre>
+<p><strong>Fields:</strong></p>
+<ul>
+<li><code>prompt_id</code> (string, optional) — Title of the saved prompt to inject. If the prompt does not exist in the store, the step fails with a descriptive error. If omitted, step execution is identical to current behavior.</li>
+</ul>
+<p><strong>Behavior:</strong></p>
+<ul>
+<li>Prompt body is prepended <em>before</em> any other input manipulation.</li>
+<li>Brain context injection and RAG happen <em>after</em> prompt injection.</li>
+<li>If <code>prompt_id</code> is set but empty, it is treated as omitted (no error).</li>
+</ul>
+<h2 id="examples">Examples</h2>
+<h3 id="create-a-prompt-in-the-tui">Create a Prompt in the TUI</h3>
+<ol>
+<li>Press <code>j</code> to open the jump window.</li>
+<li>Type “prompts” and press Enter.</li>
+<li>Press <code>n</code> (or the bound key) to create a new prompt.</li>
+<li>Enter title: “Code review synthesis”</li>
+<li>Enter body:
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>You are an expert code reviewer. Synthesize the key findings from code review comments.</span></span>
+<span class="line"><span>Focus on:</span></span>
+<span class="line"><span>- Security issues</span></span>
+<span class="line"><span>- Performance bottlenecks</span></span>
+<span class="line"><span>- Maintainability concerns</span></span></code></pre>
+</li>
+<li>Select model: <code>ollama:mistral</code> (or your configured executor).</li>
+<li>Press <code>t</code> to test the prompt against a sample input.</li>
+<li>Press <code>s</code> to save.</li>
+</ol>
+<h3 id="inject-a-prompt-into-a-pipeline">Inject a Prompt into a Pipeline</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"weekly_codebase_review"</span></span>
+<span class="line"><span style="color:#85E89D">steps</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">fetch_diffs</span></span>
+<span class="line"><span style="color:#85E89D">    executor</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">shell</span></span>
+<span class="line"><span style="color:#85E89D">    command</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"git diff main --stat | head -20"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">analyze_changes</span></span>
+<span class="line"><span style="color:#85E89D">    executor</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">ollama</span></span>
+<span class="line"><span style="color:#85E89D">    model</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"mistral"</span></span>
+<span class="line"><span style="color:#85E89D">    prompt_id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Code review synthesis"</span></span>
+<span class="line"><span style="color:#85E89D">    input</span><span style="color:#E1E4E8">: </span><span style="color:#F97583">|</span></span>
+<span class="line"><span style="color:#9ECBFF">      Analyze these recent code changes:</span></span>
+<span class="line"><span style="color:#9ECBFF">      {{get "fetch_diffs.data.output" .}}</span></span>
+<span class="line"><span style="color:#9ECBFF">    </span></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">write_summary</span></span>
+<span class="line"><span style="color:#85E89D">    executor</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">shell</span></span>
+<span class="line"><span style="color:#85E89D">    command</span><span style="color:#E1E4E8">: </span><span style="color:#F97583">|</span></span>
+<span class="line"><span style="color:#9ECBFF">      cat > weekly_review.md &#x3C;&#x3C; 'EOF'</span></span>
+<span class="line"><span style="color:#9ECBFF">      {{get "analyze_changes.data.output" .}}</span></span>
+<span class="line"><span style="color:#9ECBFF">      EOF</span></span></code></pre>
+<p>When <code>analyze_changes</code> runs, the prompt body (“You are an expert code reviewer…”) is prepended to the <code>input</code> before sending to ollama.</p>
+<h3 id="use-the-same-prompt-across-multiple-steps">Use the Same Prompt Across Multiple Steps</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"multi_stage_review"</span></span>
+<span class="line"><span style="color:#85E89D">steps</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">review_api</span></span>
+<span class="line"><span style="color:#85E89D">    executor</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">openai</span></span>
+<span class="line"><span style="color:#85E89D">    model</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">gpt-4</span></span>
+<span class="line"><span style="color:#85E89D">    prompt_id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Code review synthesis"</span></span>
+<span class="line"><span style="color:#85E89D">    input</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Review the API layer"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">review_database</span></span>
+<span class="line"><span style="color:#85E89D">    executor</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">openai</span></span>
+<span class="line"><span style="color:#85E89D">    model</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">gpt-4</span></span>
+<span class="line"><span style="color:#85E89D">    prompt_id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Code review synthesis"</span></span>
+<span class="line"><span style="color:#85E89D">    input</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Review the database layer"</span></span></code></pre>
+<p>Both steps share the same prompt; edits to “Code review synthesis” in the prompt manager apply to both instantly.</p>
+<h2 id="see-also">See Also</h2>
+<ul>
+<li><a href="/docs/pipelines.md">Pipelines</a> — Step execution, input/output, and variable interpolation</li>
+<li><a href="/docs/executors.md">Executors</a> — Available models and how to configure them</li>
+<li><a href="/docs/brain.md">Brain</a> — How brain context and RAG injection work alongside prompts</li>
+</ul> </div>  </article> <nav class="docs-prev-next"> <a class="docs-prev-next-link prev" href="/docs/pipelines/plugins"> <span class="docs-prev-next-label fg-comment">&larr; prev</span> <span class="docs-prev-next-title">Plugins</span> </a> <a class="docs-prev-next-link next" href="/docs/pipelines/telemetry"> <span class="docs-prev-next-label fg-comment">next &rarr;</span> <span class="docs-prev-next-title">Telemetry</span> </a> </nav> </div> </main> </div> <script type="module">const d=document.getElementById("docs-hamburger"),n=document.getElementById("docs-sidebar"),e=document.getElementById("docs-sidebar-overlay");function t(){n?.classList.toggle("open"),e?.classList.toggle("open")}d?.addEventListener("click",t);e?.addEventListener("click",t);</script>  </body></html>

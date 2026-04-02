@@ -1,0 +1,236 @@
+<!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Plugins — GLITCH</title><meta name="description" content="Install and manage gl1tch plugins from GitHub, configure sidecar executors, and unlock plugin-driven pipelines."><link rel="stylesheet" href="/css/bbs.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <div class="docs-page" id="docs-page"> <button class="docs-hamburger" id="docs-hamburger" aria-label="Toggle sidebar"> <span class="docs-hamburger-icon">[=]</span> </button> <aside class="docs-sidebar" id="docs-sidebar"> <div class="docs-sidebar-header"> <a href="/" class="docs-logo-link"> <span class="fg-purple bold">GL1TCH</span> </a> <a href="/" class="docs-back-link">&larr; back to terminal</a> </div> <nav class="docs-nav"> <a class="docs-nav-link" href="/docs/">
+INDEX
+</a> <div class="docs-nav-section"> <div class="docs-nav-section-label"> <span class="fg-comment">&#x250C;&#x2500;</span> PIPELINES </div> <a class="docs-nav-link" href="/docs/pipelines/philosophy"> GL1TCH Philosophy </a><a class="docs-nav-link" href="/docs/pipelines/quickstart"> Your First Pipeline </a><a class="docs-nav-link" href="/docs/pipelines/console"> Console — The Switchboard </a><a class="docs-nav-link" href="/docs/pipelines/pipelines"> Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/yaml-reference"> Pipeline YAML Reference </a><a class="docs-nav-link" href="/docs/pipelines/executors"> Executors and Plugins </a><a class="docs-nav-link" href="/docs/pipelines/brain"> The Brain System </a><a class="docs-nav-link" href="/docs/pipelines/examples"> Real-World Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/workflows"> Workflows </a><a class="docs-nav-link" href="/docs/pipelines/cli-reference"> CLI Reference </a><a class="docs-nav-link" href="/docs/pipelines/cron"> Cron Scheduling </a><a class="docs-nav-link" href="/docs/pipelines/architecture"> Architecture </a><a class="docs-nav-link" href="/docs/pipelines/technologies"> Technologies </a><a class="docs-nav-link" href="/docs/pipelines/themes"> Themes </a><a class="docs-nav-link active" href="/docs/pipelines/plugins"> Plugins </a><a class="docs-nav-link" href="/docs/pipelines/prompts"> Prompts </a><a class="docs-nav-link" href="/docs/pipelines/telemetry"> Telemetry </a> <div class="docs-nav-section-end"> <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span> </div> </div> </nav> </aside> <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div> <main class="docs-main"> <div class="docs-content"> <div class="docs-breadcrumb"> <a href="/docs/">docs</a> <span class="fg-comment"> / </span> <a href="/docs/">pipelines</a> </div> <article>  <h1 class="docs-page-title">Plugins</h1> <p class="docs-page-desc">Install and manage gl1tch plugins from GitHub, configure sidecar executors, and unlock plugin-driven pipelines.</p> <div class="docs-article"> <p>Plugins extend gl1tch with new executors and capabilities. The plugin system lets you discover, install, and activate plugins from GitHub repositories with a single command. Once installed, plugins become first-class executors available to any pipeline.</p>
+<h2 id="architecture-overview">Architecture overview</h2>
+<p>The plugin system consists of three layers:</p>
+<p><strong>1. Discovery &#x26; Installation</strong> (<code>internal/pluginmanager/</code>)</p>
+<ul>
+<li><code>Installer</code> manages the full lifecycle: fetch manifest from GitHub, install the binary (via <code>go install</code> or GitHub Releases), write the sidecar YAML, and record metadata in a local registry.</li>
+<li><code>FetchManifest()</code> downloads <code>glitch-plugin.yaml</code> from a GitHub repo at a specified ref (branch, tag, or commit).</li>
+<li><code>InstallBinary()</code> handles both Go modules (<code>go install github.com/user/plugin/cmd/pluginname</code>) and pre-built GitHub Release assets.</li>
+<li>Registry (<code>~/.config/glitch/plugins.yaml</code>) tracks all installed plugins: name, source, version, binary path, sidecar path, and install timestamp.</li>
+</ul>
+<p><strong>2. Sidecar Activation</strong> (<code>~/.config/glitch/wrappers/</code>)</p>
+<ul>
+<li>Each plugin installation writes a sidecar YAML file (<code>~/.config/glitch/wrappers/&#x3C;plugin-name>.yaml</code>) that declares the executor’s command, arguments, input/output schema, and signal handlers.</li>
+<li>The sidecar format is identical to the <code>executor.SidecarSchema</code> used by the core executor subsystem.</li>
+<li>Sidecars can be authored inline in the plugin manifest or generated automatically from the manifest.</li>
+</ul>
+<p><strong>3. Agent Capability Provider</strong> (<code>internal/apmmanager/</code>)</p>
+<ul>
+<li><code>AgentCapabilityProvider</code> interface lets pipelines request capabilities at runtime without knowing if the agent is installed.</li>
+<li><code>RequireAgent(ctx, agentID)</code> blocks until installation completes, enabling on-demand agent bootstrapping.</li>
+<li>Messages (<code>AgentInstallStartMsg</code>, <code>AgentInstallDoneMsg</code>, <code>AgentInstallErrMsg</code>) integrate with the TUI to show install progress.</li>
+</ul>
+<h2 id="technologies">Technologies</h2>
+<ul>
+<li><strong>YAML</strong> — Plugin manifests (<code>glitch-plugin.yaml</code>) and sidecar files use YAML 1.2 via <code>gopkg.in/yaml.v3</code>.</li>
+<li><strong>GitHub API</strong> — Plugin discovery and binary downloads use GitHub’s raw content API and releases API.</li>
+<li><strong>Go modules</strong> — Go-based plugins are installed via <code>go install</code> with automatic <code>GOPRIVATE</code> / <code>GONOSUMDB</code> configuration for private repos.</li>
+<li><strong>BubbleTea</strong> — The APM manager TUI component provides a two-pane interface for browsing, installing, and managing agents.</li>
+</ul>
+<h2 id="concepts">Concepts</h2>
+<p><strong>Plugin Manifest</strong> (<code>glitch-plugin.yaml</code>)
+The authoritative source for a plugin. Defines the binary name, installation method, version, sidecar schema, and signal handlers. Located at the root of a plugin repository.</p>
+<p><strong>Sidecar YAML</strong>
+An executor descriptor written to <code>~/.config/glitch/wrappers/&#x3C;name>.yaml</code> during plugin installation. Declares the command, arguments, input/output schema, and category (e.g., “providers”, “tools”). Enables the executor manager to invoke the plugin without code changes.</p>
+<p><strong>Plugin Reference</strong>
+A string identifying a plugin: <code>owner/repo</code> (floating version, defaults to <code>main</code> or <code>master</code> branch) or <code>owner/repo@ref</code> (pinned to a branch, tag, or commit).</p>
+<p><strong>Install Method</strong>
+Either <code>go</code> (source build via <code>go install</code>) or <code>release</code> (download pre-built binary from GitHub Releases). The manifest declares which method to use.</p>
+<p><strong>Registry</strong>
+<code>~/.config/glitch/plugins.yaml</code> — a YAML file tracking all installed plugins: name, GitHub source, version, binary path, sidecar path, and install timestamp.</p>
+<p><strong>Signal Handler</strong>
+A named function within a plugin binary that gl1tch invokes when a BUSD topic fires. Declared in the manifest’s <code>sidecar.signals</code> list with <code>topic</code> (BUSD topic name) and <code>handler</code> (function name).</p>
+<h2 id="configuration--yaml-reference">Configuration / YAML reference</h2>
+<h3 id="plugin-manifest-schema-glitch-pluginyaml">Plugin Manifest Schema (<code>glitch-plugin.yaml</code>)</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string></span></span>
+<span class="line"><span style="color:#6A737D">  # Canonical plugin name (used as executor name and registry key).</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">description</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string></span></span>
+<span class="line"><span style="color:#6A737D">  # Short human-readable description of what the plugin does.</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">binary</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string, optional></span></span>
+<span class="line"><span style="color:#6A737D">  # Name of the installed binary on PATH.</span></span>
+<span class="line"><span style="color:#6A737D">  # Defaults to name.</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">version</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string, optional></span></span>
+<span class="line"><span style="color:#6A737D">  # Pinned version / git ref (branch, tag, or commit).</span></span>
+<span class="line"><span style="color:#6A737D">  # If omitted, installer tries main or master.</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">install</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  go</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string, optional></span></span>
+<span class="line"><span style="color:#6A737D">    # Go module path for source build, e.g. github.com/user/plugin/cmd/tool</span></span>
+<span class="line"><span style="color:#6A737D">    # Used when method is go; incompatible with release: true</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">  release</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;boolean, optional></span></span>
+<span class="line"><span style="color:#6A737D">    # If true, download pre-built binary from GitHub Releases.</span></span>
+<span class="line"><span style="color:#6A737D">    # Asset name is inferred from binary name + GOOS + GOARCH.</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">sidecar</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  command</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string></span></span>
+<span class="line"><span style="color:#6A737D">    # Executable name or full path (e.g. mybin or /usr/local/bin/mybin).</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">  args</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;array[string], optional></span></span>
+<span class="line"><span style="color:#6A737D">    # Default arguments passed to the command (e.g. ["--quiet"]).</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">  description</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string, optional></span></span>
+<span class="line"><span style="color:#6A737D">    # Override for the executor description.</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">  category</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string, optional></span></span>
+<span class="line"><span style="color:#6A737D">    # Executor category (e.g. "providers", "tools").</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">  kind</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string, optional></span></span>
+<span class="line"><span style="color:#6A737D">    # "agent" or "tool"; controls how the executor is invoked in pipelines.</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">  input_schema</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string, optional></span></span>
+<span class="line"><span style="color:#6A737D">    # JSON Schema (as a string) describing expected input format.</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">  output_schema</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string, optional></span></span>
+<span class="line"><span style="color:#6A737D">    # JSON Schema (as a string) describing output format.</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">  signals</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#E1E4E8">    - </span><span style="color:#85E89D">topic</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string></span></span>
+<span class="line"><span style="color:#6A737D">        # BUSD topic name (e.g. "chat.message.created").</span></span>
+<span class="line"><span style="color:#85E89D">      handler</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string></span></span>
+<span class="line"><span style="color:#6A737D">        # Named function in the plugin binary to invoke (e.g. "OnMessageCreated").</span></span></code></pre>
+<h3 id="sidecar-file-schema-configglitchwrappersnameyaml">Sidecar File Schema (<code>~/.config/glitch/wrappers/&#x3C;name>.yaml</code>)</h3>
+<p>Identical to the manifest <code>sidecar</code> block, but written to disk as a standalone YAML file. Generated automatically during installation.</p>
+<h3 id="registry-entry-schema-configglitchpluginsyaml">Registry Entry Schema (<code>~/.config/glitch/plugins.yaml</code>)</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">plugins</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string></span></span>
+<span class="line"><span style="color:#6A737D">      # Plugin canonical name.</span></span>
+<span class="line"><span style="color:#85E89D">    source</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string></span></span>
+<span class="line"><span style="color:#6A737D">      # GitHub source as "owner/repo".</span></span>
+<span class="line"><span style="color:#85E89D">    version</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string></span></span>
+<span class="line"><span style="color:#6A737D">      # Installed version or ref.</span></span>
+<span class="line"><span style="color:#85E89D">    binary_path</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string></span></span>
+<span class="line"><span style="color:#6A737D">      # Absolute path to the installed executable.</span></span>
+<span class="line"><span style="color:#85E89D">    sidecar_path</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string></span></span>
+<span class="line"><span style="color:#6A737D">      # Absolute path to the sidecar YAML.</span></span>
+<span class="line"><span style="color:#85E89D">    installed_at</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;ISO8601 timestamp></span></span>
+<span class="line"><span style="color:#6A737D">      # When the plugin was installed.</span></span></code></pre>
+<h2 id="examples">Examples</h2>
+<h3 id="example-1-install-a-go-plugin">Example 1: Install a Go plugin</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> plugin</span><span style="color:#9ECBFF"> install</span><span style="color:#9ECBFF"> owner/my-plugin</span></span></code></pre>
+<p>Plugin repository structure:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>owner/my-plugin/</span></span>
+<span class="line"><span>├── glitch-plugin.yaml</span></span>
+<span class="line"><span>├── cmd/</span></span>
+<span class="line"><span>│   └── myplugin/</span></span>
+<span class="line"><span>│       └── main.go</span></span>
+<span class="line"><span>└── go.mod</span></span></code></pre>
+<p><code>glitch-plugin.yaml</code>:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">myplugin</span></span>
+<span class="line"><span style="color:#85E89D">description</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"A simple plugin that greets the world"</span></span>
+<span class="line"><span style="color:#85E89D">binary</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">myplugin</span></span>
+<span class="line"><span style="color:#85E89D">version</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"v1.0.0"</span></span>
+<span class="line"><span style="color:#85E89D">install</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  go</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">github.com/owner/my-plugin/cmd/myplugin</span></span>
+<span class="line"><span style="color:#85E89D">sidecar</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  command</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">myplugin</span></span>
+<span class="line"><span style="color:#85E89D">  args</span><span style="color:#E1E4E8">: [</span><span style="color:#9ECBFF">"--format"</span><span style="color:#E1E4E8">, </span><span style="color:#9ECBFF">"json"</span><span style="color:#E1E4E8">]</span></span>
+<span class="line"><span style="color:#85E89D">  category</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">tools</span></span>
+<span class="line"><span style="color:#85E89D">  kind</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">tool</span></span>
+<span class="line"><span style="color:#85E89D">  description</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Greet the world"</span></span>
+<span class="line"><span style="color:#85E89D">  input_schema</span><span style="color:#E1E4E8">: </span><span style="color:#F97583">|</span></span>
+<span class="line"><span style="color:#9ECBFF">    {</span></span>
+<span class="line"><span style="color:#9ECBFF">      "type": "object",</span></span>
+<span class="line"><span style="color:#9ECBFF">      "properties": {</span></span>
+<span class="line"><span style="color:#9ECBFF">        "name": {"type": "string"}</span></span>
+<span class="line"><span style="color:#9ECBFF">      }</span></span>
+<span class="line"><span style="color:#9ECBFF">    }</span></span>
+<span class="line"><span style="color:#85E89D">  output_schema</span><span style="color:#E1E4E8">: </span><span style="color:#F97583">|</span></span>
+<span class="line"><span style="color:#9ECBFF">    {</span></span>
+<span class="line"><span style="color:#9ECBFF">      "type": "object",</span></span>
+<span class="line"><span style="color:#9ECBFF">      "properties": {</span></span>
+<span class="line"><span style="color:#9ECBFF">        "greeting": {"type": "string"}</span></span>
+<span class="line"><span style="color:#9ECBFF">      }</span></span>
+<span class="line"><span style="color:#9ECBFF">    }</span></span></code></pre>
+<p>After <code>glitch plugin install owner/my-plugin@v1.0.0</code>:</p>
+<ul>
+<li>Binary installed to <code>~/.local/bin/myplugin</code> (or <code>$GOPATH/bin/myplugin</code>)</li>
+<li>Sidecar written to <code>~/.config/glitch/wrappers/myplugin.yaml</code></li>
+<li>Registry entry added to <code>~/.config/glitch/plugins.yaml</code></li>
+</ul>
+<h3 id="example-2-install-a-pre-built-release-plugin">Example 2: Install a pre-built Release plugin</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> plugin</span><span style="color:#9ECBFF"> install</span><span style="color:#9ECBFF"> owner/prebuilt-plugin</span></span></code></pre>
+<p><code>glitch-plugin.yaml</code> with release-based install:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">codegen</span></span>
+<span class="line"><span style="color:#85E89D">description</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Code generation tool with pre-built binaries"</span></span>
+<span class="line"><span style="color:#85E89D">binary</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">codegen</span></span>
+<span class="line"><span style="color:#85E89D">version</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"v2.1.0"</span></span>
+<span class="line"><span style="color:#85E89D">install</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  release</span><span style="color:#E1E4E8">: </span><span style="color:#79B8FF">true</span></span>
+<span class="line"><span style="color:#85E89D">sidecar</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  command</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">codegen</span></span>
+<span class="line"><span style="color:#85E89D">  category</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">tools</span></span>
+<span class="line"><span style="color:#85E89D">  kind</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">tool</span></span>
+<span class="line"><span style="color:#85E89D">  args</span><span style="color:#E1E4E8">: [</span><span style="color:#9ECBFF">"--mode"</span><span style="color:#E1E4E8">, </span><span style="color:#9ECBFF">"generate"</span><span style="color:#E1E4E8">]</span></span></code></pre>
+<p>The installer:</p>
+<ol>
+<li>Fetches the manifest from the repo’s <code>main</code> branch (or specified version)</li>
+<li>Downloads the release asset <code>codegen-darwin-arm64</code> or <code>codegen-linux-x86_64</code> (based on GOOS/GOARCH)</li>
+<li>Moves the binary to <code>~/.local/bin/codegen</code></li>
+<li>Writes the sidecar to <code>~/.config/glitch/wrappers/codegen.yaml</code></li>
+</ol>
+<h3 id="example-3-plugin-with-signal-handlers">Example 3: Plugin with signal handlers</h3>
+<p><code>glitch-plugin.yaml</code>:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">chat-listener</span></span>
+<span class="line"><span style="color:#85E89D">description</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Chat event listener and responder"</span></span>
+<span class="line"><span style="color:#85E89D">binary</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">chat-listener</span></span>
+<span class="line"><span style="color:#85E89D">install</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  go</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">github.com/owner/chat-listener/cmd/chat-listener</span></span>
+<span class="line"><span style="color:#85E89D">sidecar</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  command</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">chat-listener</span></span>
+<span class="line"><span style="color:#85E89D">  category</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">tools</span></span>
+<span class="line"><span style="color:#85E89D">  signals</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#E1E4E8">    - </span><span style="color:#85E89D">topic</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"chat.message.created"</span></span>
+<span class="line"><span style="color:#85E89D">      handler</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"OnNewMessage"</span></span>
+<span class="line"><span style="color:#E1E4E8">    - </span><span style="color:#85E89D">topic</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"chat.user.joined"</span></span>
+<span class="line"><span style="color:#85E89D">      handler</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"OnUserJoined"</span></span></code></pre>
+<p>When a BUSD message is published to <code>chat.message.created</code>, gl1tch invokes the plugin binary with the signal topic and payload.</p>
+<h3 id="example-4-using-a-plugin-in-a-pipeline">Example 4: Using a plugin in a pipeline</h3>
+<p>Once installed, the plugin is available as an executor in any pipeline:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">my-workflow</span></span>
+<span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Workflow using installed plugins"</span></span>
+<span class="line"><span style="color:#85E89D">steps</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">greet</span></span>
+<span class="line"><span style="color:#85E89D">    executor</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">myplugin</span></span>
+<span class="line"><span style="color:#85E89D">    args</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">      name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Alice"</span></span>
+<span class="line"><span style="color:#85E89D">    vars</span><span style="color:#E1E4E8">: {}</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">generate_code</span></span>
+<span class="line"><span style="color:#85E89D">    executor</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">codegen</span></span>
+<span class="line"><span style="color:#85E89D">    args</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">      prompt</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Write a Fibonacci function"</span></span>
+<span class="line"><span style="color:#85E89D">    vars</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">      CODEGEN_LANG</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">python</span></span></code></pre>
+<p>The executor manager resolves <code>myplugin</code> by looking it up in the sidecar directory. The sidecar YAML is loaded, and the executor is invoked with the declared command and merged arguments.</p>
+<h3 id="example-5-listing-installed-plugins">Example 5: Listing installed plugins</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> plugin</span><span style="color:#9ECBFF"> list</span></span></code></pre>
+<p>Output from the registry:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>myplugin                | owner/my-plugin       | v1.0.0       | ~/.local/bin/myplugin</span></span>
+<span class="line"><span>codegen                 | owner/prebuilt-plugin | v2.1.0       | ~/.local/bin/codegen</span></span>
+<span class="line"><span>chat-listener           | owner/chat-listener   | v1.5.2       | ~/.local/bin/chat-listener</span></span></code></pre>
+<h3 id="example-6-on-demand-agent-installation-via-requireagent">Example 6: On-demand agent installation via RequireAgent</h3>
+<p>In a pipeline step that needs an APM agent:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="go"><code><span class="line"><span style="color:#6A737D">// Pipeline builtin step (e.g., builtin.agent_step) calls:</span></span>
+<span class="line"><span style="color:#E1E4E8">agent, err </span><span style="color:#F97583">:=</span><span style="color:#E1E4E8"> provider.</span><span style="color:#B392F0">RequireAgent</span><span style="color:#E1E4E8">(ctx, </span><span style="color:#9ECBFF">"api-architect"</span><span style="color:#E1E4E8">)</span></span>
+<span class="line"><span style="color:#F97583">if</span><span style="color:#E1E4E8"> err </span><span style="color:#F97583">!=</span><span style="color:#79B8FF"> nil</span><span style="color:#E1E4E8"> {</span></span>
+<span class="line"><span style="color:#F97583">    return</span><span style="color:#E1E4E8"> fmt.</span><span style="color:#B392F0">Errorf</span><span style="color:#E1E4E8">(</span><span style="color:#9ECBFF">"need api-architect agent: </span><span style="color:#79B8FF">%w</span><span style="color:#9ECBFF">"</span><span style="color:#E1E4E8">, err)</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span>
+<span class="line"><span style="color:#6A737D">// agent.ExecutorID is now registered and available</span></span></code></pre>
+<p>The TUI shows progress:</p>
+<ul>
+<li><code>AgentInstallStartMsg</code> — spinner appears</li>
+<li><code>AgentInstallDoneMsg</code> — agent is live</li>
+<li><code>AgentInstallErrMsg</code> — error displayed to user</li>
+</ul>
+<h2 id="see-also">See Also</h2>
+<ul>
+<li><a href="./pipelines.md">Pipelines</a> — how plugins are used as executors in pipeline steps</li>
+<li><a href="./executors.md">Executors</a> — how sidecar files integrate with the executor manager</li>
+<li><a href="./apm.md">APM System</a> — on-demand agent installation and capability provisioning</li>
+</ul> </div>  </article> <nav class="docs-prev-next"> <a class="docs-prev-next-link prev" href="/docs/pipelines/themes"> <span class="docs-prev-next-label fg-comment">&larr; prev</span> <span class="docs-prev-next-title">Themes</span> </a> <a class="docs-prev-next-link next" href="/docs/pipelines/prompts"> <span class="docs-prev-next-label fg-comment">next &rarr;</span> <span class="docs-prev-next-title">Prompts</span> </a> </nav> </div> </main> </div> <script type="module">const d=document.getElementById("docs-hamburger"),n=document.getElementById("docs-sidebar"),e=document.getElementById("docs-sidebar-overlay");function t(){n?.classList.toggle("open"),e?.classList.toggle("open")}d?.addEventListener("click",t);e?.addEventListener("click",t);</script>  </body></html>

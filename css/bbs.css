@@ -396,14 +396,14 @@ body::before {
   pointer-events: auto;
 }
 
-/* Panel: fixed overlay, 80vw × 80vh, centered in viewport */
+/* Panel: fixed overlay, 72vw × 72vh, centered in viewport */
 .docs-panel {
   position: fixed;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -46%) scale(0.97);
-  width: 80vw;
-  height: 80vh;
+  width: 72vw;
+  height: 72vh;
   overflow: hidden;
   display: flex;
   flex-direction: column;

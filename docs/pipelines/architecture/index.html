@@ -1,0 +1,223 @@
+<!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Architecture — GLITCH</title><meta name="description" content="System design: three-column TUI, tmux session structure, component map, and CLI-to-console flow."><link rel="stylesheet" href="/css/bbs.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <div class="docs-page" id="docs-page"> <button class="docs-hamburger" id="docs-hamburger" aria-label="Toggle sidebar"> <span class="docs-hamburger-icon">[=]</span> </button> <aside class="docs-sidebar" id="docs-sidebar"> <div class="docs-sidebar-header"> <a href="/" class="docs-logo-link"> <span class="fg-purple bold">GL1TCH</span> </a> <a href="/" class="docs-back-link">&larr; back to terminal</a> </div> <nav class="docs-nav"> <a class="docs-nav-link" href="/docs/">
+INDEX
+</a> <div class="docs-nav-section"> <div class="docs-nav-section-label"> <span class="fg-comment">&#x250C;&#x2500;</span> PIPELINES </div> <a class="docs-nav-link" href="/docs/pipelines/philosophy"> GL1TCH Philosophy </a><a class="docs-nav-link" href="/docs/pipelines/quickstart"> Your First Pipeline </a><a class="docs-nav-link" href="/docs/pipelines/console"> Console — The Switchboard </a><a class="docs-nav-link" href="/docs/pipelines/pipelines"> Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/yaml-reference"> Pipeline YAML Reference </a><a class="docs-nav-link" href="/docs/pipelines/executors"> Executors and Plugins </a><a class="docs-nav-link" href="/docs/pipelines/brain"> The Brain System </a><a class="docs-nav-link" href="/docs/pipelines/examples"> Real-World Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/workflows"> Workflows </a><a class="docs-nav-link" href="/docs/pipelines/cli-reference"> CLI Reference </a><a class="docs-nav-link" href="/docs/pipelines/cron"> Cron Scheduling </a><a class="docs-nav-link active" href="/docs/pipelines/architecture"> Architecture </a><a class="docs-nav-link" href="/docs/pipelines/technologies"> Technologies </a><a class="docs-nav-link" href="/docs/pipelines/themes"> Themes </a><a class="docs-nav-link" href="/docs/pipelines/plugins"> Plugins </a><a class="docs-nav-link" href="/docs/pipelines/prompts"> Prompts </a><a class="docs-nav-link" href="/docs/pipelines/telemetry"> Telemetry </a> <div class="docs-nav-section-end"> <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span> </div> </div> </nav> </aside> <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div> <main class="docs-main"> <div class="docs-content"> <div class="docs-breadcrumb"> <a href="/docs/">docs</a> <span class="fg-comment"> / </span> <a href="/docs/">pipelines</a> </div> <article>  <h1 class="docs-page-title">Architecture</h1> <p class="docs-page-desc">System design: three-column TUI, tmux session structure, component map, and CLI-to-console flow.</p> <div class="docs-article"> <p>GL1TCH is a tmux-native application built around a single BubbleTea TUI called the <strong>Deck</strong>. The Deck is the control surface: you launch pipelines, run agents, inspect results, and monitor activity all from one full-screen interface. Behind the scenes, a plugin system executes workloads, a SQLite store captures run history, and tmux provides the durable session container.</p>
+<h2 id="three-column-tui-layout">Three-Column TUI Layout</h2>
+<p>The Deck divides into three regions optimized for parallel visibility:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>┌───────────────────────────────────────────────────────────────┐</span></span>
+<span class="line"><span>│  GL1TCH                                              hh:mm:ss  │</span></span>
+<span class="line"><span>├──────────────────┬──────────────────┬─────────────────────────┤</span></span>
+<span class="line"><span>│                  │                  │                         │</span></span>
+<span class="line"><span>│  LEFT COLUMN     │  CENTER COLUMN   │   RIGHT COLUMN          │</span></span>
+<span class="line"><span>│  ────────────    │  ──────────────  │   ──────────────        │</span></span>
+<span class="line"><span>│                  │                  │                         │</span></span>
+<span class="line"><span>│  • Pipelines     │  • GL1TCH Chat   │   Activity Feed         │</span></span>
+<span class="line"><span>│    (launcher)    │    (main prompt) │   (live output,         │</span></span>
+<span class="line"><span>│                  │  • Agent Grid    │    results, status)     │</span></span>
+<span class="line"><span>│  • Agent Runner  │  • Signal Board  │                         │</span></span>
+<span class="line"><span>│    (form)        │  • Inbox Detail  │                         │</span></span>
+<span class="line"><span>│                  │  • Overlays:     │                         │</span></span>
+<span class="line"><span>│  (switchable     │    - Theme Picker│                         │</span></span>
+<span class="line"><span>│   with Tab)      │    - Editors     │                         │</span></span>
+<span class="line"><span>│                  │    - Modals      │                         │</span></span>
+<span class="line"><span>│                  │                  │                         │</span></span>
+<span class="line"><span>└──────────────────┴──────────────────┴─────────────────────────┘</span></span></code></pre>
+<p><strong>Left column</strong> (fixed ~22 chars): Pipelines list (searchable, scrollable) and the Agent Runner form (3-step wizard with model/prompt selection). Both panels are keyboard-navigable; <code>Tab</code> cycles focus.</p>
+<p><strong>Center column</strong> (flexible, ~33 chars): Host to multiple views—GL1TCH AI assistant chat (primary), agent execution grid, signal board for live job monitoring, or inbox detail for reviewing past runs. Overlays (theme picker, pipeline/brain editors, re-run modal) float above. All driven by keyboard input and TUI state.</p>
+<p><strong>Right column</strong> (fixed ~30 chars): Activity Feed—a scrollable log of every launched pipeline and agent run. Each entry shows title, status (running/done/failed), elapsed time, and a collapsible step list. Selecting an entry expands it; live output streams in as the job runs.</p>
+<h2 id="tmux-session-structure">Tmux Session Structure</h2>
+<p>GL1TCH runs entirely within a single tmux session named <code>glitch</code>, created and managed by the bootstrap layer.</p>
+<p><strong>Session layout:</strong></p>
+<ul>
+<li><strong>Window 0</strong> (immutable): The GL1TCH Deck TUI. Protected from deletion (<code>^spc x</code> is a no-op on this window); only <code>q</code> or <code>^c</code> tears down the entire session.</li>
+<li><strong>Windows 1+</strong> (ephemeral): Ad-hoc shells, pipeline execution windows, and job panes. Created on-demand by the user or by the Deck when launching a job in a background window.</li>
+</ul>
+<p><strong>Tmux configuration</strong> (set via <code>tmux new-session</code> + <code>-c</code> wrapper script at bootstrap):</p>
+<ul>
+<li>Status bar: Minimal—shows current window name in center (e.g., <code>0:GLITCH</code>), chord hints (e.g., <code>^spc c new window</code>) and clock on the right. Dracula theme colors pulled from the active GL1TCH theme bundle.</li>
+<li>Keybindings: <code>ctrl+space</code> enters the <code>glitch-chord</code> key table (modal, exits with <code>Esc</code> or <code>ctrl+space</code> again). Chord keys handle window/pane navigation (<code>c</code> new, <code>[</code> <code>]</code> prev/next, <code>|</code> <code>-</code> split), detach (<code>d</code>), reload (<code>r</code>), and kill (<code>x</code> pane, <code>X</code> window).</li>
+<li>Pane borders: Styled with the theme’s border color; active pane highlighted in accent color.</li>
+<li>Mouse support: Enabled for pane focus and scrolling; <code>shift+click</code> for text selection (terminal default).</li>
+</ul>
+<h2 id="core-component-map">Core Component Map</h2>
+<p>GL1TCH is composed of these interconnected layers:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>main</span></span>
+<span class="line"><span> ├─ bootstrap (setup tmux session, keybindings, pane layout)</span></span>
+<span class="line"><span> │  └─ tmux session "glitch" (window 0: Deck TUI)</span></span>
+<span class="line"><span> │</span></span>
+<span class="line"><span> └─ console.Run() (inside tmux: BubbleTea event loop)</span></span>
+<span class="line"><span>    ├─ Model (Deck) — main TUI state machine</span></span>
+<span class="line"><span>    │  ├─ launcher (pipelines list + focus)</span></span>
+<span class="line"><span>    │  ├─ agent (agent runner form)</span></span>
+<span class="line"><span>    │  ├─ activeJobs (map[id]*jobHandle — in-flight work)</span></span>
+<span class="line"><span>    │  ├─ feed (activity feed entries)</span></span>
+<span class="line"><span>    │  └─ center panel (chat, grid, inbox, editors, modals)</span></span>
+<span class="line"><span>    │</span></span>
+<span class="line"><span>    ├─ pluginmanager (execute pipelines + agents)</span></span>
+<span class="line"><span>    │  ├─ manifest.go (parse glitch-plugin.yaml)</span></span>
+<span class="line"><span>    │  ├─ exec.go (spawn executor binaries)</span></span>
+<span class="line"><span>    │  ├─ fetch.go (pull plugin source from GitHub)</span></span>
+<span class="line"><span>    │  └─ installer.go (go install / release download)</span></span>
+<span class="line"><span>    │</span></span>
+<span class="line"><span>    ├─ store (SQLite result database)</span></span>
+<span class="line"><span>    │  └─ ~/.local/share/glitch/glitch.db (Run, StepRecord, UserScore, etc.)</span></span>
+<span class="line"><span>    │</span></span>
+<span class="line"><span>    ├─ busd (event bus — IPC via JSONL topics)</span></span>
+<span class="line"><span>    │  └─ pipelineBusEventMsg (RunStarted, StepComplete, RunFinished)</span></span>
+<span class="line"><span>    │</span></span>
+<span class="line"><span>    ├─ themes (Dracula palette + TUI styling)</span></span>
+<span class="line"><span>    │ └─ ~/.config/glitch/themes/ (user themes)</span></span>
+<span class="line"><span>    │</span></span>
+<span class="line"><span>    └─ activity (JSONL-backed timeline for feed display)</span></span></code></pre>
+<p><strong>Data flow for a pipeline run:</strong></p>
+<ol>
+<li>User selects a pipeline from the Launcher → Model queues a pipeline launch.</li>
+<li>Deck calls <code>pluginmanager.Exec()</code> with the pipeline YAML path.</li>
+<li>Executor (e.g., <code>claude-executor</code>) spawns in a tmux window; runs steps sequentially.</li>
+<li>Executor writes step status to stdout (<code>[step:&#x3C;id>] status:running</code>, <code>status:done</code>, etc.).</li>
+<li>Deck tail-reads the tmux pane or log file; parses step messages; updates <code>feed[].steps[].status</code>.</li>
+<li>When the job finishes, Store records a <code>Run</code> record + all <code>StepRecord</code> outputs.</li>
+<li>Activity Feed displays the entry; user can expand to see step details or click through to the inbox.</li>
+</ol>
+<p><strong>Data flow for an agent run:</strong></p>
+<ol>
+<li>User fills in Agent Runner form (provider, model, prompt) → submits.</li>
+<li>Deck invokes the agent executor (e.g., <code>claude-agent</code> sidecar) with the prompt.</li>
+<li>Executor returns a response; Deck buffers it in <code>glitchChat</code> panel.</li>
+<li>User can edit, regenerate, or accept the response.</li>
+<li>If accepted, Store records a <code>Run</code> (kind=“agent”); Inbox can retrieve it later.</li>
+</ol>
+<h2 id="cli-commands-wire-into-console">CLI Commands Wire Into Console</h2>
+<p>GL1TCH has two entry points, unified by the <code>TMUX</code> environment variable:</p>
+<p><strong>From outside tmux:</strong></p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">$</span><span style="color:#9ECBFF"> glitch</span></span></code></pre>
+<p>→ <code>main()</code> detects no <code>TMUX</code> env var → calls <code>bootstrap.Run()</code> → creates/reattaches session → execs the glitch binary <em>inside</em> the new window → falls through to console case.</p>
+<p><strong>From inside tmux (window 0):</strong></p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">$</span><span style="color:#9ECBFF"> glitch</span></span></code></pre>
+<p>→ <code>main()</code> detects <code>TMUX</code> env var → calls <code>console.Run()</code> → BubbleTea event loop → TUI runs until user quits.</p>
+<p><strong>CLI subcommands</strong> (pipeline, ask, help, config, cron, workflow, completion, widget, backup, restore, game, plugin, etc.) bypass the TUI:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">$</span><span style="color:#9ECBFF"> glitch</span><span style="color:#9ECBFF"> pipeline</span><span style="color:#9ECBFF"> deploy</span><span style="color:#79B8FF"> --prod</span></span>
+<span class="line"><span style="color:#B392F0">$</span><span style="color:#9ECBFF"> glitch</span><span style="color:#9ECBFF"> ask</span><span style="color:#9ECBFF"> "what's my account balance?"</span></span></code></pre>
+<p>→ <code>main()</code> routes to <code>cmd.Execute()</code> → Cobra CLI handles the subcommand → may write to Store or print to stdout, then exits.</p>
+<p><strong>Special commands:</strong></p>
+<ul>
+<li><code>glitch _reload</code> — bootstrap-internal; writes a marker file and detaches. On detach, <code>bootstrap.Run()</code> sees the marker and re-execs the glitch binary (picks up a newly compiled binary without losing the session).</li>
+<li><code>glitch _opsx</code> — (internal) display the OpenSpec explorer popup (tmux display-popup).</li>
+</ul>
+<p><strong>Keybinding-driven TUI actions</strong> — within the Deck:</p>
+<ul>
+<li><code>/pipeline &#x3C;name></code> — slash command to run a pipeline (parsed by the chat input handler).</li>
+<li><code>/terminal [size] [dir]</code> — open a new tmux pane with optional working directory.</li>
+<li><code>^spc r</code> (Deck forwards to tmux) → tmux chord executes <code>glitch _reload</code>.</li>
+<li><code>^spc q</code> → tmux detach + exit; <code>bootstrap.Run()</code> catches the detach and returns; glitch exits.</li>
+</ul>
+<h2 id="lifecycle-startup-to-shutdown">Lifecycle: Startup to Shutdown</h2>
+<p><strong>Startup (<code>glitch</code> command):</strong></p>
+<ol>
+<li><code>main()</code> runs; checks <code>TMUX</code> env var and <code>os.Args[1]</code>.</li>
+<li>If no tmux and no subcommand → <code>bootstrap.Run()</code> starts.</li>
+<li>Bootstrap creates/reattaches tmux session “glitch” with:
+<ul>
+<li>Window 0: runs <code>glitch</code> (re-execs binary).</li>
+<li>Keybindings: registers chord key table.</li>
+<li>Theme: loads active theme from <code>~/.config/glitch/themes/</code>.</li>
+</ul>
+</li>
+<li>Binary re-execs inside window 0 → <code>TMUX</code> env var now set → <code>console.Run()</code>.</li>
+<li>BubbleTea initializes Deck Model:
+<ul>
+<li>Scans pipelines from <code>~/.config/glitch/pipelines/*.yaml</code>.</li>
+<li>Loads agent providers (ollama, claude, opencode, etc.).</li>
+<li>Opens Store (SQLite at <code>~/.local/share/glitch/glitch.db</code>).</li>
+<li>Loads theme registry and applies styling.</li>
+<li>Executes startup game maintenance (auto-resolve expired encounters, apply MUD reputation decay).</li>
+</ul>
+</li>
+<li>Deck renders first frame; waits for user input.</li>
+</ol>
+<p><strong>Runtime:</strong></p>
+<ul>
+<li>User interacts with the TUI (select/launch pipelines, fill agent form, etc.).</li>
+<li>Keyboard input or mouse clicks trigger Model.Update() → state changes → Cmd(s) spawned.</li>
+<li>Cmds may launch jobs (e.g., <code>exec.Cmd</code> for a shell, pluginmanager call for a pipeline).</li>
+<li>Job output streams back via channels → Model updates feed entries in real-time.</li>
+<li>Store records are appended on job completion.</li>
+</ul>
+<p><strong>Shutdown:</strong></p>
+<ul>
+<li>User presses <code>q</code> or <code>^c</code> in the Deck → <code>tea.Quit()</code> → BubbleTea event loop exits.</li>
+<li><code>console.Run()</code> returns → <code>main()</code> exits.</li>
+<li>Tmux session remains (user can reattach with <code>glitch</code> or <code>tmux attach-session -t glitch</code>).</li>
+<li>Explicit session teardown: <code>glitch q</code> or <code>^spc q</code> → all windows/panes killed; session destroyed.</li>
+</ul>
+<h2 id="technologies--dependencies">Technologies &#x26; Dependencies</h2>
+<ul>
+<li><strong>BubbleTea</strong> (<code>charmbracelet/bubbletea</code>) — TUI framework; drives the Model-Update-View loop.</li>
+<li><strong>Lipgloss</strong> (<code>charmbracelet/lipgloss</code>) — terminal styling; applies theme colors and layout.</li>
+<li><strong>Tmux</strong> (external; required) — session container; pane/window management via CLI.</li>
+<li><strong>SQLite</strong> (<code>modernc.org/sqlite</code>) — result database; WAL mode enabled for concurrent read/write.</li>
+<li><strong>BUSD</strong> (internal; JSONL topics) — event bus for cross-process communication (pipelines → Deck).</li>
+<li><strong>Ollama</strong> (external; local) — LLM provider for agent runs and vector embeddings.</li>
+<li><strong>Plugins</strong> (external; via pluginmanager) — executors loaded from <code>glitch-plugin.yaml</code> manifests.</li>
+</ul>
+<h2 id="configuration--yaml-reference">Configuration &#x26; YAML Reference</h2>
+<p><strong>Pipeline YAML</strong> (in <code>~/.config/glitch/pipelines/</code>):</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">backup</span></span>
+<span class="line"><span style="color:#85E89D">description</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">Daily backup of workspace</span></span>
+<span class="line"><span style="color:#85E89D">steps</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">collect</span></span>
+<span class="line"><span style="color:#85E89D">    type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">shell</span></span>
+<span class="line"><span style="color:#85E89D">    run</span><span style="color:#E1E4E8">: </span><span style="color:#F97583">|</span></span>
+<span class="line"><span style="color:#9ECBFF">      tar czf /tmp/backup.tar.gz ~/work</span></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">summarize</span></span>
+<span class="line"><span style="color:#85E89D">    type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">llm</span></span>
+<span class="line"><span style="color:#85E89D">    model</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">neural-chat</span></span>
+<span class="line"><span style="color:#85E89D">    prompt</span><span style="color:#E1E4E8">: </span><span style="color:#F97583">|</span></span>
+<span class="line"><span style="color:#9ECBFF">      Summarize this backup operation:</span></span>
+<span class="line"><span style="color:#9ECBFF">      {{get "step.collect.stdout" .}}</span></span></code></pre>
+<p><strong>Plugin manifest</strong> (<code>glitch-plugin.yaml</code> in a repo):</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">claude-executor</span></span>
+<span class="line"><span style="color:#85E89D">description</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">Execute Claude API calls as pipeline steps</span></span>
+<span class="line"><span style="color:#85E89D">binary</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">claude-executor</span></span>
+<span class="line"><span style="color:#85E89D">version</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">v1.0.0</span></span>
+<span class="line"><span style="color:#85E89D">install</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  go</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">github.com/8op-org/claude-executor/cmd/claude-executor</span></span>
+<span class="line"><span style="color:#85E89D">sidecar</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  command</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">claude-executor</span></span>
+<span class="line"><span style="color:#85E89D">  args</span><span style="color:#E1E4E8">: [</span><span style="color:#9ECBFF">"--listen"</span><span style="color:#E1E4E8">, </span><span style="color:#9ECBFF">"localhost:9090"</span><span style="color:#E1E4E8">]</span></span>
+<span class="line"><span style="color:#85E89D">  description</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">Claude AI executor</span></span>
+<span class="line"><span style="color:#85E89D">  kind</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">agent</span></span>
+<span class="line"><span style="color:#85E89D">  input_schema</span><span style="color:#E1E4E8">: </span><span style="color:#F97583">|</span></span>
+<span class="line"><span style="color:#9ECBFF">    {</span></span>
+<span class="line"><span style="color:#9ECBFF">      "type": "object",</span></span>
+<span class="line"><span style="color:#9ECBFF">      "properties": {</span></span>
+<span class="line"><span style="color:#9ECBFF">        "prompt": { "type": "string" },</span></span>
+<span class="line"><span style="color:#9ECBFF">        "model": { "type": "string" }</span></span>
+<span class="line"><span style="color:#9ECBFF">      }</span></span>
+<span class="line"><span style="color:#9ECBFF">    }</span></span></code></pre>
+<p><strong>Theme bundle</strong> (<code>~/.config/glitch/themes/dracula.yaml</code>):</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">dracula</span></span>
+<span class="line"><span style="color:#85E89D">description</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">Dracula color scheme</span></span>
+<span class="line"><span style="color:#85E89D">palette</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  accent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#88c0d0"</span></span>
+<span class="line"><span style="color:#85E89D">  bg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#2e3440"</span></span>
+<span class="line"><span style="color:#85E89D">  fg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#eceff4"</span></span>
+<span class="line"><span style="color:#85E89D">  dim</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#4c566a"</span></span>
+<span class="line"><span style="color:#85E89D">  border</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#3b4252"</span></span>
+<span class="line"><span style="color:#85E89D">strings</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  button_cancel</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"↯ cancel"</span></span>
+<span class="line"><span style="color:#85E89D">  button_submit</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"✓ go"</span></span></code></pre>
+<p><strong>Store schema</strong> (SQLite tables):</p>
+<ul>
+<li><code>runs</code> — <code>id</code>, <code>kind</code>, <code>name</code>, <code>started_at</code>, <code>finished_at</code>, <code>exit_status</code>, <code>stdout</code>, <code>stderr</code>, <code>metadata</code>, <code>steps</code> (JSON array of step records).</li>
+<li><code>step_checkpoints</code> — <code>id</code>, <code>run_id</code>, <code>step_id</code>, <code>step_index</code>, <code>status</code>, <code>prompt</code>, <code>output</code>, <code>model</code>, <code>vars_json</code>, <code>started_at</code>, <code>finished_at</code>, <code>duration_ms</code>.</li>
+<li><code>user_score</code> — <code>id</code>, <code>total_xp</code>, <code>level</code>, <code>streak_days</code>, <code>last_run_date</code>, <code>total_runs</code>.</li>
+<li><code>score_events</code> — <code>id</code>, <code>run_id</code>, <code>xp</code>, <code>input_tokens</code>, <code>output_tokens</code>, <code>cache_read_tokens</code>, <code>cache_creation_tokens</code>, <code>cost_usd</code>, <code>provider</code>, <code>model</code>, <code>created_at</code>.</li>
+<li><code>game_personal_bests</code> — <code>metric</code>, <code>value</code>, <code>run_id</code>, <code>recorded_at</code>.</li>
+</ul>
+<h2 id="see-also">See Also</h2>
+<ul>
+<li><a href="philosophy.md">Philosophy</a> — Why GL1TCH exists: local-first, terminal-native.</li>
+<li><a href="console.md">Console</a> — TUI navigation, keybindings, slash commands.</li>
+<li><a href="pipelines.md">Pipelines</a> — Writing and running pipelines.</li>
+<li><a href="agents.md">Agents</a> — Running AI agents and managing responses.</li>
+</ul> </div>  </article> <nav class="docs-prev-next"> <a class="docs-prev-next-link prev" href="/docs/pipelines/cron"> <span class="docs-prev-next-label fg-comment">&larr; prev</span> <span class="docs-prev-next-title">Cron Scheduling</span> </a> <a class="docs-prev-next-link next" href="/docs/pipelines/technologies"> <span class="docs-prev-next-label fg-comment">next &rarr;</span> <span class="docs-prev-next-title">Technologies</span> </a> </nav> </div> </main> </div> <script type="module">const d=document.getElementById("docs-hamburger"),n=document.getElementById("docs-sidebar"),e=document.getElementById("docs-sidebar-overlay");function t(){n?.classList.toggle("open"),e?.classList.toggle("open")}d?.addEventListener("click",t);e?.addEventListener("click",t);</script>  </body></html>

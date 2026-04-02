@@ -1,0 +1,813 @@
+<!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Console — The Switchboard — GLITCH</title><meta name="description" content="Navigate the GL1TCH Switchboard TUI, launch pipelines, run agents, and manage your workspace."><link rel="stylesheet" href="/css/bbs.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <div class="docs-page" id="docs-page"> <button class="docs-hamburger" id="docs-hamburger" aria-label="Toggle sidebar"> <span class="docs-hamburger-icon">[=]</span> </button> <aside class="docs-sidebar" id="docs-sidebar"> <div class="docs-sidebar-header"> <a href="/" class="docs-logo-link"> <span class="fg-purple bold">GL1TCH</span> </a> <a href="/" class="docs-back-link">&larr; back to terminal</a> </div> <nav class="docs-nav"> <a class="docs-nav-link" href="/docs/">
+INDEX
+</a> <div class="docs-nav-section"> <div class="docs-nav-section-label"> <span class="fg-comment">&#x250C;&#x2500;</span> PIPELINES </div> <a class="docs-nav-link" href="/docs/pipelines/philosophy"> GL1TCH Philosophy </a><a class="docs-nav-link" href="/docs/pipelines/quickstart"> Your First Pipeline </a><a class="docs-nav-link active" href="/docs/pipelines/console"> Console — The Switchboard </a><a class="docs-nav-link" href="/docs/pipelines/pipelines"> Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/yaml-reference"> Pipeline YAML Reference </a><a class="docs-nav-link" href="/docs/pipelines/executors"> Executors and Plugins </a><a class="docs-nav-link" href="/docs/pipelines/brain"> The Brain System </a><a class="docs-nav-link" href="/docs/pipelines/examples"> Real-World Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/workflows"> Workflows </a><a class="docs-nav-link" href="/docs/pipelines/cli-reference"> CLI Reference </a><a class="docs-nav-link" href="/docs/pipelines/cron"> Cron Scheduling </a><a class="docs-nav-link" href="/docs/pipelines/architecture"> Architecture </a><a class="docs-nav-link" href="/docs/pipelines/technologies"> Technologies </a><a class="docs-nav-link" href="/docs/pipelines/themes"> Themes </a><a class="docs-nav-link" href="/docs/pipelines/plugins"> Plugins </a><a class="docs-nav-link" href="/docs/pipelines/prompts"> Prompts </a><a class="docs-nav-link" href="/docs/pipelines/telemetry"> Telemetry </a> <div class="docs-nav-section-end"> <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span> </div> </div> </nav> </aside> <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div> <main class="docs-main"> <div class="docs-content"> <div class="docs-breadcrumb"> <a href="/docs/">docs</a> <span class="fg-comment"> / </span> <a href="/docs/">pipelines</a> </div> <article>  <h1 class="docs-page-title">Console — The Switchboard</h1> <p class="docs-page-desc">Navigate the GL1TCH Switchboard TUI, launch pipelines, run agents, and manage your workspace.</p> <div class="docs-article"> <p>GL1TCH runs inside a tmux session. The <strong>Switchboard</strong> (window 0) is your primary control panel — a full-screen BubbleTea TUI that integrates pipeline launching, agent invocation, activity monitoring, and conversational AI. You can launch pipelines or agents from the left sidebar, see live output in the Activity Feed with status badges and timestamps, chat with the GL1TCH assistant for analysis and guidance, and manage multiple named sessions for separate conversation threads.</p>
+<h2 id="technologies">Technologies</h2>
+<p>The Switchboard is built on a set of mature Go libraries and local services:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Technology</th><th>Role</th></tr></thead><tbody><tr><td><strong>BubbleTea</strong></td><td>Event-driven TUI framework for terminal rendering and input handling</td></tr><tr><td><strong>Lipgloss</strong></td><td>ANSI styling and layout management (panels, borders, colors)</td></tr><tr><td><strong>Ollama</strong></td><td>Local LLM inference for the GL1TCH assistant</td></tr><tr><td><strong>busd</strong></td><td>Local Unix socket message bus for cross-component events (pipelines, steps, crons)</td></tr><tr><td><strong>SQLite</strong> (<code>internal/store</code>)</td><td>Persistence of run metadata, step details, and conversation history</td></tr><tr><td><strong>FSNotify</strong></td><td>File system watching for pipeline <code>.yaml</code> changes in real-time</td></tr><tr><td><strong>Glamour</strong></td><td>Markdown rendering for formatted output and documentation display</td></tr><tr><td><strong>OTel</strong> (<code>internal/telemetry</code>)</td><td>Distributed tracing for performance profiling and step-level diagnostics</td></tr><tr><td><strong>Cron</strong> (<code>robfig/cron</code>, <code>internal/cron</code>)</td><td>Scheduled pipeline execution and time-based triggers</td></tr></tbody></table>
+<p>The Switchboard delegates rendering consistency to <code>internal/panelrender</code> (header sprites, width calculations, ANSI stripping) and theming to <code>internal/themes</code> (Dracula palette, color bindings, dynamic theme switching).</p>
+<h2 id="named-sessions-and-status-badges">Named Sessions and Status Badges</h2>
+<p>GL1TCH supports <strong>named chat sessions</strong> — separate conversation threads you can switch between without losing context. Each session maintains its own message history, conversation state, and status badge. The active session is marked with a <code>●</code> indicator in the status bar (top right); background sessions show an attention badge if they have new activity.</p>
+<h3 id="session-states">Session States</h3>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Badge</th><th>State</th><th>Meaning</th></tr></thead><tbody><tr><td><code>●</code></td><td><strong>Active</strong></td><td>Currently visible; keyboard focus is here</td></tr><tr><td><code> </code></td><td><strong>Idle</strong></td><td>Background session with no new activity</td></tr><tr><td><code>◐</code></td><td><strong>Unread</strong></td><td>Background session has new messages since last viewed</td></tr><tr><td><code>⚠</code></td><td><strong>Attention</strong></td><td>High-priority activity (errors, clarifications, game alerts) requiring action</td></tr></tbody></table>
+<p><strong>Switching sessions</strong>: Press <code>^spc S</code> to cycle between open sessions. The previous session is marked idle; the new one becomes active. Sessions with unread messages or attention states remain highlighted in the footer.</p>
+<p><strong>Creating a session</strong>: Press <code>^spc n</code> (new session) and type a name (e.g., “debug”, “refactor”, “game”). A new empty session is created and immediately becomes active.</p>
+<h3 id="status-bar-session-indicators">Status Bar Session Indicators</h3>
+<p>The tmux status bar (bottom right) displays:</p>
+<ul>
+<li>Current time (always visible)</li>
+<li>Chord hints: <code>^spc n new</code> (create session), <code>^spc p build</code> (prompt builder), <code>^spc t themes</code> (theme picker)</li>
+<li>Attention badge if any background session needs your attention</li>
+</ul>
+<p>When a background session receives a new message or encounters an error, its badge changes from idle (<code>·</code>) to unread (<code>◐</code>) or attention (<code>⚠</code>), and the status bar briefly highlights it.</p>
+<h2 id="the-switchboard-layout">The Switchboard Layout</h2>
+<p>The Switchboard divides into three regions:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>┌─────────────────────────────────────────────────────────────┐</span></span>
+<span class="line"><span>│ GL1TCH DECK — CONTROL PANEL                         hh:mm:ss │</span></span>
+<span class="line"><span>├──────────────────────┬────────────────────────────────────────┤</span></span>
+<span class="line"><span>│                      │                                        │</span></span>
+<span class="line"><span>│  PIPELINE LAUNCHER   │                                        │</span></span>
+<span class="line"><span>│  ─────────────────   │      ACTIVITY FEED                     │</span></span>
+<span class="line"><span>│  • backup.pipeline   │      (live output, results,            │</span></span>
+<span class="line"><span>│  • deploy.pipeline   │       status badges)                   │</span></span>
+<span class="line"><span>│  • sync.pipeline     │                                        │</span></span>
+<span class="line"><span>│                      │                                        │</span></span>
+<span class="line"><span>│  AGENT RUNNER        │                                        │</span></span>
+<span class="line"><span>│  ─────────────────   │                                        │</span></span>
+<span class="line"><span>│  Provider: ollama    │                                        │</span></span>
+<span class="line"><span>│  Model: neural-chat  │                                        │</span></span>
+<span class="line"><span>│                      │                                        │</span></span>
+<span class="line"><span>│  Prompt: ___________ │                                        │</span></span>
+<span class="line"><span>│  [Enter to send]     │                                        │</span></span>
+<span class="line"><span>│                      │                                        │</span></span>
+<span class="line"><span>├──────────────────────┴────────────────────────────────────────┤</span></span>
+<span class="line"><span>│ [TAB] focus  [j/k] navigate  [↵] launch  [ESC] back  [T] theme│</span></span>
+<span class="line"><span>└───────────────────────────────────────────────────────────────┘</span></span></code></pre>
+<p><strong>Left Sidebar</strong>: Pipeline Launcher (saved <code>.pipeline.yaml</code> files) and Agent Runner (provider/model picker + inline prompt input).</p>
+<p><strong>Center/Right</strong>: Activity Feed — timestamped output from pipeline runs and agent invocations, with status badges (<code>[running]</code>, <code>[done]</code>, <code>[failed]</code>).</p>
+<p><strong>Bottom Bar</strong>: Compact keybinding reference showing the most important shortcuts.</p>
+<h2 id="console-architecture">Console Architecture</h2>
+<p>The Switchboard is built on BubbleTea, GL1TCH’s event-driven TUI framework. Understanding the architecture helps when customizing behavior or debugging layout issues.</p>
+<h3 id="core-components">Core Components</h3>
+<p><strong>Deck</strong> (<code>internal/console/deck.go</code>) — The root model. It orchestrates all panels (GL1TCH chat, pipeline launcher, agent runner, activity feed), handles keybindings, manages the session registry, and routes events. Deck is the entry point for all user input and screen rendering.</p>
+<p><strong>GL1TCH Panel</strong> (<code>internal/console/glitch_panel.go</code>) — Streaming chat interface. Handles prompt input, LLM communication via Ollama, token streaming, and cancellation. Maintains conversation turns and detects intent (routing to built-in handlers or the LLM).</p>
+<p><strong>Signal Board</strong> (<code>internal/console/signal_board.go</code>) — Activity feed. Subscribes to pipeline/step/cron events via <code>internal/busd</code>, maintains a ring buffer of up to 200 feed entries, supports fuzzy search and status filtering, and renders the visible portion with proper height calculations.</p>
+<p><strong>Session Registry</strong> (<code>internal/console/session.go</code>) — Manages named chat sessions, each with its own message history and status badge. Sessions are in-memory; the conversation history persists in the active session until you switch or quit.</p>
+<h3 id="event-flow">Event Flow</h3>
+<ol>
+<li><strong>User input</strong> → Deck’s Update() method</li>
+<li><strong>Keypress routing</strong> → Region-specific handlers (chat, launcher, feed)</li>
+<li><strong>Intent detection</strong> → Router (built-in handlers or LLM)</li>
+<li><strong>Execution</strong> → Pipeline executor, agent invocation, or LLM call</li>
+<li><strong>Completion</strong> → busd event published (pipeline_done, step_complete, etc.)</li>
+<li><strong>Feed update</strong> → Signal Board subscribes, adds entry, re-renders</li>
+<li><strong>UI re-render</strong> → Deck’s View() method calculates layout, calls region renderers, outputs ANSI</li>
+</ol>
+<h3 id="event-bus-busd">Event Bus (busd)</h3>
+<p>GL1TCH uses <code>internal/busd</code> — a local Unix socket message bus — to decouple the Deck from the executor, cron scheduler, and other services. The Deck subscribes to topics like:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Topic</th><th>Event</th><th>Meaning</th></tr></thead><tbody><tr><td><code>pipeline.started</code></td><td>A pipeline run has been launched</td><td>Add entry to Activity Feed with <code>[running]</code> badge</td></tr><tr><td><code>pipeline.completed</code></td><td>A pipeline finished successfully</td><td>Update badge to <code>[done]</code>, capture final output</td></tr><tr><td><code>pipeline.failed</code></td><td>A pipeline exited with error</td><td>Update badge to <code>[failed]</code>, capture error message</td></tr><tr><td><code>step.started</code></td><td>A step within a pipeline began</td><td>Update Inbox detail metadata</td></tr><tr><td><code>step.completed</code></td><td>A step finished</td><td>Record step duration (from OTel span or wall-clock)</td></tr><tr><td><code>step.failed</code></td><td>A step encountered an error</td><td>Mark step as failed in Inbox detail</td></tr><tr><td><code>cron.executed</code></td><td>A scheduled pipeline fired</td><td>Log to Activity Feed as cron job entry</td></tr><tr><td><code>clarification.requested</code></td><td>A step is asking for user input</td><td>Emit question to chat panel, block pipeline until answered</td></tr></tbody></table>
+<p>Subscriptions are managed in <code>glitch_panel.go</code> and <code>deck.go</code> with message handlers that:</p>
+<ol>
+<li>Update the Activity Feed in real time (Signal Board updates entry, re-renders)</li>
+<li>Update the session state (new messages added to the active session)</li>
+<li>Trigger re-renders to reflect new activity</li>
+</ol>
+<p>This asynchronous architecture allows pipelines and crons to run independently in background processes while the TUI remains responsive to keyboard input and feed scrolling.</p>
+<h3 id="styling-and-themes">Styling and Themes</h3>
+<p>Console styling is provided by <code>internal/themes</code> and <code>internal/styles</code>. Themes define a color palette (Dracula, Nord, Gruvbox, etc.); the active theme is stored in <code>~/.config/glitch/state.json</code> and applied on startup. Panel rendering delegates to <code>internal/panelrender</code> for consistent header rendering, ANSI sprite handling, and width calculations.</p>
+<h3 id="storage">Storage</h3>
+<p>Run metadata, step details, and conversation history are persisted to <code>internal/store</code> (SQLite). When you exit GL1TCH, conversation state is lost unless you save it explicitly. Pipeline outputs and OTel traces are logged to:</p>
+<ul>
+<li><code>~/.local/share/glitch/traces.jsonl</code> — OTel trace spans (for <code>/trace</code> inspection)</li>
+<li><code>~/.cache/glitch/inbox-read-state.json</code> — Which runs you’ve marked as read</li>
+</ul>
+<h2 id="sidebar-and-focus-navigation">Sidebar and Focus Navigation</h2>
+<p>The Switchboard divides into three focusable regions: <strong>Pipeline Launcher</strong> (top-left), <strong>Agent Runner</strong> (bottom-left), and <strong>Activity Feed</strong> (center/right).</p>
+<h3 id="sidebar-toggling">Sidebar Toggling</h3>
+<p>The sidebar (Pipeline Launcher + Agent Runner) divides the left pane into two stacked sections: the Pipeline Launcher on top and the Agent Runner below. Each section has its own focus region and keybindings.</p>
+<p><strong>Sidebar visibility</strong>: The sidebar can be toggled with <code>^spc \</code> (ctrl+space backslash) to maximize the Activity Feed width when reading large amounts of output. The sidebar state is remembered across sessions.</p>
+<h3 id="region-navigation">Region Navigation</h3>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody><tr><td><code>tab</code></td><td>Cycle focus forward: Launcher → Agent Runner → Activity Feed → Launcher</td></tr><tr><td><code>shift+tab</code></td><td>Cycle focus backward</td></tr><tr><td><code>h</code> or arrow-left</td><td>Shift focus to the left sidebar (from Activity Feed)</td></tr><tr><td><code>l</code> or arrow-right</td><td>Shift focus to the Activity Feed (from sidebar)</td></tr></tbody></table>
+<p>When you press <code>tab</code> in the Launcher, focus moves to the Agent Runner. Press <code>tab</code> again to move to the Activity Feed. From the Feed, <code>tab</code> wraps back to the Launcher.</p>
+<h3 id="selection-within-regions">Selection Within Regions</h3>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody><tr><td><code>j</code></td><td>Move selection down (in lists, left sidebar, or Activity Feed)</td></tr><tr><td><code>k</code></td><td>Move selection up</td></tr><tr><td><code>↵</code> (Enter)</td><td>Launch or open the selected item</td></tr><tr><td><code>esc</code></td><td>Cancel or deselect</td></tr></tbody></table>
+<h3 id="visual-controls">Visual Controls</h3>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody><tr><td><code>T</code> or <code>^spc t</code></td><td>Open theme picker modal</td></tr><tr><td><code>?</code> or <code>h</code></td><td>Show help (keybinding reference)</td></tr><tr><td><code>R</code></td><td>Reload providers/models (refresh from disk)</td></tr></tbody></table>
+<h2 id="pipeline-launcher">Pipeline Launcher</h2>
+<p>The <strong>Pipeline Launcher</strong> scans <code>~/.config/glitch/pipelines/</code> for saved <code>.pipeline.yaml</code> files and displays them as a scrollable list in the left sidebar.</p>
+<h3 id="launch-a-pipeline">Launch a Pipeline</h3>
+<p>You can launch a pipeline from the sidebar list or by typing in the chat. Chat-based dispatch requires an explicit run-verb — GL1TCH only routes to a pipeline when you clearly ask it to:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>run backup</span></span>
+<span class="line"><span>launch deploy</span></span>
+<span class="line"><span>execute sync-repos on https://github.com/org/repo</span></span></code></pre>
+<p>Questions and generic task requests (<code>check the logs</code>, <code>review my PR</code>) are answered by the AI directly without triggering a pipeline.</p>
+<p>To launch from the sidebar:</p>
+<ol>
+<li>Use <code>j</code>/<code>k</code> to navigate to the pipeline you want</li>
+<li>Press <code>↵</code> to launch it</li>
+<li>Output streams live to the Activity Feed</li>
+<li>A status badge (<code>[running]</code> → <code>[done]</code> or <code>[failed]</code>) tracks progress</li>
+<li>Each run is timestamped and added to the Inbox</li>
+</ol>
+<h3 id="active-job">Active Job</h3>
+<p>While a pipeline is running, the launcher is disabled and shows a <code>[running]</code> badge. You can still navigate other parts of the Switchboard and watch the output stream in real time. When the job completes, the launcher re-enables and the badge updates.</p>
+<blockquote>
+<p>[!TIP]
+Multi-job queuing is planned for a future release. For now, wait for the current job to finish before launching another.</p>
+</blockquote>
+<h2 id="agent-runner">Agent Runner</h2>
+<p>The <strong>Agent Runner</strong> is an inline agent invocation tool in the left sidebar. Pick a provider and model, type a prompt, and send it directly to your local Ollama or cloud provider.</p>
+<h3 id="anatomy">Anatomy</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>Provider: [ollama                    ↓]</span></span>
+<span class="line"><span>Model:    [neural-chat              ↓]</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>Prompt:   ____________________________</span></span>
+<span class="line"><span>          [Your prompt here]</span></span>
+<span class="line"><span>          [↵ to send]</span></span></code></pre>
+<p><strong>Provider</strong>: Dropdown showing installed sidecars and configured cloud providers. Managed via <code>apm.yml</code>.</p>
+<p><strong>Model</strong>: Dropdown populated from the selected provider’s available models (refreshed at startup and on <code>R</code> key).</p>
+<p><strong>Prompt Input</strong>: Textarea for typing your message. Press <code>↵</code> to submit; output streams to the Activity Feed.</p>
+<h3 id="running-an-agent">Running an Agent</h3>
+<ol>
+<li>Navigate to the Agent Runner section (use <code>tab</code>)</li>
+<li>Use <code>↓</code> to open the Provider dropdown and select a sidecar or cloud provider</li>
+<li>Use <code>↓</code> again to open the Model dropdown and pick a model</li>
+<li>Click in the Prompt field and type your message</li>
+<li>Press <code>↵</code> to send</li>
+<li>Output appears in the Activity Feed with a <code>[running]</code> badge</li>
+<li>When the agent responds, the badge updates to <code>[done]</code> or <code>[failed]</code></li>
+</ol>
+<p>Press <code>Esc</code> at any time while GL1TCH is responding to cancel the in-flight stream. Any partial response is saved to the history and input focus is restored immediately.</p>
+<h3 id="providers-and-models">Providers and Models</h3>
+<p>GL1TCH auto-detects installed Ollama sidescar via <code>~/.local/share/ollama/models</code> and registered cloud providers from <code>apm.yml</code>. Available models are pulled at startup.</p>
+<p>To refresh the model list after installing a new sidecar, press <code>R</code> in the Switchboard. This re-calls the provider discovery without restarting the TUI.</p>
+<h2 id="activity-feed">Activity Feed</h2>
+<p>The <strong>Activity Feed</strong> (center/right pane) displays real-time output from pipeline runs and agent invocations. Each entry is timestamped and tagged with its source.</p>
+<h3 id="entry-structure">Entry Structure</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>[14:23:05] [running] pipeline:backup.yaml</span></span>
+<span class="line"><span>  → Backing up database...</span></span>
+<span class="line"><span>  → Compressing files...</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>[14:23:18] [done] agent:ask</span></span>
+<span class="line"><span>  → Response from neural-chat:</span></span>
+<span class="line"><span>  Here's what I think about that...</span></span></code></pre>
+<p><strong>Timestamp</strong>: Shows when the activity started (not when output was written).</p>
+<p><strong>Status Badge</strong>:</p>
+<ul>
+<li><code>[running]</code> — job is active</li>
+<li><code>[done]</code> — job completed successfully</li>
+<li><code>[failed]</code> — job exited with non-zero status or error</li>
+</ul>
+<p><strong>Source</strong>: Either <code>pipeline:&#x3C;name></code> or <code>agent:&#x3C;provider>:&#x3C;model></code>.</p>
+<p><strong>Output</strong>: Streamed line-by-line. Long pipelines show all stdout/stderr captured during execution.</p>
+<h3 id="selecting-and-inspecting-results">Selecting and Inspecting Results</h3>
+<p>The Activity Feed is scrollable. Navigate with <code>j</code>/<code>k</code> to move between entries. Press <code>↵</code> to open the full result in the <strong>Inbox Detail Modal</strong>.</p>
+<h3 id="live-streaming">Live Streaming</h3>
+<p>Output is streamed in real time as it arrives from the pipeline or agent. The feed is throttled (50ms debounce) to avoid excessive BubbleTea re-renders on high-frequency output. Very long or complex pipelines may batch lines together.</p>
+<p>The Activity Feed maintains a <strong>rolling history of up to 200 entries</strong>. When the cap is reached, the oldest non-running entry is evicted first; if all entries are still running (a rare case), the feed truncates hard. This ensures the Switchboard remains responsive even during long sessions with many pipeline runs.</p>
+<h3 id="search-and-filter">Search and Filter</h3>
+<p>The Signal Board (Activity Feed) supports efficient searching and filtering:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody><tr><td><code>f</code></td><td>Cycle through status filters: <code>running</code> → <code>all</code> → <code>done</code> → <code>failed</code> → <code>archived</code></td></tr><tr><td><code>/</code></td><td>Enter fuzzy search mode; type to match entry titles; <code>Esc</code> to clear search</td></tr><tr><td><code>j</code>/<code>k</code></td><td>Navigate entries (normal mode) or navigate + mark (mark mode)</td></tr><tr><td><code>m</code></td><td>Toggle mark mode — hold position while marking/unmarking multiple entries</td></tr></tbody></table>
+<p><strong>Mark Mode</strong> (<code>m</code>): Toggles through three states:</p>
+<ul>
+<li><strong>Off</strong> (normal) — <code>j</code>/<code>k</code> navigate without marking</li>
+<li><strong>Active</strong> — <code>j</code>/<code>k</code> navigate <strong>and</strong> mark/unmark lines (highlighted with a badge)</li>
+<li><strong>Paused</strong> — <code>j</code>/<code>k</code> navigate without marking; useful to position on an entry without toggling its mark
+Press <code>m</code> to cycle between states. Useful for batch operations on related runs.</li>
+</ul>
+<p><strong>Fuzzy Search</strong> (<code>/</code>): Match entry titles by substring. The search resets when you select an entry or press <code>esc</code>.</p>
+<h3 id="json-output-expansion">JSON Output Expansion</h3>
+<p>Pipeline output containing valid JSON objects or arrays is automatically detected and rendered compactly by the <strong>feed parser</strong> system. Detection is zero-cost: each line is checked for leading <code>{</code> or <code>[</code> and validated with <code>json.Valid()</code> before rendering.</p>
+<p><strong>Collapsed (default)</strong>:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>▸ { … } (8 keys)</span></span>
+<span class="line"><span>▸ [ … ] (3 items)</span></span></code></pre>
+<p><strong>Expanded</strong> (press <code>↵</code> to toggle):</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>▾ { … } (8 keys)</span></span>
+<span class="line"><span>  "status": "success"</span></span>
+<span class="line"><span>  "duration_ms": 1234</span></span>
+<span class="line"><span>  "steps": [ 3 items ]</span></span>
+<span class="line"><span>  "cached": true</span></span></code></pre>
+<p>Expanded JSON is pretty-printed with syntax highlighting (keys in accent color, values in foreground). Large objects are truncated at 20 lines with an overflow indicator (<code>… N more lines</code>). Pressing <code>↵</code> again collapses the entry.</p>
+<p><strong>Parser Registry</strong> (<code>feed_parsers.go</code>):</p>
+<p>The feed parser is extensible by design. The system maintains an ordered <code>feedParsers</code> slice where each parser is a <code>FeedLineParser</code> function:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="go"><code><span class="line"><span style="color:#F97583">type</span><span style="color:#B392F0"> FeedLineParser</span><span style="color:#F97583"> func</span><span style="color:#E1E4E8">(</span><span style="color:#FFAB70">raw</span><span style="color:#F97583"> string</span><span style="color:#E1E4E8">, </span><span style="color:#FFAB70">width</span><span style="color:#F97583"> int</span><span style="color:#E1E4E8">, </span><span style="color:#FFAB70">pal</span><span style="color:#B392F0"> ANSIPalette</span><span style="color:#E1E4E8">, </span><span style="color:#FFAB70">expanded</span><span style="color:#F97583"> bool</span><span style="color:#E1E4E8">) (</span><span style="color:#FFAB70">lines</span><span style="color:#E1E4E8"> []</span><span style="color:#F97583">string</span><span style="color:#E1E4E8">, </span><span style="color:#FFAB70">matched</span><span style="color:#F97583"> bool</span><span style="color:#E1E4E8">)</span></span></code></pre>
+<p>When a feed entry is rendered:</p>
+<ol>
+<li>Raw ANSI-stripped output is passed to each parser in order (first match wins)</li>
+<li>If a parser matches and returns <code>matched=true</code>, its output lines are used</li>
+<li>If no parser matches, the line is rendered as plain text</li>
+</ol>
+<p>Built-in parsers:</p>
+<ul>
+<li><code>jsonFeedLineParser</code> — Detects and formats JSON objects and arrays</li>
+</ul>
+<p>Custom parsers can be added to the <code>feedParsers</code> slice to handle other formats (YAML, Protobuf, CSV, etc.) without modifying the core feed rendering logic.</p>
+<h2 id="gl1tch-chat-panel">GL1TCH Chat Panel</h2>
+<p>The right side of the Switchboard displays a streaming conversation with the GL1TCH AI assistant. The assistant is powered by your local Ollama instance or a configured cloud provider, and provides analysis, suggestions, and direct answers based on your pipeline runs and prompts.</p>
+<h3 id="chat-context-and-assistant-awareness">Chat Context and Assistant Awareness</h3>
+<p>The assistant’s context automatically includes:</p>
+<ul>
+<li><strong>Current environment</strong>: Working directory, active model, pipeline paths</li>
+<li><strong>Recent runs</strong>: Last 5 activity feed entries, their status, output, and step details (including OTel trace data)</li>
+<li><strong>Conversation history</strong>: Full message history within the active session (but not other sessions)</li>
+<li><strong>Run analysis</strong>: Exit codes, error messages, step durations, and structured output (JSON, ANSI) from pipeline steps</li>
+<li><strong>Game state</strong> (if applicable): Current player stats, inventory, active quests, recent narration events</li>
+</ul>
+<p>When a pipeline or agent job fails, the assistant automatically receives the failure event and can optionally analyze it, suggest debugging steps, or propose re-running with different parameters. When you ask a question, the assistant answers based on available context without necessarily triggering a new run — it’s a true conversational interface, not just a command dispatcher.</p>
+<h3 id="streaming-and-token-flow">Streaming and Token Flow</h3>
+<p>Responses from the assistant stream <strong>token-by-token</strong> with a blinking cursor (<code>▌</code>) to show activity. Very long responses are chunked and displayed in real time as they arrive from Ollama or the cloud provider. You can press <code>esc</code> at any time to cancel an in-flight stream; any partial response is preserved in the session history and you can resume the conversation immediately.</p>
+<p>Internally, streaming is driven by a pair of BubbleTea message types:</p>
+<ul>
+<li><strong><code>glitchStreamMsg</code></strong> — Carries a single token string and a channel for reading the remaining token stream. Emitted when the assistant begins responding.</li>
+<li><strong><code>glitchTickMsg</code></strong> — Fires every 120ms to drive the animation frame and pull the next token from the stream channel. Allows smooth 120ms-paced updates without blocking on I/O.</li>
+<li><strong><code>glitchDoneMsg</code></strong> — Signals that the stream has finished (channel closed).</li>
+<li><strong><code>glitchErrMsg</code></strong> — Carries an error if the stream fails (connection loss, LLM timeout, etc.).</li>
+</ul>
+<p>The Update() handler for these messages updates the chat pane’s current message buffer, re-renders the view, and continues the <code>glitchTick</code> loop until <code>glitchDoneMsg</code> arrives. When you press <code>esc</code>, a cancellation flag is set and the stream channel is closed, stopping all further pulls and rendering the partial response to history.</p>
+<h3 id="sending-messages-and-intent-routing">Sending Messages and Intent Routing</h3>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody><tr><td><code>c</code></td><td>Focus the chat input area (from any Switchboard region)</td></tr><tr><td><code>ctrl+↵</code></td><td>Send your message (normal <code>↵</code> adds a newline)</td></tr><tr><td><code>esc</code></td><td>Cancel an in-flight stream and return focus to the Switchboard</td></tr></tbody></table>
+<p><strong>Input area</strong>:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>You: __________________________________</span></span>
+<span class="line"><span>    [Type your prompt here]</span></span>
+<span class="line"><span>    [Ctrl+Enter to send]</span></span></code></pre>
+<h3 id="intent-detection-and-command-dispatch">Intent Detection and Command Dispatch</h3>
+<p>When you send a message, the GL1TCH router (<code>internal/router</code>) analyzes your input and dispatches it to one of three paths:</p>
+<p><strong>1. Built-in intent</strong> (no LLM call):
+Exact phrase matching triggers an immediate handler without consulting the LLM. These are parsed from the message and executed synchronously:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>run backup                              # launch pipeline named "backup"</span></span>
+<span class="line"><span>launch deploy --prod                    # launch with flags passed as env vars</span></span>
+<span class="line"><span>create session debug                    # new named session, becomes active</span></span>
+<span class="line"><span>switch to refactor                      # switch to existing session</span></span>
+<span class="line"><span>show pipelines                          # list all available .pipeline.yaml files</span></span>
+<span class="line"><span>/terminal 50% left                      # open tmux pane (left, 50% width)</span></span></code></pre>
+<p>The router maintains a pattern registry of these commands. When a match is found, the handler is called immediately and the output (success/failure) is published to busd as a special event that updates the chat panel.</p>
+<p><strong>2. Assistant-driven intent</strong> (full context passed to LLM):
+Free-form questions and requests are sent to the configured LLM with full conversation history and recent activity context:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>why did the backup fail?                # analysis of last failed run</span></span>
+<span class="line"><span>what pipelines are running?             # query against current state</span></span>
+<span class="line"><span>suggest a fix for the schema error      # open-ended suggestion</span></span></code></pre>
+<p>The router recognizes that these don’t match a built-in handler and packages the full context (last 5 feed entries, current session history, environment state) into a system prompt before calling Ollama. The assistant’s response appears in the chat panel as an analysis, suggestion, or clarification.</p>
+<p><strong>3. Hybrid intent</strong> (built-in + LLM elaboration):
+Some messages match a built-in handler but also trigger LLM analysis:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>run backup explain                      # launch pipeline AND explain what it does</span></span></code></pre>
+<p>The pipeline runs immediately; the LLM then receives the run output and provides commentary in the chat panel.</p>
+<p>The routing decision is made in <code>glitch_panel.go</code>’s Update() method, which calls the router to parse the message and select the dispatch path.</p>
+<h3 id="response-format">Response Format</h3>
+<p>Responses appear as timestamped entries in the chat panel:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>gl1tch: The deployment finished with exit code 0. All</span></span>
+<span class="line"><span>        three steps completed in 2m 15s. The manifest</span></span>
+<span class="line"><span>        was successfully applied to prod.</span></span></code></pre>
+<p>If the assistant suggests running a pipeline, it formats the suggestion as an action:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>gl1tch: I recommend running schema-sync --force to</span></span>
+<span class="line"><span>        resolve the schema validation error.</span></span></code></pre>
+<p>You can type <code>/pipeline schema-sync --force</code> in the chat to execute this immediately, or select it from the launcher.</p>
+<h3 id="clarifications-and-blocking-questions">Clarifications and Blocking Questions</h3>
+<p>If a pipeline reaches a step with an <code>AskClarification</code> signal (e.g., a user-input prompt that blocks until answered), the question appears in the chat panel as a highlighted entry with an input box. Your answer is validated, stored, and published back to the pipeline via the bus (<code>internal/busd</code>), which unblocks the waiting <code>AskClarification</code> step and resumes execution automatically.</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>glitch: Schema validation failed. Should I rollback</span></span>
+<span class="line"><span>        to the previous version? (yes/no)</span></span>
+<span class="line"><span>You: __________________________________</span></span>
+<span class="line"><span>     [your answer is stored as a ClarificationReply]</span></span></code></pre>
+<p>This enables interactive pipelines: a pipeline can pause mid-execution, ask a question in the UI, wait for your response, and then resume based on your answer. All clarification requests are loaded from the database on startup, so re-attaching to a GL1TCH session will show any pending questions that were unanswered.</p>
+<h2 id="chord-shortcuts">Chord Shortcuts</h2>
+<p>Chord shortcuts start with <code>^spc</code> (ctrl+space) followed by a key. This is the primary way to navigate your GL1TCH workspace beyond the Switchboard.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Chord</th><th>Action</th></tr></thead><tbody><tr><td><code>^spc h</code></td><td>Show help screen (full keybinding reference)</td></tr><tr><td><code>^spc c</code></td><td>Create a new window</td></tr><tr><td><code>^spc d</code></td><td>Detach from the session (safely exit tmux)</td></tr><tr><td><code>^spc r</code></td><td>Reload GL1TCH (pick up a new binary without restarting)</td></tr><tr><td><code>^spc q</code></td><td>Quit GL1TCH entirely (tears down all tmux sessions)</td></tr><tr><td><code>^spc [</code></td><td>Previous window in the session</td></tr><tr><td><code>^spc ]</code></td><td>Next window in the session</td></tr><tr><td><code>^spc x</code></td><td>Kill the current pane</td></tr><tr><td><code>^spc X</code></td><td>Kill the current window</td></tr><tr><td><code>^spc a</code></td><td>Jump to the GL1TCH assistant (shell/REPL pane)</td></tr><tr><td><code>^spc t</code></td><td>Open the theme picker</td></tr><tr><td><code>^spc n</code></td><td>New workspace session (alternative to <code>^spc c</code> for named sessions)</td></tr><tr><td><code>^spc p</code></td><td>Open the pipeline/prompt builder</td></tr></tbody></table>
+<h3 id="terminal-and-pipeline-commands">Terminal and Pipeline Commands</h3>
+<p>The <code>/terminal</code> and <code>/pipeline</code> commands control your workspace without requiring modal dialogs or leaving the Switchboard.</p>
+<h4 id="terminal--open-panes-with-natural-language"><code>/terminal</code> — Open Panes with Natural Language</h4>
+<p>The <code>/terminal</code> command supports natural-language syntax for opening and laying out tmux panes:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>/terminal                              # bottom pane, 25%</span></span>
+<span class="line"><span>/terminal 50%                          # 50% size</span></span>
+<span class="line"><span>/terminal half                         # 50% (alias)</span></span>
+<span class="line"><span>/terminal third bottom                 # bottom 33%, vertical split</span></span>
+<span class="line"><span>/terminal left 40%                     # left side, 40%</span></span>
+<span class="line"><span>/terminal 3 shells                     # open 3 panes stacked</span></span>
+<span class="line"><span>/terminal in /tmp                      # pane in /tmp</span></span>
+<span class="line"><span>/terminal cwd to ~/a ~/b ~/c           # 3 panes, different directories</span></span>
+<span class="line"><span>/terminal htop                         # pane runs `htop` (shell fallback)</span></span></code></pre>
+<p><strong>Size keywords</strong>: <code>25%</code>, <code>50%</code>, <code>half</code>, <code>third</code>, <code>quarter</code>, <code>full</code> (or raw percentage).</p>
+<p><strong>Direction keywords</strong>: <code>bottom</code>, <code>vertical</code>, <code>below</code> (v-split); <code>left</code> (h-split to the left).</p>
+<p><strong>Count</strong>: <code>&#x3C;N> shells</code>, <code>&#x3C;N> terminals</code>, <code>&#x3C;N> panes</code> (opens that many splits).</p>
+<p><strong>Working directory</strong>: <code>in &#x3C;path></code> (single); <code>cwd to &#x3C;path1> &#x3C;path2> …</code> (per-pane).</p>
+<p>If the input doesn’t match any natural-language pattern, it’s treated as a raw shell command and executed in a new pane.</p>
+<h4 id="pipeline--run-and-schedule-pipelines"><code>/pipeline</code> — Run and Schedule Pipelines</h4>
+<p>Run a saved pipeline with optional input and scheduling:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>/pipeline backup                           # run with defaults</span></span>
+<span class="line"><span>/pipeline deploy --prod                    # run with flags</span></span>
+<span class="line"><span>/pipeline backup --input "weekly"          # pass input data</span></span>
+<span class="line"><span>/pipeline schema-sync --at "2pm tomorrow"  # schedule for later</span></span></code></pre>
+<p>Output streams to the Activity Feed. If the pipeline takes longer than a few seconds, a dedicated tmux window opens so you can tail scrollback while continuing other work in the Switchboard.</p>
+<h4 id="other--commands">Other <code>/</code> Commands</h4>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Command</th><th>Action</th></tr></thead><tbody><tr><td><code>/help</code></td><td>Show command reference</td></tr><tr><td><code>/quit</code></td><td>Exit GL1TCH and tear down all tmux windows</td></tr></tbody></table>
+<p>Pipeline panes (opened when you run a pipeline) are laid out automatically: first job splits horizontally, subsequent jobs stack vertically on the right. Use <code>/terminal equalize</code> to rebalance panes after several runs.</p>
+<h2 id="modal-workflows">Modal Workflows</h2>
+<p>Several features open as full-screen modals layered on top of the Switchboard. You can always press <code>esc</code> to close and return to the main view.</p>
+<h3 id="theme-picker-t-or-spc-t">Theme Picker (<code>T</code> or <code>^spc t</code>)</h3>
+<p>Opens a modal showing available themes. Use <code>j</code>/<code>k</code> to navigate, press <code>↵</code> to select. The theme applies immediately to all GL1TCH panels (Switchboard, Inbox, prompts, etc.) and persists across sessions.</p>
+<p>Currently available themes:</p>
+<ul>
+<li><strong>Dracula</strong> (default) — Dark mode with purples, cyans, and high contrast</li>
+<li><strong>Nord</strong> — Cool, arctic colors</li>
+<li><strong>Gruvbox</strong> — Warm, earthy tones</li>
+</ul>
+<h3 id="inbox-detail--from-activity-feed-entry">Inbox Detail (<code>↵</code> from Activity Feed entry)</h3>
+<p>Selecting an entry in the Activity Feed and pressing <code>↵</code> opens the <strong>Inbox Detail Modal</strong>:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>┌──────────────────────────────────────────────────┐</span></span>
+<span class="line"><span>│ Pipeline: backup.yaml                   [12 of 47]│</span></span>
+<span class="line"><span>│ Status: done | Exit: 0 | Duration: 12.3s        │</span></span>
+<span class="line"><span>├──────────────────────────────────────────────────┤</span></span>
+<span class="line"><span>│ started:   2026-04-02 3:45:22 PM                 │</span></span>
+<span class="line"><span>│ finished:  2026-04-02 3:48:45 PM                 │</span></span>
+<span class="line"><span>│ cwd:       ~/projects/myapp                      │</span></span>
+<span class="line"><span>│ model:     neural-chat:7b                        │</span></span>
+<span class="line"><span>│ ────────────────────────────────────────────────│</span></span>
+<span class="line"><span>│ steps:                                           │</span></span>
+<span class="line"><span>│   ├ ✓ backup-database      2.1s                  │</span></span>
+<span class="line"><span>│   ├ ✓ compress-files       1.5s                  │</span></span>
+<span class="line"><span>│   ├ ✓ verify-integrity     0.8s                  │</span></span>
+<span class="line"><span>│   └ ✓ upload-to-archive    7.9s                  │</span></span>
+<span class="line"><span>│                                                  │</span></span>
+<span class="line"><span>│ [p]rev [n]ext [d]elete [r]erun [o]tel [esc]back │</span></span>
+<span class="line"><span>└──────────────────────────────────────────────────┘</span></span></code></pre>
+<p><strong>Run Metadata</strong>:</p>
+<ul>
+<li><strong>started</strong> / <strong>finished</strong>: Timestamps when the run began and completed</li>
+<li><strong>duration</strong>: Wall-clock time elapsed</li>
+<li><strong>exit</strong>: Exit status (0 = success, non-zero = failure)</li>
+<li><strong>cwd</strong>: Working directory the pipeline ran in</li>
+<li><strong>model</strong>: LLM model used (if applicable)</li>
+</ul>
+<p><strong>Steps Section</strong>: Shows each pipeline step with a badge:</p>
+<ul>
+<li><code>✓</code> (green) — completed successfully</li>
+<li><code>✗</code> (red) — failed with error</li>
+<li><code>·</code> (dim) — pending or in progress</li>
+</ul>
+<p>Each step shows duration in seconds. If OTel tracing is enabled, step durations come from span timings (more accurate than wall-clock).</p>
+<p><strong>Navigation inside the modal</strong>:</p>
+<ul>
+<li><code>j</code>/<code>k</code> or arrows — Scroll through the output</li>
+<li><code>p</code> — Jump to the previous result in the Inbox</li>
+<li><code>n</code> — Jump to the next result in the Inbox</li>
+<li><code>d</code> — Delete the current result (removes from Inbox)</li>
+<li><code>r</code> — Re-run the pipeline or agent with the same parameters</li>
+<li><code>o</code> — Open the OTel trace tree (if traces are available)</li>
+<li><code>esc</code> — Close and return to the Switchboard</li>
+</ul>
+<h3 id="otel-trace-view">OTel Trace View</h3>
+<p>When a pipeline includes instrumented steps, press <code>o</code> in the Inbox Detail to view the trace tree. Traces are collected by <code>internal/telemetry</code> and written as JSONL to <code>~/.local/share/glitch/traces.jsonl</code>. The trace view parses this file, matches spans to the current run by run ID, and displays the call hierarchy:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>fetch-schema                                    OK · 850ms</span></span>
+<span class="line"><span>  ├ http.request                                OK · 145ms</span></span>
+<span class="line"><span>  ├ http.response                               OK · 12ms</span></span>
+<span class="line"><span>  └ json.parse                                  OK · 3ms</span></span>
+<span class="line"><span>transform                                       OK · 680ms</span></span>
+<span class="line"><span>  ├ schema.validate                             OK · 450ms</span></span>
+<span class="line"><span>  └ schema.transform                            OK · 230ms</span></span>
+<span class="line"><span>publish                                         OK · 120ms</span></span>
+<span class="line"><span>  └ http.request                                OK · 115ms</span></span></code></pre>
+<p>Spans are indented by depth. Each shows status (<code>OK</code> or <code>ERR</code>) and duration in milliseconds. This view is useful for diagnosing performance bottlenecks in slow pipelines.</p>
+<p><strong>Note</strong>: Trace data is only available if the pipeline or agent step was instrumented with OTel calls (via <code>internal/telemetry</code>). Most built-in steps emit traces automatically; custom pipelines may need explicit instrumentation.</p>
+<h3 id="prompt-builder-spc-p">Prompt Builder (<code>^spc p</code>)</h3>
+<p>Opens a full-screen accordion-style editor for authoring and testing new pipelines or agent prompts. This is a separate view from the Switchboard and is useful for iterative development.</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>┌──────────────────────────────────────────────────┐</span></span>
+<span class="line"><span>│ PROMPT BUILDER                                   │</span></span>
+<span class="line"><span>├──────────────────────────────────────────────────┤</span></span>
+<span class="line"><span>│ Title: [New Pipeline              ]              │</span></span>
+<span class="line"><span>│                                                  │</span></span>
+<span class="line"><span>│ ▼ Step 1: Input                                  │</span></span>
+<span class="line"><span>│   Type: [user-input      ▼]                      │</span></span>
+<span class="line"><span>│   Prompt: [Ask user...   ]                       │</span></span>
+<span class="line"><span>│                                                  │</span></span>
+<span class="line"><span>│ ▼ Step 2: Brain                                  │</span></span>
+<span class="line"><span>│   Model: [gpt-4          ▼]                      │</span></span>
+<span class="line"><span>│   System: [You are...    ]                       │</span></span>
+<span class="line"><span>│                                                  │</span></span>
+<span class="line"><span>│ ▼ Step 3: Output                                 │</span></span>
+<span class="line"><span>│   Format: [markdown      ▼]                      │</span></span>
+<span class="line"><span>│                                                  │</span></span>
+<span class="line"><span>│ [save] [test] [esc] back                         │</span></span>
+<span class="line"><span>└──────────────────────────────────────────────────┘</span></span></code></pre>
+<p><strong>Key actions</strong>:</p>
+<ul>
+<li><code>tab</code> — Move between sections</li>
+<li><code>↵</code> — Expand/collapse a step</li>
+<li><code>j</code>/<code>k</code> — Navigate between steps</li>
+<li><code>space</code> — Expand/collapse the current step</li>
+<li><code>[save]</code> button — Save your pipeline to <code>~/.config/glitch/pipelines/</code></li>
+<li><code>[test]</code> button — Run a test execution and show output inline</li>
+<li><code>esc</code> — Return to the Switchboard</li>
+</ul>
+<h3 id="theme-persistence">Theme Persistence</h3>
+<p>The active theme is stored in <code>~/.config/glitch/state.json</code> and loaded automatically when you reattach to your GL1TCH session. All panels (Switchboard, modals, pane borders, text colors) respect the theme.</p>
+<h2 id="status-indicators">Status Indicators</h2>
+<p>The Switchboard shows several status indicators to keep you aware of what’s happening:</p>
+<h3 id="session-status-badges">Session Status Badges</h3>
+<p>The status bar and chat panel footer display badges for each open session:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>main ●  debug ◐  refactor ·</span></span></code></pre>
+<ul>
+<li><code>●</code> (solid circle) — Active session (currently visible)</li>
+<li><code>◐</code> (half circle) — Unread messages in background session</li>
+<li><code>·</code> (dot) — Idle background session</li>
+<li><code>⚠</code> (warning) — Attention required (errors, clarification, game alerts)</li>
+</ul>
+<p>When a background session transitions to unread or attention, it’s briefly highlighted in the status bar and the footer title updates to show the session name.</p>
+<h3 id="chat-panel-header">Chat Panel Header</h3>
+<p>The Switchboard window title and header show:</p>
+<ul>
+<li>Current time (top right)</li>
+<li>Active job count (<code>[1 running]</code> if pipelines are active; <code>[0 running]</code> when idle)</li>
+<li>Theme indicator (brief name of the active theme, e.g., “Dracula”)</li>
+</ul>
+<h3 id="exit-status">Exit Status</h3>
+<p>When a pipeline or agent finishes, the Activity Feed entry shows:</p>
+<ul>
+<li><code>[done]</code> — Exited cleanly (status 0)</li>
+<li><code>[failed]</code> — Non-zero exit code or error</li>
+<li>Exit code displayed in the Inbox Detail modal</li>
+</ul>
+<h3 id="providermodel-availability">Provider/Model Availability</h3>
+<p>If a provider is unavailable (Ollama not running, cloud API key invalid), the Agent Runner shows a warning and disables the Model dropdown until the provider is reachable again.</p>
+<h2 id="advanced-tmux-window-integration">Advanced: Tmux Window Integration</h2>
+<p>When a pipeline or long-running agent job completes, GL1TCH automatically creates a <strong>detached tmux window</strong> (if tmux is available) to display the full output scrollback. This allows you to inspect logs without blocking the Switchboard.</p>
+<h3 id="how-it-works">How It Works</h3>
+<ol>
+<li>Job starts → GL1TCH creates a window named <code>glitch-&#x3C;runID></code> in the current session</li>
+<li>Output is tee’d to a log file (e.g. <code>/tmp/glitch-42.log</code>) and displayed in the window</li>
+<li>When the job finishes, the exit code is written to a done file (e.g. <code>/tmp/glitch-42.done</code>)</li>
+<li>Window stays open (via <code>remain-on-exit on</code>); <code>automatic-rename</code> is disabled so the name doesn’t change</li>
+<li>You can attach to the window with: <code>tmux attach-session -t &#x3C;target></code></li>
+</ol>
+<p>The tmux window target is fully-qualified, e.g. <code>session:@123</code> (using the stable window ID rather than index). You can copy this from the feed entry or the Inbox Detail modal.</p>
+<h3 id="tail-output">Tail Output</h3>
+<p>If a pane is already running when you launch a pipeline, GL1TCH can optionally tail its output live with <code>tail -f</code> on the run log file instead of embedding a full shell command. This is a fallback for agent jobs that are managed in-process.</p>
+<h3 id="layout-stability">Layout Stability</h3>
+<p>The console calculates pane heights precisely to avoid layout drift:</p>
+<ul>
+<li><code>signalBoardPanelHeight()</code> accounts for header sprites, filter rows, search input, and footer</li>
+<li><code>sbFixedBodyRows</code> locks the visible entry count to prevent scroll jumping</li>
+<li>All width calculations use <code>panelrender.VisibleWidth()</code> to strip ANSI codes</li>
+</ul>
+<p>If you manually resize panes, the console may need a re-render. Press <code>ctrl+l</code> to force a redraw.</p>
+<h2 id="tips-and-patterns">Tips and Patterns</h2>
+<h3 id="quick-pipeline-testing">Quick Pipeline Testing</h3>
+<ol>
+<li>Navigate to your pipeline in the launcher</li>
+<li>Press <code>↵</code> to run it</li>
+<li>Watch output stream in the Activity Feed</li>
+<li>If it fails, press <code>^spc p</code> to open the builder, make edits, save, and test again</li>
+<li>When satisfied, the pipeline is already saved and ready for production</li>
+</ol>
+<h3 id="agent-iteration">Agent Iteration</h3>
+<ol>
+<li>Open the Agent Runner section (use <code>tab</code>)</li>
+<li>Write your prompt in the textarea</li>
+<li>Press <code>↵</code> to send</li>
+<li>Read the response in the Activity Feed</li>
+<li>Use <code>↵</code> on the activity entry to open the full result</li>
+<li>Refine your prompt and press <code>↵</code> again</li>
+<li>Responses are saved to the Inbox for reference</li>
+</ol>
+<h3 id="multi-window-workflow">Multi-Window Workflow</h3>
+<p>While a pipeline is running in the Switchboard:</p>
+<ol>
+<li>Press <code>^spc c</code> to open a new window</li>
+<li>Type commands directly in the shell (e.g., <code>tail -f /var/log/app.log</code>)</li>
+<li>Press <code>^spc j</code> to jump back to the Switchboard</li>
+<li>Check the Activity Feed for your pipeline’s progress</li>
+<li>When done, use <code>^spc ]</code> to cycle back through windows</li>
+</ol>
+<h3 id="saving-and-re-running-results">Saving and Re-running Results</h3>
+<p>Pipeline outputs are automatically saved to the <strong>Inbox</strong>. To re-run an old pipeline:</p>
+<ol>
+<li>Open the Activity Feed in the Switchboard</li>
+<li>Navigate to the result you want to repeat</li>
+<li>Press <code>↵</code> to open the Inbox Detail modal</li>
+<li>Press <code>r</code> to re-run with the same parameters</li>
+<li>Output from the new run streams to the Activity Feed</li>
+</ol>
+<h2 id="see-also">See Also</h2>
+<ul>
+<li><a href="./pipelines.md">Pipelines</a> — Author and structure <code>.pipeline.yaml</code> files</li>
+<li><a href="./sidecars.md">Sidecars &#x26; Agents</a> — Configure AI providers and models</li>
+<li><a href="./router.md">Router &#x26; Intent Dispatch</a> — How the assistant interprets your prompts and commands</li>
+<li><a href="./signals.md">Signals &#x26; Handlers</a> — Set up narration, achievements, and game events</li>
+<li><a href="./themes.md">Themes &#x26; Colors</a> — Customize the Switchboard appearance</li>
+</ul> </div>  </article> <nav class="docs-prev-next"> <a class="docs-prev-next-link prev" href="/docs/pipelines/quickstart"> <span class="docs-prev-next-label fg-comment">&larr; prev</span> <span class="docs-prev-next-title">Your First Pipeline</span> </a> <a class="docs-prev-next-link next" href="/docs/pipelines/pipelines"> <span class="docs-prev-next-label fg-comment">next &rarr;</span> <span class="docs-prev-next-title">Pipelines</span> </a> </nav> </div> </main> </div> <script type="module">const d=document.getElementById("docs-hamburger"),n=document.getElementById("docs-sidebar"),e=document.getElementById("docs-sidebar-overlay");function t(){n?.classList.toggle("open"),e?.classList.toggle("open")}d?.addEventListener("click",t);e?.addEventListener("click",t);</script>  </body></html>

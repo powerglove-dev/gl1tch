@@ -1,0 +1,358 @@
+<!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Themes — GLITCH</title><meta name="description" content="Bundle system for palette, borders, status bar, and modal styling in gl1tch."><link rel="stylesheet" href="/css/bbs.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <div class="docs-page" id="docs-page"> <button class="docs-hamburger" id="docs-hamburger" aria-label="Toggle sidebar"> <span class="docs-hamburger-icon">[=]</span> </button> <aside class="docs-sidebar" id="docs-sidebar"> <div class="docs-sidebar-header"> <a href="/" class="docs-logo-link"> <span class="fg-purple bold">GL1TCH</span> </a> <a href="/" class="docs-back-link">&larr; back to terminal</a> </div> <nav class="docs-nav"> <a class="docs-nav-link" href="/docs/">
+INDEX
+</a> <div class="docs-nav-section"> <div class="docs-nav-section-label"> <span class="fg-comment">&#x250C;&#x2500;</span> PIPELINES </div> <a class="docs-nav-link" href="/docs/pipelines/philosophy"> GL1TCH Philosophy </a><a class="docs-nav-link" href="/docs/pipelines/quickstart"> Your First Pipeline </a><a class="docs-nav-link" href="/docs/pipelines/console"> Console — The Switchboard </a><a class="docs-nav-link" href="/docs/pipelines/pipelines"> Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/yaml-reference"> Pipeline YAML Reference </a><a class="docs-nav-link" href="/docs/pipelines/executors"> Executors and Plugins </a><a class="docs-nav-link" href="/docs/pipelines/brain"> The Brain System </a><a class="docs-nav-link" href="/docs/pipelines/examples"> Real-World Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/workflows"> Workflows </a><a class="docs-nav-link" href="/docs/pipelines/cli-reference"> CLI Reference </a><a class="docs-nav-link" href="/docs/pipelines/cron"> Cron Scheduling </a><a class="docs-nav-link" href="/docs/pipelines/architecture"> Architecture </a><a class="docs-nav-link" href="/docs/pipelines/technologies"> Technologies </a><a class="docs-nav-link active" href="/docs/pipelines/themes"> Themes </a><a class="docs-nav-link" href="/docs/pipelines/plugins"> Plugins </a><a class="docs-nav-link" href="/docs/pipelines/prompts"> Prompts </a><a class="docs-nav-link" href="/docs/pipelines/telemetry"> Telemetry </a> <div class="docs-nav-section-end"> <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span> </div> </div> </nav> </aside> <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div> <main class="docs-main"> <div class="docs-content"> <div class="docs-breadcrumb"> <a href="/docs/">docs</a> <span class="fg-comment"> / </span> <a href="/docs/">pipelines</a> </div> <article>  <h1 class="docs-page-title">Themes</h1> <p class="docs-page-desc">Bundle system for palette, borders, status bar, and modal styling in gl1tch.</p> <div class="docs-article"> <p>Themes drive all color, border style, and status bar rendering in gl1tch without requiring code changes. The theme system loads bundled palettes at startup, discovers user-provided overrides from <code>~/.config/glitch/themes/</code>, and persists the active theme choice across restarts. Themes communicate changes via a bus event, allowing the UI to repaint live when a new theme is selected.</p>
+<h2 id="architecture-overview">Architecture Overview</h2>
+<p>gl1tch’s theme system lives in <code>internal/themes</code> and consists of four components:</p>
+<p><strong>Registry</strong> — <code>registry.go</code> holds the master list of available themes and tracks which one is active. It loads bundled themes from the embedded <code>assets.ThemeFS</code> and user themes from <code>~/.config/glitch/themes/</code>, with user themes winning on name collisions. The active theme is persisted to <code>~/.config/glitch/active_theme</code> and restored on startup.</p>
+<p><strong>Loader</strong> — <code>loader.go</code> reads theme bundles from both embedded and filesystem sources. A bundle is a directory containing <code>theme.yaml</code> (metadata and color definitions) and optional <code>.ans</code> ANSI art files for splash screens or panel headers.</p>
+<p><strong>Global Registry</strong> — <code>global.go</code> stores a process-level singleton so any component in gl1tch can call <code>GlobalRegistry()</code> to get the active theme without passing it through function arguments.</p>
+<p><strong>Tmux Integration</strong> — <code>tmux.go</code> applies theme colors to the running tmux session via <code>set-option</code> commands, updating the status bar colors and pane borders immediately when the user switches themes.</p>
+<p>When a user selects a new theme, the system publishes a <code>theme.changed</code> bus event with the theme name as payload. Subscribers (switchboard, panels, modals) receive this event and re-render using the new palette.</p>
+<h2 id="technologies">Technologies</h2>
+<ul>
+<li><strong>YAML</strong> — theme manifests use YAML for readability and ease of editing</li>
+<li><strong>tmux</strong> — status bar and pane border colors are applied via tmux <code>set-option</code> commands</li>
+<li><strong>ANSI escape codes</strong> — color values are hex strings (e.g. <code>#ff79c6</code>) that are converted to ANSI sequences or tmux color codes where needed</li>
+<li><strong>go:embed</strong> — bundled themes are compiled into the binary as read-only assets</li>
+</ul>
+<h2 id="concepts">Concepts</h2>
+<p><strong>Bundle</strong> — a complete theme definition. Contains a palette (seven semantic colors), border style, status bar configuration, optional ANSI splash art, modal styling, and optional panel header sprites.</p>
+<p><strong>Palette</strong> — seven semantic color slots that every theme must define: <code>bg</code> (background), <code>fg</code> (foreground), <code>accent</code> (highlights), <code>dim</code> (secondary text), <code>border</code> (panel borders), <code>error</code> (error messages), <code>success</code> (success messages). Colors are hex strings like <code>#1a1b26</code>.</p>
+<p><strong>Palette reference</strong> — a string like <code>palette.accent</code> in a YAML field that points to a palette color. The registry resolves these to hex values at runtime, allowing modal and status bar colors to derive from the palette without duplication.</p>
+<p><strong>Mode</strong> — theme classification as <code>dark</code> or <code>light</code>. Used by the theme picker to group themes and by consumers to query bundles by appearance preference.</p>
+<p><strong>Headers</strong> — optional per-panel ANSI art sprites (<code>.ans</code> files) that replace plain-text panel titles. Stored as a map from panel name to a list of file paths, ordered from widest to narrowest, so the system can pick the first sprite that fits the current panel width.</p>
+<p><strong>Modal config</strong> — colors for popup overlays (quit confirmation, agent launch, theme switcher). Fields: <code>bg</code> (overlay background), <code>border</code> (border color), <code>title_bg</code> (title bar background), <code>title_fg</code> (title bar text color).</p>
+<p><strong>Header style</strong> — dynamic header generation when no fixed-width <code>.ans</code> sprite fits the panel. Includes top/bottom/border characters and per-panel accent/text color pairs, allowing headers to render at any width.</p>
+<h2 id="configuration--yaml-reference">Configuration / YAML Reference</h2>
+<p>A theme bundle is a directory containing <code>theme.yaml</code>. Place it at <code>~/.config/glitch/themes/&#x3C;name>/</code> to load at startup, or include it in the bundled assets folder to ship with gl1tch.</p>
+<h3 id="themeyaml-schema"><code>theme.yaml</code> schema</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">example-theme</span><span style="color:#6A737D">                    # required: kebab-case identifier</span></span>
+<span class="line"><span style="color:#85E89D">display_name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Example Theme"</span><span style="color:#6A737D">          # required: human-readable name</span></span>
+<span class="line"><span style="color:#85E89D">mode</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">dark</span><span style="color:#6A737D">                             # required: "dark" or "light"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">palette</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  bg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#1a1a2e"</span><span style="color:#6A737D">                        # required: background hex</span></span>
+<span class="line"><span style="color:#85E89D">  fg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#e0e0ff"</span><span style="color:#6A737D">                        # required: foreground hex</span></span>
+<span class="line"><span style="color:#85E89D">  accent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#7b68ee"</span><span style="color:#6A737D">                    # required: highlight hex</span></span>
+<span class="line"><span style="color:#85E89D">  dim</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#555577"</span><span style="color:#6A737D">                       # required: dimmed text hex</span></span>
+<span class="line"><span style="color:#85E89D">  border</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#333355"</span><span style="color:#6A737D">                    # required: border hex</span></span>
+<span class="line"><span style="color:#85E89D">  error</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#ff4444"</span><span style="color:#6A737D">                     # required: error color hex</span></span>
+<span class="line"><span style="color:#85E89D">  success</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#44ff88"</span><span style="color:#6A737D">                   # required: success color hex</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">borders</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  style</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">light</span><span style="color:#6A737D">                         # "light", "heavy", or "ascii"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">statusbar</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  format</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">" {session} "</span><span style="color:#6A737D">                # template string</span></span>
+<span class="line"><span style="color:#85E89D">  bg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.bg"</span><span style="color:#6A737D">                     # may reference palette key</span></span>
+<span class="line"><span style="color:#85E89D">  fg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span><span style="color:#6A737D">                 # may reference palette key</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">splash</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">splash.ans</span><span style="color:#6A737D">                     # optional: relative path to .ans file</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">modal</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  bg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.bg"</span><span style="color:#6A737D">                     # optional: modal background</span></span>
+<span class="line"><span style="color:#85E89D">  border</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.border"</span><span style="color:#6A737D">             # optional: modal border</span></span>
+<span class="line"><span style="color:#85E89D">  title_bg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span><span style="color:#6A737D">           # optional: modal title bar BG</span></span>
+<span class="line"><span style="color:#85E89D">  title_fg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.bg"</span><span style="color:#6A737D">               # optional: modal title bar FG</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">header_style</span><span style="color:#E1E4E8">:                          </span><span style="color:#6A737D"># optional: dynamic header generation</span></span>
+<span class="line"><span style="color:#85E89D">  top_char</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"▄"</span><span style="color:#6A737D">                        # top block character (default "▄")</span></span>
+<span class="line"><span style="color:#85E89D">  bot_char</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"▀"</span><span style="color:#6A737D">                        # bottom block character (default "▀")</span></span>
+<span class="line"><span style="color:#85E89D">  border_char</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"█"</span><span style="color:#6A737D">                     # border character (default "█")</span></span>
+<span class="line"><span style="color:#85E89D">  panels</span><span style="color:#E1E4E8">:                              </span><span style="color:#6A737D"># map of panel name to colors</span></span>
+<span class="line"><span style="color:#85E89D">    pipelines</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">      accent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span>
+<span class="line"><span style="color:#85E89D">      text</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.fg"</span></span>
+<span class="line"><span style="color:#85E89D">    agent_runner</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">      accent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span>
+<span class="line"><span style="color:#85E89D">      text</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.fg"</span></span>
+<span class="line"><span style="color:#85E89D">    signal_board</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">      accent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span>
+<span class="line"><span style="color:#85E89D">      text</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.fg"</span></span>
+<span class="line"><span style="color:#85E89D">    activity_feed</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">      accent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span>
+<span class="line"><span style="color:#85E89D">      text</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.fg"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">headers</span><span style="color:#E1E4E8">:                               </span><span style="color:#6A737D"># optional: .ans sprite paths</span></span>
+<span class="line"><span style="color:#85E89D">  pipelines</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#E1E4E8">    - </span><span style="color:#9ECBFF">header-wide.ans</span></span>
+<span class="line"><span style="color:#E1E4E8">    - </span><span style="color:#9ECBFF">header-narrow.ans</span></span>
+<span class="line"><span style="color:#85E89D">  agent_runner</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#E1E4E8">    - </span><span style="color:#9ECBFF">header.ans</span></span></code></pre>
+<h3 id="palette-reference-resolution">Palette reference resolution</h3>
+<p>Any field in <code>statusbar</code>, <code>modal</code>, or <code>header_style</code> may contain a palette reference string like <code>"palette.accent"</code>. At runtime, the registry resolves this to the hex color from <code>palette.accent</code>. Use palette references to keep your theme cohesive — if you change the accent color, all references update automatically.</p>
+<p>Literal hex strings like <code>"#ff79c6"</code> bypass palette resolution and render as-is.</p>
+<h3 id="field-reference">Field reference</h3>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Field</th><th>Required</th><th>Type</th><th>Notes</th></tr></thead><tbody><tr><td><code>name</code></td><td>yes</td><td>string</td><td>Kebab-case, must be unique in the registry</td></tr><tr><td><code>display_name</code></td><td>yes</td><td>string</td><td>Shown in theme picker</td></tr><tr><td><code>mode</code></td><td>yes</td><td>string</td><td><code>dark</code> or <code>light</code> for grouping</td></tr><tr><td><code>palette.bg</code></td><td>yes</td><td>hex</td><td>Background color</td></tr><tr><td><code>palette.fg</code></td><td>yes</td><td>hex</td><td>Foreground/primary text color</td></tr><tr><td><code>palette.accent</code></td><td>yes</td><td>hex</td><td>Highlight/interactive color</td></tr><tr><td><code>palette.dim</code></td><td>yes</td><td>hex</td><td>Secondary/muted text color</td></tr><tr><td><code>palette.border</code></td><td>yes</td><td>hex</td><td>Panel border color</td></tr><tr><td><code>palette.error</code></td><td>yes</td><td>hex</td><td>Error message color</td></tr><tr><td><code>palette.success</code></td><td>yes</td><td>hex</td><td>Success message color</td></tr><tr><td><code>borders.style</code></td><td>yes</td><td>string</td><td><code>light</code>, <code>heavy</code>, or <code>ascii</code></td></tr><tr><td><code>statusbar.format</code></td><td>yes</td><td>string</td><td>Template with <code>{session}</code>, <code>{model}</code> tokens</td></tr><tr><td><code>statusbar.bg</code></td><td>yes</td><td>string</td><td>Hex or palette reference</td></tr><tr><td><code>statusbar.fg</code></td><td>yes</td><td>string</td><td>Hex or palette reference</td></tr><tr><td><code>splash</code></td><td>no</td><td>string</td><td>Relative path to <code>.ans</code> file in bundle</td></tr><tr><td><code>modal.bg</code></td><td>no</td><td>string</td><td>Hex or palette reference; falls back to hardcoded default if absent</td></tr><tr><td><code>modal.border</code></td><td>no</td><td>string</td><td>Hex or palette reference</td></tr><tr><td><code>modal.title_bg</code></td><td>no</td><td>string</td><td>Hex or palette reference</td></tr><tr><td><code>modal.title_fg</code></td><td>no</td><td>string</td><td>Hex or palette reference</td></tr><tr><td><code>header_style</code></td><td>no</td><td>object</td><td>Enables dynamic header rendering</td></tr><tr><td><code>headers</code></td><td>no</td><td>map</td><td>Panel name → list of <code>.ans</code> paths</td></tr></tbody></table>
+<h3 id="bundle-directory-layout">Bundle directory layout</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>~/.config/glitch/themes/</span></span>
+<span class="line"><span>└── my-theme/</span></span>
+<span class="line"><span>    ├── theme.yaml</span></span>
+<span class="line"><span>    ├── splash.ans             (optional)</span></span>
+<span class="line"><span>    ├── header-wide.ans        (optional)</span></span>
+<span class="line"><span>    └── header-narrow.ans      (optional)</span></span></code></pre>
+<p>Files referenced in <code>headers</code> and <code>splash</code> are relative to the bundle directory.</p>
+<h2 id="examples">Examples</h2>
+<h3 id="minimal-dark-theme">Minimal dark theme</h3>
+<p>Save this as <code>~/.config/glitch/themes/minimal/theme.yaml</code>:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">minimal</span></span>
+<span class="line"><span style="color:#85E89D">display_name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Minimal"</span></span>
+<span class="line"><span style="color:#85E89D">mode</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">dark</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">palette</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  bg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#0a0a0a"</span></span>
+<span class="line"><span style="color:#85E89D">  fg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#e8e8e8"</span></span>
+<span class="line"><span style="color:#85E89D">  accent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#00d7ff"</span></span>
+<span class="line"><span style="color:#85E89D">  dim</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#626262"</span></span>
+<span class="line"><span style="color:#85E89D">  border</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#3a3a3a"</span></span>
+<span class="line"><span style="color:#85E89D">  error</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#ff5555"</span></span>
+<span class="line"><span style="color:#85E89D">  success</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#55ff55"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">borders</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  style</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">light</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">statusbar</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  format</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">" {session} "</span></span>
+<span class="line"><span style="color:#85E89D">  bg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.bg"</span></span>
+<span class="line"><span style="color:#85E89D">  fg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span></code></pre>
+<h3 id="theme-with-palette-references-in-modal">Theme with palette references in modal</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">nord-themed</span></span>
+<span class="line"><span style="color:#85E89D">display_name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Nord-based"</span></span>
+<span class="line"><span style="color:#85E89D">mode</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">dark</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">palette</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  bg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#2e3440"</span></span>
+<span class="line"><span style="color:#85E89D">  fg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#eceff4"</span></span>
+<span class="line"><span style="color:#85E89D">  accent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#88c0d0"</span></span>
+<span class="line"><span style="color:#85E89D">  dim</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#4c566a"</span></span>
+<span class="line"><span style="color:#85E89D">  border</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#3b4252"</span></span>
+<span class="line"><span style="color:#85E89D">  error</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#bf616a"</span></span>
+<span class="line"><span style="color:#85E89D">  success</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#a3be8c"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">borders</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  style</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">light</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">statusbar</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  format</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">" {session} · {model} "</span></span>
+<span class="line"><span style="color:#85E89D">  bg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.bg"</span></span>
+<span class="line"><span style="color:#85E89D">  fg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">modal</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  bg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.bg"</span></span>
+<span class="line"><span style="color:#85E89D">  border</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span>
+<span class="line"><span style="color:#85E89D">  title_bg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span>
+<span class="line"><span style="color:#85E89D">  title_fg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.bg"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">header_style</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  top_char</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"▄"</span></span>
+<span class="line"><span style="color:#85E89D">  bot_char</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"▀"</span></span>
+<span class="line"><span style="color:#85E89D">  border_char</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"█"</span></span>
+<span class="line"><span style="color:#85E89D">  panels</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">    pipelines</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">      accent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span>
+<span class="line"><span style="color:#85E89D">      text</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.fg"</span></span>
+<span class="line"><span style="color:#85E89D">    agent_runner</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">      accent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span>
+<span class="line"><span style="color:#85E89D">      text</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.fg"</span></span>
+<span class="line"><span style="color:#85E89D">    signal_board</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">      accent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span>
+<span class="line"><span style="color:#85E89D">      text</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.fg"</span></span>
+<span class="line"><span style="color:#85E89D">    activity_feed</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">      accent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span>
+<span class="line"><span style="color:#85E89D">      text</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.fg"</span></span></code></pre>
+<h3 id="light-theme">Light theme</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">solarized-light</span></span>
+<span class="line"><span style="color:#85E89D">display_name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Solarized Light"</span></span>
+<span class="line"><span style="color:#85E89D">mode</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">light</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">palette</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  bg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#fdf6e3"</span></span>
+<span class="line"><span style="color:#85E89D">  fg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#657b83"</span></span>
+<span class="line"><span style="color:#85E89D">  accent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#268bd2"</span></span>
+<span class="line"><span style="color:#85E89D">  dim</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#93a1a1"</span></span>
+<span class="line"><span style="color:#85E89D">  border</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#eee8d5"</span></span>
+<span class="line"><span style="color:#85E89D">  error</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#dc322f"</span></span>
+<span class="line"><span style="color:#85E89D">  success</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#859900"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">borders</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  style</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">light</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">statusbar</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  format</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">" {session} "</span></span>
+<span class="line"><span style="color:#85E89D">  bg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.bg"</span></span>
+<span class="line"><span style="color:#85E89D">  fg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">modal</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  bg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.bg"</span></span>
+<span class="line"><span style="color:#85E89D">  border</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span>
+<span class="line"><span style="color:#85E89D">  title_bg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span>
+<span class="line"><span style="color:#85E89D">  title_fg</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.bg"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">header_style</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">  panels</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">    pipelines</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">      accent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span>
+<span class="line"><span style="color:#85E89D">      text</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.fg"</span></span>
+<span class="line"><span style="color:#85E89D">    agent_runner</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">      accent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span>
+<span class="line"><span style="color:#85E89D">      text</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.fg"</span></span>
+<span class="line"><span style="color:#85E89D">    signal_board</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">      accent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span>
+<span class="line"><span style="color:#85E89D">      text</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.fg"</span></span>
+<span class="line"><span style="color:#85E89D">    activity_feed</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">      accent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.accent"</span></span>
+<span class="line"><span style="color:#85E89D">      text</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"palette.fg"</span></span></code></pre>
+<h3 id="accessing-your-custom-theme">Accessing your custom theme</h3>
+<p>After saving a <code>theme.yaml</code> in <code>~/.config/glitch/themes/&#x3C;name>/</code>:</p>
+<ol>
+<li>Restart gl1tch — the registry loads all user themes at startup</li>
+<li>Open the theme picker (usually keybind <code>T</code> in the switchboard)</li>
+<li>Navigate to your theme and press <code>enter</code> to activate it</li>
+<li>The theme is immediately applied and persisted for future sessions</li>
+</ol>
+<p>To override a bundled theme, name your user theme identically (e.g. <code>name: nord</code>). The user version takes precedence.</p>
+<h2 id="see-also">See Also</h2>
+<ul>
+<li><a href="https://draculatheme.com/contribute">Dracula palette reference</a> — official color specs for extending Dracula-based themes</li>
+<li><a href="https://terminalcolors.com">terminalcolors.com</a> — curated repository of terminal themes with YAML exports</li>
+<li>Internal: <code>internal/themes/themes.go</code> — <code>Bundle</code> struct and color resolution</li>
+<li>Internal: <code>internal/console/switchboard.go</code> — switchboard model holds the registry and subscribes to theme changes</li>
+<li>Internal: <code>internal/styles/styles.go</code> — bundle-aware style factories for lipgloss components</li>
+</ul> </div>  </article> <nav class="docs-prev-next"> <a class="docs-prev-next-link prev" href="/docs/pipelines/technologies"> <span class="docs-prev-next-label fg-comment">&larr; prev</span> <span class="docs-prev-next-title">Technologies</span> </a> <a class="docs-prev-next-link next" href="/docs/pipelines/plugins"> <span class="docs-prev-next-label fg-comment">next &rarr;</span> <span class="docs-prev-next-title">Plugins</span> </a> </nav> </div> </main> </div> <script type="module">const d=document.getElementById("docs-hamburger"),n=document.getElementById("docs-sidebar"),e=document.getElementById("docs-sidebar-overlay");function t(){n?.classList.toggle("open"),e?.classList.toggle("open")}d?.addEventListener("click",t);e?.addEventListener("click",t);</script>  </body></html>

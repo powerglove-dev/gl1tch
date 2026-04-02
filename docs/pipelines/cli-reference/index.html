@@ -1,6 +1,7 @@
 <!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>CLI Reference — GLITCH</title><meta name="description" content="Every glitch command — ask, pipeline, cron, config, and more."><link rel="stylesheet" href="/css/bbs.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <div class="docs-page" id="docs-page"> <button class="docs-hamburger" id="docs-hamburger" aria-label="Toggle sidebar"> <span class="docs-hamburger-icon">[=]</span> </button> <aside class="docs-sidebar" id="docs-sidebar"> <div class="docs-sidebar-header"> <a href="/" class="docs-logo-link"> <span class="fg-purple bold">GL1TCH</span> </a> <a href="/" class="docs-back-link">&larr; back to terminal</a> </div> <nav class="docs-nav"> <a class="docs-nav-link" href="/docs/">
 INDEX
-</a> <div class="docs-nav-section"> <div class="docs-nav-section-label"> <span class="fg-comment">&#x250C;&#x2500;</span> PIPELINES </div> <a class="docs-nav-link" href="/docs/pipelines/quickstart"> Your First Pipeline </a><a class="docs-nav-link" href="/docs/pipelines/yaml-reference"> Pipeline YAML Reference </a><a class="docs-nav-link" href="/docs/pipelines/executors"> Executors and Plugins </a><a class="docs-nav-link" href="/docs/pipelines/brain"> The Brain System </a><a class="docs-nav-link" href="/docs/pipelines/examples"> Real-World Pipelines </a><a class="docs-nav-link active" href="/docs/pipelines/cli-reference"> CLI Reference </a> <div class="docs-nav-section-end"> <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span> </div> </div> </nav> </aside> <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div> <main class="docs-main"> <div class="docs-content"> <div class="docs-breadcrumb"> <a href="/docs/">docs</a> <span class="fg-comment"> / </span> <a href="/docs/">pipelines</a> </div> <article>  <h1 class="docs-page-title">CLI Reference</h1> <p class="docs-page-desc">Every glitch command — ask, pipeline, cron, config, and more.</p> <div class="docs-article"> <h2 id="glitch-ask">glitch ask</h2>
+</a> <div class="docs-nav-section"> <div class="docs-nav-section-label"> <span class="fg-comment">&#x250C;&#x2500;</span> PIPELINES </div> <a class="docs-nav-link" href="/docs/pipelines/philosophy"> GL1TCH Philosophy </a><a class="docs-nav-link" href="/docs/pipelines/quickstart"> Your First Pipeline </a><a class="docs-nav-link" href="/docs/pipelines/console"> Console — The Switchboard </a><a class="docs-nav-link" href="/docs/pipelines/pipelines"> Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/yaml-reference"> Pipeline YAML Reference </a><a class="docs-nav-link" href="/docs/pipelines/executors"> Executors and Plugins </a><a class="docs-nav-link" href="/docs/pipelines/brain"> The Brain System </a><a class="docs-nav-link" href="/docs/pipelines/examples"> Real-World Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/workflows"> Workflows </a><a class="docs-nav-link active" href="/docs/pipelines/cli-reference"> CLI Reference </a><a class="docs-nav-link" href="/docs/pipelines/cron"> Cron Scheduling </a><a class="docs-nav-link" href="/docs/pipelines/architecture"> Architecture </a><a class="docs-nav-link" href="/docs/pipelines/technologies"> Technologies </a><a class="docs-nav-link" href="/docs/pipelines/themes"> Themes </a><a class="docs-nav-link" href="/docs/pipelines/plugins"> Plugins </a><a class="docs-nav-link" href="/docs/pipelines/prompts"> Prompts </a><a class="docs-nav-link" href="/docs/pipelines/telemetry"> Telemetry </a> <div class="docs-nav-section-end"> <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span> </div> </div> </nav> </aside> <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div> <main class="docs-main"> <div class="docs-content"> <div class="docs-breadcrumb"> <a href="/docs/">docs</a> <span class="fg-comment"> / </span> <a href="/docs/">pipelines</a> </div> <article>  <h1 class="docs-page-title">CLI Reference</h1> <p class="docs-page-desc">Every glitch command — ask, pipeline, cron, config, and more.</p> <div class="docs-article"> <p>The <code>glitch</code> CLI is the primary interface for running pipelines, managing configuration, and interacting with the AI layer from the terminal.</p>
+<h2 id="glitch-ask">glitch ask</h2>
 <p>Send a prompt to glitch from the terminal. Routes to a matching pipeline automatically, or generates one on the fly if nothing matches.</p>
 <pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> ask</span><span style="color:#9ECBFF"> "sync my docs with the latest code changes"</span></span>
 <span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> ask</span><span style="color:#9ECBFF"> "what PRs need my review"</span></span>
@@ -77,22 +78,7 @@ INDEX
 
 
 
-<table><thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>-p</code>, <code>--provider</code></td><td><em>(local)</em></td><td>Provider ID to use: <code>ollama</code>, <code>claude</code>, <code>opencode</code>, etc.</td></tr><tr><td><code>-m</code>, <code>--model</code></td><td><em>(provider default)</em></td><td>Model name, e.g. <code>llama3.2</code>, <code>mistral</code>.</td></tr><tr><td><code>--pipeline</code></td><td><em>(none)</em></td><td>Run a named pipeline or file path instead of routing.</td></tr><tr><td><code>--input key=value</code></td><td><em>(none)</em></td><td>Pass vars into the pipeline. Repeatable.</td></tr><tr><td><code>--brain</code></td><td><code>true</code></td><td>Inject brain context from the store to ground the response.</td></tr><tr><td><code>--write-brain</code></td><td><code>false</code></td><td>Write the response back to the brain store.</td></tr><tr><td><code>--synthesize</code></td><td><code>false</code></td><td>Run response through claude to clean it up without adding new information.</td></tr><tr><td><code>--synthesize-model</code></td><td><em>(claude default)</em></td><td>Model used for the synthesis pass.</td></tr><tr><td><code>--route</code></td><td><code>true</code></td><td>Attempt to route the prompt to a matching pipeline automatically.</td></tr><tr><td><code>--auto</code>, <code>-y</code></td><td><code>false</code></td><td>Skip confirmation when a pipeline is generated on the fly.</td></tr><tr><td><code>--dry-run</code></td><td><code>false</code></td><td>Show which pipeline would run (or the generated YAML) without executing.</td></tr><tr><td><code>--json</code></td><td><code>false</code></td><td>Output the response as a JSON envelope.</td></tr></tbody></table>
-<h3 id="how-routing-works">How routing works</h3>
-<p>When <code>--route</code> is on (the default), <code>glitch ask</code> scans <code>~/.config/glitch/pipelines/</code> and uses a local model to classify your prompt against the available pipelines. If a match is found, that pipeline runs with your prompt as its input. If nothing matches, a pipeline is generated on the fly and you’re asked to confirm before it runs.</p>
-<p>Add a <code>description:</code> field to your pipeline YAMLs to give the router better signal:</p>
-<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">sync-docs</span></span>
-<span class="line"><span style="color:#85E89D">description</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Compare recent code changes against site docs and generate a sync report"</span></span>
-<span class="line"><span style="color:#85E89D">version</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"1"</span></span>
-<span class="line"><span style="color:#85E89D">steps</span><span style="color:#E1E4E8">:</span></span>
-<span class="line"><span style="color:#79B8FF">  ...</span></span></code></pre>
-<p>To skip routing entirely and get a direct one-shot response:</p>
-<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> ask</span><span style="color:#79B8FF"> --route=false</span><span style="color:#9ECBFF"> "what does write_brain do?"</span></span></code></pre>
-<h3 id="self-improvement-loop">Self-improvement loop</h3>
-<p>Combine <code>--brain</code> and <code>--write-brain</code> to build context over time:</p>
-<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> ask</span><span style="color:#79B8FF"> --brain</span><span style="color:#79B8FF"> --write-brain</span><span style="color:#9ECBFF"> "expand on how the pipeline retry system works"</span></span></code></pre>
-<p>Each run reads existing brain context, generates a grounded response, and writes it back. Later runs are richer because earlier runs accumulated knowledge.</p>
-<hr>
+<table><thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>-p</code>, <code>--provider</code></td><td><em>(local)</em></td><td>Provider ID to use: <code>ollama</code>, <code>claude</code>, <code>opencode</code>, etc.</td></tr><tr><td><code>-m</code>, <code>--model</code></td><td><em>(provider default)</em></td><td>Model name, e.g. <code>llama3.2</code>, <code>mistral</code>.</td></tr><tr><td><code>--pipeline</code></td><td><em>(none)</em></td><td>Run a named pipeline or file path instead of routing.</td></tr><tr><td><code>--input key=value</code></td><td><em>(none)</em></td><td>Pass vars into the pipeline. Repeatable.</td></tr><tr><td><code>--brain</code></td><td><code>true</code></td><td>Inject brain context from the store to ground the response.</td></tr><tr><td><code>--write-brain</code></td><td><code>false</code></td><td>Write the response back to the brain store.</td></tr><tr><td><code>--synthesize</code></td><td><code>false</code></td><td>Run response through claude to clean it up without adding new information.</td></tr><tr><td><code>--synthesize-model</code></td><td><em>(claude default)</em></td><td>Model used for the synthesis pass.</td></tr><tr><td><code>--json</code></td><td><code>false</code></td><td>Output the response as a JSON envelope.</td></tr><tr><td><code>--route</code></td><td><code>true</code></td><td>Attempt to route the prompt to a matching pipeline automatically.</td></tr><tr><td><code>--auto</code>, <code>-y</code></td><td><code>false</code></td><td>Skip confirmation when a pipeline is generated on the fly.</td></tr><tr><td><code>--dry-run</code></td><td><code>false</code></td><td>Show what would run without executing.</td></tr></tbody></table>
 <h2 id="glitch-pipeline">glitch pipeline</h2>
 <p>Run and manage pipelines.</p>
 <h3 id="glitch-pipeline-run">glitch pipeline run</h3>
@@ -100,11 +86,42 @@ INDEX
 <span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> pipeline</span><span style="color:#9ECBFF"> run</span><span style="color:#9ECBFF"> sync-docs</span></span>
 <span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> pipeline</span><span style="color:#9ECBFF"> run</span><span style="color:#9ECBFF"> ./my-pipeline.yaml</span><span style="color:#79B8FF"> --input</span><span style="color:#9ECBFF"> "focus on auth changes"</span></span></code></pre>
 <p>Looks up <code>&#x3C;name></code> as <code>~/.config/glitch/pipelines/&#x3C;name>.pipeline.yaml</code>. Pass a path directly to use any file on disk.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>--input</code></td><td><em>(none)</em></td><td>User input string passed to the pipeline as <code>{{param.input}}</code>.</td></tr></tbody></table>
 <h3 id="glitch-pipeline-resume">glitch pipeline resume</h3>
 <p>Resume a pipeline that paused waiting for a clarification answer.</p>
 <pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> pipeline</span><span style="color:#9ECBFF"> resume</span><span style="color:#79B8FF"> --run-id</span><span style="color:#F97583"> &#x3C;</span><span style="color:#9ECBFF">i</span><span style="color:#E1E4E8">d</span><span style="color:#F97583">></span></span></code></pre>
 <p>The run ID is shown in the TUI inbox when a pipeline is paused.</p>
-<hr>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>--run-id</code></td><td><em>(required)</em></td><td>Store run ID to resume.</td></tr></tbody></table>
 <h2 id="glitch-cron">glitch cron</h2>
 <p>Schedule pipelines to run automatically.</p>
 <pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> cron</span><span style="color:#9ECBFF"> start</span><span style="color:#6A737D">           # Start the cron daemon in a background tmux session</span></span>
@@ -113,7 +130,25 @@ INDEX
 <span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> cron</span><span style="color:#9ECBFF"> logs</span><span style="color:#6A737D">            # View recent cron run logs</span></span>
 <span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> cron</span><span style="color:#9ECBFF"> run</span><span style="color:#F97583"> &#x3C;</span><span style="color:#9ECBFF">nam</span><span style="color:#E1E4E8">e</span><span style="color:#F97583">></span><span style="color:#6A737D">      # Run a cron job manually right now</span></span></code></pre>
 <p>The cron daemon runs pipelines on a schedule defined in <code>~/.config/glitch/cron.yaml</code>. It runs in a detached tmux session named <code>glitch-cron</code>.</p>
-<hr>
+<h3 id="glitch-cron-start">glitch cron start</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> cron</span><span style="color:#9ECBFF"> start</span></span>
+<span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> cron</span><span style="color:#9ECBFF"> start</span><span style="color:#79B8FF"> --force</span><span style="color:#6A737D">   # Kill existing session and restart</span></span></code></pre>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>--force</code></td><td><code>false</code></td><td>Kill an existing cron session before starting.</td></tr></tbody></table>
 <h2 id="glitch-config">glitch config</h2>
 <p>Manage configuration files.</p>
 <h3 id="glitch-config-init">glitch config init</h3>
@@ -123,4 +158,121 @@ INDEX
 <ul>
 <li><code>~/.config/glitch/layout.yaml</code> — pane layout for the TUI</li>
 <li><code>~/.config/glitch/keybindings.yaml</code> — keyboard shortcut overrides</li>
-</ul> </div>  </article> <nav class="docs-prev-next"> <a class="docs-prev-next-link prev" href="/docs/pipelines/examples"> <span class="docs-prev-next-label fg-comment">&larr; prev</span> <span class="docs-prev-next-title">Real-World Pipelines</span> </a> <div></div> </nav> </div> </main> </div> <script type="module">const d=document.getElementById("docs-hamburger"),n=document.getElementById("docs-sidebar"),e=document.getElementById("docs-sidebar-overlay");function t(){n?.classList.toggle("open"),e?.classList.toggle("open")}d?.addEventListener("click",t);e?.addEventListener("click",t);</script>  </body></html>
+</ul>
+<h2 id="glitch-backup">glitch backup</h2>
+<p>Back up your config, pipelines, prompts, and brain data to a portable archive.</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> backup</span></span>
+<span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> backup</span><span style="color:#79B8FF"> --output</span><span style="color:#9ECBFF"> ./my-backup.tar.gz</span></span></code></pre>
+<p>Produces a <code>.tar.gz</code> file containing all config files from <code>~/.config/glitch/</code> and an exported JSONL snapshot of brain notes and saved prompts from the database.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>--output</code></td><td><code>glitch-backup-&#x3C;date>.tar.gz</code></td><td>Output path for the backup archive.</td></tr><tr><td><code>--no-agents</code></td><td><code>false</code></td><td>Exclude auto-generated agent pipelines from <code>pipelines/.agents/</code>.</td></tr></tbody></table>
+<h2 id="glitch-restore">glitch restore</h2>
+<p>Restore config and brain data from a backup archive.</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> restore</span><span style="color:#9ECBFF"> ./glitch-backup-2025-01-15.tar.gz</span></span>
+<span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> restore</span><span style="color:#9ECBFF"> ./backup.tar.gz</span><span style="color:#79B8FF"> --overwrite</span></span>
+<span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> restore</span><span style="color:#9ECBFF"> ./backup.tar.gz</span><span style="color:#79B8FF"> --dry-run</span></span></code></pre>
+<p>Merges config files back into <code>~/.config/glitch/</code> and re-imports DB records. Skips existing files by default.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>--overwrite</code></td><td><code>false</code></td><td>Overwrite existing config files on conflict.</td></tr><tr><td><code>--dry-run</code></td><td><code>false</code></td><td>Preview changes without writing anything.</td></tr></tbody></table>
+<h2 id="glitch-plugin">glitch plugin</h2>
+<p>Manage installed plugins.</p>
+<h3 id="glitch-plugin-install">glitch plugin install</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> plugin</span><span style="color:#9ECBFF"> install</span><span style="color:#9ECBFF"> owner/repo</span></span>
+<span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> plugin</span><span style="color:#9ECBFF"> install</span><span style="color:#9ECBFF"> owner/repo@v1.2.3</span></span></code></pre>
+<p>Downloads and installs a plugin from a GitHub repository. Writes the plugin binary and registers a sidecar wrapper so pipelines can use it immediately.</p>
+<h3 id="glitch-plugin-remove">glitch plugin remove</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> plugin</span><span style="color:#9ECBFF"> remove</span><span style="color:#F97583"> &#x3C;</span><span style="color:#9ECBFF">nam</span><span style="color:#E1E4E8">e</span><span style="color:#F97583">></span></span>
+<span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> plugin</span><span style="color:#9ECBFF"> rm</span><span style="color:#F97583"> &#x3C;</span><span style="color:#9ECBFF">nam</span><span style="color:#E1E4E8">e</span><span style="color:#F97583">></span></span></code></pre>
+<p>Removes an installed plugin.</p>
+<h3 id="glitch-plugin-list">glitch plugin list</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> plugin</span><span style="color:#9ECBFF"> list</span></span>
+<span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> plugin</span><span style="color:#9ECBFF"> ls</span></span></code></pre>
+<p>Lists all installed plugins with their sources and binary paths.</p>
+<h2 id="glitch-workflow">glitch workflow</h2>
+<p>Run and manage multi-step workflows.</p>
+<h3 id="glitch-workflow-run">glitch workflow run</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> workflow</span><span style="color:#9ECBFF"> run</span><span style="color:#F97583"> &#x3C;</span><span style="color:#9ECBFF">nam</span><span style="color:#E1E4E8">e</span><span style="color:#F97583">></span></span>
+<span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> workflow</span><span style="color:#9ECBFF"> run</span><span style="color:#9ECBFF"> my-workflow</span><span style="color:#79B8FF"> --input</span><span style="color:#9ECBFF"> "context here"</span></span></code></pre>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>--input</code></td><td><em>(none)</em></td><td>Input string passed to the workflow as <code>temp.input</code>.</td></tr></tbody></table>
+<h3 id="glitch-workflow-resume">glitch workflow resume</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> workflow</span><span style="color:#9ECBFF"> resume</span><span style="color:#79B8FF"> --run-id</span><span style="color:#F97583"> &#x3C;</span><span style="color:#9ECBFF">i</span><span style="color:#E1E4E8">d</span><span style="color:#F97583">></span></span></code></pre>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>--run-id</code></td><td><em>(required)</em></td><td>Workflow run ID to resume.</td></tr></tbody></table>
+<h2 id="glitch-widget">glitch widget</h2>
+<p>Standalone TUI widget subcommands.</p>
+<h3 id="glitch-widget-jump-window">glitch widget jump-window</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> widget</span><span style="color:#9ECBFF"> jump-window</span></span></code></pre>
+<p>Opens the jump window TUI as a standalone process. Useful for launching it directly from a keybinding without starting the full glitch session.</p>
+<h2 id="see-also">See Also</h2>
+<ul>
+<li><a href="/docs/pipelines/yaml-reference">Pipeline YAML Reference</a> — every field and what it does</li>
+<li><a href="/docs/pipelines/executors">Executors and Plugins</a> — what runs your steps</li>
+<li><a href="/docs/pipelines/brain">The Brain System</a> — persistent context across steps</li>
+</ul> </div>  </article> <nav class="docs-prev-next"> <a class="docs-prev-next-link prev" href="/docs/pipelines/workflows"> <span class="docs-prev-next-label fg-comment">&larr; prev</span> <span class="docs-prev-next-title">Workflows</span> </a> <a class="docs-prev-next-link next" href="/docs/pipelines/cron"> <span class="docs-prev-next-label fg-comment">next &rarr;</span> <span class="docs-prev-next-title">Cron Scheduling</span> </a> </nav> </div> </main> </div> <script type="module">const d=document.getElementById("docs-hamburger"),n=document.getElementById("docs-sidebar"),e=document.getElementById("docs-sidebar-overlay");function t(){n?.classList.toggle("open"),e?.classList.toggle("open")}d?.addEventListener("click",t);e?.addEventListener("click",t);</script>  </body></html>

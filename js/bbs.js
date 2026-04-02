@@ -43,6 +43,11 @@ var KeyboardRouter = (function() {
     }
     var idx = parseInt(e.key);
     if (idx >= 1 && idx <= screenOrder.length) { e.preventDefault(); switchScreen(screenOrder[idx-1]); return; }
+    // Allow screen handlers to intercept Escape before the global handler.
+    if (e.key === 'Escape') {
+      var sh = screenHandlers[activeScreen];
+      if (sh && sh['Escape']) { e.preventDefault(); sh['Escape'](e); return; }
+    }
     switch (e.key) {
       case '?': case 'F1': e.preventDefault(); toggleHelp(); break;
       case 'q': case 'Escape':
@@ -406,6 +411,33 @@ document.addEventListener('DOMContentLoaded', function() {
       'chain claude → jq → write. done.'
     ]);
   }
+
+  // Register docs screen handler
+  KeyboardRouter.register('docs', {
+    'j': function() {
+      var pane = document.getElementById('dp-content');
+      if (pane) pane.scrollTop += 80;
+    },
+    'k': function() {
+      var pane = document.getElementById('dp-content');
+      if (pane) pane.scrollTop -= 80;
+    },
+    '[': function() {
+      var items = Array.from(document.querySelectorAll('.dp-nav-item'));
+      var active = document.querySelector('.dp-nav-item.active');
+      var idx = items.indexOf(active);
+      if (idx > 0 && window.DPNav) window.DPNav.show(items[idx - 1]);
+    },
+    ']': function() {
+      var items = Array.from(document.querySelectorAll('.dp-nav-item'));
+      var active = document.querySelector('.dp-nav-item.active');
+      var idx = items.indexOf(active);
+      if (idx < items.length - 1 && window.DPNav) window.DPNav.show(items[idx + 1]);
+    },
+    'Escape': function() {
+      KeyboardRouter.switchScreen('home');
+    }
+  });
 
   // Register pipelines screen handler
   KeyboardRouter.register('pipelines', {

@@ -1,0 +1,383 @@
+<!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Workflows — GLITCH</title><meta name="description" content="Sequence pipelines and agents with runtime branching decisions and automatic checkpointing."><link rel="stylesheet" href="/css/bbs.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <div class="docs-page" id="docs-page"> <button class="docs-hamburger" id="docs-hamburger" aria-label="Toggle sidebar"> <span class="docs-hamburger-icon">[=]</span> </button> <aside class="docs-sidebar" id="docs-sidebar"> <div class="docs-sidebar-header"> <a href="/" class="docs-logo-link"> <span class="fg-purple bold">GL1TCH</span> </a> <a href="/" class="docs-back-link">&larr; back to terminal</a> </div> <nav class="docs-nav"> <a class="docs-nav-link" href="/docs/">
+INDEX
+</a> <div class="docs-nav-section"> <div class="docs-nav-section-label"> <span class="fg-comment">&#x250C;&#x2500;</span> PIPELINES </div> <a class="docs-nav-link" href="/docs/pipelines/philosophy"> GL1TCH Philosophy </a><a class="docs-nav-link" href="/docs/pipelines/quickstart"> Your First Pipeline </a><a class="docs-nav-link" href="/docs/pipelines/console"> Console — The Switchboard </a><a class="docs-nav-link" href="/docs/pipelines/pipelines"> Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/yaml-reference"> Pipeline YAML Reference </a><a class="docs-nav-link" href="/docs/pipelines/executors"> Executors and Plugins </a><a class="docs-nav-link" href="/docs/pipelines/brain"> The Brain System </a><a class="docs-nav-link" href="/docs/pipelines/examples"> Real-World Pipelines </a><a class="docs-nav-link active" href="/docs/pipelines/workflows"> Workflows </a><a class="docs-nav-link" href="/docs/pipelines/cli-reference"> CLI Reference </a><a class="docs-nav-link" href="/docs/pipelines/cron"> Cron Scheduling </a><a class="docs-nav-link" href="/docs/pipelines/architecture"> Architecture </a><a class="docs-nav-link" href="/docs/pipelines/technologies"> Technologies </a><a class="docs-nav-link" href="/docs/pipelines/themes"> Themes </a><a class="docs-nav-link" href="/docs/pipelines/plugins"> Plugins </a><a class="docs-nav-link" href="/docs/pipelines/prompts"> Prompts </a><a class="docs-nav-link" href="/docs/pipelines/telemetry"> Telemetry </a> <div class="docs-nav-section-end"> <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span> </div> </div> </nav> </aside> <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div> <main class="docs-main"> <div class="docs-content"> <div class="docs-breadcrumb"> <a href="/docs/">docs</a> <span class="fg-comment"> / </span> <a href="/docs/">pipelines</a> </div> <article>  <h1 class="docs-page-title">Workflows</h1> <p class="docs-page-desc">Sequence pipelines and agents with runtime branching decisions and automatic checkpointing.</p> <div class="docs-article"> <p>Workflows orchestrate multi-step operations by chaining pipelines and agents together, making decisions at runtime, and supporting resumable execution. A single pipeline runs one DAG in isolation; a workflow runs many pipelines, agents, or decision nodes in sequence—and can branch based on model output. When a step fails, the workflow checkpoints and can be resumed from that point without re-running earlier steps.</p>
+<h2 id="architecture">Architecture</h2>
+<p>Workflows live in <code>~/.config/glitch/workflows/</code> as YAML files. The <strong>orchestrator</strong> (<code>internal/orchestrator/</code>) loads and executes them:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>┌──────────────────────────────────────────┐</span></span>
+<span class="line"><span>│  glitch workflow run/resume commands     │  cmd/workflow.go</span></span>
+<span class="line"><span>│  (entry points)                          │</span></span>
+<span class="line"><span>└──────────────┬───────────────────────────┘</span></span>
+<span class="line"><span>               │</span></span>
+<span class="line"><span>               ↓</span></span>
+<span class="line"><span>┌──────────────────────────────────────────┐</span></span>
+<span class="line"><span>│  ConductorRunner                         │  orchestrator/conductor.go</span></span>
+<span class="line"><span>│  • executes steps in order               │  (runs the workflow state machine)</span></span>
+<span class="line"><span>│  • publishes BUSD lifecycle events       │</span></span>
+<span class="line"><span>│  • checkpoints after every step          │</span></span>
+<span class="line"><span>└──────────────┬───────────────────────────┘</span></span>
+<span class="line"><span>               │</span></span>
+<span class="line"><span>       ┌───────┼────────────┬──────────────┐</span></span>
+<span class="line"><span>       ↓       ↓            ↓              ↓</span></span>
+<span class="line"><span>   Pipeline  Agent-Ref   Decision      Parallel</span></span>
+<span class="line"><span>   Dispatch  Pipeline    Node          Executor</span></span>
+<span class="line"><span>   ──────────────────────────────────────────</span></span>
+<span class="line"><span>   (all steps read from and write to shared WorkflowContext)</span></span></code></pre>
+<p><strong>Data flow</strong>: CLI invokes <code>ConductorRunner.Run()</code> with a <code>WorkflowDef</code> and input. The runner executes steps sequentially, maintaining a shared <code>WorkflowContext</code> (key-value store) that persists each step’s output. Decision nodes evaluate a prompt against Ollama and choose a branch. Parallel steps fan out via goroutines, then rejoin. After every step, the runner checkpoints the entire state to <code>workflow_checkpoints</code> table. BUSD events (<code>workflow.run.*</code>, <code>workflow.step.*</code>) stream to the activity feed.</p>
+<h2 id="technologies">Technologies</h2>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Tool</th><th>Purpose</th></tr></thead><tbody><tr><td><strong>Ollama</strong></td><td>Local LLM for decision node branching. Only LLM in the hot path (format: JSON, no freeform parsing).</td></tr><tr><td><strong>YAML</strong></td><td>Declarative workflow definitions; loaded into <code>WorkflowDef</code> struct with strict validation.</td></tr><tr><td><strong>BUSD</strong></td><td>Publish workflow and step lifecycle events; streams to activity feed.</td></tr><tr><td><strong>SQLite</strong></td><td>Checkpoint tables (<code>workflow_runs</code>, <code>workflow_checkpoints</code>) for resumable execution.</td></tr><tr><td><strong>OpenTelemetry</strong></td><td>Tracing and metrics for workflow runs and step duration.</td></tr></tbody></table>
+<h2 id="concepts">Concepts</h2>
+<h3 id="workflowdef">WorkflowDef</h3>
+<p>A workflow definition is a YAML file with a name, version, and ordered list of steps:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">triage-and-fix</span></span>
+<span class="line"><span style="color:#85E89D">version</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"1.0"</span></span>
+<span class="line"><span style="color:#85E89D">steps</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">fetch-logs</span></span>
+<span class="line"><span style="color:#85E89D">    type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">pipeline-ref</span></span>
+<span class="line"><span style="color:#85E89D">    pipeline</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">fetch-error-logs</span></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">analyze</span></span>
+<span class="line"><span style="color:#85E89D">    type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">agent-ref</span></span>
+<span class="line"><span style="color:#85E89D">    agent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">log-analyzer</span></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">decide-fix</span></span>
+<span class="line"><span style="color:#85E89D">    type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">decision</span></span>
+<span class="line"><span style="color:#6A737D">    # ...</span></span></code></pre>
+<p>The <code>name</code> field is the workflow identifier used in CLI commands. The <code>version</code> field is semantic versioning for your own tracking (not enforced by the runner).</p>
+<h3 id="step-types">Step Types</h3>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Type</th><th>Purpose</th><th>Resolves to</th><th>Notes</th></tr></thead><tbody><tr><td><code>pipeline-ref</code></td><td>Execute a pipeline from <code>~/.config/glitch/pipelines/</code></td><td><code>&#x3C;pipeline>.pipeline.yaml</code></td><td>Input expanded via <code>{{ctx.*}}</code>; output stored as <code>&#x3C;step_id>.output</code></td></tr><tr><td><code>agent-ref</code></td><td>Execute an APM agent pipeline</td><td><code>apm.&#x3C;agent>.pipeline.yaml</code></td><td>Agent must be installed; same output behavior as pipeline-ref</td></tr><tr><td><code>decision</code></td><td>Evaluate a prompt with Ollama; branch execution</td><td>N/A</td><td>Returns a branch name; routes to <code>On.&#x3C;branch></code> step via step <code>id</code> lookup</td></tr><tr><td><code>parallel</code></td><td>Run multiple step sequences concurrently</td><td>N/A</td><td>All branches complete before next sequential step runs</td></tr></tbody></table>
+<h3 id="workflowcontext">WorkflowContext</h3>
+<p>A thread-safe key-value store shared across all steps in a workflow run. Each step can read outputs from prior steps and contribute its own output:</p>
+<ul>
+<li><strong>Keys</strong>: Follow ADK-style scoping: <code>temp.&#x3C;key></code> for ephemeral per-run data (e.g., <code>temp.input</code> for CLI input); <code>&#x3C;step_id>.output</code> for step outputs (auto-populated by dispatcher).</li>
+<li><strong>Values</strong>: Strings; individual values exceeding 16 KB are truncated with a warning.</li>
+<li><strong>Expansion</strong>: Template syntax <code>{{ctx.&#x3C;key>}}</code> in step <code>input</code>, <code>prompt</code>, or pipeline <code>vars</code> expands to the stored value.</li>
+</ul>
+<p>Example:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>Step 1 (fetch-logs) produces output → stored as fetch-logs.output</span></span>
+<span class="line"><span>Step 2 (analyze) reads {{ctx.fetch-logs.output}} in its input field</span></span>
+<span class="line"><span>Step 2 produces output → stored as analyze.output</span></span>
+<span class="line"><span>Step 3 (decide-fix) can access both via {{ctx.fetch-logs.output}} and {{ctx.analyze.output}}</span></span></code></pre>
+<h3 id="conductorrunner">ConductorRunner</h3>
+<p>Executes a <code>WorkflowDef</code> from start to finish (or from a checkpoint during resume). Responsibilities:</p>
+<ol>
+<li><strong>Sequential execution</strong>: Runs steps in declaration order.</li>
+<li><strong>Branching</strong>: Decision nodes call <code>DecisionNode.Evaluate()</code>, which prompts Ollama. The returned branch name routes the next step via ID lookup in the <code>On</code> map.</li>
+<li><strong>Parallel fan-out</strong>: Parallel steps spawn goroutines for each branch; waits for all to complete.</li>
+<li><strong>Checkpointing</strong>: After every step (success or failure), writes a checkpoint record containing step ID, status, output, and full <code>WorkflowContext</code> snapshot.</li>
+<li><strong>BUSD events</strong>: Publishes <code>workflow.run.started</code>, <code>workflow.step.started</code>, <code>workflow.step.done</code> (or <code>.failed</code>), and <code>workflow.run.completed</code> (or <code>.failed</code>).</li>
+<li><strong>Context threading</strong>: Maintains a <code>WorkflowContext</code> across all steps; each step reads and writes to it.</li>
+</ol>
+<h3 id="decisionnode">DecisionNode</h3>
+<p>Evaluates a Prompt against a local Ollama model and returns a branch name. The model is called with <code>format: "json"</code> and must return a JSON object with a <code>branch</code> field:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="json"><code><span class="line"><span style="color:#E1E4E8">{</span><span style="color:#79B8FF">"branch"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"yes"</span><span style="color:#E1E4E8">}</span></span></code></pre>
+<p>If Ollama is unavailable, the decision fails—but a <code>default_branch</code> field can soft-fail to a fallback step. Timeout is configurable (default 30 seconds).</p>
+<h2 id="configuration">Configuration</h2>
+<h3 id="workflow-file-location">Workflow File Location</h3>
+<p>Workflow files live in <code>~/.config/glitch/workflows/</code> as <code>.workflow.yaml</code> files:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>~/.config/glitch/workflows/</span></span>
+<span class="line"><span>├── backup-and-verify.workflow.yaml</span></span>
+<span class="line"><span>├── error-triage.workflow.yaml</span></span>
+<span class="line"><span>└── morning-checklist.workflow.yaml</span></span></code></pre>
+<p>The filename (minus the <code>.workflow.yaml</code> suffix) is the workflow name used in CLI commands.</p>
+<h3 id="workflow-yaml-schema">Workflow YAML Schema</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string, required></span></span>
+<span class="line"><span style="color:#6A737D">  # Unique workflow identifier. Used in CLI commands and logging.</span></span>
+<span class="line"><span style="color:#6A737D">  # Example: "triage-and-fix", "morning-checklist"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">version</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string, required></span></span>
+<span class="line"><span style="color:#6A737D">  # Semantic version (e.g., "1.0", "1.1-beta").</span></span>
+<span class="line"><span style="color:#6A737D">  # Informational; not enforced by the runner.</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">steps</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;array of WorkflowStep, required></span></span>
+<span class="line"><span style="color:#6A737D">  # Ordered list of steps. Executed sequentially unless branching or parallel.</span></span></code></pre>
+<h3 id="workflowstep-schema">WorkflowStep Schema</h3>
+<p>Each element in <code>steps</code> is a <code>WorkflowStep</code>:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string, required></span></span>
+<span class="line"><span style="color:#6A737D">  # Unique step identifier within the workflow. Used in context references,</span></span>
+<span class="line"><span style="color:#6A737D">  # decision routing, and checkpoints. No spaces or special characters.</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string, required></span></span>
+<span class="line"><span style="color:#6A737D">  # One of: pipeline-ref, agent-ref, decision, parallel</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#6A737D"># For pipeline-ref and agent-ref:</span></span>
+<span class="line"><span style="color:#85E89D">pipeline</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string></span></span>
+<span class="line"><span style="color:#6A737D">  # Pipeline name (without .pipeline.yaml extension).</span></span>
+<span class="line"><span style="color:#6A737D">  # Example: "fetch-error-logs"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">agent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string></span></span>
+<span class="line"><span style="color:#6A737D">  # Agent name. Resolves to apm.&#x3C;agent>.pipeline.yaml.</span></span>
+<span class="line"><span style="color:#6A737D">  # Example: "log-analyzer"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">input</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string, optional></span></span>
+<span class="line"><span style="color:#6A737D">  # String input to the pipeline. Can contain {{ctx.&#x3C;key>}} expansions.</span></span>
+<span class="line"><span style="color:#6A737D">  # Example: "Error log: {{ctx.fetch-logs.output}}"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">vars</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;map[string]string, optional></span></span>
+<span class="line"><span style="color:#6A737D">  # Pipeline variables (same as pipeline-level vars).</span></span>
+<span class="line"><span style="color:#6A737D">  # Each value can contain {{ctx.&#x3C;key>}} expansions.</span></span>
+<span class="line"><span style="color:#6A737D">  # Example:</span></span>
+<span class="line"><span style="color:#6A737D">  #   timeout: "30"</span></span>
+<span class="line"><span style="color:#6A737D">  #   model: "llama2"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#6A737D"># For decision:</span></span>
+<span class="line"><span style="color:#85E89D">model</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string, required></span></span>
+<span class="line"><span style="color:#6A737D">  # Ollama model name (e.g., "llama2", "neural-chat").</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">prompt</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string, required></span></span>
+<span class="line"><span style="color:#6A737D">  # Prompt template sent to Ollama. Can contain {{ctx.&#x3C;key>}} expansions.</span></span>
+<span class="line"><span style="color:#6A737D">  # The model must respond with JSON: {"branch": "&#x3C;name>"}</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#79B8FF">on</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;map[string]string, required></span></span>
+<span class="line"><span style="color:#6A737D">  # Branch routing. Keys are branch names returned by the model.</span></span>
+<span class="line"><span style="color:#6A737D">  # Values are step IDs to execute next.</span></span>
+<span class="line"><span style="color:#6A737D">  # Example:</span></span>
+<span class="line"><span style="color:#6A737D">  #   "yes": "apply-fix"</span></span>
+<span class="line"><span style="color:#6A737D">  #   "no": "log-and-skip"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">default_branch</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;string, optional></span></span>
+<span class="line"><span style="color:#6A737D">  # Fallback step ID if Ollama returns an error or unrecognized branch.</span></span>
+<span class="line"><span style="color:#6A737D">  # If omitted and an error occurs, the workflow fails.</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">timeout_secs</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;int, optional></span></span>
+<span class="line"><span style="color:#6A737D">  # Seconds to wait for Ollama to respond. Default: 30.</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#6A737D"># For parallel:</span></span>
+<span class="line"><span style="color:#85E89D">branches</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;array of ParallelBranch, required></span></span>
+<span class="line"><span style="color:#6A737D">  # Concurrent branches. Each branch is a list of steps.</span></span></code></pre>
+<h3 id="parallelbranch-schema">ParallelBranch Schema</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">steps</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">&#x3C;array of WorkflowStep, required></span></span>
+<span class="line"><span style="color:#6A737D">  # Ordered steps within this branch.</span></span>
+<span class="line"><span style="color:#6A737D">  # Can include any step type (pipeline-ref, agent-ref, decision, parallel).</span></span></code></pre>
+<h2 id="examples">Examples</h2>
+<h3 id="simple-linear-workflow">Simple Linear Workflow</h3>
+<p>Three steps executed sequentially:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">backup-and-verify</span></span>
+<span class="line"><span style="color:#85E89D">version</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"1.0"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">steps</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">backup</span></span>
+<span class="line"><span style="color:#85E89D">    type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">pipeline-ref</span></span>
+<span class="line"><span style="color:#85E89D">    pipeline</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">daily-backup</span></span>
+<span class="line"><span style="color:#85E89D">    input</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"target=database"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">verify</span></span>
+<span class="line"><span style="color:#85E89D">    type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">pipeline-ref</span></span>
+<span class="line"><span style="color:#85E89D">    pipeline</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">verify-backup</span></span>
+<span class="line"><span style="color:#85E89D">    input</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"backup_path={{ctx.backup.output}}"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">notify</span></span>
+<span class="line"><span style="color:#85E89D">    type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">agent-ref</span></span>
+<span class="line"><span style="color:#85E89D">    agent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">slack-notifier</span></span>
+<span class="line"><span style="color:#85E89D">    input</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"status=complete backup_path={{ctx.backup.output}}"</span></span></code></pre>
+<p>Run with:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> workflow</span><span style="color:#9ECBFF"> run</span><span style="color:#9ECBFF"> backup-and-verify</span></span></code></pre>
+<h3 id="workflow-with-decision-branching">Workflow with Decision Branching</h3>
+<p>Fetch logs, analyze them, then decide whether to page on-call:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">error-triage</span></span>
+<span class="line"><span style="color:#85E89D">version</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"1.0"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">steps</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">fetch-logs</span></span>
+<span class="line"><span style="color:#85E89D">    type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">pipeline-ref</span></span>
+<span class="line"><span style="color:#85E89D">    pipeline</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">fetch-error-logs</span></span>
+<span class="line"><span style="color:#85E89D">    input</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"hours=1"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">analyze</span></span>
+<span class="line"><span style="color:#85E89D">    type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">agent-ref</span></span>
+<span class="line"><span style="color:#85E89D">    agent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">log-analyzer</span></span>
+<span class="line"><span style="color:#85E89D">    input</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"logs={{ctx.fetch-logs.output}}"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">assess-severity</span></span>
+<span class="line"><span style="color:#85E89D">    type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">decision</span></span>
+<span class="line"><span style="color:#85E89D">    model</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">llama2</span></span>
+<span class="line"><span style="color:#85E89D">    prompt</span><span style="color:#E1E4E8">: </span><span style="color:#F97583">|</span></span>
+<span class="line"><span style="color:#9ECBFF">      Based on these logs, is this a critical incident?</span></span>
+<span class="line"><span style="color:#9ECBFF">      Logs: {{ctx.analyze.output}}</span></span>
+<span class="line"><span style="color:#9ECBFF">      </span></span>
+<span class="line"><span style="color:#9ECBFF">      Respond with JSON: {"branch":"critical"} or {"branch":"normal"}</span></span>
+<span class="line"><span style="color:#79B8FF">    on</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#85E89D">      critical</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">page-oncall</span></span>
+<span class="line"><span style="color:#85E89D">      normal</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">log-and-close</span></span>
+<span class="line"><span style="color:#85E89D">    default_branch</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">log-and-close</span></span>
+<span class="line"><span style="color:#85E89D">    timeout_secs</span><span style="color:#E1E4E8">: </span><span style="color:#79B8FF">30</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">page-oncall</span></span>
+<span class="line"><span style="color:#85E89D">    type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">agent-ref</span></span>
+<span class="line"><span style="color:#85E89D">    agent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">pagerduty</span></span>
+<span class="line"><span style="color:#85E89D">    input</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"incident={{ctx.analyze.output}}"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">log-and-close</span></span>
+<span class="line"><span style="color:#85E89D">    type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">pipeline-ref</span></span>
+<span class="line"><span style="color:#85E89D">    pipeline</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">log-incident</span></span>
+<span class="line"><span style="color:#85E89D">    input</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"severity=normal summary={{ctx.analyze.output}}"</span></span></code></pre>
+<p>Run with:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> workflow</span><span style="color:#9ECBFF"> run</span><span style="color:#9ECBFF"> error-triage</span></span></code></pre>
+<h3 id="workflow-with-parallel-branches">Workflow with Parallel Branches</h3>
+<p>Fetch data from two sources concurrently, then merge:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#85E89D">name</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">multi-source-gather</span></span>
+<span class="line"><span style="color:#85E89D">version</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"1.0"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#85E89D">steps</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">gather-parallel</span></span>
+<span class="line"><span style="color:#85E89D">    type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">parallel</span></span>
+<span class="line"><span style="color:#85E89D">    branches</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#E1E4E8">      - </span><span style="color:#85E89D">steps</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#E1E4E8">          - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">fetch-s3</span></span>
+<span class="line"><span style="color:#85E89D">            type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">pipeline-ref</span></span>
+<span class="line"><span style="color:#85E89D">            pipeline</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">s3-list-objects</span></span>
+<span class="line"><span style="color:#85E89D">            input</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"bucket=my-logs"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">          - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">parse-s3</span></span>
+<span class="line"><span style="color:#85E89D">            type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">agent-ref</span></span>
+<span class="line"><span style="color:#85E89D">            agent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">json-parser</span></span>
+<span class="line"><span style="color:#85E89D">            input</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"data={{ctx.fetch-s3.output}}"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">      - </span><span style="color:#85E89D">steps</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#E1E4E8">          - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">fetch-postgres</span></span>
+<span class="line"><span style="color:#85E89D">            type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">pipeline-ref</span></span>
+<span class="line"><span style="color:#85E89D">            pipeline</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">query-postgres</span></span>
+<span class="line"><span style="color:#85E89D">            input</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"query=SELECT * FROM events"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">          - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">parse-postgres</span></span>
+<span class="line"><span style="color:#85E89D">            type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">agent-ref</span></span>
+<span class="line"><span style="color:#85E89D">            agent</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">sql-to-json</span></span>
+<span class="line"><span style="color:#85E89D">            input</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"data={{ctx.fetch-postgres.output}}"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">  - </span><span style="color:#85E89D">id</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">merge</span></span>
+<span class="line"><span style="color:#85E89D">    type</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">pipeline-ref</span></span>
+<span class="line"><span style="color:#85E89D">    pipeline</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">merge-sources</span></span>
+<span class="line"><span style="color:#85E89D">    input</span><span style="color:#E1E4E8">: </span><span style="color:#F97583">|</span></span>
+<span class="line"><span style="color:#9ECBFF">      s3={{ctx.parse-s3.output}}</span></span>
+<span class="line"><span style="color:#9ECBFF">      postgres={{ctx.parse-postgres.output}}</span></span></code></pre>
+<p>Run with:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> workflow</span><span style="color:#9ECBFF"> run</span><span style="color:#9ECBFF"> multi-source-gather</span></span></code></pre>
+<h3 id="resuming-a-failed-workflow">Resuming a Failed Workflow</h3>
+<p>If a workflow fails, it checkpoints the state. Resume from the last failed step:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> workflow</span><span style="color:#9ECBFF"> resume</span><span style="color:#79B8FF"> --run-id</span><span style="color:#79B8FF"> 42</span></span></code></pre>
+<p>This re-executes the failed step and continues from there, reusing all <code>WorkflowContext</code> data from prior successful steps.</p>
+<h2 id="cli-commands">CLI Commands</h2>
+<h3 id="glitch-workflow-run">glitch workflow run</h3>
+<p>Run a workflow by name.</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> workflow</span><span style="color:#9ECBFF"> run</span><span style="color:#F97583"> &#x3C;</span><span style="color:#9ECBFF">nam</span><span style="color:#E1E4E8">e</span><span style="color:#F97583">></span><span style="color:#E1E4E8"> [--input </span><span style="color:#9ECBFF">"&#x3C;string>"]</span></span></code></pre>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>--input</code></td><td><em>(none)</em></td><td>Input string passed to the workflow as <code>temp.input</code>. Can be accessed in step <code>input</code> or <code>prompt</code> fields via <code>{{ctx.temp.input}}</code>.</td></tr></tbody></table>
+<p>The workflow must exist at <code>~/.config/glitch/workflows/&#x3C;name>.workflow.yaml</code>.</p>
+<h3 id="glitch-workflow-resume">glitch workflow resume</h3>
+<p>Resume a workflow run from its last checkpoint.</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">glitch</span><span style="color:#9ECBFF"> workflow</span><span style="color:#9ECBFF"> resume</span><span style="color:#79B8FF"> --run-id</span><span style="color:#F97583"> &#x3C;</span><span style="color:#9ECBFF">i</span><span style="color:#E1E4E8">d</span><span style="color:#F97583">></span></span></code></pre>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Flag</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>--run-id</code></td><td>yes</td><td>Workflow run ID from the checkpoint table.</td></tr></tbody></table>
+<p>The runner restores the <code>WorkflowContext</code> from the checkpoint and re-executes the failed step, then continues to completion.</p>
+<h2 id="when-to-use-workflows-vs-pipelines">When to Use Workflows vs. Pipelines</h2>
+<p><strong>Use a pipeline</strong> if:</p>
+<ul>
+<li>You have a single, linear sequence of operations (fetch → analyze → report).</li>
+<li>All logic is self-contained and doesn’t need to branch at runtime.</li>
+<li>You don’t need to compose multiple independent operations.</li>
+</ul>
+<p><strong>Use a workflow</strong> if:</p>
+<ul>
+<li>You need to chain multiple pipelines or agents together.</li>
+<li>Execution must branch based on runtime decisions (model output, file contents, etc.).</li>
+<li>You want automatic checkpointing so transient failures don’t lose progress.</li>
+<li>Steps need to share data (one step’s output feeds into the next).</li>
+<li>You need parallel branches that run concurrently then rejoin.</li>
+</ul>
+<p>In short: pipelines are for individual tasks; workflows orchestrate tasks into larger processes.</p>
+<h2 id="see-also">See Also</h2>
+<ul>
+<li><a href="/docs/pipelines">Pipelines</a> — single-DAG pipeline execution, the building block for workflow steps</li>
+<li><a href="/docs/cli-reference">CLI Reference</a> — <code>glitch workflow</code> command syntax</li>
+<li><a href="/docs/busd">BUSD Architecture</a> — event publishing and activity feed</li>
+<li><a href="/docs/store">Store and Checkpointing</a> — persistence and resumable execution</li>
+</ul> </div>  </article> <nav class="docs-prev-next"> <a class="docs-prev-next-link prev" href="/docs/pipelines/examples"> <span class="docs-prev-next-label fg-comment">&larr; prev</span> <span class="docs-prev-next-title">Real-World Pipelines</span> </a> <a class="docs-prev-next-link next" href="/docs/pipelines/cli-reference"> <span class="docs-prev-next-label fg-comment">next &rarr;</span> <span class="docs-prev-next-title">CLI Reference</span> </a> </nav> </div> </main> </div> <script type="module">const d=document.getElementById("docs-hamburger"),n=document.getElementById("docs-sidebar"),e=document.getElementById("docs-sidebar-overlay");function t(){n?.classList.toggle("open"),e?.classList.toggle("open")}d?.addEventListener("click",t);e?.addEventListener("click",t);</script>  </body></html>

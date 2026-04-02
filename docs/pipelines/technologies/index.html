@@ -1,0 +1,161 @@
+<!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Technologies — GLITCH</title><meta name="description" content="Why gl1tch chose tmux, Ollama, BubbleTea, robfig/cron, OpenTelemetry, and GitHub CLI—the architecture decisions and tradeoffs."><link rel="stylesheet" href="/css/bbs.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <div class="docs-page" id="docs-page"> <button class="docs-hamburger" id="docs-hamburger" aria-label="Toggle sidebar"> <span class="docs-hamburger-icon">[=]</span> </button> <aside class="docs-sidebar" id="docs-sidebar"> <div class="docs-sidebar-header"> <a href="/" class="docs-logo-link"> <span class="fg-purple bold">GL1TCH</span> </a> <a href="/" class="docs-back-link">&larr; back to terminal</a> </div> <nav class="docs-nav"> <a class="docs-nav-link" href="/docs/">
+INDEX
+</a> <div class="docs-nav-section"> <div class="docs-nav-section-label"> <span class="fg-comment">&#x250C;&#x2500;</span> PIPELINES </div> <a class="docs-nav-link" href="/docs/pipelines/philosophy"> GL1TCH Philosophy </a><a class="docs-nav-link" href="/docs/pipelines/quickstart"> Your First Pipeline </a><a class="docs-nav-link" href="/docs/pipelines/console"> Console — The Switchboard </a><a class="docs-nav-link" href="/docs/pipelines/pipelines"> Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/yaml-reference"> Pipeline YAML Reference </a><a class="docs-nav-link" href="/docs/pipelines/executors"> Executors and Plugins </a><a class="docs-nav-link" href="/docs/pipelines/brain"> The Brain System </a><a class="docs-nav-link" href="/docs/pipelines/examples"> Real-World Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/workflows"> Workflows </a><a class="docs-nav-link" href="/docs/pipelines/cli-reference"> CLI Reference </a><a class="docs-nav-link" href="/docs/pipelines/cron"> Cron Scheduling </a><a class="docs-nav-link" href="/docs/pipelines/architecture"> Architecture </a><a class="docs-nav-link active" href="/docs/pipelines/technologies"> Technologies </a><a class="docs-nav-link" href="/docs/pipelines/themes"> Themes </a><a class="docs-nav-link" href="/docs/pipelines/plugins"> Plugins </a><a class="docs-nav-link" href="/docs/pipelines/prompts"> Prompts </a><a class="docs-nav-link" href="/docs/pipelines/telemetry"> Telemetry </a> <div class="docs-nav-section-end"> <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span> </div> </div> </nav> </aside> <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div> <main class="docs-main"> <div class="docs-content"> <div class="docs-breadcrumb"> <a href="/docs/">docs</a> <span class="fg-comment"> / </span> <a href="/docs/">pipelines</a> </div> <article>  <h1 class="docs-page-title">Technologies</h1> <p class="docs-page-desc">Why gl1tch chose tmux, Ollama, BubbleTea, robfig/cron, OpenTelemetry, and GitHub CLI—the architecture decisions and tradeoffs.</p> <div class="docs-article"> <p>GL1TCH’s technology stack is shaped by a single constraint: <em>your AI runs on your machine, in your terminal, under your control</em>. Every major technology choice is either a direct enabler of this goal or a force-multiplier that makes local-first AI practical. This page documents the why, the integration points, and the alternatives we considered.</p>
+<h2 id="architecture-overview">Architecture Overview</h2>
+<p>GL1TCH is a single Go binary that runs inside a tmux session. It has no external processes, no network calls on the hot path, and no cloud dependencies for critical operations. The stack is organized into four layers:</p>
+<ul>
+<li><strong>Session layer (tmux)</strong>: Durability, composability, and detach/reattach semantics. Every GL1TCH workspace is a tmux session; you can detach and reconnect anytime.</li>
+<li><strong>UI layer (BubbleTea)</strong>: Event-driven TUI rendering and input handling. The Deck (control panel) is a single BubbleTea application occupying window 0 of the tmux session.</li>
+<li><strong>Intelligence layer (Ollama)</strong>: Local LLM inference for decisions, embeddings, and agent dispatch. Models run on your machine; prompts never leave unless you explicitly route them to a cloud provider.</li>
+<li><strong>Coordination layers (scheduler, tracing, pipelines)</strong>: Scheduling with cron expressions, observability with OpenTelemetry, and workflow orchestration with YAML pipelines.</li>
+</ul>
+<p>Data flows from terminal input through the TUI event loop → dispatcher → pipeline runners or agent handlers → Ollama or cloud LLM → SQLite for persistence → OpenTelemetry for tracing. The scheduler reads <code>.pipeline.yaml</code> files from disk, watches for changes with FSNotify, and triggers runs on cron expressions. Pipelines output to activity feeds in the TUI and to structured logs.</p>
+<h2 id="technologies">Technologies</h2>
+<h3 id="tmux--durability-and-composability">Tmux — Durability and Composability</h3>
+<p><strong>Why:</strong> Tmux solves three hard problems that web UIs and Electron apps cannot. <strong>Durability</strong>: You can detach and reconnect anytime; pipelines keep running offline, and your session survives terminal crashes. <strong>Composability</strong>: Tmux windows and panes are Unix primitives—you can tile multiple views, pipe output to other tools, and script around the UI. <strong>Sovereignty</strong>: Tmux runs locally with zero network calls, zero external dependencies, and zero “service status” pages.</p>
+<p><strong>Integration:</strong> Every GL1TCH instance is a named tmux session (default: <code>glitch</code>). The Deck occupies window 0. Pipelines open new windows (1, 2, 3, …) or panes within existing windows, keeping your workspace organized. The tmux status bar shows the current time, session name, and keyboard hints (via <code>~/.config/glitch/tmux.conf</code>). Detaching and reattaching is transparent; the Deck’s state is persisted to SQLite and restored on reconnect. The plugin manager shells out to tmux commands (<code>tmux split-pane</code>, <code>tmux new-window</code>) to create pipeline output panes. All GL1TCH data (logs, traces, activity) is streamed to tmux panes and logged to disk simultaneously.</p>
+<p><strong>Tradeoffs:</strong> Tmux is modal and has a steep learning curve, but once you know it, it becomes invisible—you’re working in a terminal, not an app.</p>
+<p><strong>Alternatives considered:</strong></p>
+<ul>
+<li>Screen (older, less composable)</li>
+<li>Web UI with WebSocket (requires external server, network dependency, loses session on browser close)</li>
+<li>Electron app (bloated, slow startup, not composable with Unix tools)</li>
+</ul>
+<h3 id="bubbletea--event-driven-tui-framework">BubbleTea — Event-Driven TUI Framework</h3>
+<p><strong>Why:</strong> BubbleTea is Go’s standard for full-screen TUI applications. It provides Elm-style functional architecture—event-driven rendering with predictable state transitions. Combined with Lipgloss (ANSI styling and layout), it enables pixel-perfect terminal rendering without wrestling with raw escape codes.</p>
+<p><strong>Integration:</strong> The Deck is a single BubbleTea application that occupies the full terminal inside tmux (window 0). Major panels—left sidebar (pipelines/agents), center column (chat/inbox), right column (activity feed)—are composed from smaller BubbleTea models. Keyboard and mouse input flow through the TUI event loop: tmux captures input → terminal forwarding → BubbleTea’s Update() method → reducer-style state changes → View() re-renders to ANSI. Overlays (theme picker, inbox detail, agent modal) are layered BubbleTea models using Lipgloss for z-ordering. The Activity Feed subscribes to BUSD events (pipeline runs, step completions, cron triggers) and updates the view in real-time. Chat input flows from BubbleTea → prompt builder → Ollama inference → response streaming back to the center pane. Every interaction is deterministic; tests verify behavior without mocking the TUI.</p>
+<p><strong>Tradeoffs:</strong> BubbleTea is single-threaded; complex interactions require careful state management. But the functional model prevents entire classes of state bugs (race conditions, stale renders, dropped events).</p>
+<p><strong>Alternatives considered:</strong></p>
+<ul>
+<li>ncurses (C library, low-level, verbose)</li>
+<li>Ratatui (Rust, but GL1TCH is Go)</li>
+<li>Custom ANSI codes (fragile, unmaintainable)</li>
+</ul>
+<h3 id="ollama--local-llm-inference">Ollama — Local LLM Inference</h3>
+<p><strong>Why:</strong> Ollama is the only mature tool for running open-weight models locally without Docker complexity. It implements the OpenAI API, so GL1TCH doesn’t depend on Ollama’s internal architecture.</p>
+<p><strong>Integration:</strong> GL1TCH connects to Ollama via HTTP at <code>http://localhost:11434</code> (configurable in <code>~/.config/glitch/config.yaml</code>). Three use cases: <strong>Hot-path decisions</strong> (pipeline routing, agent dispatch, brain retrieval) always use local Ollama—fast, private, deterministic. <strong>Brain embeddings</strong> embed step outputs locally and store vectors in SQLite for future retrieval. <strong>Agent chat</strong> streams Ollama responses to the center pane with the GL1TCH assistant label. Pipeline steps declare <code>provider: local</code> to invoke Ollama’s <code>/api/generate</code> endpoint. Cloud providers (e.g., <code>provider: claude/claude-sonnet-4-6</code>) are explicitly routed to cloud APIs; decision logic stays local. If Ollama is unreachable, pipelines show an error badge in the activity feed and offer a fallback to cloud providers. Brain context (recent conversation history, relevant embeddings) is passed as system messages to Ollama.</p>
+<p><strong>Tradeoffs:</strong> Local Ollama is slower than Claude or GPT-4 (5–30 seconds per inference depending on hardware). But it’s never rate-limited, never leaks prompts, works offline, and stays under your control.</p>
+<p><strong>Alternatives considered:</strong></p>
+<ul>
+<li>LLaMA.cpp (single-binary but immature CLI)</li>
+<li>Hugging Face Transformers (Python runtime dependency, overkill for serving)</li>
+<li>Cloud-only LLMs (leaks context, requires internet, vendor lock-in)</li>
+</ul>
+<h3 id="robfigcron--scheduling">robfig/cron — Scheduling</h3>
+<p><strong>Why:</strong> Go’s standard library only offers simple intervals. <code>robfig/cron</code> is the industry-standard cron parser, supporting full POSIX cron syntax (minute, hour, day-of-month, month, day-of-week) with minimal overhead.</p>
+<p><strong>Integration:</strong> Every <code>.pipeline.yaml</code> can define a <code>cron</code> field with a cron expression (e.g., <code>cron: "0 2 * * *"</code> for 2 AM daily). The scheduler (<code>internal/scheduler</code>) watches pipeline files via FSNotify and re-registers cron jobs as files change—no restart needed. When a cron expression matches, the scheduler publishes a BUSD event, which triggers the pipeline runner in-process with default parameters. Output is captured to SQLite run history and streamed to the Activity Feed with a clock icon. The activity feed shows next-scheduled run times and allows pausing/resuming cron jobs. All cron state is protected by a mutex for thread-safety.</p>
+<p><strong>Tradeoffs:</strong> Cron expressions are cryptic to non-Unix users. GL1TCH mitigates this with an optional TUI editor showing the next five run times as you type.</p>
+<p><strong>Alternatives considered:</strong></p>
+<ul>
+<li>APScheduler (Python runtime dependency)</li>
+<li>Custom time-based scheduler (reinvents the wheel)</li>
+</ul>
+<h3 id="opentelemetry--distributed-tracing">OpenTelemetry — Distributed Tracing</h3>
+<p><strong>Why:</strong> OpenTelemetry is the CNCF standard for traces and metrics. It decouples instrumentation (what you measure) from export (where you send it). This keeps GL1TCH independent of any single observability vendor.</p>
+<p><strong>Integration:</strong> The <code>internal/telemetry</code> package sets up OTel traces. Every pipeline run creates a trace with the pipeline ID as the root span. Each step (shell, LLM, conditional, fork) is a child span with attributes: step ID, provider, prompt hash, latency, token counts, success/failure. LLM calls emit detailed spans showing prompt length, model, temperature, and response tokens. Spans are exported to: <strong>local JSONL file</strong> (<code>~/.local/share/glitch/traces.jsonl</code>) for post-mortem analysis, <strong>optional gRPC endpoint</strong> for external dashboards (Jaeger, Tempo, Datadog), <strong>BUSD channel</strong> so the Activity Feed can render latency summaries in real-time. This gives three tiers of observability: <strong>real-time</strong> (watch the TUI as runs happen), <strong>session-level</strong> (scroll the activity log), <strong>historical</strong> (parse JSONL for trend analysis). Sampling is configurable to trade detail for performance.</p>
+<p><strong>Tradeoffs:</strong> OTel adds small overhead; mitigated via sampling.</p>
+<p><strong>Alternatives considered:</strong></p>
+<ul>
+<li>Custom JSON logging (fragmented, no standard exporters)</li>
+<li>Structured logs only (less causality tracking)</li>
+<li>No observability (opaque failures)</li>
+</ul>
+<h3 id="github-cli--secure-authentication">GitHub CLI — Secure Authentication</h3>
+<p><strong>Why:</strong> <code>gh auth token</code> is the simplest way to get a valid GitHub PAT without asking the user to manage secrets. GitHub CLI handles authentication, rate limiting, and API versioning. Pipeline steps can orchestrate GitHub workflows without embedding credentials.</p>
+<p><strong>Integration:</strong> When GL1TCH detects a plugin or pipeline step requires GitHub auth (e.g., fetching from a private repo), it shells out to <code>gh auth token</code> to get the current user’s PAT. No password prompts, no token storage in GL1TCH config—the token is inherited from your local <code>gh</code> auth state (<code>~/.config/gh/hosts.yml</code>). Pipeline steps can invoke GitHub CLI subcommands: <code>gh issue list</code>, <code>gh pr create</code>, <code>gh workflow run</code>, etc. Output is captured and passed to downstream steps. The plugin manager uses <code>gh</code> to fetch private packages from GitHub during installation.</p>
+<p><strong>Tradeoffs:</strong> GitHub CLI is optional; if you don’t use GitHub plugins or steps, you never need it. Requires <code>gh</code> to be pre-installed and authenticated locally.</p>
+<p><strong>Alternatives considered:</strong></p>
+<ul>
+<li>SSH keys (more secure but requires key management)</li>
+<li>Config file token (simple but encourages storing secrets in plain text)</li>
+<li>OAuth browser flow (overkill for local plugins)</li>
+</ul>
+<h3 id="go--language-and-runtime">Go — Language and Runtime</h3>
+<p><strong>Why:</strong> GL1TCH ships as a single statically-linked binary with no runtime dependencies. Go’s fast compilation, concurrency model (goroutines, channels), and comprehensive standard library (net, io, encoding/json, context, sync) make it ideal for a long-running server coordinating concurrent pipeline runs, cron jobs, and TUI events. The binary runs everywhere—Linux, macOS, Windows—with the same behavior; no platform-specific runtime needed.</p>
+<p><strong>Integration:</strong> Main entry point is <code>main.go</code>. Core packages: <code>internal/console</code> (Deck TUI and models), <code>internal/pluginmanager</code> (pipeline execution and cron registration), <code>internal/store</code> (SQLite wrapper), <code>internal/telemetry</code> (OTel setup). Each package is focused on one concern and communicates via clean interfaces. Goroutines handle concurrent operations: one for the Deck’s event loop, one for the scheduler, one for each pipeline step execution. Channels coordinate between components. No monolithic god-file; structure enables testing and modification. The binary is statically compiled with all necessary libraries embedded, so you just copy <code>glitch</code> to <code>~/bin/</code> and run it.</p>
+<p><strong>Tradeoffs:</strong> Go adds a small startup delay (30–100ms) compared to C, but this is negligible for a long-running TUI. Go’s error handling is verbose but explicit.</p>
+<p><strong>Alternatives considered:</strong></p>
+<ul>
+<li>Python (slower startup, requires runtime, harder to distribute as a single binary)</li>
+<li>Rust (steeper learning curve, overkill for an IO-heavy workload)</li>
+<li>TypeScript/Node (heavy runtime, harder to package as a single binary)</li>
+</ul>
+<h3 id="sqlite--persistence-and-history">SQLite — Persistence and History</h3>
+<p><strong>Why:</strong> GL1TCH needs to remember what pipelines you’ve run, what you’ve chatted about, what errors happened, and when. SQLite is serverless, zero-configuration, and embedded. It’s fast enough for millions of rows and supports simple querying. No external database server to manage.</p>
+<p><strong>Integration:</strong> The <code>internal/store</code> package wraps SQLite. Tables include: <code>pipelines</code> (metadata), <code>runs</code> (execution history with start time, status, parameters), <code>steps</code> (step output, logs, duration), <code>messages</code> (chat history), <code>sessions</code> (named conversation contexts). Every pipeline run inserts a row in <code>runs</code>; every step inserts details in <code>steps</code> with duration and error. The Deck queries <code>runs</code> and <code>steps</code> to populate the activity feed and inbox detail view. Messages are persisted so you can reattach to a session and see previous conversation. All data is stored in <code>~/.local/share/glitch/glitch.db</code>.</p>
+<p><strong>Tradeoffs:</strong> SQLite is single-writer; if GL1TCH tries to write while another process holds the lock, it backs off (configurable timeout). This is acceptable for a single-user terminal application.</p>
+<p><strong>Alternatives considered:</strong></p>
+<ul>
+<li>Postgres (requires external service, overkill)</li>
+<li>JSON files (slow to query, harder to update)</li>
+<li>In-memory only (lose history on detach)</li>
+</ul>
+<h3 id="additional-libraries">Additional Libraries</h3>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Library</th><th>Role</th></tr></thead><tbody><tr><td><strong>Lipgloss</strong></td><td>ANSI styling, colors, layout (panels, borders, alignment). Gives the Deck its visual polish without raw escape codes.</td></tr><tr><td><strong>Glamour</strong></td><td>Markdown rendering for documentation, formatted step output, inline help. Renders markdown to ANSI in the TUI.</td></tr><tr><td><strong>FSNotify</strong></td><td>File system watching. The scheduler watches <code>~/.config/glitch/pipelines/</code> for new/changed <code>.pipeline.yaml</code> files in real-time.</td></tr><tr><td><strong>busd</strong></td><td>In-process Unix socket message bus for cross-component events (pipeline runs, step completions, cron triggers). Decouples components via pub/sub.</td></tr></tbody></table>
+<h2 id="concepts">Concepts</h2>
+<h3 id="the-pipeline-dag">The Pipeline DAG</h3>
+<p>A pipeline is a directed acyclic graph of steps. Each step has:</p>
+<ul>
+<li>A <strong>provider</strong> (<code>ollama/mistral</code>, <code>claude/claude-sonnet-4-6</code>, <code>bash</code>, etc.)</li>
+<li>A <strong>prompt</strong> (the input to the provider)</li>
+<li>Optional <strong>brain tags</strong> (context injection from the embedding store)</li>
+<li>Optional <strong>env vars</strong> (passed to the step’s execution environment)</li>
+<li>An <strong>output contract</strong> (what the step produces)</li>
+</ul>
+<p>Steps are executed in topological order. A step’s output can be used as input to downstream steps via template syntax: <code>{{get "step.&#x3C;step_id>.data.&#x3C;field>" .}}</code>.</p>
+<h3 id="the-brain">The Brain</h3>
+<p>The brain is the embedding store—a SQLite database in <code>~/.local/share/glitch/brain/</code>. It stores:</p>
+<ul>
+<li>Vector embeddings of code chunks, documents, and agent outputs</li>
+<li>Metadata (source file, timestamp, pipeline run ID)</li>
+<li>Tags (human-readable labels for filtering)</li>
+</ul>
+<p>When a pipeline step includes a <code>brain:</code> directive, gl1tch embeds the step’s output, stores it with metadata, and makes it available for retrieval in future runs. This solves the “lost context” problem: your AI workspace learns over time.</p>
+<h3 id="hot-path-vs-cloud">Hot-path vs. Cloud</h3>
+<p>The <strong>hot path</strong> is the critical path in a pipeline that must be fast and private:</p>
+<ul>
+<li>Pipeline routing (which branch to take?)</li>
+<li>Agent dispatch (which agent should handle this?)</li>
+<li>Brain retrieval (what context is relevant?)</li>
+</ul>
+<p>These always use local Ollama. Cloud LLMs are used for <em>expensive</em> tasks (complex analysis, code review, writing) where the latency tradeoff is worth it.</p>
+<h3 id="busd--the-event-bus">BUSD — The Event Bus</h3>
+<p>BUSD (bus daemon) is an in-process event broker. All major subsystems publish events:</p>
+<ul>
+<li>Pipeline run starts/finishes</li>
+<li>Agent response ready</li>
+<li>Theme changed</li>
+<li>Cron entry triggered</li>
+</ul>
+<p>Subscribers (the TUI, the Activity Feed, the trace exporter) listen on topics and update their views. This decouples components and makes the system testable.</p>
+<h2 id="see-also">See Also</h2>
+<ul>
+<li><a href="/docs/philosophy.md">Philosophy</a> — Design principles: local-first, ownership-centered, pipeline-driven</li>
+<li><a href="/docs/architecture.md">Architecture</a> — Three-column TUI layout, tmux session structure, component map</li>
+<li><a href="/docs/console.md">Console — The Switchboard</a> — Navigate the Deck, launch pipelines, run agents</li>
+</ul> </div>  </article> <nav class="docs-prev-next"> <a class="docs-prev-next-link prev" href="/docs/pipelines/architecture"> <span class="docs-prev-next-label fg-comment">&larr; prev</span> <span class="docs-prev-next-title">Architecture</span> </a> <a class="docs-prev-next-link next" href="/docs/pipelines/themes"> <span class="docs-prev-next-label fg-comment">next &rarr;</span> <span class="docs-prev-next-title">Themes</span> </a> </nav> </div> </main> </div> <script type="module">const d=document.getElementById("docs-hamburger"),n=document.getElementById("docs-sidebar"),e=document.getElementById("docs-sidebar-overlay");function t(){n?.classList.toggle("open"),e?.classList.toggle("open")}d?.addEventListener("click",t);e?.addEventListener("click",t);</script>  </body></html>
