@@ -1,5 +1,5 @@
 // Package pipelineeditor implements a full-screen two-column pipeline editor TUI.
-// It replaces the old overlay-based pipeline editor in the switchboard package.
+// It replaces the old overlay-based pipeline editor in the deck package.
 package pipelineeditor
 
 import (
@@ -200,10 +200,10 @@ func (m Model) loadPipelines() []string {
 	return names
 }
 
-// OpenNew clears the editor for a brand-new pipeline (exported for switchboard).
+// OpenNew clears the editor for a brand-new pipeline (exported for deck).
 func (m Model) OpenNew() Model { return m.openNew() }
 
-// OpenEdit loads an existing pipeline for editing (exported for switchboard).
+// OpenEdit loads an existing pipeline for editing (exported for deck).
 func (m Model) OpenEdit(name string) Model { return m.openEdit(name) }
 
 // openNew clears the editor for a brand-new pipeline.

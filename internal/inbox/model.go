@@ -299,7 +299,7 @@ func (m Model) View() string {
 }
 
 // PanelView renders just the list panel at the given dimensions, ignoring any
-// open modal. Used by the switchboard to embed the inbox in the left column.
+// open modal. Used by the deck to embed the inbox in the left column.
 func (m Model) PanelView(w, h int) string {
 	m.width = w
 	m.height = h
@@ -378,7 +378,7 @@ func (m *Model) SetFocused(v bool) {
 	m.focused = v
 }
 
-// Runs returns the current slice of recorded runs. Used by the switchboard to
+// Runs returns the current slice of recorded runs. Used by the deck to
 // render the inbox section using its own ANSI box drawing functions.
 func (m Model) Runs() []store.Run { return m.runs }
 

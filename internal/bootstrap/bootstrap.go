@@ -117,7 +117,7 @@ func buildTmuxConf(self string) string {
 		"bind-key -T glitch-chord Escape switch-client -T root\n" +
 		// Pressing ctrl+space again exits the chord table without action.
 		"bind-key -T glitch-chord C-Space switch-client -T root\n" +
-		// GL1TCH AI assistant — focus panel in switchboard (window 0), send A key.
+		// GL1TCH AI assistant — focus panel in deck (window 0), send A key.
 		"bind-key -T glitch-chord a     { switch-client -T root ; switch-client -t glitch ; select-window -t glitch:0 ; send-keys -t glitch:0 A }\n" +
 		// Explicitly unbind removed chords so stale sessions don't keep them.
 		"unbind-key -T glitch-chord n\n" +
@@ -284,7 +284,7 @@ func Run() error {
 		return c.Run()
 	}
 
-	// Create session running the switchboard directly in the GLITCH window.
+	// Create session running the deck directly in the GLITCH window.
 	if err := run("-f", confPath, "new-session", "-d", "-s", SessionName, "-n", "GL1TCH", self); err != nil {
 		return fmt.Errorf("creating session: %w", err)
 	}

@@ -1,5 +1,5 @@
 // Package welcome tests verify that the welcome shim compiles and that Run
-// is callable. The welcome dashboard was replaced by the Switchboard; this
+// is callable. The welcome dashboard was replaced by the Deck; this
 // package is now a thin delegation layer.
 package welcome
 

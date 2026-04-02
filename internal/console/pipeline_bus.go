@@ -1,4 +1,4 @@
-// pipeline_bus.go — busd subscription and feed seeding for the Switchboard.
+// pipeline_bus.go — busd subscription and feed seeding for the Deck.
 //
 // Tasks 7.1–7.8: authoritative feed updates driven by busd pipeline/step/cron
 // events, with the log-line parser demoted to a fallback for terminals.
@@ -244,7 +244,7 @@ func tryPipelineBusSubscribeCmd(extraTopics ...string) tea.Cmd {
 			extraTopics...,
 		)
 		reg, _ := json.Marshal(map[string]any{
-			"name":      "switchboard",
+			"name":      "deck",
 			"subscribe": subs,
 		})
 		if _, err := conn.Write(append(reg, '\n')); err != nil {

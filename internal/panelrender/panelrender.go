@@ -1,5 +1,5 @@
 // Package panelrender provides shared ANSI box-drawing and panel-header
-// rendering utilities used by both switchboard and standalone sub-TUIs
+// rendering utilities used by both deck and standalone sub-TUIs
 // (crontui, jumpwindow, etc.).
 package panelrender
 
@@ -366,7 +366,7 @@ func ansiFromCol(s string, n int) string {
 }
 
 // TopBar renders a full-terminal-width title bar with accent background and
-// BG-colored text — used by Switchboard and Cron TUI as their top header row.
+// BG-colored text — used by Deck and Cron TUI as their top header row.
 // title is used as-is (callers may pass it through translations before calling).
 // Dracula purple/bg are used as fallbacks when bundle is nil.
 func TopBar(bundle *themes.Bundle, title string, width int) string {

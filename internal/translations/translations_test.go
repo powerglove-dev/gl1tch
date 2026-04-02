@@ -143,7 +143,7 @@ func TestExampleTranslationsRoundTrip(t *testing.T) {
 		translations.KeyActivityFeedTitle,
 		translations.KeyInboxTitle,
 		translations.KeyCronTitle,
-		translations.KeySwitchboardHeader,
+		translations.KeyDeckHeader,
 		translations.KeyQuitModalTitle,
 		translations.KeyHelpModalTitle,
 		translations.KeyThemePickerTitle,
@@ -159,9 +159,9 @@ func TestExampleTranslationsRoundTrip(t *testing.T) {
 		}
 	}
 
-	// The switchboard header title uses \e[ escape shorthand — verify it expanded.
-	header := p.T(translations.KeySwitchboardHeader, sentinel)
+	// The deck header title uses \e[ escape shorthand — verify it expanded.
+	header := p.T(translations.KeyDeckHeader, sentinel)
 	if !strings.Contains(header, "\x1b[") {
-		t.Errorf("switchboard_header_title ANSI escape not expanded; got %q", header)
+		t.Errorf("deck_header_title ANSI escape not expanded; got %q", header)
 	}
 }

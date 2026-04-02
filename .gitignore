@@ -27,8 +27,13 @@ assets/plugin.wasm
 # APM — Agent Package Manager
 apm_modules/
 
+# OTel traces
+traces.jsonl
+*.jsonl
+
 # Claude Code
 .claude/settings.local.json
 .claude/sessions/
 .claude/worktrees/
 .claude/*.log
+.claude/screenshots/

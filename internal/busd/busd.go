@@ -317,7 +317,7 @@ type publishClientFrameWithTrace struct {
 // event to all subscribers.
 //
 // This is the primary mechanism for out-of-process event publishing — callers
-// that do not hold a *Daemon reference (e.g. the switchboard subprocess) use
+// that do not hold a *Daemon reference (e.g. the deck subprocess) use
 // this to emit events onto the bus.
 //
 // Returns nil if the daemon is not running (dial fails), so callers can safely

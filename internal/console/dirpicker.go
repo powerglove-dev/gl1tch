@@ -13,7 +13,7 @@ type DirSelectedMsg = modal.DirSelectedMsg
 type DirCancelledMsg = modal.DirCancelledMsg
 
 // dirWalkResultMsg is an alias for modal.DirWalkResultMsg so that existing
-// switchboard code can still type-switch on it.
+// deck code can still type-switch on it.
 type dirWalkResultMsg = modal.DirWalkResultMsg
 
 // NewDirPickerModel delegates to modal.NewDirPickerModel.

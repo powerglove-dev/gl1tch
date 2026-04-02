@@ -13,13 +13,13 @@ func LoadReadSet(path string) map[int64]bool {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			log.Printf("switchboard: failed to read inbox read-state: %v", err)
+			log.Printf("deck: failed to read inbox read-state: %v", err)
 		}
 		return map[int64]bool{}
 	}
 	var ids []int64
 	if err := json.Unmarshal(data, &ids); err != nil {
-		log.Printf("switchboard: corrupt inbox read-state file, ignoring: %v", err)
+		log.Printf("deck: corrupt inbox read-state file, ignoring: %v", err)
 		return map[int64]bool{}
 	}
 	set := make(map[int64]bool, len(ids))

@@ -1,7 +1,7 @@
 // Package clarify provides the Detector interface and registry for reactive
 // agent clarification. Each executor type registers a Detector that recognises
 // its output convention for requesting user input. The pipeline runner injects
-// Instruction into prompts for registered executors, and the switchboard
+// Instruction into prompts for registered executors, and the deck
 // intercepts matching log lines to surface the clarification overlay.
 package clarify
 

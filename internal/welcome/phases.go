@@ -44,7 +44,7 @@ You can test-run a pipeline directly from the builder without leaving the TUI. A
 
 	PhaseNavigation: `Walk the user through GLITCH navigation with context about why each binding matters.
 ^spc j = jump window — this is your home for switching between running agent jobs and sysop tools. ^spc p = pipeline builder. ^spc b = brain editor. ^spc n = new agent job from clipboard content. Esc = back/cancel most overlays.
-The switchboard (window 0) has three columns: left = pipeline list and signal inbox, center = active agents and send panel, right = activity feed showing what every agent is doing in real time.
+The deck (window 0) has three columns: left = pipeline list and signal inbox, center = active agents and send panel, right = activity feed showing what every agent is doing in real time.
 The send panel in the center lets you message a running agent mid-task — steer it, correct it, ask it a follow-up.
 The jump window shows sysop tools on the left and your active jobs on the right — navigate between concurrent agents from there.`,
 
@@ -56,7 +56,7 @@ Brain types: research, architecture, preference, task, reference. Press ^spc b t
 
 	PhaseDone: `The onboarding is complete. Congratulate the user in full 90s hacker style as GLITCH.
 Remind them of the three power moves: ^spc j to navigate between jobs, ^spc p for pipelines, ^spc b for brain.
-Tell them window 0 is always home base — the switchboard never sleeps.
+Tell them window 0 is always home base — the deck never sleeps.
 Wish them luck — make it dramatic and l33t. Reference the matrix, jacking in, the net. This is your final message. Make it memorable.`,
 }
 
@@ -150,7 +150,7 @@ questions? or should we talk about navigating the system?`,
 ^spc n  →  new agent from clipboard
 Esc     →  back / cancel
 
-the switchboard (window 0) has three columns:
+the deck (window 0) has three columns:
   LEFT   = pipeline list + signal inbox
   CENTER = active agents + send panel (message a running agent mid-task)
   RIGHT  = activity feed — real-time log of everything running

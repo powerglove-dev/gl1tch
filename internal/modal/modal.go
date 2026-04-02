@@ -1,5 +1,5 @@
 // Package modal provides shared modal overlay rendering for GLITCH TUI components.
-// It extracts the common confirm/alert/scroll modal patterns used by switchboard,
+// It extracts the common confirm/alert/scroll modal patterns used by deck,
 // crontui, and other packages into a single, reusable location.
 package modal
 

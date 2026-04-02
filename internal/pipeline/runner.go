@@ -142,7 +142,7 @@ func WithResumeFrom(runID int64, stepID, followUpPrompt string) RunOption {
 }
 
 // StepStatusLineFormat is the format string for structured step-status log lines.
-// The switchboard log-watcher parses lines matching this pattern.
+// The deck log-watcher parses lines matching this pattern.
 const StepStatusLineFormat = "[step:%s] status:%s"
 
 // stepStatus represents the lifecycle state of a step.

@@ -38,7 +38,7 @@ func (m *mockGlitchBackend) stream(_ context.Context, _ []glitchTurn, _, _, _ st
 // ── intent routing tests ──────────────────────────────────────────────────────
 
 // TestGlitchPanel_IntentMsg_ResetsRoutingFlag is a regression test for the bug
-// where glitchIntentMsg was not forwarded to the panel by the switchboard,
+// where glitchIntentMsg was not forwarded to the panel by the deck,
 // leaving p.routing permanently true and blocking all subsequent Enter presses.
 func TestGlitchPanel_IntentMsg_ResetsRoutingFlag(t *testing.T) {
 	p := newTestPanel()
@@ -83,7 +83,7 @@ func TestGlitchPanel_IntentMsg_WithBackend_SetsStreaming(t *testing.T) {
 
 // TestGlitchPanel_IntentMsg_PipelineMatch_ReturnsRerunMsg verifies that when
 // intent routing finds a matching pipeline, the panel returns a cmd whose
-// message is a glitchRerunMsg directed at the switchboard.
+// message is a glitchRerunMsg directed at the deck.
 func TestGlitchPanel_IntentMsg_PipelineMatch_ReturnsRerunMsg(t *testing.T) {
 	p := newTestPanel()
 	routeResult := &router.RouteResult{

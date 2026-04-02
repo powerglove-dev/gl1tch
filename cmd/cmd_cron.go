@@ -10,10 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/8op-org/gl1tch/internal/cron"
-	crontui "github.com/8op-org/gl1tch/internal/crontui"
-	"github.com/8op-org/gl1tch/internal/themes"
 	robfigcron "github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
 )
@@ -25,7 +22,6 @@ func init() {
 	cronCmd.AddCommand(cronListCmd)
 	cronCmd.AddCommand(cronLogsCmd)
 	cronCmd.AddCommand(cronRunCmd)
-	cronCmd.AddCommand(cronTuiCmd)
 
 	cronStartCmd.Flags().Bool("force", false, "kill an existing cron session before starting")
 }
@@ -148,39 +144,6 @@ var cronLogsCmd = &cobra.Command{
 			return fmt.Errorf("cron: tail logs: %w", err)
 		}
 		return nil
-	},
-}
-
-// cronTuiCmd runs the interactive BubbleTea TUI for glitch-cron.
-var cronTuiCmd = &cobra.Command{
-	Use:   "tui",
-	Short: "Launch the interactive cron job manager TUI",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// Capture panics so the error is visible in the terminal.
-		defer func() {
-			if r := recover(); r != nil {
-				fmt.Fprintf(os.Stderr, "cron tui: panic: %v\n", r)
-				os.Exit(2)
-			}
-		}()
-
-		// Load theme registry (built-in + user themes) and make it globally
-		// accessible so busd theme-change events can look up bundles by name.
-		var bundle *themes.Bundle
-		home, _ := os.UserHomeDir()
-		userThemesDir := filepath.Join(home, ".config", "glitch", "themes")
-		if reg, err := themes.NewRegistry(userThemesDir); err == nil {
-			bundle = reg.Active()
-			themes.SetGlobalRegistry(reg)
-		}
-
-		m, err := crontui.New(bundle)
-		if err != nil {
-			return fmt.Errorf("cron tui: %w", err)
-		}
-		p := tea.NewProgram(m, tea.WithAltScreen())
-		_, err = p.Run()
-		return err
 	},
 }
 

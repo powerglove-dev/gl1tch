@@ -18,7 +18,7 @@ func GlobalProvider() Provider {
 }
 
 // SetGlobalProvider stores p as the process-level singleton provider.
-// Call this once during startup (e.g. in switchboard model creation).
+// Call this once during startup (e.g. in deck model creation).
 // Subsequent calls to GlobalProvider() will return p.
 func SetGlobalProvider(p Provider) {
 	global.mu.Lock()

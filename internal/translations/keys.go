@@ -13,7 +13,7 @@ const (
 	KeyCronTitle         = "cron_panel_title"
 
 	// ── Header / modal titles ─────────────────────────────────────────────────
-	KeySwitchboardHeader = "switchboard_header_title"
+	KeyDeckHeader = "deck_header_title"
 	KeyQuitModalTitle    = "quit_modal_title"
 	KeyHelpModalTitle    = "help_modal_title"
 	KeyThemePickerTitle  = "theme_picker_title"

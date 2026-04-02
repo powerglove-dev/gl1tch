@@ -21,7 +21,7 @@ var defaultStrings = map[string]string{
 	KeyCronTitle:         "CRON JOBS",
 
 	// ── Header / modal titles ─────────────────────────────────────────────────
-	KeySwitchboardHeader: "GL1TCH",
+	KeyDeckHeader: "GL1TCH",
 	KeyQuitModalTitle:    "BAIL OUT",
 	KeyHelpModalTitle:    "GETTING STARTED",
 	KeyThemePickerTitle:  "SELECT THEME",
@@ -131,7 +131,7 @@ questions? or should we talk about navigating the system?`,
 ^spc n  →  new agent from clipboard
 Esc     →  back / cancel
 
-the switchboard (window 0) has three columns:
+the deck (window 0) has three columns:
   LEFT   = pipeline list + signal inbox
   CENTER = active agents + send panel (message a running agent mid-task)
   RIGHT  = activity feed — real-time log of everything running

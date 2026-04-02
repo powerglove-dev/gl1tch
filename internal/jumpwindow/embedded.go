@@ -7,7 +7,7 @@ import (
 )
 
 // EmbeddedModel wraps the jump window for use as an in-process modal overlay
-// inside the switchboard or cron TUI. It sends CloseMsg instead of tea.Quit
+// inside the deck or cron TUI. It sends CloseMsg instead of tea.Quit
 // when the user closes or selects a window.
 type EmbeddedModel struct {
 	inner model

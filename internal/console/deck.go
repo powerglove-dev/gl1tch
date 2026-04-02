@@ -1,4 +1,4 @@
-// Package switchboard implements the GL1TCH Switchboard — a full-screen BubbleTea
+// Package console implements the GL1TCH Deck — a full-screen BubbleTea
 // TUI that merges the sysop panel and welcome dashboard into a single control
 // surface with a Pipeline Launcher, Agent Runner, and Activity Feed.
 package console
@@ -100,9 +100,10 @@ const maxParallelJobs = 8
 
 // StepInfo tracks the status of a single pipeline step within a feed entry.
 type StepInfo struct {
-	id     string
-	status string   // "pending", "running", "done", "failed"
-	lines  []string // per-step output lines
+	id         string
+	status     string   // "pending", "running", "done", "failed"
+	lines      []string // per-step output lines
+	DurationMS int64    // OTel-reported span duration in milliseconds; 0 = unknown
 }
 
 type feedEntry struct {
@@ -160,6 +161,15 @@ type StepStatusMsg struct {
 	FeedID string // feed entry ID
 	StepID string
 	Status string
+}
+
+// TraceSpanMsg carries a completed OTel span for feed step enrichment.
+type TraceSpanMsg struct {
+	RunID      string
+	StepID     string
+	SpanName   string
+	DurationMS int64
+	StatusOK   bool
 }
 
 // parseStepStatus parses a "[step:<id>] status:<state>" log line.
@@ -248,7 +258,7 @@ type TelemetryMsg struct {
 
 // ── Model ─────────────────────────────────────────────────────────────────────
 
-// Model is the BubbleTea model for the Switchboard.
+// Model is the BubbleTea model for the Deck.
 type Model struct {
 	width                 int
 	height                int
@@ -327,12 +337,14 @@ type Model struct {
 	// TDF header art — rendered once at startup, cached for every frame.
 	tdfHeader  []string
 	tdfHeaderW int // visual width (ANSI-stripped) of the widest header line
+	// traceView holds the rendered trace tree for the selected feed entry (/trace command).
+	traceView string
 }
 
-// New creates a new Switchboard Model, discovering pipelines and providers.
+// New creates a new Deck Model, discovering pipelines and providers.
 func New() Model { return NewWithStore(nil) }
 
-// NewWithStore creates a Switchboard Model with an attached result store.
+// NewWithStore creates a Deck Model with an attached result store.
 // The store is passed to the Inbox panel for polling run results.
 // Passing nil is valid; the Inbox will render an empty state.
 func NewWithStore(s *store.Store) Model {
@@ -1132,6 +1144,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case TraceSpanMsg:
+		for i := range m.feed {
+			if m.feed[i].id == msg.RunID {
+				for j := range m.feed[i].steps {
+					if m.feed[i].steps[j].id == msg.StepID {
+						m.feed[i].steps[j].DurationMS = msg.DurationMS
+						break
+					}
+				}
+				break
+			}
+		}
+		return m, nil
+
 	// ── orphan recovery ───────────────────────────────────────────────────
 
 	case orphanRecoveryMsg:
@@ -1326,6 +1352,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshTDFHeader(msg.cfg.Schema.Mode.Logo)
 		} else {
 			m.refreshTDFHeader()
+		}
+		return m, nil
+
+	case glitchTraceMsg:
+		if m.feedSelected < 0 || m.feedSelected >= len(m.feed) {
+			m.traceView = "no run selected"
+		} else {
+			entry := m.feed[m.feedSelected]
+			spans, err := loadTraceForRun(tracesFilePath(), entry.id)
+			if err != nil {
+				m.traceView = "trace error: " + err.Error()
+			} else {
+				m.traceView = renderTraceTree(spans, m.width)
+			}
 		}
 		return m, nil
 
@@ -2963,7 +3003,7 @@ func (m Model) filteredFeed() []feedEntry {
 
 // ── View ──────────────────────────────────────────────────────────────────────
 
-// View renders the full-screen switchboard layout (two-column).
+// View renders the full-screen deck layout (two-column).
 //
 // Center column (75%): GLITCH chat + send panel.
 // Right column (25%): signal board (pipeline statuses).
@@ -3482,7 +3522,7 @@ func (m Model) buildBanner(w int) string {
 	// Single line: logo + separator + subtitle
 	logo := pal.Accent + aBld + " ░▒▓ GL1TCH ▓▒░" + rst
 	sep := pal.Border + "  │  " + rst
-	sub := pal.FG + "GLITCH Switchboard" + rst
+	sub := pal.FG + "GLITCH Deck" + rst
 
 	return logo + sep + sub
 }
@@ -3698,7 +3738,11 @@ func (m Model) feedRawLines(width int) []string {
 				if isLast {
 					connector = "└─ "
 				}
-				add("  " + connector + col + stepGlyph(step.status) + " " + step.id + aRst)
+				stepLabel := step.id
+				if step.DurationMS > 0 {
+					stepLabel += fmt.Sprintf(" %dms", step.DurationMS)
+				}
+				add("  " + connector + col + stepGlyph(step.status) + " " + stepLabel + aRst)
 				// Step output lines (for JSON expand/collapse and cursor navigation).
 				const maxStepOutputLines = 5
 				stepLines := step.lines
@@ -3855,7 +3899,11 @@ func (m Model) viewActivityFeed(height, width int) string {
 					if isLast {
 						connector = "└─ "
 					}
-					badge := "  " + connector + col + stepGlyph(step.status) + " " + step.id + aRst
+					stepBadgeLabel := step.id
+					if step.DurationMS > 0 {
+						stepBadgeLabel += fmt.Sprintf(" %dms", step.DurationMS)
+					}
+					badge := "  " + connector + col + stepGlyph(step.status) + " " + stepBadgeLabel + aRst
 					appendRow(&allLines, badge)
 					// Per-step output lines (last maxStepOutputLines only).
 					stepLines := step.lines
@@ -4112,7 +4160,7 @@ func hexToRGBFromStyles(hex string) (uint8, uint8, uint8) {
 
 // ── Run ───────────────────────────────────────────────────────────────────────
 
-// Run starts the Switchboard as a full-screen BubbleTea program.
+// Run starts the Deck as a full-screen BubbleTea program.
 // It opens the result store and passes it to the model so the Inbox panel
 // can display recorded pipeline and agent run history.
 func Run() {
@@ -4120,20 +4168,20 @@ func Run() {
 	m := NewWithStore(s)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
-		fmt.Printf("switchboard error: %v\n", err)
+		fmt.Printf("deck error: %v\n", err)
 	}
 	if s != nil {
 		_ = s.Close()
 	}
 }
 
-// RunToggle opens the switchboard as a tmux popup.
+// RunToggle opens the deck as a tmux popup.
 func RunToggle() {
-	bin := resolveSwitchboardBin()
+	bin := resolveDeckBin()
 	exec.Command("tmux", "display-popup", "-E", "-w", "100%", "-h", "100%", bin).Run() //nolint:errcheck
 }
 
-func resolveSwitchboardBin() string {
+func resolveDeckBin() string {
 	if bin, err := exec.LookPath("glitch-sysop"); err == nil {
 		return bin
 	}

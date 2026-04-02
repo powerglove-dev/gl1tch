@@ -35,7 +35,7 @@ func PanelHeader(bundle *themes.Bundle, panel string, width int, borderColor, ti
 }
 
 // TopBar renders a full-width accent-background title bar.
-// Delegates to panelrender.TopBar so both Switchboard and Cron TUI share the same implementation.
+// Delegates to panelrender.TopBar so both the Deck and Cron TUI share the same implementation.
 func TopBar(bundle *themes.Bundle, title string, width int) string {
 	return panelrender.TopBar(bundle, title, width)
 }

@@ -56,7 +56,7 @@ type glitchRunEventMsg struct {
 	failed bool
 }
 
-// glitchRerunMsg is returned to the switchboard to trigger a pipeline rerun.
+// glitchRerunMsg is returned to the deck to trigger a pipeline rerun.
 // input, if non-empty, is forwarded as --input to the pipeline.
 type glitchRerunMsg struct {
 	name  string
@@ -70,13 +70,13 @@ type glitchIntentMsg struct {
 	turns  []glitchTurn
 }
 
-// glitchCWDMsg is returned to the switchboard to update the working directory.
+// glitchCWDMsg is returned to the deck to update the working directory.
 type glitchCWDMsg struct{ path string }
 
-// glitchQuitMsg is returned to the switchboard to trigger the quit confirmation modal.
+// glitchQuitMsg is returned to the deck to trigger the quit confirmation modal.
 type glitchQuitMsg struct{}
 
-// glitchWidgetModeMsg is returned to the switchboard to toggle widget mode
+// glitchWidgetModeMsg is returned to the deck to toggle widget mode
 // (logo swap). cfg is non-nil on activation and nil on deactivation.
 type glitchWidgetModeMsg struct{ cfg *WidgetConfig }
 
@@ -86,11 +86,15 @@ type glitchWidgetOutputMsg struct {
 	speaker string // label shown in the chat panel
 }
 
-// glitchModelMsg is returned to the switchboard after a model switch (informational).
+// glitchModelMsg is returned to the deck after a model switch (informational).
 type glitchModelMsg struct{ model string }
 
-// glitchOpenThemesMsg is returned to the switchboard to open the theme picker overlay.
+// glitchOpenThemesMsg is returned to the deck to open the theme picker overlay.
 type glitchOpenThemesMsg struct{}
+
+// glitchTraceMsg is returned to the deck to render the OTel trace for the
+// currently selected feed entry.
+type glitchTraceMsg struct{}
 
 // ClarificationInjectMsg is dispatched by pipeline_bus when a ClarificationRequested
 // busd event arrives. The root model forwards it to the glitch panel via update().
@@ -301,7 +305,7 @@ you speak in lowercase. you're direct. you don't do bit, you don't do sarcasm fo
 you are the AI assistant embedded in GLITCH — a tmux-powered workspace for automating things with pipelines and agents.
 
 what you know about the system:
-- layout: switchboard fills the screen. left column is you + send panel. right is the signal board showing pipeline run statuses.
+- layout: deck fills the screen. left column is you + send panel. right is the signal board showing pipeline run statuses.
 - key bindings: ^spc a = focus you, ^spc j = jump tmux window, ^spc p = pipeline builder, ^spc b = brain editor. esc = unfocus.
 - pipelines: yaml files in ~/.config/glitch/pipelines/. each step has a provider, prompt, optional brain tags. mix local and cloud providers in one chain.
 - providers: ollama/modelname for local (llama3.2, mistral, codestral), claude/claude-sonnet-4-6 for cloud.
@@ -667,7 +671,7 @@ type glitchPipelineFlow struct {
 	pendingName string // pre-seeded save name (from inline /pipeline <name> <desc>)
 }
 
-// glitchChatPanel is the GL1TCH AI assistant panel embedded in the switchboard
+// glitchChatPanel is the GL1TCH AI assistant panel embedded in the deck
 // center column, replacing the agents grid.
 type glitchChatPanel struct {
 	messages     []glitchEntry
@@ -700,7 +704,7 @@ type glitchChatPanel struct {
 	scrollFocused bool // tab-focused on scroll region; j/k/[/] active
 
 	activeWidget   *WidgetConfig  // non-nil when a widget is active
-	widgetRegistry *WidgetRegistry // loaded at startup, injected from switchboard
+	widgetRegistry *WidgetRegistry // loaded at startup, injected from deck
 
 	acSuggestions []slashSuggestion // filtered autocomplete list
 	acCursor      int               // selected suggestion index
@@ -1466,9 +1470,12 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
 					p.messages = append(p.messages, glitchEntry{
 						who: glitchSpeakerBot,
-						text: "slash commands:\n\n  getting started\n  /init             — first-run wizard\n  /models           — pick a provider and model\n  /cwd [path]       — set working directory\n\n  build things\n  /prompt [name]    — load or build a system prompt with AI\n  /pipeline [name]  — run a pipeline, or build one from scratch\n  /brain [query]    — search notes, or start an interactive brain session\n\n  run things\n  /rerun [name]     — rerun a pipeline by name\n  /terminal [cmd]   — open a 25% right split; run cmd or get guidance\n  /cron             — get help scheduling recurring jobs\n\n  workspace\n  /model [name]     — switch provider/model inline\n  /themes           — open theme picker\n  /clear            — clear chat history\n  /quit             — exit glitch\n  /help             — this list\n\nscroll: j/k or [/] when scroll-focused (tab to switch)",
+						text: "slash commands:\n\n  getting started\n  /init             — first-run wizard\n  /models           — pick a provider and model\n  /cwd [path]       — set working directory\n\n  build things\n  /prompt [name]    — load or build a system prompt with AI\n  /pipeline [name]  — run a pipeline, or build one from scratch\n  /brain [query]    — search notes, or start an interactive brain session\n\n  run things\n  /rerun [name]     — rerun a pipeline by name\n  /terminal [cmd]   — open a 25% right split; run cmd or get guidance\n  /cron             — get help scheduling recurring jobs\n  /trace            — show OTel trace for the selected feed entry\n\n  workspace\n  /model [name]     — switch provider/model inline\n  /themes           — open theme picker\n  /clear            — clear chat history\n  /quit             — exit glitch\n  /help             — this list\n\nscroll: j/k or [/] when scroll-focused (tab to switch)",
 					})
 					return p, nil
+				case "/trace":
+					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
+					return p, func() tea.Msg { return glitchTraceMsg{} }
 				default:
 					// Check widget registry for dynamic triggers.
 					if p.widgetRegistry != nil {
@@ -1849,7 +1856,7 @@ func parseAnswerTarget(input string, pending []pendingClarification) (idx int, a
 }
 
 // recentlyMentionedPipeline returns true if the pipeline name appears in the
-// last few bot messages — used by the switchboard to avoid duplicate "started"
+// last few bot messages — used by the deck to avoid duplicate "started"
 // announcements when intent routing already said "→ running pipeline: X".
 func (p glitchChatPanel) recentlyMentionedPipeline(name string) bool {
 	checked := 0

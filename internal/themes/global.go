@@ -19,7 +19,7 @@ func GlobalRegistry() *Registry {
 }
 
 // SetGlobalRegistry stores r as the process-level singleton registry.
-// Call this once after loading themes (e.g. from main or switchboard).
+// Call this once after loading themes (e.g. from main or deck).
 // Subsequent calls to GlobalRegistry() will return r.
 func SetGlobalRegistry(r *Registry) {
 	global.mu.Lock()

@@ -198,7 +198,7 @@ func (r *Registry) SafeSubscribe() chan string {
 
 // RefreshActive re-reads the active_theme config file and updates the active
 // bundle pointer. This allows a long-running process (e.g. a standalone TUI)
-// to pick up theme changes written by another process (e.g. the switchboard).
+// to pick up theme changes written by another process (e.g. the deck).
 // Returns the name of the newly active theme, or an empty string when the
 // file cannot be read or names an unknown theme.
 func (r *Registry) RefreshActive() string {

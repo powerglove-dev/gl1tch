@@ -305,7 +305,7 @@ func TestIntegration_NoMatch_UIComplaints(t *testing.T) {
 		"switch to dracula theme",
 		"the cron tui still shows the previous theme when i switch it in switch board",
 		"nice now set a default theme, i like nord theme, then add gruvbox, dracula, borland",
-		"when quitting from cron window it closes the window and switches back to switchboard",
+		"when quitting from cron window it closes the window and switches back to deck",
 	}
 
 	for _, prompt := range cases {
