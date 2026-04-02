@@ -344,6 +344,8 @@ type Model struct {
 	tdfHeaderW int // visual width (ANSI-stripped) of the widest header line
 	// traceView holds the rendered trace tree for the selected feed entry (/trace command).
 	traceView string
+	// scheduledJobCount is the number of entries currently defined in cron.yaml.
+	scheduledJobCount int
 }
 
 // New creates a new Deck Model, discovering pipelines and providers.
@@ -417,6 +419,11 @@ func NewWithStore(s *store.Store) Model {
 
 	// Inject widget registry into the chat panel for trigger dispatch.
 	m.glitchChat.widgetRegistry = m.widgetRegistry
+
+	// Seed scheduled job count from cron.yaml at startup.
+	if entries, err := orcaicron.LoadConfig(); err == nil {
+		m.scheduledJobCount = len(entries)
+	}
 
 	return m
 }
@@ -2437,6 +2444,10 @@ func (m Model) handlePipelineLaunchOverlay(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.pipelineScheduleErr = "write error: " + werr.Error()
 				return m, nil
 			}
+			// Refresh scheduled job count after writing the new entry.
+			if entries, err := orcaicron.LoadConfig(); err == nil {
+				m.scheduledJobCount = len(entries)
+			}
 			// Auto-start cron daemon if not already running.
 			go ensureCronDaemon()
 
@@ -3325,7 +3336,9 @@ func (m Model) midColWidth() int {
 
 // viewCenterColumn renders the center column: GLITCH chat (full height).
 func (m Model) viewCenterColumn(height, width int) []string {
-	glitchLines := m.glitchChat.build(height, width, m.ansiPalette())
+	panel := m.glitchChat
+	panel.scheduledJobs = m.scheduledJobCount
+	glitchLines := panel.build(height, width, m.ansiPalette())
 
 	var lines []string
 	lines = append(lines, glitchLines...)

@@ -719,6 +719,9 @@ type glitchChatPanel struct {
 
 	// Intent routing — async pipeline dispatch before falling back to LLM chat.
 	routing bool // true while the router goroutine is running
+
+	// scheduledJobs is the count of entries in cron.yaml, injected from Model.
+	scheduledJobs int
 }
 
 // widgetExecCmd runs a widget's binary with input on stdin and returns the
@@ -2005,11 +2008,25 @@ func (p glitchChatPanel) build(height, width int, pal styles.ANSIPalette) []stri
 	subtitleVisW := len(subtitle) // approximate (ASCII only)
 	availW := width - hPad*2
 	clockVisW := len(timeStr)
-	padding := availW - subtitleVisW - clockVisW - 1
-	if padding < 1 {
-		padding = 1
+
+	// Centered scheduled-jobs badge between title and clock.
+	badge := fmt.Sprintf("[%d sched]", p.scheduledJobs)
+	badgeW := len(badge)
+	centerPos := availW / 2
+	leftGap := centerPos - badgeW/2 - subtitleVisW
+	rightGap := availW - centerPos - (badgeW - badgeW/2) - clockVisW
+	var subtitleLine string
+	if leftGap >= 1 && rightGap >= 1 {
+		subtitleLine = padStr + pal.Dim + subtitle +
+			strings.Repeat(" ", leftGap) + badge +
+			strings.Repeat(" ", rightGap) + timeStr + aRst
+	} else {
+		padding := availW - subtitleVisW - clockVisW - 1
+		if padding < 1 {
+			padding = 1
+		}
+		subtitleLine = padStr + pal.Dim + subtitle + strings.Repeat(" ", padding) + timeStr + aRst
 	}
-	subtitleLine := padStr + pal.Dim + subtitle + strings.Repeat(" ", padding) + timeStr + aRst
 	lines = append(lines, subtitleLine)
 
 	// Autocomplete suggestion rows (rendered between subtitle and send panel).
