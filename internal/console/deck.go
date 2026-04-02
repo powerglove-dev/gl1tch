@@ -376,7 +376,7 @@ func NewWithStore(s *store.Store) Model {
 
 	agentProviders := picker.BuildProviders()
 	pipelines := ScanPipelines(pipelinesDir())
-	cfgDir := filepath.Join(os.Getenv("HOME"), ".config", "glitch")
+	cfgDir := glitchConfigDir()
 	m := Model{
 		launcher: launcherSection{
 			pipelines: pipelines,
@@ -884,6 +884,9 @@ func tickCmd() tea.Cmd {
 func pipelinesDir() string {
 	if d := os.Getenv("GLITCH_PIPELINES_DIR"); d != "" {
 		return d
+	}
+	if d := os.Getenv("GLITCH_CONFIG_DIR"); d != "" {
+		return filepath.Join(d, "pipelines")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -4487,8 +4490,28 @@ func hexToRGBFromStyles(hex string) (uint8, uint8, uint8) {
 // Run starts the Deck as a full-screen BubbleTea program.
 // It opens the result store and passes it to the model so the Inbox panel
 // can display recorded pipeline and agent run history.
+// glitchConfigDir returns the effective config directory, honouring
+// GLITCH_CONFIG_DIR when set (used by integration tests for isolation).
+func glitchConfigDir() string {
+	if d := os.Getenv("GLITCH_CONFIG_DIR"); d != "" {
+		return d
+	}
+	return filepath.Join(os.Getenv("HOME"), ".config", "glitch")
+}
+
+// glitchOpenStore opens the store, placing it inside GLITCH_CONFIG_DIR when
+// that env var is set so that integration tests are fully isolated.
+func glitchOpenStore() *store.Store {
+	if d := os.Getenv("GLITCH_CONFIG_DIR"); d != "" {
+		s, _ := store.OpenAt(filepath.Join(d, "glitch.db"))
+		return s
+	}
+	s, _ := store.Open()
+	return s
+}
+
 func Run() {
-	s, _ := store.Open() // nil-safe — inbox renders empty state on failure
+	s := glitchOpenStore()
 	m := NewWithStore(s)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
