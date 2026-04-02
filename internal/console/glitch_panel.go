@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/8op-org/gl1tch/internal/executor"
 	"github.com/8op-org/gl1tch/internal/modal"
+	"github.com/8op-org/gl1tch/internal/npcname"
 	"github.com/8op-org/gl1tch/internal/panelrender"
 	"github.com/8op-org/gl1tch/internal/picker"
 	"github.com/8op-org/gl1tch/internal/pipeline"
@@ -1965,11 +1967,14 @@ func (p glitchChatPanel) recentlyMentionedPipeline(name string) bool {
 }
 
 // pipelineNameFromReq extracts a display name from a ClarificationRequest.
-// Uses the pipeline name embedded in the RunID ("run-<id>") if no better
-// source is available. Falls back to "pipeline".
+// Converts the numeric RunID to a deterministic NPC name via npcname.FromID.
+// Falls back to "pipeline" when the ID cannot be parsed.
 func pipelineNameFromReq(req store.ClarificationRequest) string {
 	if req.RunID != "" {
-		return "run-" + req.RunID
+		if id, err := strconv.ParseInt(req.RunID, 10, 64); err == nil {
+			return npcname.FromID(id)
+		}
+		return req.RunID
 	}
 	return "pipeline"
 }
