@@ -33,9 +33,10 @@ tasks:
   # ---------------------------------------------------------------------------
 
   build:
-    desc: "Compile the glitch binary to bin/glitch"
+    desc: "Compile the glitch binary to bin/glitch and tuishot renderer"
     cmds:
       - go build -o bin/{{.BINARY}} .
+      - go build -o ~/.local/bin/tuishot ./cmd/tuishot/
 
   install:
     desc: "Build and install glitch to GOPATH/bin; symlink into ~/.local/bin"
@@ -201,6 +202,51 @@ tasks:
     desc: "Audit all APM packages for dangerous Unicode patterns"
     cmds:
       - apm audit
+
+  # ---------------------------------------------------------------------------
+  # Plugin tasks
+  # ---------------------------------------------------------------------------
+
+  plugins:
+    desc: "Build and install all core provider plugins from ../glitch-plugins"
+    vars:
+      PLUGINS_DIR: ../glitch-plugins
+    cmds:
+      - task -d {{.PLUGINS_DIR}} install
+
+  # ---------------------------------------------------------------------------
+  # Integration tests
+  # ---------------------------------------------------------------------------
+
+  test:integration:
+    desc: "Run all integration tests (requires ollama with llama3.2; override model with GLITCH_SMOKE_MODEL=llama3.2:1b)"
+    cmds:
+      - go test -tags=integration -timeout=15m -v ./internal/pipeline/...
+
+  test:integration:astro:
+    desc: "Run Astro pipeline generation + build test"
+    cmds:
+      - go test -tags=integration -timeout=15m -v -run TestAstroPipelineGenAndRun ./internal/pipeline/...
+
+  test:integration:docs-audit:
+    desc: "Run docs audit test (reads real code + docs, checks for MISSING: lines)"
+    cmds:
+      - go test -tags=integration -timeout=5m -v -run TestDocsAudit ./internal/pipeline/...
+
+  test:integration:docs-improve:
+    desc: "Run full docs-improve end-to-end test (isolated temp repo, real commit; requires ollama + claude API key)"
+    cmds:
+      - go test -tags=integration -timeout=15m -v -run TestDocsImprove ./internal/pipeline/...
+
+  test:integration:docs-pick:
+    desc: "Run pick step test only (fast — validates structured output format)"
+    cmds:
+      - go test -tags=integration -timeout=5m -v -run TestDocsImprove_PickProducesStructuredOutput ./internal/pipeline/...
+
+  run:docs-improve:
+    desc: "Trigger a single docs-improve pipeline cycle against the real repo"
+    cmds:
+      - glitch pipeline run docs-improve
 
   # ---------------------------------------------------------------------------
   # Release tasks
