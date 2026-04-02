@@ -765,11 +765,20 @@ func (b *glitchCLIBackend) stream(ctx context.Context, turns []glitchTurn, userM
 			}()
 			scanner := bufio.NewScanner(pr)
 			scanner.Buffer(make([]byte, 64*1024), 64*1024)
+			var prevFiltered bool
 			for scanner.Scan() {
 				line := scanner.Text()
 				if isToolCallLine(line) {
+					prevFiltered = true
 					continue
 				}
+				// Drop blank lines that immediately follow filtered tool-call lines
+				// (e.g. copilot emits blank separators between tool invocations that
+				// would otherwise accumulate as empty space in the chat view).
+				if prevFiltered && strings.TrimSpace(line) == "" {
+					continue
+				}
+				prevFiltered = false
 				select {
 				case ch <- line + "\n":
 				case <-ctx.Done():
@@ -1414,8 +1423,10 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 				p = p.setFocused(true)
 				return p, nil
 			}
-			// Esc unfocuses but input is still always visible.
-			p = p.setFocused(false)
+			// Esc dismisses autocomplete and stays focused; Tab handles
+			// scroll-focus toggling.
+			p.acActive = false
+			p.acSuppressed = true
 			return p, nil
 		case tea.KeyEnter:
 			if p.streaming || p.routing {
@@ -2631,7 +2642,14 @@ func (p glitchChatPanel) build(height, width int, pal styles.ANSIPalette) []stri
 	}
 	// Provider subtitle with right-aligned clock.
 	timeStr := strings.ToLower(time.Now().Format("3:04pm"))
-	subtitle := ">> GL1TCH AI assistant  //  " + providerLabel
+	var subtitleArrow string
+	if p.streaming || p.routing {
+		arrowFrames := []string{">>", "> ", " >", ">>", "> ", " >"}
+		subtitleArrow = arrowFrames[p.animFrame%len(arrowFrames)]
+	} else {
+		subtitleArrow = ">>"
+	}
+	subtitle := subtitleArrow + " GL1TCH AI assistant  //  " + providerLabel
 	// Urgent clarification badge: "▶N?" when any pending item has gone urgent.
 	if n := len(p.pendingClarifications); n > 0 {
 		badge := fmt.Sprintf(" [%d?]", n)
@@ -2716,7 +2734,18 @@ func (p glitchChatPanel) build(height, width int, pal styles.ANSIPalette) []stri
 	// Curved send panel (sendW/dash already declared above for scroll hint box).
 	// Set textarea width to fill the inner send panel (minus 2 border chars and 2 padding chars).
 	p.input.SetWidth(sendW - 4)
-	lines = append(lines, padStr+borderColor+"╭"+dash+"╮"+aRst)
+	topDash := dash
+	topBorderColor := borderColor
+	if p.streaming || p.routing {
+		// Scanning marker travels left→right across the top border.
+		runeW := sendW - 2
+		if runeW > 0 {
+			pos := p.animFrame % runeW
+			topDash = strings.Repeat("─", pos) + "◆" + strings.Repeat("─", runeW-pos-1)
+		}
+		topBorderColor = pal.Accent
+	}
+	lines = append(lines, padStr+topBorderColor+"╭"+topDash+"╮"+aRst)
 
 	if p.backend == nil {
 		lines = append(lines, padStr+panelrender.BoxRow(pal.Error+"  no provider — install ollama or configure one"+aRst, sendW, borderColor))

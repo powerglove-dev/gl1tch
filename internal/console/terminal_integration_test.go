@@ -66,8 +66,8 @@ func glitchPane(session string) string {
 // args is appended after "/terminal " (pass "" for bare /terminal).
 //
 // The literal text is sent with -l so that words like "left", "bottom", "end"
-// are not misinterpreted as tmux key names. Escape and Enter are sent
-// separately as actual keys so autocomplete is dismissed and the command fires.
+// are not misinterpreted as tmux key names. Escape dismisses any autocomplete
+// overlay without unfocusing the panel; Enter then submits the command.
 func termCmd(t *testing.T, session, args string) {
 	t.Helper()
 	input := "/terminal"
