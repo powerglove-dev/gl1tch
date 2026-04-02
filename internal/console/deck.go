@@ -22,6 +22,7 @@ import (
 	robfigcron "github.com/robfig/cron/v3"
 
 	"github.com/8op-org/gl1tch/internal/activity"
+	"github.com/8op-org/gl1tch/internal/npcname"
 	"github.com/8op-org/gl1tch/internal/tdf"
 	orcaicron "github.com/8op-org/gl1tch/internal/cron"
 	"github.com/8op-org/gl1tch/internal/busd/topics"
@@ -1210,7 +1211,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			_ = activity.AppendEvent(activity.DefaultPath(), activity.ActivityEvent{
 				TS:     time.Now().Format(time.RFC3339),
 				Kind:   "pipeline_failed",
-				Agent:  fmt.Sprintf("run-%d", id),
+				Agent:  npcname.FromID(id),
 				Label:  "interrupted",
 				Status: "failed",
 			})

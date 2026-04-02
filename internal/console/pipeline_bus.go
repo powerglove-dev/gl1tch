@@ -18,6 +18,7 @@ import (
 	"github.com/8op-org/gl1tch/internal/activity"
 	"github.com/8op-org/gl1tch/internal/busd"
 	"github.com/8op-org/gl1tch/internal/busd/topics"
+	"github.com/8op-org/gl1tch/internal/npcname"
 	"github.com/8op-org/gl1tch/internal/store"
 )
 
@@ -172,7 +173,7 @@ func seedFeedFromStoreCmd(s *store.Store) tea.Cmd {
 				}
 			}
 			e := feedEntry{
-				id:     fmt.Sprintf("run-%d", r.ID),
+				id:     npcname.FromID(r.ID),
 				title:  r.Name,
 				status: status,
 				ts:     time.UnixMilli(r.StartedAt),
