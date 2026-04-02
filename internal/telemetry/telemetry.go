@@ -108,8 +108,14 @@ func Setup(ctx context.Context, serviceName string) (func(context.Context) error
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 
-	metricExp, err := stdoutmetric.New()
+	metricsPath := filepath.Join(filepath.Dir(tracesFilePath()), "metrics.jsonl")
+	mf, err := os.OpenFile(metricsPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
+		return nil, fmt.Errorf("telemetry: open metrics file: %w", err)
+	}
+	metricExp, err := stdoutmetric.New(stdoutmetric.WithWriter(mf))
+	if err != nil {
+		_ = mf.Close()
 		return nil, fmt.Errorf("telemetry: metric exporter: %w", err)
 	}
 
@@ -125,6 +131,7 @@ func Setup(ctx context.Context, serviceName string) (func(context.Context) error
 		if fileCloser != nil {
 			_ = fileCloser.Close()
 		}
+		_ = mf.Close()
 		return nil
 	}
 	return shutdown, nil
