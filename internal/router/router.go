@@ -247,27 +247,22 @@ func (r *HybridRouter) Route(ctx context.Context, prompt string, pipelines []pip
 	return result, nil
 }
 
-// isImperativeInput returns false when the prompt is clearly a question or observation,
-// blocking the embedding fast path in those cases. It is deliberately conservative:
-// when in doubt it returns true, keeping the fast path available. The LLM stage handles
-// all ambiguous intent classification regardless.
+// isImperativeInput returns true only when the prompt is an explicit pipeline
+// invocation using "run/execute/launch/rerun/start" language. This guards the
+// embedding fast path: generic task requests ("review my PR", "improve the docs")
+// must NOT fast-path to a pipeline even at high cosine similarity — the user wants
+// the AI to handle those. Only explicit run-style commands bypass the LLM stage.
 func isImperativeInput(s string) bool {
 	s = strings.TrimSpace(strings.ToLower(s))
-	// Explicit question mark at end of prompt.
-	if strings.HasSuffix(s, "?") {
-		return false
+	// Must start with an explicit pipeline-invocation verb.
+	explicitVerbs := []string{
+		"run ", "execute ", "launch ", "rerun ", "re-run ",
+		"start ", "trigger ", "kick off ", "kick-off ",
 	}
-	// Interrogative and observational starters that signal non-command intent.
-	questionStarters := []string{
-		"what ", "what's ", "why ", "how ", "is ", "are ", "was ", "were ",
-		"can ", "could ", "should ", "would ", "will ", "do ", "does ", "did ",
-		"looks like", "it looks", "seems like", "i think", "i noticed",
-		"any idea", "any thoughts",
-	}
-	for _, prefix := range questionStarters {
-		if strings.HasPrefix(s, prefix) {
-			return false
+	for _, verb := range explicitVerbs {
+		if strings.HasPrefix(s, verb) {
+			return true
 		}
 	}
-	return true
+	return false
 }

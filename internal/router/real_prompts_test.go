@@ -214,16 +214,17 @@ func TestRouter_RealWorldPrompts_EmbeddingPath(t *testing.T) {
 	}
 
 	// Real session prompts that are semantically close to support-digest-dryrun
+	// AND start with an explicit pipeline-invocation verb (required for fast path).
 	prompts := []struct {
 		text string
 		vec  []float32 // simulated embedding
 	}{
-		// "now re-run the support-digest pipeline" — very close to support-digest
-		{"now re-run the support-digest pipeline", []float32{0.99, 0.05, 0.05}},
+		// Explicit re-run invocation — fast path eligible
+		{"re-run the support-digest pipeline", []float32{0.99, 0.05, 0.05}},
 		// "run the support digest for acme" — close
 		{"run the support digest for acme", []float32{0.97, 0.1, 0.05}},
-		// "summarize support emails every 2 hours" — close
-		{"summarize support emails every 2 hours", []float32{0.96, 0.05, 0.1}},
+		// Explicit trigger invocation — fast path eligible
+		{"trigger the support-digest-dryrun pipeline", []float32{0.96, 0.05, 0.1}},
 	}
 
 	for _, p := range prompts {

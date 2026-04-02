@@ -93,35 +93,46 @@ func (c *LLMClassifier) Classify(ctx context.Context, prompt string, pipelines [
 // ── prompt building ───────────────────────────────────────────────────────────
 
 // buildPrompt creates the structured LLM prompt with a two-step intent gate.
-// Step 1 gates on whether the input is an actionable command. Questions,
-// observations, and conversational statements must return NONE immediately
-// without proceeding to pipeline selection.
+// buildPrompt creates the structured LLM prompt for pipeline dispatch.
+// A pipeline is only selected when the user EXPLICITLY invokes one by name or
+// uses "run/execute/launch/rerun" language. Generic task requests ("review my PR",
+// "improve the docs", "check git") must return NONE — the user wants the AI to
+// handle those directly, not trigger an automated pipeline.
 func buildPrompt(userPrompt string, pipelines []pipeline.PipelineRef) string {
 	var sb strings.Builder
 
-	sb.WriteString(`You are deciding whether a user message is an actionable command to run an automated workflow, or is instead a question, observation, or conversational statement.
+	sb.WriteString(`You are deciding whether a user message is an explicit request to run a named automated pipeline, or is instead something the AI assistant should handle directly (a question, task request, observation, or conversation).
 
-Step 1 — Intent check: Is this an explicit command? The user must be directing you to perform an action (run, review, generate, check, scan, fix, build, deploy, start, launch, etc.).
-If the message is phrased as a question, observation, speculation, or statement of uncertainty, output {"pipeline":"NONE","confidence":0.05,"input":"","cron":""} immediately without reading Step 2.
+RULE: Only select a pipeline when the user explicitly invokes it by name OR uses "run", "execute", "launch", "rerun", or "start" language directed at a specific pipeline. Generic task requests — even if a pipeline exists that could do the work — must return NONE. The user chooses when to invoke a pipeline; the AI does not invoke pipelines on their behalf.
 
-Step 2 — Only if it IS a command: select the best matching pipeline from the list below.
-- "pipeline" must be a name from the list, or "NONE" if no pipeline fits the command.
+Step 1 — Is the user explicitly asking to run a pipeline (by name or with run/execute/launch/rerun)?
+If NO, output {"pipeline":"NONE","confidence":0.05,"input":"","cron":""} immediately.
+
+Step 2 — Only if YES: select the matching pipeline by name.
+- "pipeline" must be a name from the list, or "NONE" if no pipeline matches.
 - "confidence" is between 0.0 and 1.0.
-- "input" is the topic, URL, or focus the user wants acted on, or "".
+- "input" is the specific URL, path, or topic to act on, or "".
 - "cron" is a 5-field cron expression if the user wants a schedule, or "".
 
-Non-command examples — always output NONE regardless of topic:
-{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "looks like there are merge conflicts?"
-{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "why is the build failing?"
-{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "seems like the deploy is slow"
-{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "I wonder if this worked"
-{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "any open PRs?"
-{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "is the pipeline running?"
+Always NONE — user wants AI to handle it directly:
+{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "please review this PR https://..."
+{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "can you improve the docs?"
+{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "check if there are merge conflicts"
+{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "summarize the support emails"
+{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "what about the failing tests?"
+{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "looks like there are conflicts?"
 
-Command examples — match a pipeline or NONE if no pipeline fits:
-{"pipeline":"pr-review","confidence":0.93,"input":"https://github.com/org/repo/pull/42","cron":""}
-{"pipeline":"docs-improve","confidence":0.87,"input":"executor package","cron":"0 */2 * * *"}
-{"pipeline":"NONE","confidence":0.10,"input":"","cron":""}  // command with no matching pipeline
+Always NONE — questions and observations:
+{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "why is the build failing?"
+{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "any open PRs?"
+{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}  // "seems slow today"
+
+Explicit pipeline invocations — match by name:
+{"pipeline":"pr-review","confidence":0.95,"input":"https://github.com/org/repo/pull/42","cron":""}  // "run pr-review on https://..."
+{"pipeline":"pr-review","confidence":0.93,"input":"https://github.com/org/repo/pull/42","cron":""}  // "run the pr-review pipeline"
+{"pipeline":"docs-improve","confidence":0.90,"input":"executor package","cron":"0 */2 * * *"}  // "run docs-improve on executor package every 2 hours"
+{"pipeline":"support-digest","confidence":0.92,"input":"","cron":""}  // "launch support-digest"
+{"pipeline":"NONE","confidence":0.10,"input":"","cron":""}  // "run something" (no matching pipeline name)
 
 Available pipelines:
 `)

@@ -5,33 +5,47 @@ package router
 import "testing"
 
 // TestIsImperativeInput is a contract test for isImperativeInput.
-// These cases define the boundary between the embedding fast path and the LLM stage.
-// The fast path ONLY fires when isImperativeInput is true AND cosine ≥ ConfidentThreshold.
+// The fast path ONLY fires for explicit pipeline-invocation verbs
+// (run/execute/launch/rerun/start/trigger). Generic task requests — even
+// strongly imperative ones ("review my PR") — must return false so the LLM
+// classifier handles them and can return NONE instead of auto-routing.
 func TestIsImperativeInput(t *testing.T) {
 	cases := []struct {
 		input string
 		want  bool
 	}{
-		// Commands — should return true
+		// Explicit pipeline invocations — fast path eligible
 		{"run git-pulse", true},
-		{"review my PR", true},
-		{"check the status", true},
-		{"deploy staging", true},
-		{"generate a report", true},
-		{"scan for vulnerabilities", true},
-		{"show open issues", true},
-		{"list recent commits", true},
-		{"build the project", true},
-		{"create a pipeline", true},
-		{"fix the failing test", true},
-		{"analyze the logs", true},
-		{"start the job", true},
-		{"launch the pipeline", true},
+		{"run the pr-review pipeline", true},
+		{"run pr-review on https://github.com/org/repo/pull/42", true},
+		{"execute support-digest", true},
+		{"launch the docs-improve pipeline", true},
 		{"rerun the digest", true},
-		{"update dependencies", true},
-		{"push my changes", true},
+		{"re-run support-digest", true},
+		{"start git-pulse", true},
+		{"trigger the pr-review pipeline", true},
+		{"kick off support-digest", true},
+		{"kick-off the pipeline", true},
 
-		// Questions ending with "?" — must return false
+		// Generic task requests — must return false (AI handles, not pipeline)
+		{"review my PR", false},
+		{"please review this PR https://github.com/org/repo/pull/1", false},
+		{"can you review this pr?", false},
+		{"improve the docs", false},
+		{"check the status", false},
+		{"fix the failing test", false},
+		{"analyze the logs", false},
+		{"generate a report", false},
+		{"scan for vulnerabilities", false},
+		{"show open issues", false},
+		{"list recent commits", false},
+		{"build the project", false},
+		{"create a pipeline", false},
+		{"deploy staging", false},
+		{"update dependencies", false},
+		{"push my changes", false},
+
+		// Questions — must return false
 		{"looks like there are merge conflicts?", false},
 		{"why is the build failing?", false},
 		{"is the pipeline running?", false},
@@ -41,25 +55,14 @@ func TestIsImperativeInput(t *testing.T) {
 		{"how does this work?", false},
 		{"are there any failures?", false},
 		{"was the deploy successful?", false},
-		{"were there any errors?", false},
-		{"could this be a bug?", false},
-		{"should I run this again?", false},
-		{"would this trigger a pipeline?", false},
-		{"will this run automatically?", false},
-		{"did it finish?", false},
-		{"does it still work?", false},
-		{"do I need to push?", false},
 
-		// Observations and hedged statements — must return false
-		{"what seems to be wrong", false},
+		// Observations — must return false
 		{"it looks like the tests are failing", false},
 		{"looks like there is a problem", false},
 		{"seems like it crashed", false},
 		{"i think something is wrong", false},
 		{"i noticed the logs are empty", false},
 		{"any idea why this broke", false},
-		{"any thoughts on this", false},
-		{"what's happening with the build", false},
 	}
 
 	for _, tc := range cases {

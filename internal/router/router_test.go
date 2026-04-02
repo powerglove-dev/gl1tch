@@ -125,7 +125,8 @@ func TestHybridRouter_EmbeddingFastPath(t *testing.T) {
 	}
 	r := New(mgr, emb, cfg)
 
-	result, err := r.Route(context.Background(), "anything", pipelines)
+	// "run pipeline-a" is an explicit invocation verb → isImperativeInput = true
+	result, err := r.Route(context.Background(), "run pipeline-a", pipelines)
 	if err != nil {
 		t.Fatalf("Route error: %v", err)
 	}
@@ -460,7 +461,8 @@ func TestHybridRouter_EmbeddingAtExactThreshold(t *testing.T) {
 	}
 	r := New(mgr, &funcEmbedder{fn: embedFn}, cfg)
 
-	result, err := r.Route(context.Background(), "alpha query", pipelines)
+	// "run alpha-pipeline" starts with explicit verb → isImperativeInput = true
+	result, err := r.Route(context.Background(), "run alpha-pipeline", pipelines)
 	if err != nil {
 		t.Fatalf("Route error: %v", err)
 	}
@@ -504,7 +506,7 @@ func TestHybridRouter_MultiplePipelines_EmbeddingPicksBest(t *testing.T) {
 	}
 	r := New(mgr, &funcEmbedder{fn: embedFn}, cfg)
 
-	result, err := r.Route(context.Background(), "beta query", pipelines)
+	result, err := r.Route(context.Background(), "run beta", pipelines)
 	if err != nil {
 		t.Fatalf("Route error: %v", err)
 	}
