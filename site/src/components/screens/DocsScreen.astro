@@ -12,39 +12,34 @@ const rendered = await Promise.all(
 );
 ---
 
-<div class="dp-shell">
-  <!-- sidebar nav -->
-  <nav class="dp-nav" id="dp-nav">
-    <div class="dp-nav-header">
-      <span class="fg-purple">GL1TCH</span><span class="fg-comment"> / docs</span>
-    </div>
-
-    <div class="dp-nav-section">PIPELINES</div>
+<div class="ds-root">
+  <!-- compact top nav -->
+  <nav class="ds-nav" id="ds-nav">
     {rendered.map(({ doc, slug }, i) => (
       <button
-        class={`dp-nav-item${i === 0 ? ' active' : ''}`}
-        data-target={`dp-section-${slug}`}
-        onclick="DPNav.show(this)"
+        class={`ds-tab${i === 0 ? ' active' : ''}`}
+        data-target={`ds-article-${slug}`}
+        onclick="DS.show(this)"
       >
-        <span class="dp-nav-num fg-comment">{String(doc.data.order).padStart(2, '0')}</span>
-        <span class="dp-nav-label">{doc.data.title}</span>
+        <span class="ds-num">{String(doc.data.order).padStart(2, '0')}</span>
+        <span class="ds-label">{doc.data.title}</span>
       </button>
     ))}
   </nav>
 
-  <!-- content panes -->
-  <div class="dp-content" id="dp-content">
+  <!-- content -->
+  <div class="ds-body" id="ds-body">
     {rendered.map(({ doc, Content, slug }, i) => (
       <article
-        id={`dp-section-${slug}`}
-        class={`dp-article${i === 0 ? ' visible' : ''}`}
+        id={`ds-article-${slug}`}
+        class={`ds-article${i === 0 ? ' visible' : ''}`}
         aria-hidden={i !== 0}
       >
-        <div class="dp-article-header">
-          <h1 class="dp-title fg-purple">{doc.data.title}</h1>
-          <p class="dp-desc fg-comment">{doc.data.description}</p>
+        <div class="ds-article-meta">
+          <span class="ds-article-title fg-purple">{doc.data.title}</span>
+          <span class="ds-article-desc fg-comment">{doc.data.description}</span>
         </div>
-        <div class="dp-body">
+        <div class="ds-content">
           <Content />
         </div>
       </article>
@@ -53,234 +48,188 @@ const rendered = await Promise.all(
 </div>
 
 <script>
-  const DPNav = {
+  const DS = {
     show(btn: HTMLButtonElement) {
       const target = btn.dataset.target;
       if (!target) return;
 
-      // deactivate all nav items
-      document.querySelectorAll('.dp-nav-item').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.ds-tab').forEach(el => el.classList.remove('active'));
       btn.classList.add('active');
 
-      // hide all articles
-      document.querySelectorAll('.dp-article').forEach(el => {
+      document.querySelectorAll('.ds-article').forEach(el => {
         el.classList.remove('visible');
         el.setAttribute('aria-hidden', 'true');
       });
 
-      // show target
       const article = document.getElementById(target);
       if (article) {
         article.classList.add('visible');
         article.removeAttribute('aria-hidden');
-        // scroll content pane to top
-        const pane = document.getElementById('dp-content');
-        if (pane) pane.scrollTop = 0;
+        const body = document.getElementById('ds-body');
+        if (body) body.scrollTop = 0;
       }
     }
   };
 
-  // expose for inline onclick
-  (window as any).DPNav = DPNav;
+  (window as any).DS = DS;
 </script>
 
 <style>
-/* ── Shell layout ── */
-.dp-shell {
+.ds-root {
   display: flex;
+  flex-direction: column;
   height: 100%;
   overflow: hidden;
 }
 
-/* ── Sidebar nav ── */
-.dp-nav {
-  width: 168px;
+/* ── top nav strip ── */
+.ds-nav {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
   flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--current-line);
-  background: var(--darkbg);
-  overflow-y: auto;
-  padding: 12px 0 8px;
-}
-
-.dp-nav-header {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  padding: 0 12px 10px;
   border-bottom: 1px solid var(--current-line);
-  margin-bottom: 8px;
-  letter-spacing: 0.02em;
+  background: var(--darkbg);
+  gap: 0;
+  scrollbar-width: none;
 }
+.ds-nav::-webkit-scrollbar { display: none; }
 
-.dp-nav-section {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  color: var(--comment);
-  padding: 8px 12px 4px;
-  text-transform: uppercase;
-}
-
-.dp-nav-item {
+.ds-tab {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  width: 100%;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
   background: none;
   border: none;
-  border-left: 2px solid transparent;
+  border-bottom: 2px solid transparent;
   color: var(--comment);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  text-align: left;
-  padding: 6px 10px 6px 10px;
+  font-size: 10.5px;
+  padding: 8px 14px;
   cursor: pointer;
-  line-height: 1.4;
+  white-space: nowrap;
   transition: color 0.1s, border-color 0.1s;
+  line-height: 1;
 }
-
-.dp-nav-item:hover {
+.ds-tab:hover { color: var(--fg); }
+.ds-tab.active {
   color: var(--fg);
+  border-bottom-color: var(--purple);
 }
 
-.dp-nav-item.active {
-  color: var(--fg);
-  border-left-color: var(--purple);
-  background: rgba(135,135,175,0.06);
-}
-
-.dp-nav-num {
+.ds-num {
+  color: var(--comment);
   font-size: 9px;
-  margin-top: 1px;
-  flex-shrink: 0;
+  opacity: 0.6;
 }
+.ds-tab.active .ds-num { opacity: 1; }
 
-/* ── Content pane ── */
-.dp-content {
+/* ── scrollable content area ── */
+.ds-body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
 }
+.ds-body::-webkit-scrollbar       { width: 3px; }
+.ds-body::-webkit-scrollbar-track { background: transparent; }
+.ds-body::-webkit-scrollbar-thumb { background: var(--comment); }
 
-.dp-article {
+.ds-article {
   display: none;
-  padding: 28px 32px 48px;
+  padding: 20px 28px 40px;
 }
+.ds-article.visible { display: block; }
 
-.dp-article.visible {
-  display: block;
-}
-
-.dp-article-header {
+.ds-article-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
   border-bottom: 1px solid var(--current-line);
-  padding-bottom: 16px;
-  margin-bottom: 28px;
+  flex-wrap: wrap;
 }
-
-.dp-title {
+.ds-article-title {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 18px;
-  font-weight: normal;
-  margin: 0 0 8px;
+  font-size: 14px;
   letter-spacing: 0.02em;
 }
-
-.dp-desc {
-  font-size: 12px;
-  margin: 0;
-  line-height: 1.7;
+.ds-article-desc {
   font-family: 'JetBrains Mono', monospace;
-  color: var(--comment);
+  font-size: 11px;
+  line-height: 1.6;
 }
 
-/* ── Markdown prose in panel ── */
-.dp-body {
+/* ── prose ── */
+.ds-content {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 12.5px;
-  line-height: 2;
+  font-size: 12px;
+  line-height: 1.9;
   color: var(--fg);
 }
 
-/* Headings */
-.dp-body h2 {
+.ds-content h2 {
   color: var(--cyan);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: normal;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  margin: 36px 0 14px;
+  margin: 32px 0 12px;
   padding-bottom: 6px;
   border-bottom: 1px solid var(--current-line);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
-.dp-body h2::before {
-  content: '//';
-  color: var(--comment);
-  font-size: 10px;
-  letter-spacing: 0;
-}
+.ds-content h2::before { content: '//'; color: var(--comment); font-size: 9px; }
 
-.dp-body h3 {
+.ds-content h3 {
   color: var(--yellow);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: normal;
-  margin: 28px 0 10px;
-  padding-left: 10px;
+  margin: 24px 0 8px;
+  padding-left: 8px;
   border-left: 2px solid var(--yellow);
 }
 
-.dp-body h4 {
+.ds-content h4 {
   color: var(--fg);
   font-size: 11px;
   font-weight: bold;
-  margin: 20px 0 8px;
+  margin: 18px 0 6px;
   letter-spacing: 0.04em;
 }
 
-/* Paragraphs */
-.dp-body p {
-  margin: 0 0 18px;
-  color: var(--fg);
-}
+.ds-content p { margin: 0 0 14px; }
 
-/* Lists */
-.dp-body ul, .dp-body ol {
-  margin: 0 0 18px;
-  padding-left: 20px;
-}
-.dp-body li {
-  margin-bottom: 8px;
-  line-height: 1.9;
-}
-.dp-body li > p { margin-bottom: 6px; }
-.dp-body ul li::marker { color: var(--purple); }
-.dp-body ol li::marker { color: var(--comment); }
+.ds-content ul, .ds-content ol { margin: 0 0 14px; padding-left: 18px; }
+.ds-content li { margin-bottom: 6px; line-height: 1.8; }
+.ds-content li > p { margin-bottom: 4px; }
+.ds-content ul li::marker { color: var(--purple); }
+.ds-content ol li::marker { color: var(--comment); }
 
-/* Inline code */
-.dp-body code {
+.ds-content code {
   background: rgba(135,135,175,0.12);
   color: var(--cyan);
-  padding: 2px 6px;
-  font-size: 11.5px;
+  padding: 1px 5px;
+  font-size: 11px;
   font-family: 'JetBrains Mono', monospace;
   border: 1px solid rgba(135,135,175,0.18);
   border-radius: 2px;
 }
 
-/* Code blocks */
-.dp-body pre {
+.ds-content pre {
   background: var(--darkbg);
-  border-left: 3px solid var(--purple);
-  padding: 16px 18px;
+  border-left: 2px solid var(--purple);
+  padding: 12px 14px;
   overflow-x: auto;
-  margin: 4px 0 22px;
-  font-size: 11.5px;
-  line-height: 1.75;
+  margin: 4px 0 18px;
+  font-size: 11px;
+  line-height: 1.7;
 }
-.dp-body pre code {
+.ds-content pre code {
   background: none;
   border: none;
   padding: 0;
@@ -288,97 +237,65 @@ const rendered = await Promise.all(
   font-size: inherit;
 }
 
-/* Strong / em */
-.dp-body strong {
-  color: var(--fg);
-  font-weight: bold;
-}
-.dp-body em {
-  color: var(--comment);
-  font-style: normal;
-}
+.ds-content strong { color: var(--fg); font-weight: bold; }
+.ds-content em     { color: var(--comment); font-style: normal; }
 
-/* Links */
-.dp-body a {
+.ds-content a {
   color: var(--purple);
   text-decoration: none;
   border-bottom: 1px solid rgba(135,135,175,0.3);
 }
-.dp-body a:hover {
-  color: var(--cyan);
-  border-bottom-color: var(--cyan);
-}
+.ds-content a:hover { color: var(--cyan); border-bottom-color: var(--cyan); }
 
-/* Tables */
-.dp-body table {
+.ds-content table {
   width: 100%;
   border-collapse: collapse;
-  margin: 4px 0 24px;
-  font-size: 11.5px;
+  margin: 4px 0 20px;
+  font-size: 11px;
   border: 1px solid var(--current-line);
 }
-.dp-body thead {
-  background: var(--darkbg);
-  border-bottom: 2px solid var(--purple);
-}
-.dp-body th {
+.ds-content thead { background: var(--darkbg); border-bottom: 1px solid var(--purple); }
+.ds-content th {
   color: var(--purple);
   text-align: left;
-  padding: 8px 14px;
+  padding: 6px 12px;
   font-weight: normal;
   letter-spacing: 0.06em;
-  font-size: 10.5px;
+  font-size: 10px;
   text-transform: uppercase;
   border-right: 1px solid var(--current-line);
   white-space: nowrap;
 }
-.dp-body th:last-child { border-right: none; }
-.dp-body td {
-  padding: 9px 14px;
+.ds-content th:last-child { border-right: none; }
+.ds-content td {
+  padding: 7px 12px;
   border-bottom: 1px solid var(--current-line);
   border-right: 1px solid var(--current-line);
   vertical-align: top;
-  line-height: 1.7;
+  line-height: 1.6;
 }
-.dp-body td:last-child { border-right: none; }
-.dp-body tr:last-child td { border-bottom: none; }
-.dp-body tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
-.dp-body tbody tr:hover { background: rgba(135,135,175,0.06); }
-.dp-body td code, .dp-body th code { font-size: 11px; }
+.ds-content td:last-child { border-right: none; }
+.ds-content tr:last-child td { border-bottom: none; }
+.ds-content tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+.ds-content tbody tr:hover { background: rgba(135,135,175,0.06); }
 
-/* Blockquotes — used as admonitions */
-.dp-body blockquote {
-  border-left: 3px solid var(--comment);
-  margin: 4px 0 22px;
-  padding: 12px 16px;
+.ds-content blockquote {
+  border-left: 2px solid var(--comment);
+  margin: 4px 0 18px;
+  padding: 10px 14px;
   background: rgba(95,95,135,0.08);
   color: var(--fg);
   line-height: 1.8;
 }
-.dp-body blockquote p { margin: 0; }
-.dp-body blockquote p + p { margin-top: 8px; }
-
-/* Admonition variants via strong prefix */
-/* > **Note:** text  → blue-ish */
-.dp-body blockquote:has(strong:first-child) {
+.ds-content blockquote p { margin: 0; }
+.ds-content blockquote:has(strong:first-child) {
   border-left-color: var(--cyan);
   background: rgba(135,175,175,0.07);
 }
-/* > **Warning:** text → yellow */
-.dp-body blockquote:has(strong:first-child):has([data-warn]) {
-  border-left-color: var(--yellow);
-  background: rgba(215,175,95,0.07);
-}
 
-/* Horizontal rule as section divider */
-.dp-body hr {
+.ds-content hr {
   border: none;
   border-top: 1px solid var(--current-line);
-  margin: 28px 0;
+  margin: 24px 0;
 }
-
-/* Scrollbar inside content */
-.dp-content::-webkit-scrollbar         { width: 4px; }
-.dp-content::-webkit-scrollbar-track   { background: transparent; }
-.dp-content::-webkit-scrollbar-thumb   { background: var(--comment); }
 </style>

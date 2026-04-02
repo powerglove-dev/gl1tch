@@ -1,84 +1,118 @@
-## GLITCH Database Context
+---
+title: "Your First Pipeline"
+description: "Install gl1tch, write a pipeline YAML, run it. Five minutes."
+order: 1
+---
 
-### Schema: runs table (read-only)
-Columns: id (INTEGER PK), kind (TEXT), name (TEXT), started_at (INTEGER unix-ms),
-finished_at (INTEGER unix-ms, nullable), exit_status (INTEGER, nullable),
-stdout (TEXT), stderr (TEXT), metadata (TEXT JSON), steps (TEXT JSON array).
-This table is READ-ONLY. Do not issue INSERT, UPDATE, or DELETE against it.
+## Prerequisites
 
-## Brain Notes (this run)
+You need two things:
 
-[write_doc] [type:finding title:cli-reference.md overwritten with brain preamble by previous pipeline step tags:docs,pipeline,corruption] The file site/src/content/pipelines/cli-reference.md was corrupted: a previous pipeline step wrote the injected brain preamble (GLITCH Database Context + brain notes + brain-write system prompt) directly to the file instead of documentation content. The file was restored from cmd/ source analysis. Root cause: a pipeline step that was supposed to write documentation output wrote its input context instead. Guard against this by ensuring write steps use {{steps.<id>.output}} not raw input.
-[deep_search] ` blocks. If one is found and a store is available, it's persisted for the current run. Every subsequent step receives accumulated brain notes in its prompt preamble — automatically, before your prompt text.
+- **Go 1.22+** installed on your machine. Run `go version` to check.
+- **An AI provider**: either the [Claude CLI](https://claude.ai/download) installed and authenticated, or [Ollama](https://ollama.ai) running locally with a model pulled.
 
-There are no YAML flags that control this. Brain scanning and injection are always on when a store is configured (which is the default when running via `glitch pipeline run`). The model decides what's worth remembering by whether it emits a `<brain>` block.
+That's it. No Docker, no cloud account, no config ceremony.
 
-## Writing to the brain
+## Install
 
-Your prompt instructs the model to emit a brain block. gl1tch finds it, extracts it, stores it.
+From source (recommended for now):
+
+```bash
+git clone https://github.com/8op-org/gl1tch.git
+cd gl1tch
+go build ./cmd/glitch
+```
+
+Or grab it directly:
+
+```bash
+go install github.com/8op-org/gl1tch/cmd/glitch@latest
+```
+
+Either way you end up with a `glitch` binary. Put it somewhere on your `$PATH`.
+
+## Your first pipeline
+
+Create a file called `hello.pipeline.yaml`. Anywhere on disk is fine.
 
 ```yaml
+name: hello
+version: "1"
 steps:
-  - id: audit
+  - id: greet
     executor: claude
-    model: claude-sonnet-4-6
+    model: claude-haiku-4-5-20251001
     prompt: |
-      Audit this codebase for security issues. Be specific.
-      Record your key findings in a <brain> block at the end.
+      Say hello in the style of a 1990s BBS sysop. Keep it under 3 lines.
 ```
 
-The model outputs its analysis, then appends:
+Run it:
 
+```bash
+glitch pipeline run hello.pipeline.yaml
 ```
-<brain tags="security,sql-injection">
-SQL injection in user_search (line 42), admin_filter (line 89),
-report_query (line 156). All use string concatenation. No parameterized queries.
-[pick] ` tag with structured attributes.
 
-```markdown
-<brain type="research" tags="optional,comma,tags" title="Contextual updates">
-Update existing documentation, create new topics, rotate through topics, update topic catalogue, review and refine existing documentation, perform quality checks, store the brain note.
+The runner builds the executor, sends the prompt, and streams output to stdout. You should see something like a sysop greeting from 1994 appear in your terminal.
 
-> Do NOT modify the runs table.
+If you're using Ollama instead of Claude, swap the executor and model:
 
----
-BRAIN NOTE INSTRUCTION: Include a <brain> block somewhere in your response to persist an insight for future steps in this pipeline.
+```yaml
+- id: greet
+  executor: ollama
+  model: qwen2.5-coder:latest
+  prompt: |
+    Say hello in the style of a 1990s BBS sysop. Keep it under 3 lines.
+```
 
-Use the <brain> tag with structured attributes to categorize your note:
+## What just happened
 
-  <brain type="research" tags="optional,comma,tags" title="Human readable title">
-  Your insight, analysis, or structured data here.
-  </brain>
+When you run `glitch pipeline run`, the runner:
 
-Available types:
-- research  — background info, context, references
-- finding   — concrete discovery (bug, pattern, fact)
-- data      — structured output (metrics, counts, lists)
-- code      — code snippet or file path reference
+1. Parses the YAML and validates the step DAG
+2. Resolves each step's executor (native like `claude`/`ollama`, or sidecar CLI wrappers loaded from `~/.config/glitch/wrappers/`)
+3. Runs steps in dependency order, streaming output as it goes
+4. Stores the run result in the local SQLite database
 
-The <tags> attribute is optional. The <title> attribute is recommended.
+Single-step pipelines are fine for testing, but the real power is chaining.
 
-Example:
-  <brain type="finding" tags="auth,security" title="Session token stored in plain text">
-  Found that session tokens are written to ~/.glitch/session without encryption.
-  File: internal/auth/session.go line 42.
-  </brain>
+## Chaining steps
 
-The brain note will be stored and made available to subsequent agent steps with use_brain enabled.
----
+Here's a two-step pipeline that fetches a repo description from GitHub and summarizes it:
 
-The cli-reference.md has been restored with complete, accurate content derived from the cmd/ source files. The corruption was caused by a prior pipeline step writing its injected brain preamble to the file instead of documentation content.
+```yaml
+name: git-summary
+version: "1"
+steps:
+  - id: get-repo
+    executor: gh
+    vars:
+      args: "repo view --json description"
 
-**What changed:**
-- Restored full frontmatter and proper document structure
-- Documented all commands: `ask`, `pipeline`, `cron`, `config`, `backup`, `restore`, `plugin`, `workflow`, `widget`
-- All flags sourced directly from cmd/ Go source — no invented fields
-- `--dry-run` and `--json` flags on `glitch ask` were missing from the truncated original; now included
-- Added `backup` and `restore` sections (previously undocumented in the CLI reference)
+  - id: summarize
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    needs: [get-repo]
+    prompt: |
+      Summarize this repo description in one sentence:
+      {{steps.get-repo.output}}
+```
 
-Other docs (`brain.md`, `executors.md`, `yaml-reference.md`, `examples.md`) are accurate and complete. The sidecar vars convention (`GLITCH_<KEY>` env var mapping) was already documented in `executors.md` by the previous pipeline step.
+The `needs` field creates a dependency. `summarize` won't run until `get-repo` finishes. The `{{steps.get-repo.output}}` template expression injects the previous step's output into the prompt.
 
-<brain type="finding" tags="docs,pipeline,corruption" title="cli-reference.md overwritten with brain preamble by previous pipeline step">
-The file site/src/content/pipelines/cli-reference.md was corrupted: a previous pipeline step wrote the injected brain preamble (GLITCH Database Context + brain notes + brain-write system prompt) directly to the file instead of documentation content. The file was restored from cmd/ source analysis. Root cause: a pipeline step that was supposed to write documentation output wrote its input context instead. Guard against this by ensuring write steps use { {steps.<id>.output}} not raw input.
-</brain>
+To use the `gh` executor, you need the [GitHub CLI](https://cli.github.com/) installed and authenticated. The `gh` executor is a sidecar wrapper -- a YAML file in `~/.config/glitch/wrappers/` that tells gl1tch how to call the `gh` command.
 
+## Where pipelines live
+
+The `glitch pipeline run` command accepts:
+
+- A **file path**: `glitch pipeline run ./my-pipeline.pipeline.yaml`
+- A **pipeline name**: `glitch pipeline run my-pipeline` -- this looks in `~/.config/glitch/pipelines/my-pipeline.pipeline.yaml`
+
+For development, use file paths. For pipelines you run often, drop them in the config directory.
+
+## Next steps
+
+- Read the [YAML Reference](/docs/pipelines/yaml-reference) for every field you can use
+- Learn about [Executors and Plugins](/docs/pipelines/executors) to understand what runs your steps
+- Explore the [Brain System](/docs/pipelines/brain) for persistent context across steps
+- Copy a [Real-World Pipeline](/docs/pipelines/examples) and adapt it
