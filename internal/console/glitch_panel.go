@@ -970,7 +970,7 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case glitchTickMsg:
-		if p.streaming {
+		if p.streaming || p.routing {
 			p.animFrame++
 			return p, glitchTick()
 		}
@@ -1653,7 +1653,7 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 			turns := p.turns[:len(p.turns)-1]
 			userTextCopy := userText
 			cfgDir := p.cfgDir
-			return p, func() tea.Msg {
+			return p, tea.Batch(glitchTick(), func() tea.Msg {
 				r := buildPanelRouter(cfgDir)
 				refs, _ := pipeline.DiscoverPipelines(filepath.Join(cfgDir, "pipelines"))
 				if len(refs) > 0 {
@@ -1665,7 +1665,7 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					}
 				}
 				return glitchIntentMsg{result: nil, prompt: userTextCopy, turns: turns}
-			}
+			})
 		}
 	}
 
@@ -2217,7 +2217,7 @@ func (p glitchChatPanel) build(height, width int, pal styles.ANSIPalette) []stri
 	}
 
 	var hints []panelrender.Hint
-	if p.streaming {
+	if p.streaming || p.routing {
 		spinFrames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 		spin := spinFrames[p.animFrame%len(spinFrames)]
 		hints = []panelrender.Hint{{Key: spin, Desc: "thinking"}}
