@@ -36,7 +36,7 @@
     {
       "question": "what are the keyboard shortcuts",
       "keywords": ["keyboard", "shortcut", "keybind", "hotkey", "ctrl", "key", "binding", "navigate"],
-      "response": "Inside GLITCH:\n\n  Tab         focus the input\n  Esc         unfocus\n  ^space a    focus the assistant (chord)\n  ^space p    open pipeline builder\n  ^space b    open brain editor\n  ^space j    jump to a session window\n\nType / for slash command autocomplete."
+      "response": "Inside GLITCH:\n\n  Tab         focus the input\n  Esc         unfocus\n  ^space a    focus the assistant (chord)\n  ^space b    open brain editor\n  ^space j    jump to a session window\n\nType / for slash command autocomplete."
     },
     {
       "question": "how do pipelines work",
@@ -71,7 +71,7 @@
     {
       "question": "how do I create a pipeline",
       "keywords": ["create", "write", "build", "make", "new", "pipeline", "yaml", "author"],
-      "response": "Open the pipeline builder: ^space p from inside GLITCH. Or write a YAML file directly — name, version, and a steps list. Each step needs an id, executor, and prompt. Run it with /pipeline name or `glitch pipeline run file.yaml`. Type /pipelines for an annotated example."
+      "response": "Write a YAML file directly — name, version, and a steps list. Each step needs an id, executor, and prompt. Run it with /pipeline name or `glitch pipeline run file.yaml`. Type /pipelines for an annotated example."
     },
     {
       "question": "can pipelines run on a schedule",
