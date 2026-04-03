@@ -26,23 +26,11 @@ INDEX
 <span class="line"><span> M site/src/content/pipelines/quickstart.md</span></span></code></pre>
 <p>That’s a real pipeline run — <code>git log</code>, <code>git diff --stat</code>, and <code>git status</code> chained together in one step.</p>
 <h2 id="add-ai-to-the-pipeline">Add AI to the pipeline</h2>
-<p>The next step is pairing shell output with a local model. Ask gl1tch to summarize the same commits:</p>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> ask</span><span style="color:#BD93F9"> --provider</span><span style="color:#F1FA8C"> ollama</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">summarize my last 5 commits</span><span style="color:#E9F284">"</span></span></code></pre>
-<p>gl1tch fetches your commits with <code>git log</code>, then passes them to your local Ollama model:</p>
+<p>Ask gl1tch to summarize the same commits. gl1tch defaults to Claude Haiku — fast, cheap, and capable enough for most pipeline steps:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> ask</span><span style="color:#BD93F9"> --provider</span><span style="color:#F1FA8C"> claude</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">summarize my last 5 commits</span><span style="color:#E9F284">"</span></span></code></pre>
+<p>gl1tch fetches your commits with <code>git log</code>, passes them to Haiku, and streams the result:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>[step:fetch] status:running</span></span>
 <span class="line"><span>[step:fetch] status:done</span></span>
-<span class="line"><span>[step:summarize] status:running</span></span>
-<span class="line"><span>[step:summarize] status:done</span></span>
-<span class="line"><span></span></span>
-<span class="line"><span>Recent commits added a signal handler for in-game chat interaction and a</span></span>
-<span class="line"><span>subcommand for discovering plugin models. There were also improvements to</span></span>
-<span class="line"><span>the router with enhanced test coverage, and dead code was cleaned up by</span></span>
-<span class="line"><span>removing an unused EditorPanel class.</span></span></code></pre>
-<p>No model flag needed. When you specify a provider without a model, gl1tch picks the cheapest available one automatically — in this case <code>qwen2.5:latest</code>.</p>
-<h2 id="use-claude-instead">Use Claude instead</h2>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> ask</span><span style="color:#BD93F9"> --provider</span><span style="color:#F1FA8C"> claude</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">summarize my last 5 commits</span><span style="color:#E9F284">"</span></span></code></pre>
-<p>Same routing, same pipeline — Claude Haiku by default (the cheapest option), or pass <code>--model claude-sonnet-4-6</code> to upgrade.</p>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>[step:fetch] status:running</span></span>
 <span class="line"><span>[step:summarize] status:running</span></span>
 <span class="line"><span>[step:summarize] status:done</span></span>
 <span class="line"><span></span></span>
@@ -57,6 +45,14 @@ INDEX
 <span class="line"><span>**389150d — Five intent routing improvements**</span></span>
 <span class="line"><span>Major routing overhaul: removed a gate blocking natural-language invocations,</span></span>
 <span class="line"><span>added fast-path extraction for cron expressions, and added near-miss clarification.</span></span></code></pre>
+<p>No model flag needed — gl1tch picks the cheapest model for the provider automatically.</p>
+<blockquote>
+<p><strong>Note:</strong> Pipelines that use tools, run shell commands autonomously, or coordinate multi-agent workflows require a model with tool/function-calling support. Haiku handles summarization and generation steps well; for agentic tasks upgrade to <code>--model claude-sonnet-4-6</code> or <code>--model claude-opus-4-6</code>.</p>
+</blockquote>
+<h2 id="use-ollama-instead">Use Ollama instead</h2>
+<p>If you’d rather keep everything local:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> ask</span><span style="color:#BD93F9"> --provider</span><span style="color:#F1FA8C"> ollama</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">summarize my last 5 commits</span><span style="color:#E9F284">"</span></span></code></pre>
+<p>gl1tch picks your default Ollama model (<code>qwen2.5:latest</code> unless you configure otherwise) and runs the same pipeline locally — no API key, no outbound traffic.</p>
 <h2 id="review-a-pr">Review a PR</h2>
 <p>Pass gl1tch a GitHub PR URL and it routes to <code>pr-review</code> automatically:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> ask</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">https://github.com/8op-org/gl1tch/pull/40</span><span style="color:#E9F284">"</span></span></code></pre>
