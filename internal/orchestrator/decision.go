@@ -26,10 +26,11 @@ type DecisionNode struct {
 
 // ollamaRequest is the body sent to Ollama /api/generate.
 type ollamaRequest struct {
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
-	Format string `json:"format"`
-	Stream bool   `json:"stream"`
+	Model     string `json:"model"`
+	Prompt    string `json:"prompt"`
+	Format    string `json:"format"`
+	Stream    bool   `json:"stream"`
+	KeepAlive int    `json:"keep_alive"`
 }
 
 // ollamaResponse is the response from Ollama /api/generate.
@@ -55,10 +56,11 @@ func (d *DecisionNode) Evaluate(ctx context.Context, wctx *WorkflowContext) (str
 	expanded := ExpandTemplate(d.Prompt, wctx)
 
 	reqBody := ollamaRequest{
-		Model:  d.Model,
-		Prompt: expanded,
-		Format: "json",
-		Stream: false,
+		Model:     d.Model,
+		Prompt:    expanded,
+		Format:    "json",
+		Stream:    false,
+		KeepAlive: -1,
 	}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {

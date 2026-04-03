@@ -115,9 +115,10 @@ func (b *OllamaBackend) Stream(ctx context.Context, history []Turn, userMsg stri
 // stream sends the messages to Ollama and streams back tokens.
 func (b *OllamaBackend) stream(ctx context.Context, msgs []ollamaMsg) (<-chan string, error) {
 	body, err := json.Marshal(map[string]any{
-		"model":    b.model,
-		"messages": msgs,
-		"stream":   true,
+		"model":      b.model,
+		"messages":   msgs,
+		"stream":     true,
+		"keep_alive": -1,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("ollama: marshal: %w", err)

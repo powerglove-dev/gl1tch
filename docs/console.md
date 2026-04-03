@@ -485,7 +485,7 @@ Chord shortcuts start with `^spc` (ctrl+space) followed by a key. This is the pr
 | `^spc X` | Kill the current window |
 | `^spc a` | Jump to the GL1TCH assistant (shell/REPL pane) |
 | `^spc t` | Open the theme picker |
-| `^spc n` | New workspace session (alternative to `^spc c` for named sessions) |
+| `^spc n` | New tmux window (alternative to `^spc c`) |
 | `^spc p` | Open the pipeline/prompt builder |
 
 ### Terminal and Pipeline Commands

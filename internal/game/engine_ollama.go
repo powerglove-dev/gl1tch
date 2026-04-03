@@ -95,7 +95,8 @@ func (e *GameEngine) ollamaChat(ctx context.Context, systemPrompt, userMsg strin
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": userMsg},
 		},
-		"stream": false,
+		"stream":     false,
+		"keep_alive": -1,
 	}
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {

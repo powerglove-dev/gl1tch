@@ -28,13 +28,15 @@ func (m *mockGlitchBackend) streamIntro(_ context.Context, _ string) (<-chan str
 	return ch, nil
 }
 
-func (m *mockGlitchBackend) stream(_ context.Context, _ []glitchTurn, _, _, _ string) (<-chan string, error) {
+func (m *mockGlitchBackend) stream(_ context.Context, _ []glitchTurn, _, _, _, _ string) (<-chan string, <-chan string, error) {
 	ch := make(chan string, len(m.tokens))
 	for _, t := range m.tokens {
 		ch <- t
 	}
 	close(ch)
-	return ch, nil
+	doneCh := make(chan string)
+	close(doneCh)
+	return ch, doneCh, nil
 }
 
 // ── intent routing tests ──────────────────────────────────────────────────────

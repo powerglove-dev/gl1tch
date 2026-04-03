@@ -124,9 +124,10 @@ func (g *Guide) StreamResponse(phase Phase, userMsg string) (<-chan string, erro
 	messages = append(messages, g.history[1:]...)
 
 	body, err := json.Marshal(map[string]any{
-		"model":    g.model,
-		"messages": messages,
-		"stream":   true,
+		"model":      g.model,
+		"messages":   messages,
+		"stream":     true,
+		"keep_alive": -1,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("guide: marshal: %w", err)

@@ -135,9 +135,10 @@ func (s *OllamaSectionScorer) scoreViaOllama(ctx context.Context, prompt string,
 	}
 
 	reqBody := map[string]any{
-		"model":  s.model,
-		"prompt": sb.String(),
-		"stream": false,
+		"model":      s.model,
+		"prompt":     sb.String(),
+		"stream":     false,
+		"keep_alive": -1,
 	}
 
 	body, err := json.Marshal(reqBody)

@@ -11,7 +11,7 @@ GL1TCH's technology stack is shaped by a single constraint: *your AI runs on you
 
 GL1TCH is a single Go binary that runs inside a tmux session. It has no external processes, no network calls on the hot path, and no cloud dependencies for critical operations. The stack is organized into four layers:
 
-- **Session layer (tmux)**: Durability, composability, and detach/reattach semantics. Every GL1TCH workspace is a tmux session; you can detach and reconnect anytime.
+- **Session layer (tmux)**: Durability, composability, and detach/reattach semantics. GL1TCH runs inside a tmux session; you can detach and reconnect anytime, and your pipelines keep running.
 - **UI layer (BubbleTea)**: Event-driven TUI rendering and input handling. The Deck (control panel) is a single BubbleTea application occupying window 0 of the tmux session.
 - **Intelligence layer (Ollama)**: Local LLM inference for decisions, embeddings, and agent dispatch. Models run on your machine; prompts never leave unless you explicitly route them to a cloud provider.
 - **Coordination layers (scheduler, tracing, pipelines)**: Scheduling with cron expressions, observability with OpenTelemetry, and workflow orchestration with YAML pipelines.

@@ -535,9 +535,9 @@ func (m Model) conversationActive() bool {
 	return m.glitchChat.IsActive() || time.Since(m.lastUserMsgAt) < 30*time.Second
 }
 
-// narrationAllowed returns false when unsolicited narration should be dropped:
-// during an active conversation, within 5s of the last narration, or in busy
-// mode (≥2 run completions in 60s).
+// narrationAllowed returns false when unsolicited run-analysis narration should
+// be dropped: during an active conversation, within 5s of the last narration,
+// or in busy mode (≥2 run completions in 60s).
 func (m Model) narrationAllowed() bool {
 	if m.conversationActive() {
 		return false
@@ -549,6 +549,14 @@ func (m Model) narrationAllowed() bool {
 		return false
 	}
 	return true
+}
+
+// gameNarrationAllowed returns false only when the panel is actively streaming
+// or routing. Unlike narrationAllowed, it ignores the lastUserMsgAt window so
+// that async game events (XP, achievements) are not silently dropped because
+// the user happened to send a message recently.
+func (m Model) gameNarrationAllowed() bool {
+	return !m.glitchChat.IsActive()
 }
 
 // SendPanelAgentOpen returns whether the send panel agent picker popup is open — used in tests.
@@ -1495,7 +1503,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case glitchNarrationMsg:
-		if !m.narrationAllowed() {
+		if !m.gameNarrationAllowed() {
 			return m, nil
 		}
 		m.lastNarrationAt = time.Now()
