@@ -48,7 +48,7 @@ INDEX
 <span class="line"><span>└────────────────────────────────────────────────────────────┘</span></span></code></pre>
 <p>The send panel at the bottom lets you select a saved agent, attach a saved prompt, or attach a named pipeline to your message.</p>
 <h3 id="views-inside-the-workspace">Views inside the workspace</h3>
-<p>Press <code>/</code> commands or keyboard shortcuts to switch what you’re looking at:</p>
+<p>The workspace has three panels. Navigate between them with <code>tab</code>. Use keyboard shortcuts from the focused panel:</p>
 
 
 
@@ -74,12 +74,8 @@ INDEX
 
 
 
-
-
-
-
-
-<table><thead><tr><th>View</th><th>How to open</th><th>What it shows</th></tr></thead><tbody><tr><td>Chat</td><td>default</td><td>Conversation with your assistant</td></tr><tr><td>Signal board</td><td><code>/signals</code></td><td>Live status of all running and recent pipeline jobs</td></tr><tr><td>Inbox</td><td><code>/inbox</code></td><td>Detailed results of past runs, searchable</td></tr><tr><td>Brain editor</td><td><code>/brain</code></td><td>Read and edit your brain memory notes</td></tr></tbody></table>
+<table><thead><tr><th>Panel</th><th>How to focus</th><th>What it shows</th></tr></thead><tbody><tr><td>Chat</td><td>default / <code>tab</code></td><td>Conversation with your assistant</td></tr><tr><td>Inbox</td><td><code>tab</code> to cycle</td><td>All pipeline runs — select one and press <code>enter</code> for full output</td></tr><tr><td>Signal board</td><td><code>s</code> from any panel</td><td>Live status of running and recent jobs</td></tr></tbody></table>
+<p>From the signal board, <code>enter</code> opens the inbox detail for the selected run. From inbox detail, <code>j</code>/<code>k</code> scrolls the output, <code>e</code> opens it in your <code>$EDITOR</code>, and <code>r</code> sends selected lines back to the agent as follow-up context.</p>
 <h2 id="where-things-live">Where Things Live</h2>
 
 
@@ -132,6 +128,15 @@ INDEX
 <h2 id="how-the-brain-works">How the Brain Works</h2>
 <p>The brain is a local store of context built up from your pipeline runs. When a step has <code>write_brain: true</code>, its output is indexed and stored. On future runs with <code>--brain</code>, gl1tch retrieves relevant context and injects it into your prompts.</p>
 <p>Your workspace learns over time without you having to re-explain things.</p>
+<h2 id="viewing-pipeline-results">Viewing Pipeline Results</h2>
+<p>After a run finishes, results land in the inbox panel. You can also pull them up directly:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> pipeline</span><span style="color:#F1FA8C"> results</span><span style="color:#6272A4">              # most recent run</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> pipeline</span><span style="color:#F1FA8C"> results</span><span style="color:#F1FA8C"> git-digest</span><span style="color:#6272A4">   # most recent run for a named pipeline</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> pipeline</span><span style="color:#F1FA8C"> results</span><span style="color:#F1FA8C"> git-digest</span><span style="color:#BD93F9"> --limit</span><span style="color:#BD93F9"> 3</span><span style="color:#6272A4">  # last 3 runs</span></span></code></pre>
+<p>From inside the workspace, ask gl1tch directly:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>show me what git-digest found</span></span></code></pre>
+<p>gl1tch will call <code>glitch pipeline results git-digest</code> and display the output in chat. To see it in a separate pane:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>/terminal glitch pipeline results git-digest</span></span></code></pre>
 <h2 id="how-glitch-ask-works">How glitch ask Works</h2>
 <p>When you run <code>glitch ask "summarize my open PRs"</code>, gl1tch:</p>
 <ol>
