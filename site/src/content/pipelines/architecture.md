@@ -27,7 +27,7 @@ You type:
   Steps run in order — parallel where possible
   Each step:
     1. Resolves template expressions ({{steps.x.output}})
-    2. Calls the executor (ollama, claude, gh, etc.)
+    2. Calls the executor (ollama, claude, shell, etc.)
     3. Captures the output
     4. Stores it locally
 
@@ -39,30 +39,40 @@ You type:
 
 That's it. No hidden agents. No cloud orchestration. The work happens on your machine.
 
-## The Control Panel
+## Your Workspace
 
-When you run `glitch` without a subcommand, you get a three-column workspace:
+When you run `glitch` without a subcommand, it starts a tmux session named `glitch` and opens the console — a full-screen chat interface where you talk to your assistant, launch pipelines, and review results.
 
 ```text
-┌─────────────────┬──────────────────┬──────────────────┐
-│  Your Pipelines │  gl1tch Chat     │  Activity Feed   │
-│  ────────────── │  ──────────────  │  ──────────────  │
-│                 │                  │                  │
-│  list of all    │  Ask questions,  │  Live output     │
-│  your pipelines │  get answers,    │  from running    │
-│  (searchable)   │  launch jobs     │  pipelines       │
-│                 │                  │                  │
-│  Agent Runner   │  Agent Grid      │  Step statuses   │
-│  (run a model   │  Signal Board    │  Elapsed time    │
-│   with a prompt)│  Inbox Detail    │  Results         │
-└─────────────────┴──────────────────┴──────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│  GL1TCH                                            [header] │
+│                                                             │
+│  gl1tch: What do you need?                                  │
+│                                                             │
+│  you: run code-review on the current branch                 │
+│                                                             │
+│  gl1tch: Running code-review…  ✓ done                       │
+│  [result output]                                            │
+│                                                             │
+│ ╭─────────────────────────────────────────────────────────╮ │
+│ │ > type a message or /command                            │ │
+│ │                                             agent │ p │ │ │
+│ ╰─────────────────────────────────────────────────────────╯ │
+└────────────────────────────────────────────────────────────┘
 ```
 
-**Left column:** Your pipeline list and agent runner form. Tab cycles focus between them.
+The send panel at the bottom lets you select a saved agent, attach a saved prompt, or attach a named pipeline to your message.
 
-**Center column:** The main interaction area. Chat with your assistant, monitor running jobs, review past results.
+### Views inside the workspace
 
-**Right column:** The activity feed. Every pipeline run streams here in real time — step by step, with status and timing.
+Press `/` commands or keyboard shortcuts to switch what you're looking at:
+
+| View | How to open | What it shows |
+|------|-------------|---------------|
+| Chat | default | Conversation with your assistant |
+| Signal board | `/signals` | Live status of all running and recent pipeline jobs |
+| Inbox | `/inbox` | Detailed results of past runs, searchable |
+| Brain editor | `/brain` | Read and edit your brain memory notes |
 
 ## Where Things Live
 
@@ -72,20 +82,15 @@ When you run `glitch` without a subcommand, you get a three-column workspace:
 | Your workflows | `~/.config/glitch/workflows/` |
 | Your tool wrappers | `~/.config/glitch/wrappers/` |
 | Your themes | `~/.config/glitch/themes/` |
-| Run history (SQLite) | `~/.local/share/glitch/glitch.db` |
+| Run history + brain + prompts | `~/.local/share/glitch/glitch.db` |
 | Trace logs | `~/.local/share/glitch/traces.jsonl` |
+| Cron log | `~/.local/share/glitch/cron.log` |
 
 Everything is on your disk. Nothing requires a network connection for core operation.
 
-## How the Brain Works
-
-The brain is a local database of context from your pipeline runs. When a step has `write_brain: true`, its output is indexed and stored. On future runs with `--brain`, gl1tch retrieves relevant context and injects it into your prompts.
-
-Your workspace learns over time without you having to re-explain things.
-
 ## How Scheduling Works
 
-Your workspace can run pipelines on a schedule. The scheduler watches `~/.config/glitch/pipelines/` and fires pipelines based on their `cron` field:
+gl1tch runs a second background tmux session named `glitch-cron` alongside the main console. It watches your pipelines and fires the ones with a `cron` field on schedule:
 
 ```yaml
 name: morning-summary
@@ -94,13 +99,18 @@ steps:
   ...
 ```
 
-Start the scheduler:
+The cron session starts automatically when you open gl1tch. You can also interact with it directly:
 
 ```bash
-glitch cron start
+glitch cron list    # see scheduled pipelines and next run times
+glitch cron logs    # tail the cron log
 ```
 
-The scheduler runs in a detached terminal session and keeps going whether you're watching or not.
+## How the Brain Works
+
+The brain is a local store of context built up from your pipeline runs. When a step has `write_brain: true`, its output is indexed and stored. On future runs with `--brain`, gl1tch retrieves relevant context and injects it into your prompts.
+
+Your workspace learns over time without you having to re-explain things.
 
 ## How glitch ask Works
 
