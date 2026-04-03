@@ -37,6 +37,120 @@ glitch pipeline run summarize.pipeline.yaml
 Your last 10 commits feed straight into the model. The summary streams to your terminal.
 
 
+## Building a Pipeline with gl1tch
+
+You don't have to write YAML by hand. Ask gl1tch to build it.
+
+Open your workspace (`glitch`), then describe what you want:
+
+```text
+you:     build me a pipeline that summarizes my recent git activity
+         and flags anything that looks risky
+
+gl1tch:  got it. pulling commits and diffstat, then routing through
+         a local model for the summary and risk pass.
+
+         here's the pipeline — i'll save it to
+         ~/.config/glitch/pipelines/git-digest.pipeline.yaml
+
+         ┌─────────────────────────────────────────────────────┐
+         │ name: git-digest                                     │
+         │ version: "1"                                         │
+         │                                                      │
+         │ steps:                                               │
+         │   - id: log                                          │
+         │     executor: shell                                  │
+         │     prompt: "git log --oneline -20"                  │
+         │                                                      │
+         │   - id: diffstat                                     │
+         │     executor: shell                                  │
+         │     prompt: "git diff HEAD~10 --stat"                │
+         │                                                      │
+         │   - id: summarize                                    │
+         │     executor: ollama                                 │
+         │     model: qwen2.5-coder:latest                      │
+         │     needs: [log, diffstat]                           │
+         │     prompt: |                                        │
+         │       Summarize recent git activity.                 │
+         │       Flag any changes that look risky (large        │
+         │       deletions, core files, no tests nearby).       │
+         │                                                      │
+         │       commits:                                       │
+         │       {{steps.log.output}}                           │
+         │                                                      │
+         │       diffstat:                                      │
+         │       {{steps.diffstat.output}}                      │
+         └─────────────────────────────────────────────────────┘
+
+         run it?
+
+you:     yes
+
+gl1tch:  running git-digest…
+
+         ✓  log       0.1s
+         ✓  diffstat  0.1s
+         ✓  summarize 3.2s
+
+         ─────────────────────────────────────────────────────
+         Recent activity spans 20 commits over the last 3 days.
+         Main changes: pipeline runner refactor (runner.go +340
+         / -180), new executor discovery logic, test coverage
+         added for retry behavior.
+
+         ⚠ Flagged: internal/pipeline/runner.go saw significant
+         rewrites with no accompanying test file changes in the
+         same window. Worth a focused review pass before merge.
+         ─────────────────────────────────────────────────────
+```
+
+The pipeline is saved. Run it any time:
+
+```bash
+glitch pipeline run git-digest
+```
+
+Or ask from the console:
+
+```text
+run git-digest
+```
+
+---
+
+Here's the full pipeline that was generated and tested:
+
+```yaml
+name: git-digest
+version: "1"
+
+steps:
+  - id: log
+    executor: shell
+    prompt: "git log --oneline -20"
+
+  - id: diffstat
+    executor: shell
+    prompt: "git diff HEAD~10 --stat"
+
+  - id: summarize
+    executor: ollama
+    model: qwen2.5-coder:latest
+    needs: [log, diffstat]
+    prompt: |
+      Summarize recent git activity.
+      Flag any changes that look risky (large deletions, core files, no tests nearby).
+
+      commits:
+      {{steps.log.output}}
+
+      diffstat:
+      {{steps.diffstat.output}}
+```
+
+`log` and `diffstat` run in parallel. `summarize` waits for both, then feeds both outputs to the model in a single pass.
+
+
 ## How Pipelines Work
 
 ### Steps
@@ -300,51 +414,123 @@ steps:
 
 ## Examples
 
-### Morning Standup Digest
+### Morning standup
 
-Fetches your commits and drafts a standup update:
+Asks gl1tch to build it:
+
+```text
+you:     i want a pipeline that reads my last day of commits and
+         writes a standup draft
+
+gl1tch:  saving as standup.pipeline.yaml
+```
+
+The tested pipeline:
 
 ```yaml
 name: standup
 version: "1"
-vars:
-  repo: "your-org/your-repo"
+
 steps:
   - id: commits
-    executor: gh
-    vars:
-      args: "api repos/{{vars.repo}}/commits?since=$(date -u -v-1d +%Y-%m-%dT%H:%M:%SZ) --jq '.[].commit.message'"
+    executor: shell
+    prompt: "git log --since='24 hours ago' --oneline --no-merges"
+
   - id: draft
-    executor: claude
-    model: claude-haiku-4-5-20251001
+    executor: ollama
+    model: qwen2.5-coder:latest
     needs: [commits]
     prompt: |
-      Write a brief standup based on these commits:
+      Write a standup update from these commits.
+      Format: Yesterday / Today / Blockers. Keep it under 8 lines.
+
       {{steps.commits.output}}
-      Format: Yesterday / Today / Blockers. Under 10 lines.
 ```
 
-### Parallel Model Comparison
+Run output:
 
-Sends the same prompt to two models, compares their answers:
+```text
+✓  commits  0.1s
+✓  draft    2.8s
+
+Yesterday: finished executor discovery refactor, added retry policy
+  tests, fixed template rendering for nested steps.
+Today: wiring up the plugin manifest validator, then reviewing the
+  open PRs on the runner.
+Blockers: none.
+```
+
+
+### Code review on a diff
+
+```yaml
+name: diff-review
+version: "1"
+
+steps:
+  - id: diff
+    executor: shell
+    prompt: "git diff main --stat && git diff main"
+
+  - id: review
+    executor: ollama
+    model: qwen2.5-coder:latest
+    needs: [diff]
+    prompt: |
+      Review this diff. Focus on:
+      - correctness issues
+      - missing error handling
+      - anything that would fail in production
+
+      {{steps.diff.output}}
+```
+
+Run output:
+
+```text
+✓  diff    0.1s
+✓  review  4.1s
+
+Overall: mostly clean. Three things worth looking at:
+
+1. executor/discovery.go:88 — LoadWrappersFromDir swallows errors
+   into a slice but the caller only logs them. If a sidecar fails
+   to load, the pipeline silently skips it. Consider returning an
+   error or at minimum logging at warn level.
+
+2. pipeline/runner.go:1737 — prompt_id lookup uses GetPromptByTitle
+   which does a case-insensitive match. Two prompts that differ only
+   in case would be ambiguous. Worth a comment or an exact-match guard.
+
+3. No tests added for the new retry backoff path. The existing retry
+   tests only cover max_attempts. Edge case but worth covering.
+```
+
+
+### Parallel model comparison
+
+Same question to two models, then a judgment pass. `claude-answer` and `local-answer` run in parallel — `judge` waits for both:
 
 ```yaml
 name: compare
 version: "1"
 vars:
   question: "Explain Go interfaces in two sentences."
+
 steps:
   - id: claude-answer
     executor: claude
     model: claude-haiku-4-5-20251001
     prompt: "{{vars.question}}"
+
   - id: local-answer
     executor: ollama
-    model: llama3.2:latest
+    model: qwen2.5-coder:latest
     prompt: "{{vars.question}}"
+
   - id: judge
     executor: claude
-    model: claude-sonnet-4-6
+    model: claude-haiku-4-5-20251001
     needs: [claude-answer, local-answer]
     prompt: |
       Compare these two answers to: "{{vars.question}}"
@@ -352,10 +538,22 @@ steps:
       Answer A: {{steps.claude-answer.output}}
       Answer B: {{steps.local-answer.output}}
 
-      Which is more accurate and why?
+      Which is clearer and more accurate? One paragraph.
 ```
 
-`claude-answer` and `local-answer` run in parallel. `judge` waits for both.
+Run output:
+
+```text
+✓  claude-answer  1.2s
+✓  local-answer   2.1s   (parallel)
+✓  judge          1.4s
+
+Both answers are accurate. Answer A is more concise — it leads with
+the behavioral definition (a set of method signatures) before explaining
+implicit satisfaction. Answer B gives a good concrete analogy but buries
+the definition. For a developer new to Go, Answer A is the better starting
+point.
+```
 
 
 ## Reference
