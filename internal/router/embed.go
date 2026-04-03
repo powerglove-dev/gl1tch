@@ -20,6 +20,9 @@ type pipelineEmbedding struct {
 	// DescHash is the SHA256 of (name + description + trigger_phrases); used to detect staleness.
 	DescHash string    `json:"desc_hash"`
 	Vector   []float32 `json:"vector"`
+	// GeneratedPhrases caches auto-generated trigger phrases so the LLM is called at most
+	// once per pipeline version. Populated by EmbeddingRouter when PhraseGenerator is set.
+	GeneratedPhrases []string `json:"generated_phrases,omitempty"`
 }
 
 // ScoredCandidate pairs a pipeline reference with its cosine similarity score.
@@ -32,8 +35,9 @@ type ScoredCandidate struct {
 // cached pipeline representative vectors. It maintains an in-memory cache
 // (invalidated by description+trigger hash) and optionally persists to disk.
 type EmbeddingRouter struct {
-	embedder Embedder
-	cfg      Config
+	embedder  Embedder
+	cfg       Config
+	generator PhraseGenerator // optional; nil disables auto-generation
 
 	mu    sync.Mutex
 	cache map[string]pipelineEmbedding // keyed by pipeline name
@@ -43,9 +47,10 @@ type EmbeddingRouter struct {
 // cache from cfg.CacheDir on construction.
 func newEmbeddingRouter(embedder Embedder, cfg Config) *EmbeddingRouter {
 	r := &EmbeddingRouter{
-		embedder: embedder,
-		cfg:      cfg,
-		cache:    make(map[string]pipelineEmbedding),
+		embedder:  embedder,
+		cfg:       cfg,
+		generator: cfg.PhraseGenerator,
+		cache:     make(map[string]pipelineEmbedding),
 	}
 	r.loadDiskCache()
 	return r
@@ -107,8 +112,12 @@ func (r *EmbeddingRouter) Route(ctx context.Context, prompt string, pipelines []
 }
 
 // ensureEmbedded checks the in-memory cache for each pipeline and (re-)embeds
-// those whose hash has changed. When a pipeline has trigger_phrases, embeds each
-// phrase and stores the centroid vector; otherwise embeds the description text.
+// those whose hash has changed.
+//
+// Embedding source priority:
+//  1. Pipeline's own trigger_phrases (explicit YAML field) — imperative phrase centroid.
+//  2. Auto-generated phrases from PhraseGenerator (cached in GeneratedPhrases) — centroid.
+//  3. Description text fallback.
 func (r *EmbeddingRouter) ensureEmbedded(ctx context.Context, pipelines []pipeline.PipelineRef) error {
 	r.mu.Lock()
 	var toEmbed []pipeline.PipelineRef
@@ -128,13 +137,27 @@ func (r *EmbeddingRouter) ensureEmbedded(ctx context.Context, pipelines []pipeli
 	for _, p := range toEmbed {
 		var vec []float32
 		var err error
+		h := pipelineHash(p)
 
-		if len(p.TriggerPhrases) > 0 {
-			// Embed each trigger phrase and use the centroid as the representative vector.
+		phrases := p.TriggerPhrases
+
+		// Auto-generate trigger phrases when none are defined and a generator is set.
+		// Generated phrases are stored in the cache entry so the LLM is called at most once.
+		if len(phrases) == 0 && r.generator != nil {
+			generated, genErr := r.generator.GeneratePhrases(ctx, p.Name, p.Description)
+			if genErr == nil && len(generated) > 0 {
+				phrases = generated
+				// Write generated phrases back into the cache entry below.
+			}
+			// Generation failure is non-fatal: fall through to description embedding.
+		}
+
+		if len(phrases) > 0 {
+			// Embed each phrase and use the centroid as the representative vector.
 			// Trigger phrases are imperative invocation patterns ("run git pulse", etc.)
 			// so the embedding space is driven by command intent rather than behavior prose.
-			vecs := make([][]float32, 0, len(p.TriggerPhrases))
-			for _, phrase := range p.TriggerPhrases {
+			vecs := make([][]float32, 0, len(phrases))
+			for _, phrase := range phrases {
 				v, embedErr := r.embedder.Embed(ctx, phrase)
 				if embedErr != nil {
 					return embedErr
@@ -149,9 +172,13 @@ func (r *EmbeddingRouter) ensureEmbedded(ctx context.Context, pipelines []pipeli
 			}
 		}
 
-		h := pipelineHash(p)
 		r.mu.Lock()
-		r.cache[p.Name] = pipelineEmbedding{DescHash: h, Vector: vec}
+		entry := pipelineEmbedding{DescHash: h, Vector: vec}
+		// Cache generated phrases (not the YAML ones — those come from the PipelineRef).
+		if len(p.TriggerPhrases) == 0 && len(phrases) > 0 {
+			entry.GeneratedPhrases = phrases
+		}
+		r.cache[p.Name] = entry
 		r.mu.Unlock()
 	}
 

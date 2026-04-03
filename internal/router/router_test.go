@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"sync/atomic"
 	"testing"
 
@@ -550,21 +551,14 @@ func TestHybridRouter_LLMHallucination(t *testing.T) {
 	}
 }
 
-func TestHybridRouter_NonImperative_NeverRoutesToLLM(t *testing.T) {
-	// Non-imperative inputs (questions, observations, generic tasks) must be
-	// stopped by the hard gate before the LLM is ever called — even with cosine=1.0.
-	llmCalled := int64(0)
-	mgr := executor.NewManager()
-	if err := mgr.Register(&executor.StubExecutor{
-		ExecutorName: "ollama",
-		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
-			atomic.AddInt64(&llmCalled, 1)
-			_, err := fmt.Fprint(w, `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`)
-			return err
-		},
-	}); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
+func TestHybridRouter_NonImperative_NeverDispatchesPipeline(t *testing.T) {
+	// Non-imperative inputs (questions, observations, generic task requests) must
+	// NEVER result in a pipeline dispatch. The LLM may be called (it applies its
+	// own intent gate), but the result must always have Pipeline == nil.
+	//
+	// Note: the global isImperativeInput gate was removed. These prompts now reach
+	// the LLM stage, which correctly returns NONE via its own Step 1 intent gate.
+	mgr := makeMgr(t, `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`)
 
 	pipelines := []pipeline.PipelineRef{
 		{Name: "pipeline-a", Description: "alpha unit"},
@@ -592,14 +586,162 @@ func TestHybridRouter_NonImperative_NeverRoutesToLLM(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Route error: %v", err)
 		}
-		if atomic.LoadInt64(&llmCalled) != 0 {
-			t.Errorf("LLM must NOT be called for non-imperative input %q", prompt)
-		}
 		if result.Pipeline != nil {
 			t.Errorf("non-imperative input %q must not route to pipeline, got %q", prompt, result.Pipeline.Name)
 		}
-		if result.Method != "none" {
-			t.Errorf("expected method 'none' for %q, got %q", prompt, result.Method)
+	}
+}
+
+func TestHybridRouter_NaturalPhrasing_CanDispatch(t *testing.T) {
+	// Natural-language dispatch ("can you run X?", "please run X") must now reach
+	// the LLM and route correctly. These prompts previously failed the global gate
+	// but the LLM correctly identifies them as explicit pipeline invocations.
+	pipelines := []pipeline.PipelineRef{
+		{Name: "pr-review", Description: "Review pull requests"},
+	}
+
+	cases := []struct {
+		prompt      string
+		llmResponse string
+		wantName    string
+	}{
+		{
+			"can you run pr-review on this PR?",
+			`{"pipeline":"pr-review","confidence":0.91,"input":"","cron":""}`,
+			"pr-review",
+		},
+		{
+			"please run the pr-review pipeline",
+			`{"pipeline":"pr-review","confidence":0.88,"input":"","cron":""}`,
+			"pr-review",
+		},
+		{
+			"could you launch pr-review for me?",
+			`{"pipeline":"pr-review","confidence":0.85,"input":"","cron":""}`,
+			"pr-review",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.prompt, func(t *testing.T) {
+			mgr := makeMgr(t, tc.llmResponse)
+			embedFn := func(text string) []float32 {
+				if text == "Review pull requests" {
+					return []float32{1, 0}
+				}
+				return []float32{0.7, 0.3} // above gate, below fast-path → LLM
+			}
+			cfg := Config{ConfidentThreshold: 0.85, AmbiguousThreshold: 0.65, Model: "test-model"}
+			r := New(mgr, &funcEmbedder{fn: embedFn}, cfg)
+
+			result, err := r.Route(context.Background(), tc.prompt, pipelines)
+			if err != nil {
+				t.Fatalf("Route error: %v", err)
+			}
+			if result.Pipeline == nil {
+				t.Fatalf("natural phrasing %q should dispatch, got nil", tc.prompt)
+			}
+			if result.Pipeline.Name != tc.wantName {
+				t.Errorf("pipeline=%q, want %q", result.Pipeline.Name, tc.wantName)
+			}
+		})
+	}
+}
+
+func TestHybridRouter_EmbeddingFastPath_PopulatesInput(t *testing.T) {
+	// The embedding fast-path (cosine >= ConfidentThreshold) must extract Input
+	// from the prompt so pipelines receive their {{param.input}} variable even
+	// when the LLM stage is skipped.
+	pipelines := []pipeline.PipelineRef{
+		{Name: "pr-review", Description: "Review pull requests"},
+	}
+
+	llmCalled := int64(0)
+	mgr := executor.NewManager()
+	if err := mgr.Register(&executor.StubExecutor{
+		ExecutorName: "ollama",
+		ExecuteFn: func(_ context.Context, _ string, _ map[string]string, w io.Writer) error {
+			atomic.AddInt64(&llmCalled, 1)
+			_, err := fmt.Fprint(w, `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`)
+			return err
+		},
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Both description and query embed to {1,0} → cosine=1.0 → fast-path.
+	embedFn := func(_ string) []float32 { return []float32{1, 0} }
+	cfg := Config{ConfidentThreshold: 0.85, AmbiguousThreshold: 0.65, Model: "test-model"}
+	r := New(mgr, &funcEmbedder{fn: embedFn}, cfg)
+
+	result, err := r.Route(context.Background(), "run pr-review on https://github.com/org/repo/pull/42", pipelines)
+	if err != nil {
+		t.Fatalf("Route error: %v", err)
+	}
+	if result.Pipeline == nil {
+		t.Fatal("expected pipeline match, got nil")
+	}
+	if result.Method != "embedding" {
+		t.Errorf("expected fast-path method 'embedding', got %q", result.Method)
+	}
+	if atomic.LoadInt64(&llmCalled) != 0 {
+		t.Error("LLM must not be called on fast-path")
+	}
+	if result.Input != "https://github.com/org/repo/pull/42" {
+		t.Errorf("Input = %q, want URL", result.Input)
+	}
+}
+
+func TestHybridRouter_EmbeddingFastPath_PopulatesCron(t *testing.T) {
+	// The embedding fast-path must extract CronExpr from the prompt so scheduled
+	// pipelines work correctly without an LLM call.
+	pipelines := []pipeline.PipelineRef{
+		{Name: "docs-improve", Description: "Improve documentation"},
+	}
+	mgr := makeMgr(t, `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`)
+	embedFn := func(_ string) []float32 { return []float32{1, 0} } // cosine=1.0 → fast-path
+
+	cfg := Config{ConfidentThreshold: 0.85, AmbiguousThreshold: 0.65, Model: "test-model"}
+	r := New(mgr, &funcEmbedder{fn: embedFn}, cfg)
+
+	result, err := r.Route(context.Background(), "run docs-improve every 2 hours", pipelines)
+	if err != nil {
+		t.Fatalf("Route error: %v", err)
+	}
+	if result.Pipeline == nil {
+		t.Fatal("expected pipeline match, got nil")
+	}
+	if result.CronExpr != "0 */2 * * *" {
+		t.Errorf("CronExpr = %q, want %q", result.CronExpr, "0 */2 * * *")
+	}
+}
+
+func TestHybridRouter_FeedbackLog_WrittenOnMatch(t *testing.T) {
+	// Every Route call must append a record to the feedback log.
+	dir := t.TempDir()
+	pipelines := []pipeline.PipelineRef{
+		{Name: "git-push", Description: "Push changes"},
+	}
+	mgr := makeMgr(t, `{"pipeline":"git-push","confidence":0.92,"input":"","cron":""}`)
+	embedFn := func(text string) []float32 {
+		if text == "Push changes" {
+			return []float32{1, 0}
 		}
+		return []float32{0.6, 0.8} // above gate, below fast-path → LLM
+	}
+
+	cfg := Config{
+		ConfidentThreshold: 0.85,
+		AmbiguousThreshold: 0.65,
+		Model:              "test-model",
+		CacheDir:           dir,
+	}
+	r := New(mgr, &funcEmbedder{fn: embedFn}, cfg)
+
+	_, _ = r.Route(context.Background(), "run git-push on feature branch", pipelines)
+
+	logPath := dir + "/routing-feedback.jsonl"
+	if _, err := os.Stat(logPath); err != nil {
+		t.Fatalf("feedback log not created: %v", err)
 	}
 }

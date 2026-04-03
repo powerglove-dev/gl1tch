@@ -131,6 +131,17 @@ var askCmd = &cobra.Command{
 						}
 						return dispatchMatched(cmd, prompt, result, inputVars)
 					}
+					// Near-miss: close match that didn't meet the confidence bar — ask user.
+					if result != nil && result.NearMiss != nil {
+						if confirmed, err := confirmNearMiss(result.NearMiss.Name, result.NearMissScore); err == nil && confirmed {
+							nearResult := &router.RouteResult{
+								Pipeline:   result.NearMiss,
+								Confidence: result.NearMissScore,
+								Method:     "near-miss",
+							}
+							return dispatchMatched(cmd, prompt, nearResult, inputVars)
+						}
+					}
 					// No match — try to generate a pipeline on the fly.
 					return dispatchGenerated(cmd, prompt, mgr, providerID, resolvedModel, inputVars)
 				}
@@ -149,6 +160,19 @@ var askCmd = &cobra.Command{
 	},
 }
 
+
+// confirmNearMiss prints a near-miss prompt and reads a y/N answer from stdin.
+// Returns (true, nil) when the user confirms, (false, nil) otherwise.
+// Errors (e.g. EOF on non-interactive stdin) are treated as "no".
+func confirmNearMiss(name string, score float64) (bool, error) {
+	fmt.Fprintf(os.Stderr, "[route] near match: %q (%.0f%%) — run it? [y/N] ", name, score*100)
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		return false, nil
+	}
+	answer := strings.ToLower(strings.TrimSpace(scanner.Text()))
+	return answer == "y" || answer == "yes", nil
+}
 
 // upsertCronEntry adds or updates a cron entry for the given pipeline in cron.yaml.
 func upsertCronEntry(ref *pipeline.PipelineRef, input, cronExpr string) error {

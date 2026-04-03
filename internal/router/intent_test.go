@@ -5,10 +5,13 @@ package router
 import "testing"
 
 // TestIsImperativeInput is a contract test for isImperativeInput.
-// The fast path ONLY fires for explicit pipeline-invocation verbs
-// (run/execute/launch/rerun/start/trigger). Generic task requests — even
-// strongly imperative ones ("review my PR") — must return false so the LLM
-// classifier handles them and can return NONE instead of auto-routing.
+// isImperativeInput guards the embedding fast-path (skip LLM when cosine is
+// very confident). It returns true ONLY for explicit verb-prefix invocations
+// (run/execute/launch/rerun/start/trigger).
+//
+// Natural-language invocations ("can you run X?", "please run X") return false
+// here — they fall through to the LLM stage, which handles them via its own
+// Step 1 intent gate. isImperativeInput is NOT a global routing gate.
 func TestIsImperativeInput(t *testing.T) {
 	cases := []struct {
 		input string

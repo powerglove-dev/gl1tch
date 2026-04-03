@@ -8,6 +8,11 @@ package router
 //
 // Themes, brain, saved prompts are NOT routing targets — those cases must return
 // nil Pipeline. Pipelines and cron scheduling are routing targets.
+//
+// This test uses DisableEmbeddings=true to exercise the LLM stage directly.
+// With the global isImperativeInput gate removed, ALL prompts now reach the LLM.
+// The LLM stub returns NONE for non-pipeline cases, so Pipeline == nil is still
+// guaranteed — but Method is now "llm" instead of "none" for those cases.
 
 import (
 	"context"
@@ -51,14 +56,14 @@ func TestRouter_SubsystemPrompts(t *testing.T) {
 		wantCron     string
 		wantMethod   string
 	}{
-		// ── Themes ── not a routing target; non-imperative → hard gate returns none ─
+		// ── Themes ── not a routing target; LLM returns NONE ─────────────────────
 		{
 			// mar26: user asking to change the active theme
 			source:       "mar26",
 			prompt:       "nice now set a default theme, i like nord theme, then add gruvbox, dracula, borland",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
 			// mar28: theme not updating after switch
@@ -66,7 +71,7 @@ func TestRouter_SubsystemPrompts(t *testing.T) {
 			prompt:       "the cron tui still shows the previous theme when i switch it in switch board",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
 			// derived: direct theme switch request
@@ -74,7 +79,7 @@ func TestRouter_SubsystemPrompts(t *testing.T) {
 			prompt:       "switch to dracula theme",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
 			// derived: query current theme
@@ -82,7 +87,7 @@ func TestRouter_SubsystemPrompts(t *testing.T) {
 			prompt:       "what theme is currently active",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
 			// mar26: theme applied to UI components
@@ -90,7 +95,7 @@ func TestRouter_SubsystemPrompts(t *testing.T) {
 			prompt:       "the popup modals for agent runner, quit, jump session need to honor themes",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 
 		// ── Brain ── not a routing target ─────────────────────────────────────────
@@ -108,7 +113,7 @@ func TestRouter_SubsystemPrompts(t *testing.T) {
 			prompt:       "what did i ask yesterday about the router",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
 			// derived: list brain notes
@@ -116,7 +121,7 @@ func TestRouter_SubsystemPrompts(t *testing.T) {
 			prompt:       "show me recent brain notes",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
 			// mar31: brain injector — observation, not imperative
@@ -124,7 +129,7 @@ func TestRouter_SubsystemPrompts(t *testing.T) {
 			prompt:       "when i run orcai its jumps right into brain",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 
 		// ── Saved Prompts ── not a routing target ─────────────────────────────────
@@ -134,7 +139,7 @@ func TestRouter_SubsystemPrompts(t *testing.T) {
 			prompt:       "i can't load prompt builder, pipeline builder loads",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
 			// mar24: accessing prompt builder
@@ -142,10 +147,10 @@ func TestRouter_SubsystemPrompts(t *testing.T) {
 			prompt:       "ok now i need you to add a way for me to access the prompt builder feature, i dont think `n is the right place, maybe `p?",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
-			// derived: run saved prompt by title — starts with "run " → imperative
+			// derived: run saved prompt by title — starts with "run " → imperative, LLM returns NONE
 			source:       "derived",
 			prompt:       "run my saved prompt called improve docs",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
@@ -158,7 +163,7 @@ func TestRouter_SubsystemPrompts(t *testing.T) {
 			prompt:       "the prompt builder UI is SO difficult to use and navigate",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 
 		// ── Pipelines ── matched, LLM returns high confidence ────────────────────
@@ -188,20 +193,20 @@ func TestRouter_SubsystemPrompts(t *testing.T) {
 			wantMethod:   "llm",
 		},
 		{
-			// mar26: generate pipelines — not imperative → hard gate
+			// mar26: generate pipelines — not explicit invocation; LLM returns NONE
 			source:       "mar26",
 			prompt:       "generate me some actual pipelines i can use in my orcai testing using opencode and local models along with jq",
-			llmJSON:      `{"pipeline":"clarify-haiku-multistep","confidence":0.82,"input":"opencode jq","cron":""}`,
+			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "", // "generate" is not an explicit pipeline-invocation verb
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
-			// mar31: semantic code index pipeline — not imperative → hard gate
+			// mar31: semantic code index pipeline — user wants AI to answer, not run a pipeline
 			source:       "mar31",
 			prompt:       "I need to verify that our brain, semantic code indexer are being used by agents. Can you come up with a pipeline that will index the cwd codebase",
-			llmJSON:      `{"pipeline":"clarify-haiku-multistep","confidence":0.76,"input":"codebase indexing","cron":""}`,
-			wantPipeline: "", // user wants AI to answer, not run a pipeline
-			wantMethod:   "none",
+			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
+			wantPipeline: "",
+			wantMethod:   "llm",
 		},
 		{
 			// mar31: pipeline run and verify
@@ -232,12 +237,12 @@ func TestRouter_SubsystemPrompts(t *testing.T) {
 			wantMethod:   "llm",
 		},
 		{
-			// derived: every 2 hours — not imperative (no explicit run verb)
+			// derived: "summarize" is not an explicit pipeline invocation verb; LLM returns NONE
 			prompt:       "summarize support emails every 2 hours",
 			source:       "derived",
-			llmJSON:      `{"pipeline":"support-digest-dryrun","confidence":0.87,"input":"\"support queue\"","cron":"0 */2 * * *"}`,
+			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
 			// derived: daily midnight
@@ -286,149 +291,149 @@ func TestRouter_SubsystemPrompts(t *testing.T) {
 			wantMethod:   "llm",
 		},
 		{
-			// mar30: git op — not imperative → hard gate
+			// mar30: git op — not an explicit pipeline invocation; LLM returns NONE
 			source:       "mar30",
 			prompt:       "commit and push",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
-			// mar30: typo git op — not imperative → hard gate
+			// mar30: typo git op — LLM returns NONE
 			source:       "mar30",
 			prompt:       "comit and push it all up",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
-			// mar30: caps + typo — not imperative → hard gate
+			// mar30: caps + typo — LLM returns NONE
 			source:       "mar30",
 			prompt:       "COMIT AN DPUSH DUMBASS",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
-			// mar31: merge op — not imperative → hard gate
+			// mar31: merge op — LLM returns NONE
 			source:       "mar31",
 			prompt:       "merge into main",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
-			// mar30: context-free affirmation — not imperative → hard gate
+			// mar30: context-free affirmation — LLM returns NONE
 			source:       "mar30",
 			prompt:       "works i tested it",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
 			// mar30: LLM hallucinates a pipeline not in the list — "run " → imperative
 			source:       "mar30",
 			prompt:       "run the git push pipeline",
 			llmJSON:      `{"pipeline":"git-push","confidence":0.90,"input":"","cron":""}`,
-			wantPipeline: "", // "git-push" not in subsystemPipelines → hallucination
+			wantPipeline: "", // "git-push" not in subsystemPipelines → hallucination rejected
 			wantMethod:   "llm",
 		},
 		{
-			// mar27: cron UI complaint — not imperative → hard gate
+			// mar27: cron UI complaint — LLM returns NONE
 			source:       "mar27",
 			prompt:       "i can't tab focus to the cron panel and it doesn't have the ansi headers like the other panels",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
-			// mar28: cron scheduling bug — not imperative → hard gate
+			// mar28: cron scheduling bug — LLM returns NONE
 			source:       "mar28",
 			prompt:       "ok schedule pipelines are not honoring set working directory and starting in a git worktree",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.30,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
-			// mar25: state cleanup — not imperative → hard gate
+			// mar25: state cleanup — LLM returns NONE
 			source:       "mar25",
 			prompt:       "make sure everything is pushed up",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.0,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 
-		// ── Questions and observations ── hard gate returns none immediately ──────
+		// ── Questions and observations ── LLM returns NONE ────────────────────────
 		{
 			// The original misfire that drove this redesign
 			source:       "regression",
 			prompt:       "looks like there are merge conflicts?",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
 			source:       "regression",
 			prompt:       "why did support-digest fail?",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
 			source:       "regression",
 			prompt:       "is the digest pipeline working?",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
 			source:       "regression",
 			prompt:       "seems slow today",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
 			source:       "regression",
 			prompt:       "it looks like the test-glab-after pipeline is stuck",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
 			source:       "regression",
 			prompt:       "any idea why clarify-haiku isn't running?",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
 			source:       "regression",
 			prompt:       "i think the support digest ran yesterday",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
 			source:       "regression",
 			prompt:       "are there any pipelines that could do this?",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
 			source:       "regression",
 			prompt:       "what would happen if I ran the digest now?",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 		{
 			source:       "regression",
 			prompt:       "i noticed the haiku pipeline didn't finish",
 			llmJSON:      `{"pipeline":"NONE","confidence":0.05,"input":"","cron":""}`,
 			wantPipeline: "",
-			wantMethod:   "none",
+			wantMethod:   "llm",
 		},
 	}
 

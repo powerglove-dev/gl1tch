@@ -96,11 +96,14 @@ type Config struct {
 	// CandidateGateThreshold: minimum cosine similarity to admit a pipeline as an LLM
 	// candidate. When no pipeline clears this, the LLM call is skipped (default 0.40).
 	CandidateGateThreshold float64
-	// CacheDir is the directory for the on-disk embedding cache.
-	// If empty, the disk cache is disabled (in-memory only).
+	// CacheDir is the directory for the on-disk embedding cache and feedback log.
+	// If empty, both are disabled (in-memory only).
 	CacheDir string
 	// DisableEmbeddings skips the embedding stage entirely and always uses the LLM.
 	DisableEmbeddings bool
+	// PhraseGenerator auto-generates trigger phrases for pipelines that define none.
+	// When nil, auto-generation is disabled and description text is used as fallback.
+	PhraseGenerator PhraseGenerator
 }
 
 // Embedder abstracts embedding computation so tests can inject stubs.
@@ -117,6 +120,7 @@ type Router interface {
 type HybridRouter struct {
 	embedRouter *EmbeddingRouter
 	classifier  *LLMClassifier
+	feedback    *FeedbackLogger
 	cfg         Config
 }
 
@@ -135,6 +139,7 @@ func New(mgr *executor.Manager, embedder Embedder, cfg Config) *HybridRouter {
 	return &HybridRouter{
 		embedRouter: newEmbeddingRouter(embedder, cfg),
 		classifier:  NewLLMClassifier(mgr, cfg),
+		feedback:    NewFeedbackLogger(cfg.CacheDir),
 		cfg:         cfg,
 	}
 }
@@ -150,22 +155,17 @@ func New(mgr *executor.Manager, embedder Embedder, cfg Config) *HybridRouter {
 //     d. Otherwise fall through to LLM with the candidate subset.
 //  3. LLM classifier on candidate subset (intent gate + pipeline selection).
 //     LLM errors are non-fatal — return safe no-match result.
+//
+// Every result is recorded to the feedback log (CacheDir/routing-feedback.jsonl).
 func (r *HybridRouter) Route(ctx context.Context, prompt string, pipelines []pipeline.PipelineRef) (*RouteResult, error) {
 	if len(pipelines) == 0 {
-		return &RouteResult{Method: "none"}, nil
+		result := &RouteResult{Method: "none"}
+		r.feedback.Record(prompt, result)
+		return result, nil
 	}
 
 	ctx, span := routerTracer.Start(ctx, "router.classify")
 	defer span.End()
-
-	// Hard gate: non-imperative input never dispatches a pipeline, regardless of
-	// embedding similarity or LLM output. Questions, observations, and generic
-	// task requests ("fix this", "review my PR") are handled by the AI directly.
-	if !isImperativeInput(prompt) {
-		span.SetAttributes(attribute.String("router.strategy", "none-not-imperative"))
-		span.SetStatus(codes.Ok, "")
-		return &RouteResult{Method: "none"}, nil
-	}
 
 	// candidatePipelines is what gets passed to the LLM. Starts as the full list
 	// (for DisableEmbeddings) but is narrowed to candidates when embeddings run.
@@ -185,13 +185,17 @@ func (r *HybridRouter) Route(ctx context.Context, prompt string, pipelines []pip
 					attribute.Float64("router.confidence", 0),
 				)
 				span.SetStatus(codes.Ok, "")
-				return &RouteResult{Method: "none"}, nil
+				result := &RouteResult{Method: "none"}
+				r.feedback.Record(prompt, result)
+				return result, nil
 			}
 
 			topScore := candidates[0].Score
 			routerSimilarity.Record(ctx, topScore)
 
 			// Fast path: high confidence AND clearly imperative — skip LLM for latency.
+			// Input and cron are extracted from the prompt text so pipelines receive
+			// their {{param.input}} variable even without an LLM call.
 			if topScore >= r.cfg.ConfidentThreshold && isImperativeInput(prompt) {
 				best := &candidates[0].Ref
 				routerStrategyUsed.Add(ctx, 1, metric.WithAttributes(attribute.String("strategy", "embedding")))
@@ -201,11 +205,15 @@ func (r *HybridRouter) Route(ctx context.Context, prompt string, pipelines []pip
 					attribute.Float64("router.confidence", topScore),
 				)
 				span.SetStatus(codes.Ok, "")
-				return &RouteResult{
+				result := &RouteResult{
 					Pipeline:   best,
 					Confidence: topScore,
+					Input:      extractInput(prompt),
+					CronExpr:   validateCron(extractCronPhrase(prompt)),
 					Method:     "embedding",
-				}, nil
+				}
+				r.feedback.Record(prompt, result)
+				return result, nil
 			}
 
 			// Narrow the LLM candidate list to only topically relevant pipelines.
@@ -230,7 +238,9 @@ func (r *HybridRouter) Route(ctx context.Context, prompt string, pipelines []pip
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		// LLM errors are non-fatal — return safe no-match with any near-miss we found.
-		return &RouteResult{Method: "none", NearMiss: nearMiss, NearMissScore: nearMissScore}, nil
+		result = &RouteResult{Method: "none", NearMiss: nearMiss, NearMissScore: nearMissScore}
+		r.feedback.Record(prompt, result)
+		return result, nil
 	}
 
 	matched := ""
@@ -253,6 +263,7 @@ func (r *HybridRouter) Route(ctx context.Context, prompt string, pipelines []pip
 		result.NearMiss = nearMiss
 		result.NearMissScore = nearMissScore
 	}
+	r.feedback.Record(prompt, result)
 	return result, nil
 }
 
@@ -261,6 +272,10 @@ func (r *HybridRouter) Route(ctx context.Context, prompt string, pipelines []pip
 // embedding fast path: generic task requests ("review my PR", "improve the docs")
 // must NOT fast-path to a pipeline even at high cosine similarity — the user wants
 // the AI to handle those. Only explicit run-style commands bypass the LLM stage.
+//
+// Note: this is NOT used as a global gate. Non-imperative prompts still reach the
+// LLM stage, which applies its own intent gate ("can you run X?" is handled there).
+// isImperativeInput is used only as a fast-path guard (skip LLM when confident).
 func isImperativeInput(s string) bool {
 	s = strings.TrimSpace(strings.ToLower(s))
 	// Must start with an explicit pipeline-invocation verb.
