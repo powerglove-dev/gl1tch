@@ -1,71 +1,79 @@
-<!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Your First Pipeline — GLITCH</title><meta name="description" content="Install gl1tch and run your first AI-powered pipeline in under five minutes."><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="stylesheet" href="/css/bbs.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <div class="docs-page" id="docs-page"> <button class="docs-hamburger" id="docs-hamburger" aria-label="Toggle sidebar"> <span class="docs-hamburger-icon">[=]</span> </button> <aside class="docs-sidebar" id="docs-sidebar"> <div class="docs-sidebar-header"> <a href="/" class="docs-logo-link"> <span class="fg-purple bold">GL1TCH</span> </a> <a href="/" class="docs-back-link">&larr; back to terminal</a> </div> <nav class="docs-nav"> <a class="docs-nav-link" href="/docs/">
+<!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Your First Pipeline — GLITCH</title><meta name="description" content="Install gl1tch and run your first AI-powered automation in under five minutes."><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="stylesheet" href="/css/bbs.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <div class="docs-page" id="docs-page"> <button class="docs-hamburger" id="docs-hamburger" aria-label="Toggle sidebar"> <span class="docs-hamburger-icon">[=]</span> </button> <aside class="docs-sidebar" id="docs-sidebar"> <div class="docs-sidebar-header"> <a href="/" class="docs-logo-link"> <span class="fg-purple bold">GL1TCH</span> </a> <a href="/" class="docs-back-link">&larr; back to terminal</a> </div> <nav class="docs-nav"> <a class="docs-nav-link" href="/docs/">
 INDEX
-</a> <div class="docs-nav-section"> <div class="docs-nav-section-label"> <span class="fg-comment">&#x250C;&#x2500;</span> PIPELINES </div> <a class="docs-nav-link" href="/docs/pipelines/philosophy"> Philosophy </a><a class="docs-nav-link active" href="/docs/pipelines/quickstart"> Your First Pipeline </a><a class="docs-nav-link" href="/docs/pipelines/console"> Console </a><a class="docs-nav-link" href="/docs/pipelines/pipelines"> Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/yaml-reference"> Pipeline YAML Reference </a><a class="docs-nav-link" href="/docs/pipelines/executors"> Executors </a><a class="docs-nav-link" href="/docs/pipelines/brain"> The Brain System </a><a class="docs-nav-link" href="/docs/pipelines/examples"> Pipeline Examples </a><a class="docs-nav-link" href="/docs/pipelines/workflows"> Workflows </a><a class="docs-nav-link" href="/docs/pipelines/cli-reference"> CLI Reference </a><a class="docs-nav-link" href="/docs/pipelines/cron"> Cron Scheduling </a><a class="docs-nav-link" href="/docs/pipelines/architecture"> Architecture </a><a class="docs-nav-link" href="/docs/pipelines/technologies"> Technologies </a><a class="docs-nav-link" href="/docs/pipelines/themes"> Themes </a><a class="docs-nav-link" href="/docs/pipelines/plugins"> Plugins </a><a class="docs-nav-link" href="/docs/pipelines/prompts"> Prompts </a><a class="docs-nav-link" href="/docs/pipelines/telemetry"> Telemetry </a> <div class="docs-nav-section-end"> <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span> </div> </div> </nav> </aside> <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div> <main class="docs-main"> <div class="docs-content"> <div class="docs-breadcrumb"> <a href="/docs/">docs</a> <span class="fg-comment"> / </span> <a href="/docs/">pipelines</a> </div> <article>  <h1 class="docs-page-title">Your First Pipeline</h1> <p class="docs-page-desc">Install gl1tch and run your first AI-powered pipeline in under five minutes.</p> <div class="docs-article"> <p>gl1tch runs automations you write in YAML and executes them with real AI. This page gets you from zero to a working pipeline in under five minutes. No theory — just install, write, run.</p>
-<h2 id="quick-start">Quick Start</h2>
-<p><strong>Step 1 — Install:</strong></p>
+</a> <div class="docs-nav-section"> <div class="docs-nav-section-label"> <span class="fg-comment">&#x250C;&#x2500;</span> PIPELINES </div> <a class="docs-nav-link" href="/docs/pipelines/philosophy"> Philosophy </a><a class="docs-nav-link active" href="/docs/pipelines/quickstart"> Your First Pipeline </a><a class="docs-nav-link" href="/docs/pipelines/console"> Console </a><a class="docs-nav-link" href="/docs/pipelines/pipelines"> Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/yaml-reference"> Pipeline YAML Reference </a><a class="docs-nav-link" href="/docs/pipelines/executors"> Executors </a><a class="docs-nav-link" href="/docs/pipelines/brain"> The Brain System </a><a class="docs-nav-link" href="/docs/pipelines/examples"> Pipeline Examples </a><a class="docs-nav-link" href="/docs/pipelines/workflows"> Workflows </a><a class="docs-nav-link" href="/docs/pipelines/cli-reference"> CLI Reference </a><a class="docs-nav-link" href="/docs/pipelines/cron"> Cron Scheduling </a><a class="docs-nav-link" href="/docs/pipelines/architecture"> Architecture </a><a class="docs-nav-link" href="/docs/pipelines/technologies"> Technologies </a><a class="docs-nav-link" href="/docs/pipelines/themes"> Themes </a><a class="docs-nav-link" href="/docs/pipelines/plugins"> Plugins </a><a class="docs-nav-link" href="/docs/pipelines/prompts"> Prompts </a><a class="docs-nav-link" href="/docs/pipelines/telemetry"> Telemetry </a> <div class="docs-nav-section-end"> <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span> </div> </div> </nav> </aside> <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div> <main class="docs-main"> <div class="docs-content"> <div class="docs-breadcrumb"> <a href="/docs/">docs</a> <span class="fg-comment"> / </span> <a href="/docs/">pipelines</a> </div> <article>  <h1 class="docs-page-title">Your First Pipeline</h1> <p class="docs-page-desc">Install gl1tch and run your first AI-powered automation in under five minutes.</p> <div class="docs-article"> <p>gl1tch runs AI-powered automations called pipelines. You tell it what you want — it routes to the right pipeline, or builds one on the spot. This page gets you from zero to a working pipeline in under five minutes.</p>
+<h2 id="install">Install</h2>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">go</span><span style="color:#F1FA8C"> install</span><span style="color:#F1FA8C"> github.com/8op-org/gl1tch/cmd/glitch@latest</span></span></code></pre>
-<p>You need Go 1.22+ and either <a href="https://ollama.ai">Ollama</a> running locally or the <a href="https://claude.ai/download">Claude CLI</a> authenticated. No Docker, no cloud account required.</p>
-<p><strong>Step 2 — Write a pipeline:</strong></p>
-<p>Create <code>hello.pipeline.yaml</code> anywhere on disk:</p>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> hello</span></span>
-<span class="line"><span style="color:#8BE9FD">version</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">1</span><span style="color:#E9F284">"</span></span>
-<span class="line"><span style="color:#8BE9FD">steps</span><span style="color:#FF79C6">:</span></span>
-<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> greet</span></span>
-<span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> claude</span></span>
-<span class="line"><span style="color:#8BE9FD">    model</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> claude-haiku-4-5-20251001</span></span>
-<span class="line"><span style="color:#8BE9FD">    prompt</span><span style="color:#FF79C6">:</span><span style="color:#FF79C6"> |</span></span>
-<span class="line"><span style="color:#F1FA8C">      Say hello in the style of a 1990s BBS sysop. Keep it under 3 lines.</span></span></code></pre>
-<p><strong>Step 3 — Run it:</strong></p>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> pipeline</span><span style="color:#F1FA8C"> run</span><span style="color:#F1FA8C"> hello.pipeline.yaml</span></span></code></pre>
-<p>You’ll see a sysop greeting stream to your terminal. That’s your first pipeline.</p>
-<blockquote>
-<p><strong>TIP:</strong> Using Ollama instead of Claude? Swap executor and model:</p>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ollama</span></span>
-<span class="line"><span style="color:#8BE9FD">model</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> qwen2.5-coder:latest</span></span></code></pre>
-</blockquote>
-<h2 id="what-just-happened">What Just Happened</h2>
-<p>gl1tch read your YAML, found the <code>greet</code> step, sent your prompt to Claude, and streamed the response to stdout. Every pipeline run is stored locally so you can review it later.</p>
-<p>Single-step pipelines are useful for quick tasks. The real power comes from chaining steps together.</p>
-<h2 id="chaining-steps">Chaining Steps</h2>
-<p>Steps can pass their output to later steps. This pipeline fetches a GitHub repo description and summarizes it:</p>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> git-summary</span></span>
-<span class="line"><span style="color:#8BE9FD">version</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">1</span><span style="color:#E9F284">"</span></span>
-<span class="line"><span style="color:#8BE9FD">steps</span><span style="color:#FF79C6">:</span></span>
-<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> get-repo</span></span>
-<span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> gh</span></span>
-<span class="line"><span style="color:#8BE9FD">    vars</span><span style="color:#FF79C6">:</span></span>
-<span class="line"><span style="color:#8BE9FD">      args</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">repo view --json description</span><span style="color:#E9F284">"</span></span>
-<span class="line"></span>
-<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> summarize</span></span>
-<span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> claude</span></span>
-<span class="line"><span style="color:#8BE9FD">    model</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> claude-haiku-4-5-20251001</span></span>
-<span class="line"><span style="color:#8BE9FD">    needs</span><span style="color:#FF79C6">:</span><span style="color:#F8F8F2"> [</span><span style="color:#F1FA8C">get-repo</span><span style="color:#F8F8F2">]</span></span>
-<span class="line"><span style="color:#8BE9FD">    prompt</span><span style="color:#FF79C6">:</span><span style="color:#FF79C6"> |</span></span>
-<span class="line"><span style="color:#F1FA8C">      Summarize this repo description in one sentence:</span></span>
-<span class="line"><span style="color:#F1FA8C">      {{steps.get-repo.output}}</span></span></code></pre>
-<p>Two things to notice:</p>
+<p>You need Go 1.22+ and at least one AI provider: <a href="https://ollama.ai">Ollama</a> running locally, or the <a href="https://claude.ai/download">Claude CLI</a> authenticated. No Docker, no cloud account required.</p>
+<h2 id="run-your-first-pipeline">Run your first pipeline</h2>
+<p>gl1tch ships with <code>wf-git-pulse</code> — a pipeline that shows what’s happening in any git repo right now:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> pipeline</span><span style="color:#F1FA8C"> run</span><span style="color:#F1FA8C"> wf-git-pulse</span></span></code></pre>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>[pipeline] starting: wf-git-pulse</span></span>
+<span class="line"><span>[step:pulse] status:running</span></span>
+<span class="line"><span>[step:pulse] status:done</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>=== recent commits ===</span></span>
+<span class="line"><span>067ce08 feat(console): mud-chat-reply signal handler</span></span>
+<span class="line"><span>68a8da1 feat(model): add glitch model subcommand for plugin model discovery</span></span>
+<span class="line"><span>7cc9125 Merge pull request #40 from 8op-org/feature/router-improvements</span></span>
+<span class="line"><span>389150d feat(router): five intent routing improvements with full test coverage</span></span>
+<span class="line"><span>aa2faf2 chore: delete dead EditorPanel from buildershared</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>=== diff stat since last commit ===</span></span>
+<span class="line"><span> internal/console/signal_handlers.go | 38 +++++++++++++++++++++++++++++++++++++</span></span>
+<span class="line"><span> 1 file changed, 38 insertions(+)</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>=== untracked / modified ===</span></span>
+<span class="line"><span> M site/src/content/pipelines/quickstart.md</span></span></code></pre>
+<p>That’s a real pipeline run — <code>git log</code>, <code>git diff --stat</code>, and <code>git status</code> chained together in one step.</p>
+<h2 id="add-ai-to-the-pipeline">Add AI to the pipeline</h2>
+<p>The next step is pairing shell output with a local model. Ask gl1tch to summarize the same commits:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> ask</span><span style="color:#BD93F9"> --provider</span><span style="color:#F1FA8C"> ollama</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">summarize my last 5 commits</span><span style="color:#E9F284">"</span></span></code></pre>
+<p>gl1tch fetches your commits with <code>git log</code>, then passes them to your local Ollama model:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>[step:fetch] status:running</span></span>
+<span class="line"><span>[step:fetch] status:done</span></span>
+<span class="line"><span>[step:summarize] status:running</span></span>
+<span class="line"><span>[step:summarize] status:done</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>Recent commits added a signal handler for in-game chat interaction and a</span></span>
+<span class="line"><span>subcommand for discovering plugin models. There were also improvements to</span></span>
+<span class="line"><span>the router with enhanced test coverage, and dead code was cleaned up by</span></span>
+<span class="line"><span>removing an unused EditorPanel class.</span></span></code></pre>
+<p>No model flag needed. When you specify a provider without a model, gl1tch picks the cheapest available one automatically — in this case <code>qwen2.5:latest</code>.</p>
+<h2 id="use-claude-instead">Use Claude instead</h2>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> ask</span><span style="color:#BD93F9"> --provider</span><span style="color:#F1FA8C"> claude</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">summarize my last 5 commits</span><span style="color:#E9F284">"</span></span></code></pre>
+<p>Same routing, same pipeline — Claude Haiku by default (the cheapest option), or pass <code>--model claude-sonnet-4-6</code> to upgrade.</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>[step:fetch] status:running</span></span>
+<span class="line"><span>[step:summarize] status:running</span></span>
+<span class="line"><span>[step:summarize] status:done</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>**067ce08 — MUD chat reply handler**</span></span>
+<span class="line"><span>Added in-game chat integration. When players mention "glitch" in MUD chat,</span></span>
+<span class="line"><span>gl1tch generates a reply and publishes it back to the game's web chat UI.</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>**68a8da1 — glitch model subcommand**</span></span>
+<span class="line"><span>New command that outputs the best available model in "provider/model" format.</span></span>
+<span class="line"><span>Enables plugins to resolve the user's configured model without hardcoding names.</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>**389150d — Five intent routing improvements**</span></span>
+<span class="line"><span>Major routing overhaul: removed a gate blocking natural-language invocations,</span></span>
+<span class="line"><span>added fast-path extraction for cron expressions, and added near-miss clarification.</span></span></code></pre>
+<h2 id="review-a-pr">Review a PR</h2>
+<p>Pass gl1tch a GitHub PR URL and it routes to <code>pr-review</code> automatically:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> ask</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">https://github.com/8op-org/gl1tch/pull/40</span><span style="color:#E9F284">"</span></span></code></pre>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>[route] → pr-review (95%)</span></span>
+<span class="line"><span>[step:fetch_diff] status:running</span></span>
+<span class="line"><span>[step:fetch_comments] status:running</span></span>
+<span class="line"><span>[step:fix] status:running</span></span>
+<span class="line"><span>[step:fix] status:done</span></span></code></pre>
+<p><code>pr-review</code> fetches the diff and reviewer comments, then produces corrected code. Requires <code>gh</code> authenticated.</p>
+<h2 id="open-the-console">Open the console</h2>
+<p>For ongoing sessions — asking questions, running pipelines, switching between projects:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span></span></code></pre>
+<p>Everything available from the command line is available here, plus conversation history, brain context, and the inline docs viewer (<code>/docs</code>).</p>
+<h2 id="next-steps">Next steps</h2>
 <ul>
-<li><code>needs: [get-repo]</code> — the <code>summarize</code> step waits for <code>get-repo</code> to finish before it runs.</li>
-<li><code>{{steps.get-repo.output}}</code> — injects the previous step’s output into the prompt.</li>
-</ul>
-<p>The <code>gh</code> executor wraps the <a href="https://cli.github.com/">GitHub CLI</a>. Make sure it’s installed and authenticated before running this one.</p>
-<h2 id="where-to-save-your-pipelines">Where to Save Your Pipelines</h2>
-<p><code>glitch pipeline run</code> accepts a file path or a pipeline name:</p>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#6272A4"># Run by file path (good for development)</span></span>
-<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> pipeline</span><span style="color:#F1FA8C"> run</span><span style="color:#F1FA8C"> ./hello.pipeline.yaml</span></span>
-<span class="line"></span>
-<span class="line"><span style="color:#6272A4"># Run by name (looks in ~/.config/glitch/pipelines/)</span></span>
-<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> pipeline</span><span style="color:#F1FA8C"> run</span><span style="color:#F1FA8C"> hello</span></span></code></pre>
-<p>Drop pipelines you use regularly into <code>~/.config/glitch/pipelines/</code>. They show up automatically in your gl1tch workspace.</p>
-<h2 id="next-steps">Next Steps</h2>
-<ul>
-<li><a href="/docs/pipelines/pipelines">Pipelines</a> — Full guide to writing and structuring pipelines</li>
-<li><a href="/docs/pipelines/console">Console</a> — Your gl1tch workspace: chat, launch, inspect runs</li>
-<li><a href="/docs/pipelines/examples">Examples</a> — Copy-paste pipelines for real developer workflows</li>
-</ul>
-<h2 id="see-also">See Also</h2>
-<ul>
-<li><a href="/docs/pipelines/pipelines">Pipelines</a></li>
-<li><a href="/docs/pipelines/console">Console</a></li>
-<li><a href="/docs/pipelines/examples">Examples</a></li>
+<li><a href="/docs/pipelines/pipelines">Pipelines</a> — What’s inside a pipeline and how steps connect</li>
+<li><a href="/docs/pipelines/console">Console</a> — Your gl1tch workspace in detail</li>
+<li><a href="/docs/pipelines/brain">Brain</a> — How gl1tch remembers context across sessions</li>
+<li><a href="/docs/pipelines/examples">Examples</a> — Ready-to-run pipelines for real developer workflows</li>
 </ul> </div>  </article> <nav class="docs-prev-next"> <a class="docs-prev-next-link prev" href="/docs/pipelines/philosophy"> <span class="docs-prev-next-label fg-comment">&larr; prev</span> <span class="docs-prev-next-title">Philosophy</span> </a> <a class="docs-prev-next-link next" href="/docs/pipelines/console"> <span class="docs-prev-next-label fg-comment">next &rarr;</span> <span class="docs-prev-next-title">Console</span> </a> </nav> </div> </main> </div> <script type="module">const d=document.getElementById("docs-hamburger"),n=document.getElementById("docs-sidebar"),e=document.getElementById("docs-sidebar-overlay");function t(){n?.classList.toggle("open"),e?.classList.toggle("open")}d?.addEventListener("click",t);e?.addEventListener("click",t);</script>  </body></html>
