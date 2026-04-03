@@ -1,0 +1,100 @@
+<!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Troubleshooting — GLITCH</title><meta name="description" content="Diagnose and fix common pipeline failures, template errors, and scheduling problems."><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="stylesheet" href="/css/bbs.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <div class="docs-page" id="docs-page"> <button class="docs-hamburger" id="docs-hamburger" aria-label="Toggle sidebar"> <span class="docs-hamburger-icon">[=]</span> </button> <aside class="docs-sidebar" id="docs-sidebar"> <div class="docs-sidebar-header"> <a href="/" class="docs-logo-link"> <span class="fg-purple bold">GL1TCH</span> </a> <a href="/" class="docs-back-link">&larr; back to terminal</a> </div> <nav class="docs-nav"> <a class="docs-nav-link" href="/docs/">
+INDEX
+</a> <div class="docs-nav-section"> <div class="docs-nav-section-label"> <span class="fg-comment">&#x250C;&#x2500;</span> PIPELINES </div> <a class="docs-nav-link" href="/docs/pipelines/philosophy"> Philosophy </a><a class="docs-nav-link" href="/docs/pipelines/quickstart"> Your First Pipeline </a><a class="docs-nav-link" href="/docs/pipelines/console"> Console </a><a class="docs-nav-link" href="/docs/pipelines/pipelines"> Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/yaml-reference"> Pipeline YAML Reference </a><a class="docs-nav-link" href="/docs/pipelines/executors"> Executors </a><a class="docs-nav-link" href="/docs/pipelines/brain"> The Brain System </a><a class="docs-nav-link" href="/docs/pipelines/examples"> Pipeline Examples </a><a class="docs-nav-link" href="/docs/pipelines/workflows"> Workflows </a><a class="docs-nav-link" href="/docs/pipelines/cli-reference"> CLI Reference </a><a class="docs-nav-link active" href="/docs/pipelines/troubleshooting"> Troubleshooting </a><a class="docs-nav-link" href="/docs/pipelines/cron"> Cron Scheduling </a><a class="docs-nav-link" href="/docs/pipelines/architecture"> Architecture </a><a class="docs-nav-link" href="/docs/pipelines/technologies"> Technologies </a><a class="docs-nav-link" href="/docs/pipelines/game"> Game System </a><a class="docs-nav-link" href="/docs/pipelines/themes"> Themes </a><a class="docs-nav-link" href="/docs/pipelines/customization"> Customization </a><a class="docs-nav-link" href="/docs/pipelines/plugins"> Plugins </a><a class="docs-nav-link" href="/docs/pipelines/prompts"> Prompts </a><a class="docs-nav-link" href="/docs/pipelines/telemetry"> Telemetry </a> <div class="docs-nav-section-end"> <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span> </div> </div> </nav> </aside> <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div> <main class="docs-main"> <div class="docs-content"> <div class="docs-breadcrumb"> <a href="/docs/">docs</a> <span class="fg-comment"> / </span> <a href="/docs/">pipelines</a> </div> <article>  <h1 class="docs-page-title">Troubleshooting</h1> <p class="docs-page-desc">Diagnose and fix common pipeline failures, template errors, and scheduling problems.</p> <div class="docs-article"> <p>Something’s not working. Here’s how to find out why.</p>
+<h2 id="check-what-would-run-first">Check what would run first</h2>
+<p>Before running a pipeline for real, use <code>--dry-run</code> to see what gl1tch would execute without actually doing anything:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> pipeline</span><span style="color:#F1FA8C"> run</span><span style="color:#F1FA8C"> my-pipeline.pipeline.yaml</span><span style="color:#BD93F9"> --dry-run</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> ask</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">summarize my PRs</span><span style="color:#E9F284">"</span><span style="color:#BD93F9"> --dry-run</span></span></code></pre>
+<p>Dry run shows you the resolved step order, template expressions, and which executor each step would call. Template errors surface here before they waste a real run.</p>
+<h2 id="read-the-step-error">Read the step error</h2>
+<p>When a pipeline fails, the error message names the step and the executor. Look for the step <code>id</code> first — that tells you exactly where it broke.</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>step [fetch-data] executor=gh: exit status 1</span></span>
+<span class="line"><span>gh: unknown command "api repos/…"</span></span></code></pre>
+<p>Fix the command in that step, then re-run. You don’t need to restart from the beginning — steps that already succeeded are cached in the run.</p>
+<h2 id="resume-a-failed-run">Resume a failed run</h2>
+<p>Runs that fail mid-way can be resumed from the last successful step. Find the run ID in your inbox or from the signal board, then:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> pipeline</span><span style="color:#F1FA8C"> resume</span><span style="color:#BD93F9"> --run-id</span><span style="color:#FF79C6"> &#x3C;</span><span style="color:#F1FA8C">i</span><span style="color:#F8F8F2">d</span><span style="color:#FF79C6">></span></span></code></pre>
+<p>Skips all completed steps and retries from the failure point.</p>
+<h2 id="template-expression-errors">Template expression errors</h2>
+<p>Template errors look like <code>template: :1: unexpected "."</code> or an empty output where you expected data. Common causes:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Symptom</th><th>Likely cause</th></tr></thead><tbody><tr><td>Step output is empty</td><td>Previous step produced no output</td></tr><tr><td><code>unexpected "."</code></td><td>Typo in expression — check the step ID</td></tr><tr><td><code>undefined variable</code></td><td>Step ID doesn’t match what you typed</td></tr><tr><td><code>index out of range</code></td><td>Tried to access a key that doesn’t exist</td></tr></tbody></table>
+<p>Use <code>--dry-run</code> to see the resolved template before it runs. The dry-run output shows final expression values.</p>
+<p><strong>Correct syntax:</strong></p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">prompt</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">Summarize: {{steps.fetch.output}}</span><span style="color:#E9F284">"</span></span>
+<span class="line"><span style="color:#8BE9FD">input</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">{{steps.extract.output}}</span><span style="color:#E9F284">"</span></span>
+<span class="line"><span style="color:#8BE9FD">vars</span><span style="color:#FF79C6">:</span></span>
+<span class="line"><span style="color:#8BE9FD">  repo</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">{{vars.repo}}</span><span style="color:#E9F284">"</span></span></code></pre>
+<p>Step IDs are case-sensitive. <code>{{steps.Fetch.output}}</code> won’t match a step with <code>id: fetch</code>.</p>
+<h2 id="model-not-available">Model not available</h2>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>no model available — is ollama running or a provider configured?</span></span></code></pre>
+<p>Check which model gl1tch would pick:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> model</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> model</span><span style="color:#BD93F9"> --local</span><span style="color:#6272A4">   # only Ollama</span></span></code></pre>
+<p>If Ollama is not running, start it:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">ollama</span><span style="color:#F1FA8C"> serve</span></span></code></pre>
+<p>If you want to use a cloud provider, make sure it’s authenticated and set it explicitly:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> ask</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">test</span><span style="color:#E9F284">"</span><span style="color:#BD93F9"> --provider</span><span style="color:#F1FA8C"> claude</span></span></code></pre>
+<h2 id="executor-not-found">Executor not found</h2>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>executor "ripgrep" not found</span></span></code></pre>
+<p>This means a pipeline step references a plugin executor that isn’t installed. Install it:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> plugin</span><span style="color:#F1FA8C"> install</span><span style="color:#FF79C6"> &#x3C;</span><span style="color:#F1FA8C">owner/rep</span><span style="color:#F8F8F2">o</span><span style="color:#FF79C6">></span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> plugin</span><span style="color:#F1FA8C"> list</span><span style="color:#6272A4">   # verify it appears</span></span></code></pre>
+<h2 id="cron-jobs-not-firing">Cron jobs not firing</h2>
+<p>Check whether the scheduler is running:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> cron</span><span style="color:#F1FA8C"> list</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> cron</span><span style="color:#F1FA8C"> logs</span></span></code></pre>
+<p>If there are no recent logs and jobs should have fired, the scheduler may not be running. Start it:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> cron</span><span style="color:#F1FA8C"> start</span></span></code></pre>
+<p>If it’s already running but jobs still don’t fire, check the schedule expression:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#6272A4"># Test a cron expression manually</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> cron</span><span style="color:#F1FA8C"> run</span><span style="color:#FF79C6"> &#x3C;</span><span style="color:#F1FA8C">nam</span><span style="color:#F8F8F2">e</span><span style="color:#FF79C6">></span><span style="color:#6272A4">   # force an immediate run</span></span></code></pre>
+<h2 id="workflow-stuck-at-a-decision">Workflow stuck at a decision</h2>
+<p>Workflows that branch on conditions can get stuck if no condition matches and there’s no <code>default</code> branch. Open the workflow file and add a fallback:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">branches</span><span style="color:#FF79C6">:</span></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> condition</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">{{steps.check.output | contains 'ok'}}</span><span style="color:#E9F284">"</span></span>
+<span class="line"><span style="color:#8BE9FD">    pipeline</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> success-path</span></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> condition</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">default</span><span style="color:#E9F284">"</span></span>
+<span class="line"><span style="color:#8BE9FD">    pipeline</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> fallback-path</span></span></code></pre>
+<h2 id="reset-state">Reset state</h2>
+<p>If something is deeply wrong and you want to start fresh without losing your pipelines and config:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#6272A4"># Back up everything first</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> backup</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#6272A4"># Restore only config, skip brain data</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> restore</span><span style="color:#F1FA8C"> ./backup.tar.gz</span><span style="color:#BD93F9"> --dry-run</span><span style="color:#6272A4">   # preview first</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> restore</span><span style="color:#F1FA8C"> ./backup.tar.gz</span></span></code></pre>
+<p>To wipe just the brain store and start with a clean context:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">rm</span><span style="color:#F1FA8C"> ~/.local/share/glitch/brain.db</span></span></code></pre>
+<p>This does not affect your pipelines, cron config, or prompts.</p>
+<h2 id="see-also">See Also</h2>
+<ul>
+<li><a href="/docs/pipelines/cli-reference">CLI Reference</a> — all flags including <code>--dry-run</code></li>
+<li><a href="/docs/pipelines/pipelines">Pipelines</a> — pipeline YAML guide</li>
+<li><a href="/docs/pipelines/cron">Cron Scheduling</a> — scheduler setup and commands</li>
+<li><a href="/docs/pipelines/workflows">Workflows</a> — branching and resumption</li>
+</ul> </div>  </article> <nav class="docs-prev-next"> <a class="docs-prev-next-link prev" href="/docs/pipelines/cli-reference"> <span class="docs-prev-next-label fg-comment">&larr; prev</span> <span class="docs-prev-next-title">CLI Reference</span> </a> <a class="docs-prev-next-link next" href="/docs/pipelines/cron"> <span class="docs-prev-next-label fg-comment">next &rarr;</span> <span class="docs-prev-next-title">Cron Scheduling</span> </a> </nav> </div> </main> </div> <script type="module">const d=document.getElementById("docs-hamburger"),n=document.getElementById("docs-sidebar"),e=document.getElementById("docs-sidebar-overlay");function t(){n?.classList.toggle("open"),e?.classList.toggle("open")}d?.addEventListener("click",t);e?.addEventListener("click",t);</script>  </body></html>

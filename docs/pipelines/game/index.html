@@ -1,0 +1,68 @@
+<!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Game System — GLITCH</title><meta name="description" content="Every pipeline you run earns XP, builds streaks, and may trigger an ICE encounter. Here's how it works."><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="stylesheet" href="/css/bbs.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <div class="docs-page" id="docs-page"> <button class="docs-hamburger" id="docs-hamburger" aria-label="Toggle sidebar"> <span class="docs-hamburger-icon">[=]</span> </button> <aside class="docs-sidebar" id="docs-sidebar"> <div class="docs-sidebar-header"> <a href="/" class="docs-logo-link"> <span class="fg-purple bold">GL1TCH</span> </a> <a href="/" class="docs-back-link">&larr; back to terminal</a> </div> <nav class="docs-nav"> <a class="docs-nav-link" href="/docs/">
+INDEX
+</a> <div class="docs-nav-section"> <div class="docs-nav-section-label"> <span class="fg-comment">&#x250C;&#x2500;</span> PIPELINES </div> <a class="docs-nav-link" href="/docs/pipelines/philosophy"> Philosophy </a><a class="docs-nav-link" href="/docs/pipelines/quickstart"> Your First Pipeline </a><a class="docs-nav-link" href="/docs/pipelines/console"> Console </a><a class="docs-nav-link" href="/docs/pipelines/pipelines"> Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/yaml-reference"> Pipeline YAML Reference </a><a class="docs-nav-link" href="/docs/pipelines/executors"> Executors </a><a class="docs-nav-link" href="/docs/pipelines/brain"> The Brain System </a><a class="docs-nav-link" href="/docs/pipelines/examples"> Pipeline Examples </a><a class="docs-nav-link" href="/docs/pipelines/workflows"> Workflows </a><a class="docs-nav-link" href="/docs/pipelines/cli-reference"> CLI Reference </a><a class="docs-nav-link" href="/docs/pipelines/troubleshooting"> Troubleshooting </a><a class="docs-nav-link" href="/docs/pipelines/cron"> Cron Scheduling </a><a class="docs-nav-link" href="/docs/pipelines/architecture"> Architecture </a><a class="docs-nav-link" href="/docs/pipelines/technologies"> Technologies </a><a class="docs-nav-link active" href="/docs/pipelines/game"> Game System </a><a class="docs-nav-link" href="/docs/pipelines/themes"> Themes </a><a class="docs-nav-link" href="/docs/pipelines/customization"> Customization </a><a class="docs-nav-link" href="/docs/pipelines/plugins"> Plugins </a><a class="docs-nav-link" href="/docs/pipelines/prompts"> Prompts </a><a class="docs-nav-link" href="/docs/pipelines/telemetry"> Telemetry </a> <div class="docs-nav-section-end"> <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span> </div> </div> </nav> </aside> <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div> <main class="docs-main"> <div class="docs-content"> <div class="docs-breadcrumb"> <a href="/docs/">docs</a> <span class="fg-comment"> / </span> <a href="/docs/">pipelines</a> </div> <article>  <h1 class="docs-page-title">Game System</h1> <p class="docs-page-desc">Every pipeline you run earns XP, builds streaks, and may trigger an ICE encounter. Here&#39;s how it works.</p> <div class="docs-article"> <p>gl1tch turns your pipeline runs into a persistent game. The more you run, the more XP you earn. Build streaks. Hit thresholds. Unlock achievements. Occasionally, ICE detects you.</p>
+<h2 id="how-scoring-works">How Scoring Works</h2>
+<p>Every time a pipeline completes, gl1tch scores the run. The score is based on:</p>
+<ul>
+<li><strong>Speed</strong> — faster runs score higher</li>
+<li><strong>Cache efficiency</strong> — hits on cached tokens add a bonus</li>
+<li><strong>Streak multiplier</strong> — consecutive days of runs stack your multiplier</li>
+<li><strong>Retry penalty</strong> — steps that fail and retry cost points</li>
+<li><strong>Provider weights</strong> — some providers score differently based on the active world pack</li>
+</ul>
+<p>You don’t configure any of this. It happens automatically in the background.</p>
+<h2 id="xp-levels-and-streaks">XP, Levels, and Streaks</h2>
+<p>Each scored run adds XP to your total. XP accumulates into levels. Your streak counts consecutive calendar days with at least one run.</p>
+<p>Check your standing with <code>glitch game top</code>:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> game</span><span style="color:#F1FA8C"> top</span></span></code></pre>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>── Personal Bests ──────────────────────────────</span></span>
+<span class="line"><span>  METRIC                    VALUE           DATE</span></span>
+<span class="line"><span>  ──────────────────────────────────────────────</span></span>
+<span class="line"><span>  Fastest Run               420ms           2026-03-15</span></span>
+<span class="line"><span>  Highest XP (single run)   1840 XP         2026-03-22</span></span>
+<span class="line"><span>  Longest Streak            14 days         2026-03-01</span></span>
+<span class="line"><span>  Most Cache Tokens         84200           2026-03-18</span></span>
+<span class="line"><span>  Lowest Cost (non-zero)    $0.000012       2026-03-20</span></span></code></pre>
+<h2 id="recap">Recap</h2>
+<p><code>glitch game recap</code> generates a short cyberpunk story arc narrating your last N days of runs. It uses your stats — runs, XP, achievements, streak — as the source material and asks your local Ollama model to narrate it.</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> game</span><span style="color:#F1FA8C"> recap</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> game</span><span style="color:#F1FA8C"> recap</span><span style="color:#BD93F9"> --days</span><span style="color:#BD93F9"> 14</span></span></code></pre>
+<p>No Ollama? It falls back to a plain stats table.</p>
+<h2 id="ice-encounters">ICE Encounters</h2>
+<p>When you cross certain thresholds or trip specific conditions, ICE spawns. You have until the deadline to resolve it.</p>
+<p>Check for an active encounter:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> game</span><span style="color:#F1FA8C"> ice</span></span></code></pre>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>[ICE DETECTED] Black ICE — Class IV</span></span>
+<span class="line"><span>Deadline: 2026-04-04T08:00:00Z</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>  [1] fight  — attempt to defeat the ICE</span></span>
+<span class="line"><span>  [2] jack-out — disconnect safely (loss)</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>Choice:</span></span></code></pre>
+<p><strong>Fight</strong> to keep your streak intact. <strong>Jack out</strong> to disengage safely — but your streak takes a hit.</p>
+<h2 id="the-world-pack">The World Pack</h2>
+<p>gl1tch maintains a “world pack” — a set of scoring weights and narrative rules that shape how the game feels. Over time, gl1tch analyzes your run patterns and tunes the world pack to fit how you actually work.</p>
+<p>To trigger the tuner manually:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> game</span><span style="color:#F1FA8C"> tune</span></span></code></pre>
+<p>The tuner calls Ollama with your last 30 days of stats, generates an evolved world pack, and writes it to <code>~/.local/share/glitch/agents/game-world-tuned.agent.md</code>. The next run picks it up automatically.</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>Running game tuner...</span></span>
+<span class="line"><span>  Stats window: last 30 days, 47 runs</span></span>
+<span class="line"><span>  Current pack: neon-sprawl-v2</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>Game pack evolved in 8s</span></span>
+<span class="line"><span>  Old pack: neon-sprawl-v2</span></span>
+<span class="line"><span>  New pack: neon-sprawl-v3</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>Weight changes:</span></span>
+<span class="line"><span>  speed_bonus_scale: 1.2000 → 1.4500 (+0.2500)</span></span>
+<span class="line"><span>  streak_multiplier: 1.5000 → 1.7000 (+0.2000)</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>Game rules: 42 lines (unchanged length)</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>Pack written to ~/.local/share/glitch/agents/game-world-tuned.agent.md</span></span></code></pre>
+<p>The tuner also runs automatically after runs that cross score thresholds — you don’t need to trigger it manually unless you want to force a refresh.</p>
+<h2 id="see-also">See Also</h2>
+<ul>
+<li><a href="/docs/pipelines/cli-reference#glitch-game">CLI Reference</a> — <code>glitch game</code> subcommands</li>
+<li><a href="/docs/pipelines/architecture">Architecture</a> — how run data is stored</li>
+</ul> </div>  </article> <nav class="docs-prev-next"> <a class="docs-prev-next-link prev" href="/docs/pipelines/technologies"> <span class="docs-prev-next-label fg-comment">&larr; prev</span> <span class="docs-prev-next-title">Technologies</span> </a> <a class="docs-prev-next-link next" href="/docs/pipelines/themes"> <span class="docs-prev-next-label fg-comment">next &rarr;</span> <span class="docs-prev-next-title">Themes</span> </a> </nav> </div> </main> </div> <script type="module">const d=document.getElementById("docs-hamburger"),n=document.getElementById("docs-sidebar"),e=document.getElementById("docs-sidebar-overlay");function t(){n?.classList.toggle("open"),e?.classList.toggle("open")}d?.addEventListener("click",t);e?.addEventListener("click",t);</script>  </body></html>

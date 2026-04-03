@@ -1,19 +1,18 @@
-<!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Customization — GLITCH</title><meta name="description" content="Change the voice, panel names, and messages in your workspace — make gl1tch sound like you."><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="stylesheet" href="/css/bbs.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <div class="docs-page" id="docs-page"> <button class="docs-hamburger" id="docs-hamburger" aria-label="Toggle sidebar"> <span class="docs-hamburger-icon">[=]</span> </button> <aside class="docs-sidebar" id="docs-sidebar"> <div class="docs-sidebar-header"> <a href="/" class="docs-logo-link"> <span class="fg-purple bold">GL1TCH</span> </a> <a href="/" class="docs-back-link">&larr; back to terminal</a> </div> <nav class="docs-nav"> <a class="docs-nav-link" href="/docs/">
+<!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Customization — GLITCH</title><meta name="description" content="Change panel names, modal messages, and onboarding text in your workspace."><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="stylesheet" href="/css/bbs.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <div class="docs-page" id="docs-page"> <button class="docs-hamburger" id="docs-hamburger" aria-label="Toggle sidebar"> <span class="docs-hamburger-icon">[=]</span> </button> <aside class="docs-sidebar" id="docs-sidebar"> <div class="docs-sidebar-header"> <a href="/" class="docs-logo-link"> <span class="fg-purple bold">GL1TCH</span> </a> <a href="/" class="docs-back-link">&larr; back to terminal</a> </div> <nav class="docs-nav"> <a class="docs-nav-link" href="/docs/">
 INDEX
-</a> <div class="docs-nav-section"> <div class="docs-nav-section-label"> <span class="fg-comment">&#x250C;&#x2500;</span> PIPELINES </div> <a class="docs-nav-link" href="/docs/pipelines/philosophy"> Philosophy </a><a class="docs-nav-link" href="/docs/pipelines/quickstart"> Your First Pipeline </a><a class="docs-nav-link" href="/docs/pipelines/console"> Console </a><a class="docs-nav-link" href="/docs/pipelines/pipelines"> Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/yaml-reference"> Pipeline YAML Reference </a><a class="docs-nav-link" href="/docs/pipelines/executors"> Executors </a><a class="docs-nav-link" href="/docs/pipelines/brain"> The Brain System </a><a class="docs-nav-link" href="/docs/pipelines/examples"> Pipeline Examples </a><a class="docs-nav-link" href="/docs/pipelines/workflows"> Workflows </a><a class="docs-nav-link" href="/docs/pipelines/cli-reference"> CLI Reference </a><a class="docs-nav-link" href="/docs/pipelines/cron"> Cron Scheduling </a><a class="docs-nav-link" href="/docs/pipelines/architecture"> Architecture </a><a class="docs-nav-link" href="/docs/pipelines/technologies"> Technologies </a><a class="docs-nav-link" href="/docs/pipelines/themes"> Themes </a><a class="docs-nav-link active" href="/docs/pipelines/customization"> Customization </a><a class="docs-nav-link" href="/docs/pipelines/plugins"> Plugins </a><a class="docs-nav-link" href="/docs/pipelines/prompts"> Prompts </a><a class="docs-nav-link" href="/docs/pipelines/telemetry"> Telemetry </a> <div class="docs-nav-section-end"> <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span> </div> </div> </nav> </aside> <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div> <main class="docs-main"> <div class="docs-content"> <div class="docs-breadcrumb"> <a href="/docs/">docs</a> <span class="fg-comment"> / </span> <a href="/docs/">pipelines</a> </div> <article>  <h1 class="docs-page-title">Customization</h1> <p class="docs-page-desc">Change the voice, panel names, and messages in your workspace — make gl1tch sound like you.</p> <div class="docs-article"> <p>gl1tch ships with a default personality: dry, confident, hacker-adjacent. If that’s not your vibe, every label, panel title, modal message, and onboarding script is overridable. One YAML file, no restart required.</p>
+</a> <div class="docs-nav-section"> <div class="docs-nav-section-label"> <span class="fg-comment">&#x250C;&#x2500;</span> PIPELINES </div> <a class="docs-nav-link" href="/docs/pipelines/philosophy"> Philosophy </a><a class="docs-nav-link" href="/docs/pipelines/quickstart"> Your First Pipeline </a><a class="docs-nav-link" href="/docs/pipelines/console"> Console </a><a class="docs-nav-link" href="/docs/pipelines/pipelines"> Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/yaml-reference"> Pipeline YAML Reference </a><a class="docs-nav-link" href="/docs/pipelines/executors"> Executors </a><a class="docs-nav-link" href="/docs/pipelines/brain"> The Brain System </a><a class="docs-nav-link" href="/docs/pipelines/examples"> Pipeline Examples </a><a class="docs-nav-link" href="/docs/pipelines/workflows"> Workflows </a><a class="docs-nav-link" href="/docs/pipelines/cli-reference"> CLI Reference </a><a class="docs-nav-link" href="/docs/pipelines/troubleshooting"> Troubleshooting </a><a class="docs-nav-link" href="/docs/pipelines/cron"> Cron Scheduling </a><a class="docs-nav-link" href="/docs/pipelines/architecture"> Architecture </a><a class="docs-nav-link" href="/docs/pipelines/technologies"> Technologies </a><a class="docs-nav-link" href="/docs/pipelines/game"> Game System </a><a class="docs-nav-link" href="/docs/pipelines/themes"> Themes </a><a class="docs-nav-link active" href="/docs/pipelines/customization"> Customization </a><a class="docs-nav-link" href="/docs/pipelines/plugins"> Plugins </a><a class="docs-nav-link" href="/docs/pipelines/prompts"> Prompts </a><a class="docs-nav-link" href="/docs/pipelines/telemetry"> Telemetry </a> <div class="docs-nav-section-end"> <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span> </div> </div> </nav> </aside> <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div> <main class="docs-main"> <div class="docs-content"> <div class="docs-breadcrumb"> <a href="/docs/">docs</a> <span class="fg-comment"> / </span> <a href="/docs/">pipelines</a> </div> <article>  <h1 class="docs-page-title">Customization</h1> <p class="docs-page-desc">Change panel names, modal messages, and onboarding text in your workspace.</p> <div class="docs-article"> <p>Every panel title, modal message, and onboarding script in gl1tch is overridable. One YAML file, no restart required.</p>
 <h2 id="quick-start">Quick Start</h2>
 <p>Create <code>~/.config/glitch/translations.yaml</code> and override any key you want:</p>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">deck_header_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">MY WORKSPACE</span><span style="color:#E9F284">"</span></span>
-<span class="line"><span style="color:#8BE9FD">signal_board_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">JOBS</span><span style="color:#E9F284">"</span></span>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">signal_board_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">JOBS</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">quit_modal_message</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">close everything?</span><span style="color:#E9F284">"</span></span></code></pre>
 <p>Reopen gl1tch and your changes are live.</p>
 <h2 id="how-it-works">How It Works</h2>
-<p>Every visible string in your workspace has a key. At startup gl1tch resolves each key through three layers in order:</p>
+<p>Every overridable string has a key. At startup gl1tch resolves each key through three layers in order:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>~/.config/glitch/translations.yaml   ← your overrides (highest priority)</span></span>
 <span class="line"><span>        │</span></span>
 <span class="line"><span>theme strings                         ← optional strings bundled with your theme</span></span>
 <span class="line"><span>        │</span></span>
-<span class="line"><span>built-in defaults                     ← shipped gl1tch personality</span></span></code></pre>
+<span class="line"><span>built-in defaults                     ← shipped gl1tch defaults</span></span></code></pre>
 <p>The first layer that has a value for a key wins. You only need to define the keys you want to change — everything else falls through to the default.</p>
 <h2 id="panel-and-modal-labels">Panel and Modal Labels</h2>
 <p>These keys control what you see in the UI chrome.</p>
@@ -92,129 +91,7 @@ INDEX
 
 
 
-
-
-
-
-
-
-
-
-
-
-<table><thead><tr><th>Key</th><th>Default</th><th>What it labels</th></tr></thead><tbody><tr><td><code>deck_header_title</code></td><td><code>GL1TCH</code></td><td>Top header bar</td></tr><tr><td><code>pipelines_panel_title</code></td><td><code>PIPELINES</code></td><td>Pipeline list panel</td></tr><tr><td><code>agent_runner_panel_title</code></td><td><code>AGENT RUNNER</code></td><td>Agent runner panel</td></tr><tr><td><code>signal_board_panel_title</code></td><td><code>SIGNAL BOARD</code></td><td>Live job status view</td></tr><tr><td><code>activity_feed_panel_title</code></td><td><code>ACTIVITY FEED</code></td><td>Activity feed</td></tr><tr><td><code>inbox_panel_title</code></td><td><code>INBOX</code></td><td>Run results inbox</td></tr><tr><td><code>cron_panel_title</code></td><td><code>CRON JOBS</code></td><td>Scheduled jobs panel</td></tr><tr><td><code>quit_modal_title</code></td><td><code>BAIL OUT</code></td><td>Quit confirmation modal title</td></tr><tr><td><code>quit_modal_message</code></td><td><code>you sure? the grid will still be here.</code></td><td>Quit confirmation message</td></tr><tr><td><code>help_modal_title</code></td><td><code>GETTING STARTED</code></td><td>Help modal title</td></tr><tr><td><code>theme_picker_title</code></td><td><code>SELECT THEME</code></td><td>Theme picker title</td></tr><tr><td><code>theme_picker_dark_tab</code></td><td><code>Dark</code></td><td>Dark themes tab label</td></tr><tr><td><code>theme_picker_light_tab</code></td><td><code>Light</code></td><td>Light themes tab label</td></tr><tr><td><code>rerun_context_label</code></td><td><code>ADDITIONAL CONTEXT</code></td><td>Re-run modal context field</td></tr><tr><td><code>rerun_cwd_label</code></td><td><code>WORKING DIRECTORY</code></td><td>Re-run modal directory field</td></tr></tbody></table>
-<h2 id="help-modal">Help Modal</h2>
-<p>These keys control the section headers and key binding descriptions in the built-in help screen (<code>ctrl+space ?</code>).</p>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-<table><thead><tr><th>Key</th><th>Default</th></tr></thead><tbody><tr><td><code>help_chord_note</code></td><td><code>Chord prefix: ^spc  (ctrl+space, then the key below)</code></td></tr><tr><td><code>help_section_system</code></td><td><code>HELP &#x26; SYSTEM</code></td></tr><tr><td><code>help_section_workspace</code></td><td><code>WORKSPACE</code></td></tr><tr><td><code>help_section_windows</code></td><td><code>WINDOWS &#x26; PANES</code></td></tr><tr><td><code>help_section_nav</code></td><td><code>NAVIGATION</code></td></tr><tr><td><code>help_section_panels</code></td><td><code>PANELS</code></td></tr><tr><td><code>help_bind_help</code></td><td><code>this help</code></td></tr><tr><td><code>help_bind_quit</code></td><td><code>quit GLITCH</code></td></tr><tr><td><code>help_bind_detach</code></td><td><code>detach  (session stays alive)</code></td></tr><tr><td><code>help_bind_reload</code></td><td><code>reload  (hot-swap binary)</code></td></tr><tr><td><code>help_bind_themes</code></td><td><code>theme picker</code></td></tr><tr><td><code>help_bind_jump</code></td><td><code>jump to any window</code></td></tr><tr><td><code>help_bind_new_win</code></td><td><code>new window</code></td></tr><tr><td><code>help_bind_prev_win</code></td><td><code>previous / next window</code></td></tr><tr><td><code>help_bind_split_right</code></td><td><code>split pane right / down</code></td></tr><tr><td><code>help_bind_nav_pane</code></td><td><code>navigate panes</code></td></tr><tr><td><code>help_bind_kill</code></td><td><code>kill pane / window</code></td></tr><tr><td><code>help_bind_tab_nav</code></td><td><code>navigate panels &#x26; list items</code></td></tr><tr><td><code>help_bind_enter</code></td><td><code>open / confirm / run selected</code></td></tr><tr><td><code>help_bind_esc</code></td><td><code>back / close overlay</code></td></tr><tr><td><code>help_panel_pipelines</code></td><td><code>run and monitor named pipelines</code></td></tr><tr><td><code>help_panel_agent_runner</code></td><td><code>launch and wrangle AI agents</code></td></tr><tr><td><code>help_panel_signal_board</code></td><td><code>inter-agent message bus</code></td></tr><tr><td><code>help_panel_activity_feed</code></td><td><code>live events, run history, logs</code></td></tr><tr><td><code>help_panel_cron</code></td><td><code>scheduled pipelines and agent jobs</code></td></tr></tbody></table>
+<table><thead><tr><th>Key</th><th>Default</th><th>What it labels</th></tr></thead><tbody><tr><td><code>pipelines_panel_title</code></td><td><code>PIPELINES</code></td><td>Pipeline list panel</td></tr><tr><td><code>agent_runner_panel_title</code></td><td><code>AGENT RUNNER</code></td><td>Agent runner panel</td></tr><tr><td><code>signal_board_panel_title</code></td><td><code>SIGNAL BOARD</code></td><td>Live job status view</td></tr><tr><td><code>activity_feed_panel_title</code></td><td><code>ACTIVITY FEED</code></td><td>Activity feed</td></tr><tr><td><code>inbox_panel_title</code></td><td><code>INBOX</code></td><td>Run results inbox</td></tr><tr><td><code>cron_panel_title</code></td><td><code>CRON JOBS</code></td><td>Scheduled jobs panel</td></tr><tr><td><code>quit_modal_title</code></td><td><code>BAIL OUT</code></td><td>Quit confirmation modal title</td></tr><tr><td><code>quit_modal_message</code></td><td><code>you sure? the grid will still be here.</code></td><td>Quit confirmation message</td></tr><tr><td><code>theme_picker_title</code></td><td><code>SELECT THEME</code></td><td>Theme picker title</td></tr><tr><td><code>theme_picker_dark_tab</code></td><td><code>Dark</code></td><td>Dark themes tab label</td></tr><tr><td><code>theme_picker_light_tab</code></td><td><code>Light</code></td><td>Light themes tab label</td></tr><tr><td><code>rerun_context_label</code></td><td><code>ADDITIONAL CONTEXT</code></td><td>Re-run modal context field</td></tr><tr><td><code>rerun_cwd_label</code></td><td><code>WORKING DIRECTORY</code></td><td>Re-run modal directory field</td></tr></tbody></table>
 <h2 id="welcome-onboarding">Welcome Onboarding</h2>
 <p>The first time you open gl1tch, you see a scripted onboarding conversation. These are fully replaceable — write your own intro, change the tone, drop in your team’s context.</p>
 
@@ -264,12 +141,11 @@ INDEX
 <span class="line"></span>
 <span class="line"><span style="color:#F1FA8C">  what are you working on?</span></span></code></pre>
 <blockquote>
-<p><strong>NOTE:</strong> The onboarding only runs once on first launch. To re-run it, delete <code>~/.local/share/glitch/glitch.db</code> — or just run the welcome assistant directly with <code>glitch assistant</code>.</p>
+<p><strong>NOTE:</strong> The onboarding only runs once on first launch. To re-run it, delete <code>~/.local/share/glitch/glitch.db</code>.</p>
 </blockquote>
 <h2 id="ansi-colors-in-values">ANSI Colors in Values</h2>
 <p>Any value can include ANSI escape sequences for color. Use the shorthand forms — gl1tch expands them automatically:</p>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">deck_header_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[1;35mMY GRID</span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[0m</span><span style="color:#E9F284">"</span></span>
-<span class="line"><span style="color:#8BE9FD">quit_modal_message</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[31myou sure?</span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[0m  the grid will still be here.</span><span style="color:#E9F284">"</span></span></code></pre>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">quit_modal_message</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[31myou sure?</span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[0m  the grid will still be here.</span><span style="color:#E9F284">"</span></span></code></pre>
 <p>Supported shorthand forms:</p>
 
 
@@ -304,29 +180,23 @@ INDEX
 <span class="line"><span style="color:#6272A4">  # ... colors</span></span>
 <span class="line"></span>
 <span class="line"><span style="color:#8BE9FD">strings</span><span style="color:#FF79C6">:</span></span>
-<span class="line"><span style="color:#8BE9FD">  deck_header_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">SYSTEM</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">  signal_board_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">OPS</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">  quit_modal_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">DISCONNECT</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">  quit_modal_message</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">terminate session?</span><span style="color:#E9F284">"</span></span></code></pre>
 <p>See <a href="/docs/pipelines/themes">Themes</a> for the full theme format.</p>
 <h2 id="examples">Examples</h2>
 <h3 id="corporate-friendly-workspace">Corporate-friendly workspace</h3>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">deck_header_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">WORKSPACE</span><span style="color:#E9F284">"</span></span>
-<span class="line"><span style="color:#8BE9FD">pipelines_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">AUTOMATIONS</span><span style="color:#E9F284">"</span></span>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">pipelines_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">AUTOMATIONS</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">signal_board_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">ACTIVE JOBS</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">agent_runner_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">RUN</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">quit_modal_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">EXIT</span><span style="color:#E9F284">"</span></span>
-<span class="line"><span style="color:#8BE9FD">quit_modal_message</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">Close gl1tch?</span><span style="color:#E9F284">"</span></span>
-<span class="line"><span style="color:#8BE9FD">help_modal_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">KEYBOARD SHORTCUTS</span><span style="color:#E9F284">"</span></span></code></pre>
+<span class="line"><span style="color:#8BE9FD">quit_modal_message</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">Close gl1tch?</span><span style="color:#E9F284">"</span></span></code></pre>
 <h3 id="minimal-no-personality">Minimal, no personality</h3>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">deck_header_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">gl1tch</span><span style="color:#E9F284">"</span></span>
-<span class="line"><span style="color:#8BE9FD">quit_modal_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">quit</span><span style="color:#E9F284">"</span></span>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">quit_modal_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">quit</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">quit_modal_message</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">exit?</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">inbox_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">runs</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">cron_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">scheduled</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">signal_board_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">live</span><span style="color:#E9F284">"</span></span></code></pre>
-<h3 id="ansi-styled-header">ANSI-styled header</h3>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">deck_header_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[1;36mGL1TCH</span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[0m  </span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[2m//  your workspace</span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[0m</span><span style="color:#E9F284">"</span></span></code></pre>
 <h2 id="see-also">See Also</h2>
 <ul>
 <li><a href="/docs/pipelines/themes">Themes</a> — change colors, borders, and layout alongside your copy</li>

@@ -1,6 +1,6 @@
 <!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>GLITCH</title><meta name="description" content="A terminal workspace for AI-assisted development. Pipelines, agents, brain context — in your terminal."><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="stylesheet" href="/css/bbs.css"><link rel="stylesheet" href="/_astro/index@_@astro.Na0AKDoy.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <main class="terminal-stage" data-astro-cid-j7pv25f6> <div class="terminal-workspace" id="terminal-workspace" data-astro-cid-j7pv25f6> <div class="mac-terminal" id="mac-frame" data-astro-cid-j7pv25f6> <div class="mac-titlebar" data-astro-cid-j7pv25f6> <div class="mac-dots" aria-hidden="true" data-astro-cid-j7pv25f6> <span class="mac-dot mac-dot-red" data-astro-cid-j7pv25f6></span> <span class="mac-dot mac-dot-yellow" data-astro-cid-j7pv25f6></span> <span class="mac-dot mac-dot-green" data-astro-cid-j7pv25f6></span> </div> <span class="mac-title" id="mac-frame-title" data-astro-cid-j7pv25f6>GL1TCH</span> <!-- only visible in docs mode --> <button class="mac-docs-close" id="mac-docs-close" onclick="DOCS_PANEL.close()" aria-label="Close docs" hidden data-astro-cid-j7pv25f6>
 esc
-</button> </div> <div class="mac-body" style="padding:0; background:#1a1b26; flex:1; overflow:hidden; display:flex; flex-direction:column;" data-astro-cid-j7pv25f6> <!-- Terminal view --> <div id="view-terminal" style="flex:1; overflow:hidden; display:flex; flex-direction:column;" data-astro-cid-j7pv25f6> <div class="tui-terminal" id="mac-terminal" data-astro-cid-d3petfjt> <!-- Left pane border accent --> <div class="tui-pane-bar" aria-hidden="true" data-astro-cid-d3petfjt></div> <!-- Main content area --> <div class="tui-main" data-astro-cid-d3petfjt> <!-- Logo area --> <div class="tui-logo-area" data-astro-cid-d3petfjt> <img src="/glitch-logo.gif" alt="GL1TCH" class="tui-logo" data-astro-cid-d3petfjt> </div> <!-- Output area (typewriter responses appear here) --> <div class="terminal-output" id="terminal-output" data-astro-cid-d3petfjt></div> <!-- Bottom bars, pinned --> <div class="tui-bottom" data-astro-cid-d3petfjt> <!-- Status bar --> <div class="tui-statusbar" data-astro-cid-d3petfjt> <span class="tui-status-left" data-astro-cid-d3petfjt>&gt;&gt; GL1TCH AI assistant &nbsp;//&nbsp; Ollama</span> <span class="tui-status-center" data-astro-cid-d3petfjt>&#x21BB; 3 &middot; Lv6 &middot; 8.0kxp</span> <span class="tui-status-right" id="tui-clock" data-astro-cid-d3petfjt></span> </div> <!-- Input row --> <div class="tui-input-row" data-astro-cid-d3petfjt> <span class="tui-prompt" data-astro-cid-d3petfjt>&gt;&gt; </span> <input type="text" id="terminal-input" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" placeholder="ask glitch anything…" aria-label="GLITCH terminal input" data-astro-cid-d3petfjt> </div> <!-- Hint bar --> <div class="tui-hintbar" data-astro-cid-d3petfjt> <span class="tui-hintbar-left" data-astro-cid-d3petfjt> <kbd data-astro-cid-d3petfjt>enter</kbd><span class="tui-hint-dim" data-astro-cid-d3petfjt> send &middot; </span> <kbd data-astro-cid-d3petfjt>esc</kbd><span class="tui-hint-dim" data-astro-cid-d3petfjt> unfocus &middot; </span> <kbd data-astro-cid-d3petfjt>/help</kbd><span class="tui-hint-dim" data-astro-cid-d3petfjt> commands</span> </span> <span class="tui-hintbar-right tui-hint-dim" data-astro-cid-d3petfjt>~/Projects/gl1tch</span> </div> <!-- Sessions bar --> <div class="tui-sessionsbar" data-astro-cid-d3petfjt> <span class="tui-hint-dim" data-astro-cid-d3petfjt>sessions: </span> <span class="tui-session-active" data-astro-cid-d3petfjt>&#x25BA; main</span> </div> <!-- Chord bar --> <div class="tui-chordbar" data-astro-cid-d3petfjt> <kbd data-astro-cid-d3petfjt>^spc d</kbd><span class="tui-hint-dim" data-astro-cid-d3petfjt> detach &nbsp;&middot;&nbsp; </span> <kbd data-astro-cid-d3petfjt>^spc r</kbd><span class="tui-hint-dim" data-astro-cid-d3petfjt> reload &nbsp;&middot;&nbsp; </span> <kbd data-astro-cid-d3petfjt>/quit</kbd><span class="tui-hint-dim" data-astro-cid-d3petfjt> quit</span> </div> </div><!-- /.tui-bottom --> </div><!-- /.tui-main --> </div><!-- /.tui-terminal --> <script type="module" src="/_astro/MacTerminal.astro_astro_type_script_index_0_lang.Cec2gS9L.js"></script> </div> <!-- Docs view — pre-rendered, hidden until /docs is typed --> <div id="view-docs" style="flex:1; overflow:hidden; display:none;" data-astro-cid-j7pv25f6> <div class="ds-root"> <div class="ds-body-wrap"> <!-- left sidebar nav --> <nav class="ds-sidebar" id="ds-sidebar" aria-label="Documentation sections"> <div class="ds-sidebar-label">docs</div> <button class="ds-nav-item active" data-target="ds-article-philosophy" data-slug="philosophy" onclick="DS.show(this)"> <span class="ds-nav-num">00</span> <span class="ds-nav-label">Philosophy</span> </button><button class="ds-nav-item" data-target="ds-article-quickstart" data-slug="quickstart" onclick="DS.show(this)"> <span class="ds-nav-num">01</span> <span class="ds-nav-label">Your First Pipeline</span> </button><button class="ds-nav-item" data-target="ds-article-console" data-slug="console" onclick="DS.show(this)"> <span class="ds-nav-num">02</span> <span class="ds-nav-label">Console</span> </button><button class="ds-nav-item" data-target="ds-article-pipelines" data-slug="pipelines" onclick="DS.show(this)"> <span class="ds-nav-num">02</span> <span class="ds-nav-label">Pipelines</span> </button><button class="ds-nav-item" data-target="ds-article-yaml-reference" data-slug="yaml-reference" onclick="DS.show(this)"> <span class="ds-nav-num">02</span> <span class="ds-nav-label">Pipeline YAML Reference</span> </button><button class="ds-nav-item" data-target="ds-article-executors" data-slug="executors" onclick="DS.show(this)"> <span class="ds-nav-num">03</span> <span class="ds-nav-label">Executors</span> </button><button class="ds-nav-item" data-target="ds-article-brain" data-slug="brain" onclick="DS.show(this)"> <span class="ds-nav-num">04</span> <span class="ds-nav-label">The Brain System</span> </button><button class="ds-nav-item" data-target="ds-article-examples" data-slug="examples" onclick="DS.show(this)"> <span class="ds-nav-num">05</span> <span class="ds-nav-label">Pipeline Examples</span> </button><button class="ds-nav-item" data-target="ds-article-workflows" data-slug="workflows" onclick="DS.show(this)"> <span class="ds-nav-num">05</span> <span class="ds-nav-label">Workflows</span> </button><button class="ds-nav-item" data-target="ds-article-cli-reference" data-slug="cli-reference" onclick="DS.show(this)"> <span class="ds-nav-num">06</span> <span class="ds-nav-label">CLI Reference</span> </button><button class="ds-nav-item" data-target="ds-article-cron" data-slug="cron" onclick="DS.show(this)"> <span class="ds-nav-num">09</span> <span class="ds-nav-label">Cron Scheduling</span> </button><button class="ds-nav-item" data-target="ds-article-architecture" data-slug="architecture" onclick="DS.show(this)"> <span class="ds-nav-num">10</span> <span class="ds-nav-label">Architecture</span> </button><button class="ds-nav-item" data-target="ds-article-technologies" data-slug="technologies" onclick="DS.show(this)"> <span class="ds-nav-num">10</span> <span class="ds-nav-label">Technologies</span> </button><button class="ds-nav-item" data-target="ds-article-themes" data-slug="themes" onclick="DS.show(this)"> <span class="ds-nav-num">50</span> <span class="ds-nav-label">Themes</span> </button><button class="ds-nav-item" data-target="ds-article-customization" data-slug="customization" onclick="DS.show(this)"> <span class="ds-nav-num">55</span> <span class="ds-nav-label">Customization</span> </button><button class="ds-nav-item" data-target="ds-article-plugins" data-slug="plugins" onclick="DS.show(this)"> <span class="ds-nav-num">99</span> <span class="ds-nav-label">Plugins</span> </button><button class="ds-nav-item" data-target="ds-article-prompts" data-slug="prompts" onclick="DS.show(this)"> <span class="ds-nav-num">99</span> <span class="ds-nav-label">Prompts</span> </button><button class="ds-nav-item" data-target="ds-article-telemetry" data-slug="telemetry" onclick="DS.show(this)"> <span class="ds-nav-num">99</span> <span class="ds-nav-label">Telemetry</span> </button> </nav> <!-- scrollable content --> <div class="ds-body" id="ds-body"> <article id="ds-article-philosophy" class="ds-article visible" aria-hidden="false"> <div class="ds-article-meta"> <span class="ds-article-title fg-purple">Philosophy</span> <span class="ds-article-desc fg-comment">Explain what gl1tch is, what it is not, and why it works the way it does.</span> </div> <div class="ds-content"> <p>gl1tch is a personal AI assistant that lives in your terminal. It runs your automations, learns your projects, and adapts to your workflow — entirely on your machine, without sending your work to a service you don’t control.</p>
+</button> </div> <div class="mac-body" style="padding:0; background:#1a1b26; flex:1; overflow:hidden; display:flex; flex-direction:column;" data-astro-cid-j7pv25f6> <!-- Terminal view --> <div id="view-terminal" style="flex:1; overflow:hidden; display:flex; flex-direction:column;" data-astro-cid-j7pv25f6> <div class="tui-terminal" id="mac-terminal" data-astro-cid-d3petfjt> <!-- Left pane border accent --> <div class="tui-pane-bar" aria-hidden="true" data-astro-cid-d3petfjt></div> <!-- Main content area --> <div class="tui-main" data-astro-cid-d3petfjt> <!-- Logo area --> <div class="tui-logo-area" data-astro-cid-d3petfjt> <img src="/glitch-logo.gif" alt="GL1TCH" class="tui-logo" data-astro-cid-d3petfjt> </div> <!-- Output area (typewriter responses appear here) --> <div class="terminal-output" id="terminal-output" data-astro-cid-d3petfjt></div> <!-- Bottom bars, pinned --> <div class="tui-bottom" data-astro-cid-d3petfjt> <!-- Status bar --> <div class="tui-statusbar" data-astro-cid-d3petfjt> <span class="tui-status-left" data-astro-cid-d3petfjt>&gt;&gt; GL1TCH AI assistant &nbsp;//&nbsp; Ollama</span> <span class="tui-status-center" data-astro-cid-d3petfjt>&#x21BB; 3 &middot; Lv6 &middot; 8.0kxp</span> <span class="tui-status-right" id="tui-clock" data-astro-cid-d3petfjt></span> </div> <!-- Input row --> <div class="tui-input-row" data-astro-cid-d3petfjt> <span class="tui-prompt" data-astro-cid-d3petfjt>&gt;&gt; </span> <input type="text" id="terminal-input" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" placeholder="ask glitch anything…" aria-label="GLITCH terminal input" data-astro-cid-d3petfjt> </div> <!-- Hint bar --> <div class="tui-hintbar" data-astro-cid-d3petfjt> <span class="tui-hintbar-left" data-astro-cid-d3petfjt> <kbd data-astro-cid-d3petfjt>enter</kbd><span class="tui-hint-dim" data-astro-cid-d3petfjt> send &middot; </span> <kbd data-astro-cid-d3petfjt>esc</kbd><span class="tui-hint-dim" data-astro-cid-d3petfjt> unfocus &middot; </span> <kbd data-astro-cid-d3petfjt>/help</kbd><span class="tui-hint-dim" data-astro-cid-d3petfjt> commands</span> </span> <span class="tui-hintbar-right tui-hint-dim" data-astro-cid-d3petfjt>~/Projects/gl1tch</span> </div> <!-- Sessions bar --> <div class="tui-sessionsbar" data-astro-cid-d3petfjt> <span class="tui-hint-dim" data-astro-cid-d3petfjt>sessions: </span> <span class="tui-session-active" data-astro-cid-d3petfjt>&#x25BA; main</span> </div> <!-- Chord bar --> <div class="tui-chordbar" data-astro-cid-d3petfjt> <kbd data-astro-cid-d3petfjt>^spc d</kbd><span class="tui-hint-dim" data-astro-cid-d3petfjt> detach &nbsp;&middot;&nbsp; </span> <kbd data-astro-cid-d3petfjt>^spc r</kbd><span class="tui-hint-dim" data-astro-cid-d3petfjt> reload &nbsp;&middot;&nbsp; </span> <kbd data-astro-cid-d3petfjt>/quit</kbd><span class="tui-hint-dim" data-astro-cid-d3petfjt> quit</span> </div> </div><!-- /.tui-bottom --> </div><!-- /.tui-main --> </div><!-- /.tui-terminal --> <script type="module" src="/_astro/MacTerminal.astro_astro_type_script_index_0_lang.Cec2gS9L.js"></script> </div> <!-- Docs view — pre-rendered, hidden until /docs is typed --> <div id="view-docs" style="flex:1; overflow:hidden; display:none;" data-astro-cid-j7pv25f6> <div class="ds-root"> <div class="ds-body-wrap"> <!-- left sidebar nav --> <nav class="ds-sidebar" id="ds-sidebar" aria-label="Documentation sections"> <div class="ds-sidebar-label">docs</div> <button class="ds-nav-item active" data-target="ds-article-philosophy" data-slug="philosophy" onclick="DS.show(this)"> <span class="ds-nav-num">00</span> <span class="ds-nav-label">Philosophy</span> </button><button class="ds-nav-item" data-target="ds-article-quickstart" data-slug="quickstart" onclick="DS.show(this)"> <span class="ds-nav-num">01</span> <span class="ds-nav-label">Your First Pipeline</span> </button><button class="ds-nav-item" data-target="ds-article-console" data-slug="console" onclick="DS.show(this)"> <span class="ds-nav-num">02</span> <span class="ds-nav-label">Console</span> </button><button class="ds-nav-item" data-target="ds-article-pipelines" data-slug="pipelines" onclick="DS.show(this)"> <span class="ds-nav-num">02</span> <span class="ds-nav-label">Pipelines</span> </button><button class="ds-nav-item" data-target="ds-article-yaml-reference" data-slug="yaml-reference" onclick="DS.show(this)"> <span class="ds-nav-num">02</span> <span class="ds-nav-label">Pipeline YAML Reference</span> </button><button class="ds-nav-item" data-target="ds-article-executors" data-slug="executors" onclick="DS.show(this)"> <span class="ds-nav-num">03</span> <span class="ds-nav-label">Executors</span> </button><button class="ds-nav-item" data-target="ds-article-brain" data-slug="brain" onclick="DS.show(this)"> <span class="ds-nav-num">04</span> <span class="ds-nav-label">The Brain System</span> </button><button class="ds-nav-item" data-target="ds-article-examples" data-slug="examples" onclick="DS.show(this)"> <span class="ds-nav-num">05</span> <span class="ds-nav-label">Pipeline Examples</span> </button><button class="ds-nav-item" data-target="ds-article-workflows" data-slug="workflows" onclick="DS.show(this)"> <span class="ds-nav-num">05</span> <span class="ds-nav-label">Workflows</span> </button><button class="ds-nav-item" data-target="ds-article-cli-reference" data-slug="cli-reference" onclick="DS.show(this)"> <span class="ds-nav-num">06</span> <span class="ds-nav-label">CLI Reference</span> </button><button class="ds-nav-item" data-target="ds-article-troubleshooting" data-slug="troubleshooting" onclick="DS.show(this)"> <span class="ds-nav-num">07</span> <span class="ds-nav-label">Troubleshooting</span> </button><button class="ds-nav-item" data-target="ds-article-cron" data-slug="cron" onclick="DS.show(this)"> <span class="ds-nav-num">09</span> <span class="ds-nav-label">Cron Scheduling</span> </button><button class="ds-nav-item" data-target="ds-article-architecture" data-slug="architecture" onclick="DS.show(this)"> <span class="ds-nav-num">10</span> <span class="ds-nav-label">Architecture</span> </button><button class="ds-nav-item" data-target="ds-article-technologies" data-slug="technologies" onclick="DS.show(this)"> <span class="ds-nav-num">10</span> <span class="ds-nav-label">Technologies</span> </button><button class="ds-nav-item" data-target="ds-article-game" data-slug="game" onclick="DS.show(this)"> <span class="ds-nav-num">11</span> <span class="ds-nav-label">Game System</span> </button><button class="ds-nav-item" data-target="ds-article-themes" data-slug="themes" onclick="DS.show(this)"> <span class="ds-nav-num">50</span> <span class="ds-nav-label">Themes</span> </button><button class="ds-nav-item" data-target="ds-article-customization" data-slug="customization" onclick="DS.show(this)"> <span class="ds-nav-num">55</span> <span class="ds-nav-label">Customization</span> </button><button class="ds-nav-item" data-target="ds-article-plugins" data-slug="plugins" onclick="DS.show(this)"> <span class="ds-nav-num">99</span> <span class="ds-nav-label">Plugins</span> </button><button class="ds-nav-item" data-target="ds-article-prompts" data-slug="prompts" onclick="DS.show(this)"> <span class="ds-nav-num">99</span> <span class="ds-nav-label">Prompts</span> </button><button class="ds-nav-item" data-target="ds-article-telemetry" data-slug="telemetry" onclick="DS.show(this)"> <span class="ds-nav-num">99</span> <span class="ds-nav-label">Telemetry</span> </button> </nav> <!-- scrollable content --> <div class="ds-body" id="ds-body"> <article id="ds-article-philosophy" class="ds-article visible" aria-hidden="false"> <div class="ds-article-meta"> <span class="ds-article-title fg-purple">Philosophy</span> <span class="ds-article-desc fg-comment">Explain what gl1tch is, what it is not, and why it works the way it does.</span> </div> <div class="ds-content"> <p>gl1tch is a personal AI assistant that lives in your terminal. It runs your automations, learns your projects, and adapts to your workflow — entirely on your machine, without sending your work to a service you don’t control.</p>
 <p>That’s the whole idea. Every design decision comes back to it.</p>
 <h2 id="what-you-get">What You Get</h2>
 <p>Your assistant, your pipelines, your data. Nothing requires a cloud account. Nothing phones home. You can run gl1tch on a laptop, a home server, or a VPS — anywhere that runs a terminal.</p>
@@ -2495,6 +2495,80 @@ seconds longer to load.</p>
 
 <table><thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>--overwrite</code></td><td><code>false</code></td><td>Overwrite existing config files on conflict.</td></tr><tr><td><code>--dry-run</code></td><td><code>false</code></td><td>Preview changes without writing anything.</td></tr></tbody></table>
 <hr>
+<h2 id="glitch-model">glitch model</h2>
+<p>Print the best available model as <code>provider/model</code>. Reads your persisted backend selection first, then falls back to live provider discovery. Exits with code 1 if no model is available.</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> model</span><span style="color:#6272A4">                # print best available: e.g. ollama/llama3.2</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> model</span><span style="color:#BD93F9"> --local</span><span style="color:#6272A4">        # restrict to local providers only</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> model</span><span style="color:#BD93F9"> --json</span><span style="color:#6272A4">         # {"provider":"ollama","model":"llama3.2"}</span></span></code></pre>
+<p>Useful in shell scripts and pipeline steps:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#BD93F9">GLITCH_MODEL</span><span style="color:#FF79C6">=</span><span style="color:#F8F8F2">$(</span><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> model</span><span style="color:#F8F8F2">)</span></span>
+<span class="line"><span style="color:#BD93F9">GLITCH_MODEL</span><span style="color:#FF79C6">=</span><span style="color:#F8F8F2">$(</span><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> model</span><span style="color:#BD93F9"> --local</span><span style="color:#F8F8F2">)</span></span></code></pre>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>--local</code></td><td><code>false</code></td><td>Restrict to local providers only (Ollama).</td></tr><tr><td><code>--json</code></td><td><code>false</code></td><td>Output as JSON: <code>{"provider":"...","model":"..."}</code>.</td></tr></tbody></table>
+<hr>
+<h2 id="glitch-busd">glitch busd</h2>
+<p>Interact with the gl1tch event bus. Useful for plugins and external tools that need to send signals into a running gl1tch session.</p>
+<h3 id="glitch-busd-publish">glitch busd publish</h3>
+<p>Publish a JSON event to the gl1tch event bus socket.</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> busd</span><span style="color:#F1FA8C"> publish</span><span style="color:#FF79C6"> &#x3C;</span><span style="color:#F1FA8C">topi</span><span style="color:#F8F8F2">c</span><span style="color:#FF79C6">></span><span style="color:#F8F8F2"> [json-payload]</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> busd</span><span style="color:#F1FA8C"> publish</span><span style="color:#F1FA8C"> my.custom.event</span><span style="color:#E9F284"> '</span><span style="color:#F1FA8C">{"key":"value"}</span><span style="color:#E9F284">'</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> busd</span><span style="color:#F1FA8C"> publish</span><span style="color:#F1FA8C"> mud.chat.reply</span><span style="color:#E9F284"> '</span><span style="color:#F1FA8C">{"text":"hello","world":"blockhaven"}</span><span style="color:#E9F284">'</span></span></code></pre>
+<p>The payload must be valid JSON. Omit it to send an empty event. Fails with a helpful error if gl1tch is not running.</p>
+<hr>
+<h2 id="glitch-game">glitch game</h2>
+<p>Your pipeline runs earn XP and track streaks. The game system surfaces this as a cyberpunk meta-layer — levels, achievements, ICE encounters, and a self-tuning world that adapts to how you work.</p>
+<h3 id="glitch-game-recap">glitch game recap</h3>
+<p>Narrate your last N days as a cyberpunk story arc. Uses your run history to generate a short narrative with Ollama.</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> game</span><span style="color:#F1FA8C"> recap</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> game</span><span style="color:#F1FA8C"> recap</span><span style="color:#BD93F9"> --days</span><span style="color:#BD93F9"> 14</span></span></code></pre>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>--days</code></td><td><code>7</code></td><td>Number of days to include in the recap.</td></tr></tbody></table>
+<h3 id="glitch-game-top">glitch game top</h3>
+<p>Show your personal best records across all tracked metrics.</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> game</span><span style="color:#F1FA8C"> top</span></span></code></pre>
+<p>Displays fastest run, highest XP, longest streak, most cache tokens, and lowest cost per run.</p>
+<h3 id="glitch-game-ice">glitch game ice</h3>
+<p>Resolve a pending ICE encounter. Encounters spawn when specific thresholds are crossed. You choose to fight or jack out — losing decrements your streak.</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> game</span><span style="color:#F1FA8C"> ice</span></span></code></pre>
+<p>Prints the active encounter (if any) with a choice prompt. No encounter? No output.</p>
+<h3 id="glitch-game-tune">glitch game tune</h3>
+<p>Manually trigger the self-evolving game pack tuner. Analyzes your last 30 days of run data with Ollama and writes an evolved world pack to <code>~/.local/share/glitch/agents/game-world-tuned.agent.md</code>. The tuner runs automatically after runs; use this to force a refresh.</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> game</span><span style="color:#F1FA8C"> tune</span></span></code></pre>
+<hr>
 <h2 id="glitch-widget">glitch widget</h2>
 <h3 id="glitch-widget-jump-window">glitch widget jump-window</h3>
 <p>Open the jump window as a standalone process. Useful for launching directly from a keybinding without starting a full session.</p>
@@ -2505,6 +2579,103 @@ seconds longer to load.</p>
 <li><a href="/docs/pipelines/yaml-reference">Pipeline YAML Reference</a> — every field and what it does</li>
 <li><a href="/docs/pipelines/executors">Executors</a> — what runs your steps</li>
 <li><a href="/docs/pipelines/workflows">Workflows</a> — chain multiple pipelines together</li>
+</ul> </div> </article><article id="ds-article-troubleshooting" class="ds-article" aria-hidden="true"> <div class="ds-article-meta"> <span class="ds-article-title fg-purple">Troubleshooting</span> <span class="ds-article-desc fg-comment">Diagnose and fix common pipeline failures, template errors, and scheduling problems.</span> </div> <div class="ds-content"> <p>Something’s not working. Here’s how to find out why.</p>
+<h2 id="check-what-would-run-first">Check what would run first</h2>
+<p>Before running a pipeline for real, use <code>--dry-run</code> to see what gl1tch would execute without actually doing anything:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> pipeline</span><span style="color:#F1FA8C"> run</span><span style="color:#F1FA8C"> my-pipeline.pipeline.yaml</span><span style="color:#BD93F9"> --dry-run</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> ask</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">summarize my PRs</span><span style="color:#E9F284">"</span><span style="color:#BD93F9"> --dry-run</span></span></code></pre>
+<p>Dry run shows you the resolved step order, template expressions, and which executor each step would call. Template errors surface here before they waste a real run.</p>
+<h2 id="read-the-step-error">Read the step error</h2>
+<p>When a pipeline fails, the error message names the step and the executor. Look for the step <code>id</code> first — that tells you exactly where it broke.</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>step [fetch-data] executor=gh: exit status 1</span></span>
+<span class="line"><span>gh: unknown command "api repos/…"</span></span></code></pre>
+<p>Fix the command in that step, then re-run. You don’t need to restart from the beginning — steps that already succeeded are cached in the run.</p>
+<h2 id="resume-a-failed-run">Resume a failed run</h2>
+<p>Runs that fail mid-way can be resumed from the last successful step. Find the run ID in your inbox or from the signal board, then:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> pipeline</span><span style="color:#F1FA8C"> resume</span><span style="color:#BD93F9"> --run-id</span><span style="color:#FF79C6"> &#x3C;</span><span style="color:#F1FA8C">i</span><span style="color:#F8F8F2">d</span><span style="color:#FF79C6">></span></span></code></pre>
+<p>Skips all completed steps and retries from the failure point.</p>
+<h2 id="template-expression-errors">Template expression errors</h2>
+<p>Template errors look like <code>template: :1: unexpected "."</code> or an empty output where you expected data. Common causes:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Symptom</th><th>Likely cause</th></tr></thead><tbody><tr><td>Step output is empty</td><td>Previous step produced no output</td></tr><tr><td><code>unexpected "."</code></td><td>Typo in expression — check the step ID</td></tr><tr><td><code>undefined variable</code></td><td>Step ID doesn’t match what you typed</td></tr><tr><td><code>index out of range</code></td><td>Tried to access a key that doesn’t exist</td></tr></tbody></table>
+<p>Use <code>--dry-run</code> to see the resolved template before it runs. The dry-run output shows final expression values.</p>
+<p><strong>Correct syntax:</strong></p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">prompt</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">Summarize: {{steps.fetch.output}}</span><span style="color:#E9F284">"</span></span>
+<span class="line"><span style="color:#8BE9FD">input</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">{{steps.extract.output}}</span><span style="color:#E9F284">"</span></span>
+<span class="line"><span style="color:#8BE9FD">vars</span><span style="color:#FF79C6">:</span></span>
+<span class="line"><span style="color:#8BE9FD">  repo</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">{{vars.repo}}</span><span style="color:#E9F284">"</span></span></code></pre>
+<p>Step IDs are case-sensitive. <code>{{steps.Fetch.output}}</code> won’t match a step with <code>id: fetch</code>.</p>
+<h2 id="model-not-available">Model not available</h2>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>no model available — is ollama running or a provider configured?</span></span></code></pre>
+<p>Check which model gl1tch would pick:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> model</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> model</span><span style="color:#BD93F9"> --local</span><span style="color:#6272A4">   # only Ollama</span></span></code></pre>
+<p>If Ollama is not running, start it:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">ollama</span><span style="color:#F1FA8C"> serve</span></span></code></pre>
+<p>If you want to use a cloud provider, make sure it’s authenticated and set it explicitly:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> ask</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">test</span><span style="color:#E9F284">"</span><span style="color:#BD93F9"> --provider</span><span style="color:#F1FA8C"> claude</span></span></code></pre>
+<h2 id="executor-not-found">Executor not found</h2>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>executor "ripgrep" not found</span></span></code></pre>
+<p>This means a pipeline step references a plugin executor that isn’t installed. Install it:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> plugin</span><span style="color:#F1FA8C"> install</span><span style="color:#FF79C6"> &#x3C;</span><span style="color:#F1FA8C">owner/rep</span><span style="color:#F8F8F2">o</span><span style="color:#FF79C6">></span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> plugin</span><span style="color:#F1FA8C"> list</span><span style="color:#6272A4">   # verify it appears</span></span></code></pre>
+<h2 id="cron-jobs-not-firing">Cron jobs not firing</h2>
+<p>Check whether the scheduler is running:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> cron</span><span style="color:#F1FA8C"> list</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> cron</span><span style="color:#F1FA8C"> logs</span></span></code></pre>
+<p>If there are no recent logs and jobs should have fired, the scheduler may not be running. Start it:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> cron</span><span style="color:#F1FA8C"> start</span></span></code></pre>
+<p>If it’s already running but jobs still don’t fire, check the schedule expression:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#6272A4"># Test a cron expression manually</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> cron</span><span style="color:#F1FA8C"> run</span><span style="color:#FF79C6"> &#x3C;</span><span style="color:#F1FA8C">nam</span><span style="color:#F8F8F2">e</span><span style="color:#FF79C6">></span><span style="color:#6272A4">   # force an immediate run</span></span></code></pre>
+<h2 id="workflow-stuck-at-a-decision">Workflow stuck at a decision</h2>
+<p>Workflows that branch on conditions can get stuck if no condition matches and there’s no <code>default</code> branch. Open the workflow file and add a fallback:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">branches</span><span style="color:#FF79C6">:</span></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> condition</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">{{steps.check.output | contains 'ok'}}</span><span style="color:#E9F284">"</span></span>
+<span class="line"><span style="color:#8BE9FD">    pipeline</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> success-path</span></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> condition</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">default</span><span style="color:#E9F284">"</span></span>
+<span class="line"><span style="color:#8BE9FD">    pipeline</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> fallback-path</span></span></code></pre>
+<h2 id="reset-state">Reset state</h2>
+<p>If something is deeply wrong and you want to start fresh without losing your pipelines and config:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#6272A4"># Back up everything first</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> backup</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#6272A4"># Restore only config, skip brain data</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> restore</span><span style="color:#F1FA8C"> ./backup.tar.gz</span><span style="color:#BD93F9"> --dry-run</span><span style="color:#6272A4">   # preview first</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> restore</span><span style="color:#F1FA8C"> ./backup.tar.gz</span></span></code></pre>
+<p>To wipe just the brain store and start with a clean context:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">rm</span><span style="color:#F1FA8C"> ~/.local/share/glitch/brain.db</span></span></code></pre>
+<p>This does not affect your pipelines, cron config, or prompts.</p>
+<h2 id="see-also">See Also</h2>
+<ul>
+<li><a href="/docs/pipelines/cli-reference">CLI Reference</a> — all flags including <code>--dry-run</code></li>
+<li><a href="/docs/pipelines/pipelines">Pipelines</a> — pipeline YAML guide</li>
+<li><a href="/docs/pipelines/cron">Cron Scheduling</a> — scheduler setup and commands</li>
+<li><a href="/docs/pipelines/workflows">Workflows</a> — branching and resumption</li>
 </ul> </div> </article><article id="ds-article-cron" class="ds-article" aria-hidden="true"> <div class="ds-article-meta"> <span class="ds-article-title fg-purple">Cron Scheduling</span> <span class="ds-article-desc fg-comment">Schedule your pipelines to run automatically — wake up to results already waiting in your workspace.</span> </div> <div class="ds-content"> <p>Set a pipeline on a schedule and stop thinking about it. Your morning standup prep runs at 8 AM. Your nightly code review finishes while you sleep. Your dependency audit fires every Monday. gl1tch runs your pipelines on a cron schedule and logs the results — you just check in when you’re ready.</p>
 <h2 id="quick-start">Quick Start</h2>
 <p>Create <code>~/.config/glitch/cron.yaml</code> with your first scheduled pipeline:</p>
@@ -2887,6 +3058,71 @@ seconds longer to load.</p>
 <li><a href="/docs/pipelines/philosophy">Philosophy</a> — the reasoning behind these choices</li>
 <li><a href="/docs/pipelines/architecture">Architecture</a> — how the pieces fit together</li>
 <li><a href="/docs/pipelines/executors">Executors</a> — configuring AI providers in your pipelines</li>
+</ul> </div> </article><article id="ds-article-game" class="ds-article" aria-hidden="true"> <div class="ds-article-meta"> <span class="ds-article-title fg-purple">Game System</span> <span class="ds-article-desc fg-comment">Every pipeline you run earns XP, builds streaks, and may trigger an ICE encounter. Here&#39;s how it works.</span> </div> <div class="ds-content"> <p>gl1tch turns your pipeline runs into a persistent game. The more you run, the more XP you earn. Build streaks. Hit thresholds. Unlock achievements. Occasionally, ICE detects you.</p>
+<h2 id="how-scoring-works">How Scoring Works</h2>
+<p>Every time a pipeline completes, gl1tch scores the run. The score is based on:</p>
+<ul>
+<li><strong>Speed</strong> — faster runs score higher</li>
+<li><strong>Cache efficiency</strong> — hits on cached tokens add a bonus</li>
+<li><strong>Streak multiplier</strong> — consecutive days of runs stack your multiplier</li>
+<li><strong>Retry penalty</strong> — steps that fail and retry cost points</li>
+<li><strong>Provider weights</strong> — some providers score differently based on the active world pack</li>
+</ul>
+<p>You don’t configure any of this. It happens automatically in the background.</p>
+<h2 id="xp-levels-and-streaks">XP, Levels, and Streaks</h2>
+<p>Each scored run adds XP to your total. XP accumulates into levels. Your streak counts consecutive calendar days with at least one run.</p>
+<p>Check your standing with <code>glitch game top</code>:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> game</span><span style="color:#F1FA8C"> top</span></span></code></pre>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>── Personal Bests ──────────────────────────────</span></span>
+<span class="line"><span>  METRIC                    VALUE           DATE</span></span>
+<span class="line"><span>  ──────────────────────────────────────────────</span></span>
+<span class="line"><span>  Fastest Run               420ms           2026-03-15</span></span>
+<span class="line"><span>  Highest XP (single run)   1840 XP         2026-03-22</span></span>
+<span class="line"><span>  Longest Streak            14 days         2026-03-01</span></span>
+<span class="line"><span>  Most Cache Tokens         84200           2026-03-18</span></span>
+<span class="line"><span>  Lowest Cost (non-zero)    $0.000012       2026-03-20</span></span></code></pre>
+<h2 id="recap">Recap</h2>
+<p><code>glitch game recap</code> generates a short cyberpunk story arc narrating your last N days of runs. It uses your stats — runs, XP, achievements, streak — as the source material and asks your local Ollama model to narrate it.</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> game</span><span style="color:#F1FA8C"> recap</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> game</span><span style="color:#F1FA8C"> recap</span><span style="color:#BD93F9"> --days</span><span style="color:#BD93F9"> 14</span></span></code></pre>
+<p>No Ollama? It falls back to a plain stats table.</p>
+<h2 id="ice-encounters">ICE Encounters</h2>
+<p>When you cross certain thresholds or trip specific conditions, ICE spawns. You have until the deadline to resolve it.</p>
+<p>Check for an active encounter:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> game</span><span style="color:#F1FA8C"> ice</span></span></code></pre>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>[ICE DETECTED] Black ICE — Class IV</span></span>
+<span class="line"><span>Deadline: 2026-04-04T08:00:00Z</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>  [1] fight  — attempt to defeat the ICE</span></span>
+<span class="line"><span>  [2] jack-out — disconnect safely (loss)</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>Choice:</span></span></code></pre>
+<p><strong>Fight</strong> to keep your streak intact. <strong>Jack out</strong> to disengage safely — but your streak takes a hit.</p>
+<h2 id="the-world-pack">The World Pack</h2>
+<p>gl1tch maintains a “world pack” — a set of scoring weights and narrative rules that shape how the game feels. Over time, gl1tch analyzes your run patterns and tunes the world pack to fit how you actually work.</p>
+<p>To trigger the tuner manually:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> game</span><span style="color:#F1FA8C"> tune</span></span></code></pre>
+<p>The tuner calls Ollama with your last 30 days of stats, generates an evolved world pack, and writes it to <code>~/.local/share/glitch/agents/game-world-tuned.agent.md</code>. The next run picks it up automatically.</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>Running game tuner...</span></span>
+<span class="line"><span>  Stats window: last 30 days, 47 runs</span></span>
+<span class="line"><span>  Current pack: neon-sprawl-v2</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>Game pack evolved in 8s</span></span>
+<span class="line"><span>  Old pack: neon-sprawl-v2</span></span>
+<span class="line"><span>  New pack: neon-sprawl-v3</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>Weight changes:</span></span>
+<span class="line"><span>  speed_bonus_scale: 1.2000 → 1.4500 (+0.2500)</span></span>
+<span class="line"><span>  streak_multiplier: 1.5000 → 1.7000 (+0.2000)</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>Game rules: 42 lines (unchanged length)</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>Pack written to ~/.local/share/glitch/agents/game-world-tuned.agent.md</span></span></code></pre>
+<p>The tuner also runs automatically after runs that cross score thresholds — you don’t need to trigger it manually unless you want to force a refresh.</p>
+<h2 id="see-also">See Also</h2>
+<ul>
+<li><a href="/docs/pipelines/cli-reference#glitch-game">CLI Reference</a> — <code>glitch game</code> subcommands</li>
+<li><a href="/docs/pipelines/architecture">Architecture</a> — how run data is stored</li>
 </ul> </div> </article><article id="ds-article-themes" class="ds-article" aria-hidden="true"> <div class="ds-article-meta"> <span class="ds-article-title fg-purple">Themes</span> <span class="ds-article-desc fg-comment">Switch your assistant&#39;s look instantly, or build a theme that&#39;s completely yours.</span> </div> <div class="ds-content"> <p>gl1tch ships with a set of built-in themes. Switch between them with one command, or drop a <code>theme.yaml</code> into your config folder and make your workspace look exactly how you want it. Colors, borders, status bar, panel headers — all yours.</p>
 <h2 id="quick-start">Quick Start</h2>
 <p>Open the theme picker from anywhere in gl1tch:</p>
@@ -3191,20 +3427,19 @@ seconds longer to load.</p>
 <ul>
 <li><a href="/docs/pipelines/plugins">Plugins</a> — extend what your assistant can do</li>
 <li><a href="/docs/pipelines/prompts">Prompts</a> — pair a sharp theme with a sharp prompt library</li>
-</ul> </div> </article><article id="ds-article-customization" class="ds-article" aria-hidden="true"> <div class="ds-article-meta"> <span class="ds-article-title fg-purple">Customization</span> <span class="ds-article-desc fg-comment">Change the voice, panel names, and messages in your workspace — make gl1tch sound like you.</span> </div> <div class="ds-content"> <p>gl1tch ships with a default personality: dry, confident, hacker-adjacent. If that’s not your vibe, every label, panel title, modal message, and onboarding script is overridable. One YAML file, no restart required.</p>
+</ul> </div> </article><article id="ds-article-customization" class="ds-article" aria-hidden="true"> <div class="ds-article-meta"> <span class="ds-article-title fg-purple">Customization</span> <span class="ds-article-desc fg-comment">Change panel names, modal messages, and onboarding text in your workspace.</span> </div> <div class="ds-content"> <p>Every panel title, modal message, and onboarding script in gl1tch is overridable. One YAML file, no restart required.</p>
 <h2 id="quick-start">Quick Start</h2>
 <p>Create <code>~/.config/glitch/translations.yaml</code> and override any key you want:</p>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">deck_header_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">MY WORKSPACE</span><span style="color:#E9F284">"</span></span>
-<span class="line"><span style="color:#8BE9FD">signal_board_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">JOBS</span><span style="color:#E9F284">"</span></span>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">signal_board_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">JOBS</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">quit_modal_message</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">close everything?</span><span style="color:#E9F284">"</span></span></code></pre>
 <p>Reopen gl1tch and your changes are live.</p>
 <h2 id="how-it-works">How It Works</h2>
-<p>Every visible string in your workspace has a key. At startup gl1tch resolves each key through three layers in order:</p>
+<p>Every overridable string has a key. At startup gl1tch resolves each key through three layers in order:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>~/.config/glitch/translations.yaml   ← your overrides (highest priority)</span></span>
 <span class="line"><span>        │</span></span>
 <span class="line"><span>theme strings                         ← optional strings bundled with your theme</span></span>
 <span class="line"><span>        │</span></span>
-<span class="line"><span>built-in defaults                     ← shipped gl1tch personality</span></span></code></pre>
+<span class="line"><span>built-in defaults                     ← shipped gl1tch defaults</span></span></code></pre>
 <p>The first layer that has a value for a key wins. You only need to define the keys you want to change — everything else falls through to the default.</p>
 <h2 id="panel-and-modal-labels">Panel and Modal Labels</h2>
 <p>These keys control what you see in the UI chrome.</p>
@@ -3283,129 +3518,7 @@ seconds longer to load.</p>
 
 
 
-
-
-
-
-
-
-
-
-
-
-<table><thead><tr><th>Key</th><th>Default</th><th>What it labels</th></tr></thead><tbody><tr><td><code>deck_header_title</code></td><td><code>GL1TCH</code></td><td>Top header bar</td></tr><tr><td><code>pipelines_panel_title</code></td><td><code>PIPELINES</code></td><td>Pipeline list panel</td></tr><tr><td><code>agent_runner_panel_title</code></td><td><code>AGENT RUNNER</code></td><td>Agent runner panel</td></tr><tr><td><code>signal_board_panel_title</code></td><td><code>SIGNAL BOARD</code></td><td>Live job status view</td></tr><tr><td><code>activity_feed_panel_title</code></td><td><code>ACTIVITY FEED</code></td><td>Activity feed</td></tr><tr><td><code>inbox_panel_title</code></td><td><code>INBOX</code></td><td>Run results inbox</td></tr><tr><td><code>cron_panel_title</code></td><td><code>CRON JOBS</code></td><td>Scheduled jobs panel</td></tr><tr><td><code>quit_modal_title</code></td><td><code>BAIL OUT</code></td><td>Quit confirmation modal title</td></tr><tr><td><code>quit_modal_message</code></td><td><code>you sure? the grid will still be here.</code></td><td>Quit confirmation message</td></tr><tr><td><code>help_modal_title</code></td><td><code>GETTING STARTED</code></td><td>Help modal title</td></tr><tr><td><code>theme_picker_title</code></td><td><code>SELECT THEME</code></td><td>Theme picker title</td></tr><tr><td><code>theme_picker_dark_tab</code></td><td><code>Dark</code></td><td>Dark themes tab label</td></tr><tr><td><code>theme_picker_light_tab</code></td><td><code>Light</code></td><td>Light themes tab label</td></tr><tr><td><code>rerun_context_label</code></td><td><code>ADDITIONAL CONTEXT</code></td><td>Re-run modal context field</td></tr><tr><td><code>rerun_cwd_label</code></td><td><code>WORKING DIRECTORY</code></td><td>Re-run modal directory field</td></tr></tbody></table>
-<h2 id="help-modal">Help Modal</h2>
-<p>These keys control the section headers and key binding descriptions in the built-in help screen (<code>ctrl+space ?</code>).</p>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-<table><thead><tr><th>Key</th><th>Default</th></tr></thead><tbody><tr><td><code>help_chord_note</code></td><td><code>Chord prefix: ^spc  (ctrl+space, then the key below)</code></td></tr><tr><td><code>help_section_system</code></td><td><code>HELP &#x26; SYSTEM</code></td></tr><tr><td><code>help_section_workspace</code></td><td><code>WORKSPACE</code></td></tr><tr><td><code>help_section_windows</code></td><td><code>WINDOWS &#x26; PANES</code></td></tr><tr><td><code>help_section_nav</code></td><td><code>NAVIGATION</code></td></tr><tr><td><code>help_section_panels</code></td><td><code>PANELS</code></td></tr><tr><td><code>help_bind_help</code></td><td><code>this help</code></td></tr><tr><td><code>help_bind_quit</code></td><td><code>quit GLITCH</code></td></tr><tr><td><code>help_bind_detach</code></td><td><code>detach  (session stays alive)</code></td></tr><tr><td><code>help_bind_reload</code></td><td><code>reload  (hot-swap binary)</code></td></tr><tr><td><code>help_bind_themes</code></td><td><code>theme picker</code></td></tr><tr><td><code>help_bind_jump</code></td><td><code>jump to any window</code></td></tr><tr><td><code>help_bind_new_win</code></td><td><code>new window</code></td></tr><tr><td><code>help_bind_prev_win</code></td><td><code>previous / next window</code></td></tr><tr><td><code>help_bind_split_right</code></td><td><code>split pane right / down</code></td></tr><tr><td><code>help_bind_nav_pane</code></td><td><code>navigate panes</code></td></tr><tr><td><code>help_bind_kill</code></td><td><code>kill pane / window</code></td></tr><tr><td><code>help_bind_tab_nav</code></td><td><code>navigate panels &#x26; list items</code></td></tr><tr><td><code>help_bind_enter</code></td><td><code>open / confirm / run selected</code></td></tr><tr><td><code>help_bind_esc</code></td><td><code>back / close overlay</code></td></tr><tr><td><code>help_panel_pipelines</code></td><td><code>run and monitor named pipelines</code></td></tr><tr><td><code>help_panel_agent_runner</code></td><td><code>launch and wrangle AI agents</code></td></tr><tr><td><code>help_panel_signal_board</code></td><td><code>inter-agent message bus</code></td></tr><tr><td><code>help_panel_activity_feed</code></td><td><code>live events, run history, logs</code></td></tr><tr><td><code>help_panel_cron</code></td><td><code>scheduled pipelines and agent jobs</code></td></tr></tbody></table>
+<table><thead><tr><th>Key</th><th>Default</th><th>What it labels</th></tr></thead><tbody><tr><td><code>pipelines_panel_title</code></td><td><code>PIPELINES</code></td><td>Pipeline list panel</td></tr><tr><td><code>agent_runner_panel_title</code></td><td><code>AGENT RUNNER</code></td><td>Agent runner panel</td></tr><tr><td><code>signal_board_panel_title</code></td><td><code>SIGNAL BOARD</code></td><td>Live job status view</td></tr><tr><td><code>activity_feed_panel_title</code></td><td><code>ACTIVITY FEED</code></td><td>Activity feed</td></tr><tr><td><code>inbox_panel_title</code></td><td><code>INBOX</code></td><td>Run results inbox</td></tr><tr><td><code>cron_panel_title</code></td><td><code>CRON JOBS</code></td><td>Scheduled jobs panel</td></tr><tr><td><code>quit_modal_title</code></td><td><code>BAIL OUT</code></td><td>Quit confirmation modal title</td></tr><tr><td><code>quit_modal_message</code></td><td><code>you sure? the grid will still be here.</code></td><td>Quit confirmation message</td></tr><tr><td><code>theme_picker_title</code></td><td><code>SELECT THEME</code></td><td>Theme picker title</td></tr><tr><td><code>theme_picker_dark_tab</code></td><td><code>Dark</code></td><td>Dark themes tab label</td></tr><tr><td><code>theme_picker_light_tab</code></td><td><code>Light</code></td><td>Light themes tab label</td></tr><tr><td><code>rerun_context_label</code></td><td><code>ADDITIONAL CONTEXT</code></td><td>Re-run modal context field</td></tr><tr><td><code>rerun_cwd_label</code></td><td><code>WORKING DIRECTORY</code></td><td>Re-run modal directory field</td></tr></tbody></table>
 <h2 id="welcome-onboarding">Welcome Onboarding</h2>
 <p>The first time you open gl1tch, you see a scripted onboarding conversation. These are fully replaceable — write your own intro, change the tone, drop in your team’s context.</p>
 
@@ -3455,12 +3568,11 @@ seconds longer to load.</p>
 <span class="line"></span>
 <span class="line"><span style="color:#F1FA8C">  what are you working on?</span></span></code></pre>
 <blockquote>
-<p><strong>NOTE:</strong> The onboarding only runs once on first launch. To re-run it, delete <code>~/.local/share/glitch/glitch.db</code> — or just run the welcome assistant directly with <code>glitch assistant</code>.</p>
+<p><strong>NOTE:</strong> The onboarding only runs once on first launch. To re-run it, delete <code>~/.local/share/glitch/glitch.db</code>.</p>
 </blockquote>
 <h2 id="ansi-colors-in-values">ANSI Colors in Values</h2>
 <p>Any value can include ANSI escape sequences for color. Use the shorthand forms — gl1tch expands them automatically:</p>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">deck_header_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[1;35mMY GRID</span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[0m</span><span style="color:#E9F284">"</span></span>
-<span class="line"><span style="color:#8BE9FD">quit_modal_message</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[31myou sure?</span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[0m  the grid will still be here.</span><span style="color:#E9F284">"</span></span></code></pre>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">quit_modal_message</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[31myou sure?</span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[0m  the grid will still be here.</span><span style="color:#E9F284">"</span></span></code></pre>
 <p>Supported shorthand forms:</p>
 
 
@@ -3495,29 +3607,23 @@ seconds longer to load.</p>
 <span class="line"><span style="color:#6272A4">  # ... colors</span></span>
 <span class="line"></span>
 <span class="line"><span style="color:#8BE9FD">strings</span><span style="color:#FF79C6">:</span></span>
-<span class="line"><span style="color:#8BE9FD">  deck_header_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">SYSTEM</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">  signal_board_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">OPS</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">  quit_modal_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">DISCONNECT</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">  quit_modal_message</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">terminate session?</span><span style="color:#E9F284">"</span></span></code></pre>
 <p>See <a href="/docs/pipelines/themes">Themes</a> for the full theme format.</p>
 <h2 id="examples">Examples</h2>
 <h3 id="corporate-friendly-workspace">Corporate-friendly workspace</h3>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">deck_header_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">WORKSPACE</span><span style="color:#E9F284">"</span></span>
-<span class="line"><span style="color:#8BE9FD">pipelines_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">AUTOMATIONS</span><span style="color:#E9F284">"</span></span>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">pipelines_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">AUTOMATIONS</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">signal_board_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">ACTIVE JOBS</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">agent_runner_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">RUN</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">quit_modal_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">EXIT</span><span style="color:#E9F284">"</span></span>
-<span class="line"><span style="color:#8BE9FD">quit_modal_message</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">Close gl1tch?</span><span style="color:#E9F284">"</span></span>
-<span class="line"><span style="color:#8BE9FD">help_modal_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">KEYBOARD SHORTCUTS</span><span style="color:#E9F284">"</span></span></code></pre>
+<span class="line"><span style="color:#8BE9FD">quit_modal_message</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">Close gl1tch?</span><span style="color:#E9F284">"</span></span></code></pre>
 <h3 id="minimal-no-personality">Minimal, no personality</h3>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">deck_header_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">gl1tch</span><span style="color:#E9F284">"</span></span>
-<span class="line"><span style="color:#8BE9FD">quit_modal_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">quit</span><span style="color:#E9F284">"</span></span>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">quit_modal_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">quit</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">quit_modal_message</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">exit?</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">inbox_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">runs</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">cron_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">scheduled</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">signal_board_panel_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">live</span><span style="color:#E9F284">"</span></span></code></pre>
-<h3 id="ansi-styled-header">ANSI-styled header</h3>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">deck_header_title</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[1;36mGL1TCH</span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[0m  </span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[2m//  your workspace</span><span style="color:#FF79C6">\e</span><span style="color:#F1FA8C">[0m</span><span style="color:#E9F284">"</span></span></code></pre>
 <h2 id="see-also">See Also</h2>
 <ul>
 <li><a href="/docs/pipelines/themes">Themes</a> — change colors, borders, and layout alongside your copy</li>
