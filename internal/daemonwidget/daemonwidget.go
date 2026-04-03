@@ -4,6 +4,18 @@
 // Each daemon binary is started with cmd.Start() (non-blocking) immediately
 // after the BUSD event bus is ready. Processes are tracked and killed on
 // Stop(). If a daemon exits early it is left dead — no restart logic for MVP.
+//
+// Display requirements
+//
+// A sidecar may declare a display field to describe its graphical needs:
+//
+//	display: ""          — headless, always launched (default)
+//	display: headless    — same as empty
+//	display: systray     — requires a GUI windowing environment; skipped when
+//	                       no display is detected (SSH, headless Linux, etc.)
+//
+// On macOS (darwin) a windowing environment is always assumed present.
+// On other platforms the launcher checks $DISPLAY (X11) and $WAYLAND_DISPLAY.
 package daemonwidget
 
 import (
@@ -11,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 
 	"gopkg.in/yaml.v3"
 )
@@ -22,6 +35,29 @@ type sidecar struct {
 	Command string   `yaml:"command"`
 	Args    []string `yaml:"args,omitempty"`
 	Daemon  bool     `yaml:"daemon,omitempty"`
+	// Display describes graphical requirements: "", "headless", or "systray".
+	Display string `yaml:"display,omitempty"`
+}
+
+// hasDisplay returns true when a windowing environment is available.
+// On macOS it is always true. On Linux/other it requires $DISPLAY or
+// $WAYLAND_DISPLAY to be set.
+func hasDisplay() bool {
+	if runtime.GOOS == "darwin" {
+		return true
+	}
+	return os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
+}
+
+// canLaunch reports whether a daemon with the given display requirement can be
+// started in the current environment.
+func canLaunch(display string) bool {
+	switch display {
+	case "systray":
+		return hasDisplay()
+	default: // "", "headless", or any unrecognised value — always launch
+		return true
+	}
 }
 
 // Manager tracks running daemon processes.
@@ -30,9 +66,10 @@ type Manager struct {
 }
 
 // StartAll scans wrappersDir for sidecar YAMLs with daemon:true and starts
-// each one as a background process. Errors for individual daemons are printed
-// to stderr and skipped — a single bad entry will not prevent the others from
-// launching.
+// each eligible one as a background process. Daemons whose display requirement
+// cannot be satisfied in the current environment are skipped with a log line.
+// Errors for individual daemons are printed to stderr and skipped — a single
+// bad entry will not prevent the others from launching.
 func StartAll(wrappersDir string) *Manager {
 	m := &Manager{}
 
@@ -66,6 +103,11 @@ func StartAll(wrappersDir string) *Manager {
 			continue
 		}
 
+		if !canLaunch(sc.Display) {
+			fmt.Fprintf(os.Stderr, "glitch: daemonwidget: skipping %s (display:%q not available)\n", sc.Name, sc.Display)
+			continue
+		}
+
 		if sc.Command == "" {
 			fmt.Fprintf(os.Stderr, "glitch: daemonwidget: %s has daemon:true but no command\n", e.Name())
 			continue
@@ -80,7 +122,7 @@ func StartAll(wrappersDir string) *Manager {
 			continue
 		}
 
-		fmt.Fprintf(os.Stderr, "glitch: daemonwidget: started %s (pid %d)\n", sc.Name, cmd.Process.Pid)
+		fmt.Fprintf(os.Stderr, "glitch: daemonwidget: started %s (pid %d, display:%q)\n", sc.Name, cmd.Process.Pid, sc.Display)
 		m.procs = append(m.procs, cmd)
 	}
 

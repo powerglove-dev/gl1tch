@@ -59,6 +59,10 @@ type PluginSidecar struct {
 	// gl1tch will start it automatically on session launch (after BUSD is ready)
 	// and leave it running for the lifetime of the session.
 	Daemon       bool           `yaml:"daemon,omitempty"`
+	// Display describes the graphical requirements of a daemon plugin.
+	// Valid values: "" or "headless" (always launched), "systray" (skipped on
+	// headless hosts that have no windowing environment).
+	Display      string         `yaml:"display,omitempty"`
 	InputSchema  string         `yaml:"input_schema"`
 	OutputSchema string         `yaml:"output_schema"`
 	Signals      []PluginSignal `yaml:"signals,omitempty"`

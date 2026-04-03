@@ -64,6 +64,10 @@ type SidecarSchema struct {
 	// Daemon, when true, marks this plugin as a long-running background process.
 	// gl1tch starts it automatically on session launch after BUSD is ready.
 	Daemon bool `yaml:"daemon,omitempty"`
+	// Display describes the graphical requirements of a daemon plugin.
+	// Valid values: "" or "headless" (no display needed, always launched),
+	// "systray" (requires a GUI/windowing environment — skipped on headless hosts).
+	Display string `yaml:"display,omitempty"`
 	// Mode declares optional widget/UI-takeover behaviour. Zero-value when absent.
 	Mode ModeBlock `yaml:"mode,omitempty"`
 	// Signals declares optional BUSD topic subscriptions with named handlers. Nil when absent.
