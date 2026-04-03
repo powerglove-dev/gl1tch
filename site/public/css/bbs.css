@@ -853,15 +853,14 @@ body::before {
 
 .docs-article img {
   display: block;
-  /* Natural size, capped at viewport minus some breathing room */
-  width: auto;
-  max-width: min(960px, calc(100vw - 48px));
+  /* Bleed symmetrically into docs-main's 48px padding — stays within
+     overflow-x:hidden boundary while escaping the 720px content column */
+  width: calc(100% + 96px);
   height: auto;
-  /* Break out of the 720px content column and center on page */
-  position: relative;
-  left: 50%;
-  transform: translateX(-50%);
-  margin: 32px 0;
+  margin-top: 32px;
+  margin-bottom: 32px;
+  margin-left: -48px;
+  margin-right: -48px;
   border: 1px solid var(--purple);
   box-shadow: 0 0 0 1px var(--current-line), 4px 4px 0 0 var(--purple);
   border-radius: 2px;
