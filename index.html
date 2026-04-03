@@ -2546,7 +2546,7 @@ esc
 <span class="line"><span>  Steps run in order — parallel where possible</span></span>
 <span class="line"><span>  Each step:</span></span>
 <span class="line"><span>    1. Resolves template expressions ({{steps.x.output}})</span></span>
-<span class="line"><span>    2. Calls the executor (ollama, claude, gh, etc.)</span></span>
+<span class="line"><span>    2. Calls the executor (ollama, claude, shell, etc.)</span></span>
 <span class="line"><span>    3. Captures the output</span></span>
 <span class="line"><span>    4. Stores it locally</span></span>
 <span class="line"><span></span></span>
@@ -2555,23 +2555,57 @@ esc
 <span class="line"><span>  Results appear in your terminal</span></span>
 <span class="line"><span>  Full run history written to ~/.local/share/glitch/glitch.db</span></span></code></pre>
 <p>That’s it. No hidden agents. No cloud orchestration. The work happens on your machine.</p>
-<h2 id="the-control-panel">The Control Panel</h2>
-<p>When you run <code>glitch</code> without a subcommand, you get a three-column workspace:</p>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>┌─────────────────┬──────────────────┬──────────────────┐</span></span>
-<span class="line"><span>│  Your Pipelines │  gl1tch Chat     │  Activity Feed   │</span></span>
-<span class="line"><span>│  ────────────── │  ──────────────  │  ──────────────  │</span></span>
-<span class="line"><span>│                 │                  │                  │</span></span>
-<span class="line"><span>│  list of all    │  Ask questions,  │  Live output     │</span></span>
-<span class="line"><span>│  your pipelines │  get answers,    │  from running    │</span></span>
-<span class="line"><span>│  (searchable)   │  launch jobs     │  pipelines       │</span></span>
-<span class="line"><span>│                 │                  │                  │</span></span>
-<span class="line"><span>│  Agent Runner   │  Agent Grid      │  Step statuses   │</span></span>
-<span class="line"><span>│  (run a model   │  Signal Board    │  Elapsed time    │</span></span>
-<span class="line"><span>│   with a prompt)│  Inbox Detail    │  Results         │</span></span>
-<span class="line"><span>└─────────────────┴──────────────────┴──────────────────┘</span></span></code></pre>
-<p><strong>Left column:</strong> Your pipeline list and agent runner form. Tab cycles focus between them.</p>
-<p><strong>Center column:</strong> The main interaction area. Chat with your assistant, monitor running jobs, review past results.</p>
-<p><strong>Right column:</strong> The activity feed. Every pipeline run streams here in real time — step by step, with status and timing.</p>
+<h2 id="your-workspace">Your Workspace</h2>
+<p>When you run <code>glitch</code> without a subcommand, it starts a tmux session named <code>glitch</code> and opens the console — a full-screen chat interface where you talk to your assistant, launch pipelines, and review results.</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>┌────────────────────────────────────────────────────────────┐</span></span>
+<span class="line"><span>│  GL1TCH                                            [header] │</span></span>
+<span class="line"><span>│                                                             │</span></span>
+<span class="line"><span>│  gl1tch: What do you need?                                  │</span></span>
+<span class="line"><span>│                                                             │</span></span>
+<span class="line"><span>│  you: run code-review on the current branch                 │</span></span>
+<span class="line"><span>│                                                             │</span></span>
+<span class="line"><span>│  gl1tch: Running code-review…  ✓ done                       │</span></span>
+<span class="line"><span>│  [result output]                                            │</span></span>
+<span class="line"><span>│                                                             │</span></span>
+<span class="line"><span>│ ╭─────────────────────────────────────────────────────────╮ │</span></span>
+<span class="line"><span>│ │ > type a message or /command                            │ │</span></span>
+<span class="line"><span>│ │                                             agent │ p │ │ │</span></span>
+<span class="line"><span>│ ╰─────────────────────────────────────────────────────────╯ │</span></span>
+<span class="line"><span>└────────────────────────────────────────────────────────────┘</span></span></code></pre>
+<p>The send panel at the bottom lets you select a saved agent, attach a saved prompt, or attach a named pipeline to your message.</p>
+<h3 id="views-inside-the-workspace">Views inside the workspace</h3>
+<p>Press <code>/</code> commands or keyboard shortcuts to switch what you’re looking at:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>View</th><th>How to open</th><th>What it shows</th></tr></thead><tbody><tr><td>Chat</td><td>default</td><td>Conversation with your assistant</td></tr><tr><td>Signal board</td><td><code>/signals</code></td><td>Live status of all running and recent pipeline jobs</td></tr><tr><td>Inbox</td><td><code>/inbox</code></td><td>Detailed results of past runs, searchable</td></tr><tr><td>Brain editor</td><td><code>/brain</code></td><td>Read and edit your brain memory notes</td></tr></tbody></table>
 <h2 id="where-things-live">Where Things Live</h2>
 
 
@@ -2606,20 +2640,24 @@ esc
 
 
 
-<table><thead><tr><th>What</th><th>Where</th></tr></thead><tbody><tr><td>Your pipelines</td><td><code>~/.config/glitch/pipelines/</code></td></tr><tr><td>Your workflows</td><td><code>~/.config/glitch/workflows/</code></td></tr><tr><td>Your tool wrappers</td><td><code>~/.config/glitch/wrappers/</code></td></tr><tr><td>Your themes</td><td><code>~/.config/glitch/themes/</code></td></tr><tr><td>Run history (SQLite)</td><td><code>~/.local/share/glitch/glitch.db</code></td></tr><tr><td>Trace logs</td><td><code>~/.local/share/glitch/traces.jsonl</code></td></tr></tbody></table>
+
+
+
+
+<table><thead><tr><th>What</th><th>Where</th></tr></thead><tbody><tr><td>Your pipelines</td><td><code>~/.config/glitch/pipelines/</code></td></tr><tr><td>Your workflows</td><td><code>~/.config/glitch/workflows/</code></td></tr><tr><td>Your tool wrappers</td><td><code>~/.config/glitch/wrappers/</code></td></tr><tr><td>Your themes</td><td><code>~/.config/glitch/themes/</code></td></tr><tr><td>Run history + brain + prompts</td><td><code>~/.local/share/glitch/glitch.db</code></td></tr><tr><td>Trace logs</td><td><code>~/.local/share/glitch/traces.jsonl</code></td></tr><tr><td>Cron log</td><td><code>~/.local/share/glitch/cron.log</code></td></tr></tbody></table>
 <p>Everything is on your disk. Nothing requires a network connection for core operation.</p>
-<h2 id="how-the-brain-works">How the Brain Works</h2>
-<p>The brain is a local database of context from your pipeline runs. When a step has <code>write_brain: true</code>, its output is indexed and stored. On future runs with <code>--brain</code>, gl1tch retrieves relevant context and injects it into your prompts.</p>
-<p>Your workspace learns over time without you having to re-explain things.</p>
 <h2 id="how-scheduling-works">How Scheduling Works</h2>
-<p>Your workspace can run pipelines on a schedule. The scheduler watches <code>~/.config/glitch/pipelines/</code> and fires pipelines based on their <code>cron</code> field:</p>
+<p>gl1tch runs a second background tmux session named <code>glitch-cron</code> alongside the main console. It watches your pipelines and fires the ones with a <code>cron</code> field on schedule:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> morning-summary</span></span>
 <span class="line"><span style="color:#8BE9FD">cron</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">0 8 * * 1-5</span><span style="color:#E9F284">"</span><span style="color:#6272A4">   # 8am, Monday–Friday</span></span>
 <span class="line"><span style="color:#8BE9FD">steps</span><span style="color:#FF79C6">:</span></span>
 <span class="line"><span style="color:#BD93F9">  ...</span></span></code></pre>
-<p>Start the scheduler:</p>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> cron</span><span style="color:#F1FA8C"> start</span></span></code></pre>
-<p>The scheduler runs in a detached terminal session and keeps going whether you’re watching or not.</p>
+<p>The cron session starts automatically when you open gl1tch. You can also interact with it directly:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> cron</span><span style="color:#F1FA8C"> list</span><span style="color:#6272A4">    # see scheduled pipelines and next run times</span></span>
+<span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> cron</span><span style="color:#F1FA8C"> logs</span><span style="color:#6272A4">    # tail the cron log</span></span></code></pre>
+<h2 id="how-the-brain-works">How the Brain Works</h2>
+<p>The brain is a local store of context built up from your pipeline runs. When a step has <code>write_brain: true</code>, its output is indexed and stored. On future runs with <code>--brain</code>, gl1tch retrieves relevant context and injects it into your prompts.</p>
+<p>Your workspace learns over time without you having to re-explain things.</p>
 <h2 id="how-glitch-ask-works">How glitch ask Works</h2>
 <p>When you run <code>glitch ask "summarize my open PRs"</code>, gl1tch:</p>
 <ol>
