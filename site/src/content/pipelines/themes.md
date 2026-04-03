@@ -214,6 +214,7 @@ modal:
 | `statusbar.bg` | yes | string | Hex or `palette.<key>` reference |
 | `statusbar.fg` | yes | string | Hex or `palette.<key>` reference |
 | `splash` | no | string | Relative path to an `.ans` ANSI art file |
+| `strings` | no | map | UI text overrides — panel titles, modal messages, etc. See [Customization](/docs/pipelines/customization) |
 | `modal.bg` | no | string | Hex or palette reference |
 | `modal.border` | no | string | Hex or palette reference |
 | `modal.title_bg` | no | string | Hex or palette reference |

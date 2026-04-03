@@ -1,7 +1,8 @@
-// Package translations provides a UI string overrides layer for GL1TCH.
-// Operators can override any labeled string in the UI via a YAML file at
-// ~/.config/glitch/translations.yaml. Values may contain raw ANSI escape
-// sequences or the shorthand notations \e[, \033[, and \x1b[.
+// Package translations provides the UI text and personality customization layer
+// for GL1TCH. Users can override any labeled string — panel titles, modal
+// messages, onboarding scripts, help text — via ~/.config/glitch/translations.yaml.
+// Values may contain raw ANSI escape sequences or the shorthand notations
+// \e[, \033[, and \x1b[.
 package translations
 
 // Provider is implemented by any translations source.
