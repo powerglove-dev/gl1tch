@@ -240,6 +240,99 @@ esc
 <span class="line"><span style="color:#F1FA8C">      {{steps.get-logs.output}}</span></span></code></pre>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> pipeline</span><span style="color:#F1FA8C"> run</span><span style="color:#F1FA8C"> summarize.pipeline.yaml</span></span></code></pre>
 <p>Your last 10 commits feed straight into the model. The summary streams to your terminal.</p>
+<h2 id="building-a-pipeline-with-gl1tch">Building a Pipeline with gl1tch</h2>
+<p>You don’t have to write YAML by hand. Ask gl1tch to build it.</p>
+<p>Open your workspace (<code>glitch</code>), then describe what you want:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>you:     build me a pipeline that summarizes my recent git activity</span></span>
+<span class="line"><span>         and flags anything that looks risky</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>gl1tch:  got it. pulling commits and diffstat, then routing through</span></span>
+<span class="line"><span>         a local model for the summary and risk pass.</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>         here's the pipeline — i'll save it to</span></span>
+<span class="line"><span>         ~/.config/glitch/pipelines/git-digest.pipeline.yaml</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>         ┌─────────────────────────────────────────────────────┐</span></span>
+<span class="line"><span>         │ name: git-digest                                     │</span></span>
+<span class="line"><span>         │ version: "1"                                         │</span></span>
+<span class="line"><span>         │                                                      │</span></span>
+<span class="line"><span>         │ steps:                                               │</span></span>
+<span class="line"><span>         │   - id: log                                          │</span></span>
+<span class="line"><span>         │     executor: shell                                  │</span></span>
+<span class="line"><span>         │     prompt: "git log --oneline -20"                  │</span></span>
+<span class="line"><span>         │                                                      │</span></span>
+<span class="line"><span>         │   - id: diffstat                                     │</span></span>
+<span class="line"><span>         │     executor: shell                                  │</span></span>
+<span class="line"><span>         │     prompt: "git diff HEAD~10 --stat"                │</span></span>
+<span class="line"><span>         │                                                      │</span></span>
+<span class="line"><span>         │   - id: summarize                                    │</span></span>
+<span class="line"><span>         │     executor: ollama                                 │</span></span>
+<span class="line"><span>         │     model: qwen2.5-coder:latest                      │</span></span>
+<span class="line"><span>         │     needs: [log, diffstat]                           │</span></span>
+<span class="line"><span>         │     prompt: |                                        │</span></span>
+<span class="line"><span>         │       Summarize recent git activity.                 │</span></span>
+<span class="line"><span>         │       Flag any changes that look risky (large        │</span></span>
+<span class="line"><span>         │       deletions, core files, no tests nearby).       │</span></span>
+<span class="line"><span>         │                                                      │</span></span>
+<span class="line"><span>         │       commits:                                       │</span></span>
+<span class="line"><span>         │       {{steps.log.output}}                           │</span></span>
+<span class="line"><span>         │                                                      │</span></span>
+<span class="line"><span>         │       diffstat:                                      │</span></span>
+<span class="line"><span>         │       {{steps.diffstat.output}}                      │</span></span>
+<span class="line"><span>         └─────────────────────────────────────────────────────┘</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>         run it?</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>you:     yes</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>gl1tch:  running git-digest…</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>         ✓  log       0.1s</span></span>
+<span class="line"><span>         ✓  diffstat  0.1s</span></span>
+<span class="line"><span>         ✓  summarize 3.2s</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>         ─────────────────────────────────────────────────────</span></span>
+<span class="line"><span>         Recent activity spans 20 commits over the last 3 days.</span></span>
+<span class="line"><span>         Main changes: pipeline runner refactor (runner.go +340</span></span>
+<span class="line"><span>         / -180), new executor discovery logic, test coverage</span></span>
+<span class="line"><span>         added for retry behavior.</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>         ⚠ Flagged: internal/pipeline/runner.go saw significant</span></span>
+<span class="line"><span>         rewrites with no accompanying test file changes in the</span></span>
+<span class="line"><span>         same window. Worth a focused review pass before merge.</span></span>
+<span class="line"><span>         ─────────────────────────────────────────────────────</span></span></code></pre>
+<p>The pipeline is saved. Run it any time:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> pipeline</span><span style="color:#F1FA8C"> run</span><span style="color:#F1FA8C"> git-digest</span></span></code></pre>
+<p>Or ask from the console:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>run git-digest</span></span></code></pre>
+<hr>
+<p>Here’s the full pipeline that was generated and tested:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> git-digest</span></span>
+<span class="line"><span style="color:#8BE9FD">version</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">1</span><span style="color:#E9F284">"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#8BE9FD">steps</span><span style="color:#FF79C6">:</span></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> log</span></span>
+<span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> shell</span></span>
+<span class="line"><span style="color:#8BE9FD">    prompt</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">git log --oneline -20</span><span style="color:#E9F284">"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> diffstat</span></span>
+<span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> shell</span></span>
+<span class="line"><span style="color:#8BE9FD">    prompt</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">git diff HEAD~10 --stat</span><span style="color:#E9F284">"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> summarize</span></span>
+<span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ollama</span></span>
+<span class="line"><span style="color:#8BE9FD">    model</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> qwen2.5-coder:latest</span></span>
+<span class="line"><span style="color:#8BE9FD">    needs</span><span style="color:#FF79C6">:</span><span style="color:#F8F8F2"> [</span><span style="color:#F1FA8C">log</span><span style="color:#F8F8F2">, </span><span style="color:#F1FA8C">diffstat</span><span style="color:#F8F8F2">]</span></span>
+<span class="line"><span style="color:#8BE9FD">    prompt</span><span style="color:#FF79C6">:</span><span style="color:#FF79C6"> |</span></span>
+<span class="line"><span style="color:#F1FA8C">      Summarize recent git activity.</span></span>
+<span class="line"><span style="color:#F1FA8C">      Flag any changes that look risky (large deletions, core files, no tests nearby).</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F1FA8C">      commits:</span></span>
+<span class="line"><span style="color:#F1FA8C">      {{steps.log.output}}</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F1FA8C">      diffstat:</span></span>
+<span class="line"><span style="color:#F1FA8C">      {{steps.diffstat.output}}</span></span></code></pre>
+<p><code>log</code> and <code>diffstat</code> run in parallel. <code>summarize</code> waits for both, then feeds both outputs to the model in a single pass.</p>
 <h2 id="how-pipelines-work">How Pipelines Work</h2>
 <h3 id="steps">Steps</h3>
 <p>Every pipeline is a list of steps. Each step has:</p>
@@ -486,43 +579,97 @@ esc
 <span class="line"><span style="color:#8BE9FD">    needs</span><span style="color:#FF79C6">:</span><span style="color:#F8F8F2"> [</span><span style="color:#F1FA8C">extract</span><span style="color:#F8F8F2">]</span></span>
 <span class="line"><span style="color:#8BE9FD">    prompt</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">Prioritize these TODOs by risk: {{steps.extract.output}}</span><span style="color:#E9F284">"</span></span></code></pre>
 <h2 id="examples">Examples</h2>
-<h3 id="morning-standup-digest">Morning Standup Digest</h3>
-<p>Fetches your commits and drafts a standup update:</p>
+<h3 id="morning-standup">Morning standup</h3>
+<p>Asks gl1tch to build it:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>you:     i want a pipeline that reads my last day of commits and</span></span>
+<span class="line"><span>         writes a standup draft</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>gl1tch:  saving as standup.pipeline.yaml</span></span></code></pre>
+<p>The tested pipeline:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> standup</span></span>
 <span class="line"><span style="color:#8BE9FD">version</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">1</span><span style="color:#E9F284">"</span></span>
-<span class="line"><span style="color:#8BE9FD">vars</span><span style="color:#FF79C6">:</span></span>
-<span class="line"><span style="color:#8BE9FD">  repo</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">your-org/your-repo</span><span style="color:#E9F284">"</span></span>
+<span class="line"></span>
 <span class="line"><span style="color:#8BE9FD">steps</span><span style="color:#FF79C6">:</span></span>
 <span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> commits</span></span>
-<span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> gh</span></span>
-<span class="line"><span style="color:#8BE9FD">    vars</span><span style="color:#FF79C6">:</span></span>
-<span class="line"><span style="color:#8BE9FD">      args</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">api repos/{{vars.repo}}/commits?since=$(date -u -v-1d +%Y-%m-%dT%H:%M:%SZ) --jq '.[].commit.message'</span><span style="color:#E9F284">"</span></span>
+<span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> shell</span></span>
+<span class="line"><span style="color:#8BE9FD">    prompt</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">git log --since='24 hours ago' --oneline --no-merges</span><span style="color:#E9F284">"</span></span>
+<span class="line"></span>
 <span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> draft</span></span>
-<span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> claude</span></span>
-<span class="line"><span style="color:#8BE9FD">    model</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> claude-haiku-4-5-20251001</span></span>
+<span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ollama</span></span>
+<span class="line"><span style="color:#8BE9FD">    model</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> qwen2.5-coder:latest</span></span>
 <span class="line"><span style="color:#8BE9FD">    needs</span><span style="color:#FF79C6">:</span><span style="color:#F8F8F2"> [</span><span style="color:#F1FA8C">commits</span><span style="color:#F8F8F2">]</span></span>
 <span class="line"><span style="color:#8BE9FD">    prompt</span><span style="color:#FF79C6">:</span><span style="color:#FF79C6"> |</span></span>
-<span class="line"><span style="color:#F1FA8C">      Write a brief standup based on these commits:</span></span>
-<span class="line"><span style="color:#F1FA8C">      {{steps.commits.output}}</span></span>
-<span class="line"><span style="color:#F1FA8C">      Format: Yesterday / Today / Blockers. Under 10 lines.</span></span></code></pre>
-<h3 id="parallel-model-comparison">Parallel Model Comparison</h3>
-<p>Sends the same prompt to two models, compares their answers:</p>
+<span class="line"><span style="color:#F1FA8C">      Write a standup update from these commits.</span></span>
+<span class="line"><span style="color:#F1FA8C">      Format: Yesterday / Today / Blockers. Keep it under 8 lines.</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F1FA8C">      {{steps.commits.output}}</span></span></code></pre>
+<p>Run output:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>✓  commits  0.1s</span></span>
+<span class="line"><span>✓  draft    2.8s</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>Yesterday: finished executor discovery refactor, added retry policy</span></span>
+<span class="line"><span>  tests, fixed template rendering for nested steps.</span></span>
+<span class="line"><span>Today: wiring up the plugin manifest validator, then reviewing the</span></span>
+<span class="line"><span>  open PRs on the runner.</span></span>
+<span class="line"><span>Blockers: none.</span></span></code></pre>
+<h3 id="code-review-on-a-diff">Code review on a diff</h3>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> diff-review</span></span>
+<span class="line"><span style="color:#8BE9FD">version</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">1</span><span style="color:#E9F284">"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#8BE9FD">steps</span><span style="color:#FF79C6">:</span></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> diff</span></span>
+<span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> shell</span></span>
+<span class="line"><span style="color:#8BE9FD">    prompt</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">git diff main --stat &#x26;&#x26; git diff main</span><span style="color:#E9F284">"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> review</span></span>
+<span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ollama</span></span>
+<span class="line"><span style="color:#8BE9FD">    model</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> qwen2.5-coder:latest</span></span>
+<span class="line"><span style="color:#8BE9FD">    needs</span><span style="color:#FF79C6">:</span><span style="color:#F8F8F2"> [</span><span style="color:#F1FA8C">diff</span><span style="color:#F8F8F2">]</span></span>
+<span class="line"><span style="color:#8BE9FD">    prompt</span><span style="color:#FF79C6">:</span><span style="color:#FF79C6"> |</span></span>
+<span class="line"><span style="color:#F1FA8C">      Review this diff. Focus on:</span></span>
+<span class="line"><span style="color:#F1FA8C">      - correctness issues</span></span>
+<span class="line"><span style="color:#F1FA8C">      - missing error handling</span></span>
+<span class="line"><span style="color:#F1FA8C">      - anything that would fail in production</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F1FA8C">      {{steps.diff.output}}</span></span></code></pre>
+<p>Run output:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>✓  diff    0.1s</span></span>
+<span class="line"><span>✓  review  4.1s</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>Overall: mostly clean. Three things worth looking at:</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>1. executor/discovery.go:88 — LoadWrappersFromDir swallows errors</span></span>
+<span class="line"><span>   into a slice but the caller only logs them. If a sidecar fails</span></span>
+<span class="line"><span>   to load, the pipeline silently skips it. Consider returning an</span></span>
+<span class="line"><span>   error or at minimum logging at warn level.</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>2. pipeline/runner.go:1737 — prompt_id lookup uses GetPromptByTitle</span></span>
+<span class="line"><span>   which does a case-insensitive match. Two prompts that differ only</span></span>
+<span class="line"><span>   in case would be ambiguous. Worth a comment or an exact-match guard.</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>3. No tests added for the new retry backoff path. The existing retry</span></span>
+<span class="line"><span>   tests only cover max_attempts. Edge case but worth covering.</span></span></code></pre>
+<h3 id="parallel-model-comparison">Parallel model comparison</h3>
+<p>Same question to two models, then a judgment pass. <code>claude-answer</code> and <code>local-answer</code> run in parallel — <code>judge</code> waits for both:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> compare</span></span>
 <span class="line"><span style="color:#8BE9FD">version</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">1</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">vars</span><span style="color:#FF79C6">:</span></span>
 <span class="line"><span style="color:#8BE9FD">  question</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">Explain Go interfaces in two sentences.</span><span style="color:#E9F284">"</span></span>
+<span class="line"></span>
 <span class="line"><span style="color:#8BE9FD">steps</span><span style="color:#FF79C6">:</span></span>
 <span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> claude-answer</span></span>
 <span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> claude</span></span>
 <span class="line"><span style="color:#8BE9FD">    model</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> claude-haiku-4-5-20251001</span></span>
 <span class="line"><span style="color:#8BE9FD">    prompt</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">{{vars.question}}</span><span style="color:#E9F284">"</span></span>
+<span class="line"></span>
 <span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> local-answer</span></span>
 <span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ollama</span></span>
-<span class="line"><span style="color:#8BE9FD">    model</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> llama3.2:latest</span></span>
+<span class="line"><span style="color:#8BE9FD">    model</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> qwen2.5-coder:latest</span></span>
 <span class="line"><span style="color:#8BE9FD">    prompt</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">{{vars.question}}</span><span style="color:#E9F284">"</span></span>
+<span class="line"></span>
 <span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> judge</span></span>
 <span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> claude</span></span>
-<span class="line"><span style="color:#8BE9FD">    model</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> claude-sonnet-4-6</span></span>
+<span class="line"><span style="color:#8BE9FD">    model</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> claude-haiku-4-5-20251001</span></span>
 <span class="line"><span style="color:#8BE9FD">    needs</span><span style="color:#FF79C6">:</span><span style="color:#F8F8F2"> [</span><span style="color:#F1FA8C">claude-answer</span><span style="color:#F8F8F2">, </span><span style="color:#F1FA8C">local-answer</span><span style="color:#F8F8F2">]</span></span>
 <span class="line"><span style="color:#8BE9FD">    prompt</span><span style="color:#FF79C6">:</span><span style="color:#FF79C6"> |</span></span>
 <span class="line"><span style="color:#F1FA8C">      Compare these two answers to: "{{vars.question}}"</span></span>
@@ -530,8 +677,17 @@ esc
 <span class="line"><span style="color:#F1FA8C">      Answer A: {{steps.claude-answer.output}}</span></span>
 <span class="line"><span style="color:#F1FA8C">      Answer B: {{steps.local-answer.output}}</span></span>
 <span class="line"></span>
-<span class="line"><span style="color:#F1FA8C">      Which is more accurate and why?</span></span></code></pre>
-<p><code>claude-answer</code> and <code>local-answer</code> run in parallel. <code>judge</code> waits for both.</p>
+<span class="line"><span style="color:#F1FA8C">      Which is clearer and more accurate? One paragraph.</span></span></code></pre>
+<p>Run output:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>✓  claude-answer  1.2s</span></span>
+<span class="line"><span>✓  local-answer   2.1s   (parallel)</span></span>
+<span class="line"><span>✓  judge          1.4s</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>Both answers are accurate. Answer A is more concise — it leads with</span></span>
+<span class="line"><span>the behavioral definition (a set of method signatures) before explaining</span></span>
+<span class="line"><span>implicit satisfaction. Answer B gives a good concrete analogy but buries</span></span>
+<span class="line"><span>the definition. For a developer new to Go, Answer A is the better starting</span></span>
+<span class="line"><span>point.</span></span></code></pre>
 <h2 id="reference">Reference</h2>
 <h3 id="step-fields">Step Fields</h3>
 
