@@ -38,7 +38,7 @@ func main() {
 			bootstrap.WriteReloadMarker() //nolint:errcheck
 			exec.Command("tmux", "detach-client").Run() //nolint:errcheck
 			return
-		case "ask", "help", "pipeline", "workflow", "completion", "config", "cron", "widget", "backup", "restore", "game", "plugin":
+		case "ask", "help", "model", "pipeline", "workflow", "completion", "config", "cron", "widget", "backup", "restore", "game", "plugin":
 			cmd.Execute()
 			return
 		default:
