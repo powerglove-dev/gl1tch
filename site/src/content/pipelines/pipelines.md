@@ -42,7 +42,11 @@ Your last 10 commits feed straight into the model. The summary streams to your t
 
 You don't have to write YAML by hand. Ask gl1tch to build it.
 
-Open your workspace (`glitch`), then describe what you want:
+Open your workspace (`glitch`):
+
+![gl1tch workspace ready](/screenshots/pipelines/pipeline-build-01-ready.png)
+
+Describe what you want:
 
 ```text
 you:     build me a pipeline that summarizes my recent git activity
@@ -116,6 +120,8 @@ Or run it from the console:
 ```text
 /pipeline git-digest
 ```
+
+![gl1tch launching git-digest](/screenshots/pipelines/pipeline-run-03-result.png)
 
 ---
 
