@@ -1,158 +1,118 @@
 ---
 title: "Executors"
-description: "Configure the AI providers and tools that run your pipeline steps."
+description: "The AI providers and tools that run your pipeline steps."
 order: 3
 ---
 
-Every pipeline step has an `executor` field. That field picks what does the work — an AI model, a CLI tool, or a lightweight builtin. Here's how to configure each one.
+Every pipeline step has an `executor` field that picks what does the work — a local AI model, a cloud provider, a CLI tool, or a builtin. You can ask gl1tch to build pipeline steps for you, or write them directly in YAML.
 
-## Quick Start
+## Quick reference
 
-Pick your provider and copy the YAML:
+| Executor | What it does | Needs |
+|----------|-------------|-------|
+| `ollama` | Runs a local model via Ollama | Ollama running, model pulled |
+| `claude` | Runs Claude via the Claude CLI | Claude CLI authenticated |
+| `shell` | Runs any shell command | Nothing extra |
+| `gh` | Runs a `gh` CLI subcommand | GitHub CLI authenticated |
+| `jq` | Applies a jq filter to JSON input | `jq` on PATH |
+| `builtin.*` | Lightweight built-in functions | Nothing extra |
 
-**Local AI (Ollama):**
-```yaml
-- id: analyze
-  executor: ollama
-  model: qwen2.5-coder:latest
-  prompt: "Explain what this function does."
-```
-
-**Claude:**
-```yaml
-- id: review
-  executor: claude
-  model: claude-sonnet-4-6
-  prompt: "Review this code for bugs."
-```
-
-**GitHub CLI:**
-```yaml
-- id: list-prs
-  executor: gh
-  vars:
-    args: "pr list --json number,title,author"
-```
-
-## AI Providers
+## AI executors
 
 ### ollama
 
-Runs a model on your local [Ollama](https://ollama.ai) instance. Connects to `localhost:11434`. No API key. No data leaves your machine.
+Runs a model on your local [Ollama](https://ollama.ai) instance at `localhost:11434`. No API key. No data leaves your machine.
 
 ```yaml
-- id: analyze
+- id: summarize
   executor: ollama
-  model: qwen2.5-coder:latest
-  prompt: "What does this function do?\n\n{{steps.fetch.output}}"
+  model: qwen2.5:latest
+  prompt: |
+    Summarize these commits in 2–3 sentences:
+    {{.step.fetch.data.value}}
 ```
 
 Pull the model first:
 
 ```bash
-ollama pull qwen2.5-coder:latest
+ollama pull qwen2.5:latest
 ```
 
-The `model` field is the exact Ollama model tag. Use any model you have pulled.
+Use `model` to set the Ollama model tag. You can use any model you have pulled — run `ollama list` to see what's available.
+
+> **Note:** Smaller models (qwen2.5, llama3.2) handle summarization, classification, and generation well. Pipelines that use tools, run shell commands autonomously, or coordinate multi-step reasoning require a larger local model with tool/function-calling support — `ollama pull qwen3:8b` is a good starting point for agentic steps.
 
 ### claude
 
-Runs Claude via the Claude CLI. Install and authenticate the CLI before using this executor — gl1tch delegates to it.
+Runs Claude via the [Claude CLI](https://claude.ai/download). Install and authenticate the CLI before using this executor.
 
 ```yaml
 - id: review
   executor: claude
-  model: claude-sonnet-4-6
+  model: claude-haiku-4-5-20251001
   prompt: |
-    Review this pull request diff for correctness and security.
-    {{steps.get-diff.output}}
+    Review this diff for correctness and security:
+    {{.step.fetch.data.value}}
 ```
 
-Use the full model identifier in the `model` field.
+| Model | Use for |
+|-------|---------|
+| `claude-haiku-4-5-20251001` | Summarization, formatting, simple transforms (default) |
+| `claude-sonnet-4-6` | Complex reasoning, code review, writing |
+| `claude-opus-4-6` | Hardest tasks |
 
-| Model | Description |
-|-------|-------------|
-| `claude-sonnet-4-6` | Best quality. Use for complex analysis and writing. |
-| `claude-haiku-4-5-20251001` | Faster. Use for classification, formatting, and simple transforms. |
+When no `model` is specified, gl1tch uses Haiku.
 
-## Provider Table
+## Shell and CLI executors
 
-| Executor | Runs where | Needs |
-|----------|-----------|-------|
-| `ollama` | Your machine | Ollama running locally, model pulled |
-| `claude` | Anthropic API | Claude CLI installed and authenticated |
+### shell
 
-> **TIP:** Use `ollama` for routing decisions and quick transforms. Use `claude` for tasks that benefit from a larger model — code review, complex reasoning, writing.
+Runs any shell command and captures stdout. Use this to fetch data for downstream AI steps.
 
-## CLI Tool Executors
+```yaml
+- id: fetch
+  executor: shell
+  vars:
+    cmd: "git log --oneline -10"
+```
 
-These wrap command-line tools. They pass `vars.args` to the tool and capture stdout.
+Pass the command as `vars.cmd`. It runs inside `sh -c`.
 
 ### gh
 
-GitHub CLI wrapper. Requires the [GitHub CLI](https://cli.github.com/) installed and authenticated.
+Wraps the [GitHub CLI](https://cli.github.com/). Requires `gh` installed and authenticated.
 
 ```yaml
-- id: list-prs
+- id: fetch-diff
   executor: gh
   vars:
-    args: "pr list --json number,title,author"
+    args: "pr diff 42"
 ```
 
 Pass any `gh` subcommand and flags as `vars.args`. Output is captured and available to downstream steps.
 
 ### jq
 
-Runs [jq](https://jqlang.github.io/jq/) on the step input. Use it to transform JSON between steps.
+Applies a [jq](https://jqlang.github.io/jq/) filter to JSON input.
 
 ```yaml
 - id: extract-titles
   executor: jq
-  needs: [list-prs]
-  input: "{{steps.list-prs.output}}"
+  needs: [fetch-prs]
+  input: "{{.step.fetch-prs.data.value}}"
   vars:
-    args: ".[].title"
+    filter: ".[].title"
 ```
 
-### write
+Pass the filter expression as `vars.filter`. Input defaults to the previous step's output.
 
-Writes the step input to a file on disk.
+## Builtin executors
 
-```yaml
-- id: save-report
-  executor: write
-  needs: [review]
-  vars:
-    path: "./review.md"
-  input: "{{steps.review.output}}"
-```
-
-### Custom tool wrappers
-
-Wrap any CLI tool by creating a YAML file in `~/.config/glitch/wrappers/`:
-
-```yaml
-# ~/.config/glitch/wrappers/my-tool.yaml
-name: my-tool
-description: "Custom CLI integration"
-command: /usr/local/bin/my-tool
-args: ["--format", "json"]
-kind: tool
-```
-
-Now use `executor: my-tool` in any pipeline. Input goes to stdin, output comes from stdout. Each key in `vars` is passed to the process as `GLITCH_<KEY>=<value>`.
-
-The `kind` field controls what context the executor receives:
-- `tool` — receives only the step input
-- `agent` — receives the full execution context (default)
-
-## Builtins
-
-Builtins are lightweight functions built into gl1tch. They don't spawn processes or call APIs. Use them for control flow, validation, and glue.
+Builtins are lightweight functions built into gl1tch. They don't spawn processes or call external APIs — use them for control flow and glue between steps.
 
 ### builtin.assert
 
-Validates a value. Fails the step if the assertion is false. Use it to gate downstream steps on expected output.
+Fails the step — and halts the pipeline — if a value doesn't match what's expected.
 
 ```yaml
 - id: check
@@ -160,12 +120,12 @@ Validates a value. Fails the step if the assertion is false. Use it to gate down
   needs: [analyze]
   args:
     expected: "pass"
-    actual: "{{steps.analyze.output}}"
+    actual: "{{.step.analyze.data.value}}"
 ```
 
 ### builtin.set_data
 
-Sets static values in the step output. Useful for injecting constants or seed data into the pipeline.
+Injects static values into the pipeline context. Useful for constants and seed data.
 
 ```yaml
 - id: config
@@ -178,7 +138,7 @@ Sets static values in the step output. Useful for injecting constants or seed da
 
 ### builtin.log
 
-Logs a message during pipeline execution. Does not produce output for downstream steps.
+Logs a message during execution. Produces no output for downstream steps.
 
 ```yaml
 - id: checkpoint
@@ -190,7 +150,7 @@ Logs a message during pipeline execution. Does not produce output for downstream
 
 ### builtin.sleep
 
-Pauses execution for a duration. Useful for rate limiting.
+Pauses execution. Useful for rate limiting between steps.
 
 ```yaml
 - id: wait
@@ -213,7 +173,7 @@ Makes a GET request and returns the response body.
 
 ### builtin.index_code
 
-Indexes a codebase directory for semantic search using a local model. Run this as a first step before asking questions about a codebase.
+Indexes a codebase for semantic search using a local model. Run this before `builtin.search_code` steps.
 
 ```yaml
 - id: index
@@ -223,49 +183,91 @@ Indexes a codebase directory for semantic search using a local model. Run this a
     model: "qwen2.5-coder:latest"
 ```
 
-## Full Example: Code Review Pipeline
+### builtin.search_code
 
-Four steps, three executor types:
+Searches an indexed codebase semantically.
 
 ```yaml
-name: code-review
+- id: find
+  executor: builtin.search_code
+  needs: [index]
+  args:
+    query: "error handling in pipeline runner"
+    limit: 5
+```
+
+## Passing output between steps
+
+Use `{{.step.<id>.data.value}}` to inject a previous step's output into a prompt or input field:
+
+```yaml
+steps:
+  - id: fetch
+    executor: shell
+    vars:
+      cmd: "git log --oneline -5"
+
+  - id: summarize
+    executor: ollama
+    model: qwen2.5:latest
+    needs: [fetch]
+    prompt: |
+      Summarize these commits:
+      {{.step.fetch.data.value}}
+```
+
+The `needs` field ensures `fetch` finishes before `summarize` starts.
+
+## Custom wrappers
+
+Wrap any CLI tool by dropping a YAML file in `~/.config/glitch/wrappers/`:
+
+```yaml
+# ~/.config/glitch/wrappers/my-tool.yaml
+name: my-tool
+description: "My custom CLI integration"
+command: /usr/local/bin/my-tool
+args: ["--format", "json"]
+kind: tool
+```
+
+Use `executor: my-tool` in any pipeline step. Input goes to stdin. Each key in `vars` is passed as `GLITCH_<KEY>=<value>`. The `kind` field controls context:
+- `tool` — receives only the step input
+- `agent` — receives the full execution context (default)
+
+## Full example: PR review pipeline
+
+Three executor types working together — shell fetches the diff, Claude reviews it, shell saves the result:
+
+```yaml
+name: pr-review-local
 version: "1"
 steps:
-  # Fetch the PR diff with the GitHub CLI
-  - id: get-diff
+  - id: fetch-diff
     executor: gh
     vars:
       args: "pr diff 42"
 
-  # AI review
   - id: review
-    executor: claude
-    model: claude-sonnet-4-6
-    needs: [get-diff]
+    executor: ollama
+    model: qwen3:8b
+    needs: [fetch-diff]
     prompt: |
       Review this pull request diff. Focus on correctness, edge cases,
       and security. Be specific.
 
-      {{steps.get-diff.output}}
+      {{.step.fetch-diff.data.value}}
 
-  # Log a checkpoint
-  - id: log-done
-    executor: builtin.log
-    needs: [review]
-    args:
-      message: "Review complete."
-
-  # Save the review to disk
   - id: save
-    executor: write
+    executor: shell
     needs: [review]
     vars:
-      path: ./review-pr42.md
-    input: "{{steps.review.output}}"
+      cmd: "cat > review-pr42.md"
+    input: "{{.step.review.data.value}}"
 ```
 
-## See Also
+## See also
 
 - [Pipeline YAML Reference](/docs/pipelines/yaml-reference) — every field and what it does
-- [CLI Reference](/docs/pipelines/cli-reference) — running pipelines from the command line
-- [Workflows](/docs/pipelines/workflows) — chain multiple pipelines together
+- [Examples](/docs/pipelines/examples) — ready-to-run pipelines for real workflows
+- [Plugins](/docs/pipelines/plugins) — install community executors
