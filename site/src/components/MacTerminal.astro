@@ -84,17 +84,6 @@ async function init() {
     inputEl.focus();
   });
 
-  // Docs panel close button
-  document.getElementById('docs-panel-close')?.addEventListener('click', closeDocs);
-
-  // Click backdrop (::after on workspace) to close docs
-  document.getElementById('terminal-workspace')?.addEventListener('click', (e) => {
-    const workspace = e.currentTarget as HTMLElement;
-    if (!workspace.classList.contains('docs-open')) return;
-    const panel = document.getElementById('docs-panel');
-    if (panel && !panel.contains(e.target as Node)) closeDocs();
-  });
-
   // Run intro, then enable input
   inputEl.disabled = true;
   await runIntro();
@@ -176,12 +165,7 @@ function processCommand(raw: string) {
     }
 
     if (name === 'docs' || name === 'd') {
-      const workspace = document.getElementById('terminal-workspace');
-      if (workspace?.classList.contains('docs-open')) {
-        closeDocs();
-      } else {
-        openDocs();
-      }
+      window.location.href = '/docs';
       return;
     }
 
@@ -588,26 +572,6 @@ steps:
 function showRandomPipeline() {
   const pick = PIPELINES[Math.floor(Math.random() * PIPELINES.length)];
   typewrite(`${pick.name}  —  ${pick.desc}\n\n${pick.yaml}\n\nrun it:  glitch pipeline run ${pick.name}.yaml\ntype /pipelines again for another example.`);
-}
-
-// ── Docs split panel ──────────────────────────────────────────
-
-function openDocs() {
-  const workspace = document.getElementById('terminal-workspace');
-  const panel     = document.getElementById('docs-panel');
-  if (!workspace || !panel) return;
-  workspace.classList.add('docs-open');
-  panel.removeAttribute('aria-hidden');
-  appendLine('output-dim', '>> docs panel open  ·  /docs to close  ·  × to dismiss');
-}
-
-function closeDocs() {
-  const workspace = document.getElementById('terminal-workspace');
-  const panel     = document.getElementById('docs-panel');
-  if (!workspace || !panel) return;
-  workspace.classList.remove('docs-open');
-  panel.setAttribute('aria-hidden', 'true');
-  inputEl.focus();
 }
 
 // ── Output ────────────────────────────────────────────────────────────────────

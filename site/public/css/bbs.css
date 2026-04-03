@@ -372,101 +372,6 @@ body::before {
   position: relative;
 }
 
-/* Terminal stays untouched — docs panel stacks on top */
-.terminal-workspace.docs-open .mac-terminal {
-  /* no resize */
-}
-
-/* Splitbar not used in overlay mode */
-.docs-splitbar { display: none; }
-
-/* Backdrop — dims everything behind the panel */
-.terminal-workspace::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.6);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.28s ease;
-  z-index: 9;
-}
-.terminal-workspace.docs-open::after {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-/* Panel: fixed overlay, 72vw × 72vh, centered in viewport */
-.docs-panel {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -46%) scale(0.97);
-  width: 72vw;
-  height: 72vh;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg);
-  border-radius: 8px;
-  opacity: 0;
-  pointer-events: none;
-  transition:
-    opacity 0.24s ease,
-    transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-  z-index: 10;
-}
-
-.terminal-workspace.docs-open .docs-panel {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translate(-50%, -50%) scale(1);
-  box-shadow:
-    0 0 0 1px rgba(135,135,175,0.3),
-    0 0 80px rgba(135,135,175,0.1),
-    0 32px 64px rgba(0,0,0,0.85);
-}
-
-.docs-panel-titlebar {
-  background: var(--darkbg);
-  border-bottom: 1px solid rgba(135,135,175,0.2);
-  height: 38px;
-  display: flex;
-  align-items: center;
-  padding: 0 14px;
-  flex-shrink: 0;
-  position: relative;
-  user-select: none;
-}
-
-.docs-panel-close {
-  position: absolute;
-  right: 14px;
-  top: 50%;
-  transform: translateY(-50%);
-  background: none;
-  border: none;
-  color: var(--comment);
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
-  padding: 2px 6px;
-  font-family: 'JetBrains Mono', monospace;
-  transition: color 0.15s;
-}
-
-.docs-panel-close:hover { color: var(--red); }
-
-.docs-panel-body {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-
-.docs-panel-body::-webkit-scrollbar         { width: 4px; }
-.docs-panel-body::-webkit-scrollbar-track   { background: transparent; }
-.docs-panel-body::-webkit-scrollbar-thumb   { background: var(--comment); border-radius: 2px; }
-
 /* ── Pane content styles (used by screen components) ── */
 
 .term-pane-header {
@@ -574,7 +479,6 @@ body::before {
 /* ─── RESPONSIVE ──────────────────────────────────────────── */
 
 @media (max-width: 900px) {
-  .docs-panel { width: 94vw; height: 90vh; }
 }
 
 @media (max-width: 600px) {

@@ -1,28 +1,12 @@
 ---
 import Base from '../layouts/Base.astro';
 import MacTerminal from '../components/MacTerminal.astro';
-import DocsScreen from '../components/screens/DocsScreen.astro';
 import ProjectStats from '../components/ProjectStats.astro';
 ---
 <Base>
   <main class="terminal-stage">
     <div class="terminal-workspace" id="terminal-workspace">
       <MacTerminal />
-      <div class="docs-splitbar" id="docs-splitbar" aria-hidden="true"></div>
-      <div class="docs-panel" id="docs-panel" aria-hidden="true">
-        <div class="docs-panel-titlebar">
-          <div class="mac-dots" aria-hidden="true">
-            <span class="mac-dot mac-dot-red"></span>
-            <span class="mac-dot mac-dot-yellow"></span>
-            <span class="mac-dot mac-dot-green"></span>
-          </div>
-          <span class="mac-title">DOCS</span>
-          <button class="docs-panel-close" id="docs-panel-close" aria-label="Close docs panel">×</button>
-        </div>
-        <div class="docs-panel-body">
-          <DocsScreen />
-        </div>
-      </div>
     </div>
   </main>
   <ProjectStats />
