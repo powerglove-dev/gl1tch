@@ -1736,6 +1736,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.glitchChat = newPanel
 			doneCmd = tea.Batch(doneCmd, alertCmd)
 		}
+		// Append a compact pipeline completion entry to the launching session's history.
+		if jh, ok := m.activeJobs[msg.id]; ok && jh.session != "" && jh.pipelineName != "" {
+			if histCmd := appendPipelineHistoryCmd(m.glitchChat.cfgDir, jh.session, jh.pipelineName, msg.id, finalStatus == FeedFailed); histCmd != nil {
+				doneCmd = tea.Batch(doneCmd, histCmd)
+			}
+		}
 		delete(m.activeJobs, msg.id)
 		return m, doneCmd
 
@@ -1795,6 +1801,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			newPanel, alertCmd := m.glitchChat.update(glitchNarrationMsg{text: quip})
 			m.glitchChat = newPanel
 			failCmd = tea.Batch(failCmd, alertCmd)
+		}
+		// Append a compact pipeline failure entry to the launching session's history.
+		if jh, ok := m.activeJobs[msg.id]; ok && jh.session != "" && jh.pipelineName != "" {
+			if histCmd := appendPipelineHistoryCmd(m.glitchChat.cfgDir, jh.session, jh.pipelineName, msg.id, true); histCmd != nil {
+				failCmd = tea.Batch(failCmd, histCmd)
+			}
 		}
 		delete(m.activeJobs, msg.id)
 		return m, failCmd

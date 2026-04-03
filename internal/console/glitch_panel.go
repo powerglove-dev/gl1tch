@@ -1282,6 +1282,14 @@ func newGlitchPanel(cfgDir string, providers []picker.ProviderDef, s *store.Stor
 				s.backend = lookupBackend(rec.Backend, providers)
 			}
 			s.resumeID = rec.ResumeID
+			if !rec.CreatedAt.IsZero() {
+				s.createdAt = rec.CreatedAt
+			}
+			// Load conversation history so Ollama and other backends have context.
+			if hist, err := loadHistory(cfgDir, rec.Name, 20); err == nil && len(hist) > 0 {
+				s.turns = trimTurns(hist)
+				s.resumed = true
+			}
 		}
 		// Switch to the previously active session (non-main only).
 		if activeName != "main" && p.sessions.get(activeName) != nil {
@@ -1451,6 +1459,10 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					glitchSaveBrainNote(p.store, "glitch-chat",
 						fmt.Sprintf("type:conversation cwd:%q title:\"GLITCH %s\" tags:\"chat,glitch\"", p.launchCWD, time.Now().Format("2006-01-02 15:04")),
 						"USER: "+lastUser+"\n\nGLITCH: "+response)
+					// Persist this turn pair to history.jsonl for cross-restart continuity.
+					if histCmd := appendHistoryCmd(p.cfgDir, p.sessions.active, lastUser, response); histCmd != nil {
+						saveCmd = tea.Batch(saveCmd, histCmd)
+					}
 				}
 			}
 			p.streamIsRunAnalysis = false
@@ -3071,7 +3083,16 @@ func (p glitchChatPanel) build(height, width int, pal styles.ANSIPalette) []stri
 	} else {
 		subtitleArrow = ">>"
 	}
-	subtitle := subtitleArrow + " GL1TCH AI assistant  //  " + providerLabel
+	subtitleBase := subtitleArrow + " GL1TCH AI assistant  //  " + providerLabel
+	subtitleVisW := len(subtitleBase) // approximate (ASCII only)
+	subtitle := subtitleBase
+	if p.sessions != nil {
+		if s := p.sessions.Active(); s != nil && s.resumed {
+			const resumedLabel = "  (resumed)"
+			subtitle += pal.Dim + resumedLabel + aRst
+			subtitleVisW += len(resumedLabel)
+		}
+	}
 	// Urgent clarification badge: "▶N?" when any pending item has gone urgent.
 	if n := len(p.pendingClarifications); n > 0 {
 		badge := fmt.Sprintf(" [%d?]", n)
@@ -3080,8 +3101,8 @@ func (p glitchChatPanel) build(height, width int, pal styles.ANSIPalette) []stri
 		} else {
 			subtitle += pal.Dim + badge + aRst
 		}
+		subtitleVisW += len(badge)
 	}
-	subtitleVisW := len(subtitle) // approximate (ASCII only)
 	availW := width - hPad*2
 	clockVisW := len(timeStr)
 

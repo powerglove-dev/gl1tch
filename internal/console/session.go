@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"gopkg.in/yaml.v3"
@@ -25,13 +26,15 @@ const (
 
 // chatSession holds the conversation history and status for a named session.
 type chatSession struct {
-	name     string
-	messages []glitchEntry
-	turns    []glitchTurn
-	status   SessionStatus
-	cwd      string        // working directory for this session
-	backend  glitchBackend // AI provider+model for this session
-	resumeID string        // provider-side conversation ID for resumption (e.g. Claude session_id)
+	name      string
+	messages  []glitchEntry
+	turns     []glitchTurn
+	status    SessionStatus
+	cwd       string        // working directory for this session
+	backend   glitchBackend // AI provider+model for this session
+	resumeID  string        // provider-side conversation ID for resumption (e.g. Claude session_id)
+	createdAt time.Time     // when this session was first created
+	resumed   bool          // true when history was loaded from history.jsonl on startup
 }
 
 // SessionRegistry manages named chat sessions.
@@ -42,7 +45,7 @@ type SessionRegistry struct {
 
 func newSessionRegistry() *SessionRegistry {
 	return &SessionRegistry{
-		sessions: []*chatSession{{name: "main", status: SessionActive}},
+		sessions: []*chatSession{{name: "main", status: SessionActive, createdAt: time.Now().UTC()}},
 		active:   "main",
 	}
 }
@@ -79,7 +82,7 @@ func (r *SessionRegistry) get(name string) *chatSession {
 
 // create adds a new idle session. Caller must verify name is unique.
 func (r *SessionRegistry) create(name string) *chatSession {
-	s := &chatSession{name: name, status: SessionIdle}
+	s := &chatSession{name: name, status: SessionIdle, createdAt: time.Now().UTC()}
 	r.sessions = append(r.sessions, s)
 	return s
 }
@@ -138,10 +141,12 @@ func (r *SessionRegistry) markAttention(name string) {
 
 // sessionRecord is the on-disk representation of a single session.
 type sessionRecord struct {
-	Name     string `yaml:"name"`
-	CWD      string `yaml:"cwd,omitempty"`
-	Backend  string `yaml:"backend,omitempty"` // backend.name() slug, e.g. "ollama/llama3.2"
-	ResumeID string `yaml:"resume_id,omitempty"`
+	Name       string    `yaml:"name"`
+	CWD        string    `yaml:"cwd,omitempty"`
+	Backend    string    `yaml:"backend,omitempty"` // backend.name() slug, e.g. "ollama/llama3.2"
+	ResumeID   string    `yaml:"resume_id,omitempty"`
+	CreatedAt  time.Time `yaml:"created_at,omitempty"`
+	LastUsedAt time.Time `yaml:"last_used_at,omitempty"`
 }
 
 // sessionFile is the top-level structure of sessions.yaml.
@@ -177,6 +182,7 @@ func loadSessions(cfgDir string) ([]sessionRecord, string, error) {
 // are the panel's live values for the currently displayed session, which may
 // differ from what the registry holds until the next switchToSession call.
 func saveSessionsCmd(cfgDir string, reg *SessionRegistry, activeName, activeCWD string, activeBackend glitchBackend) tea.Cmd {
+	now := time.Now().UTC()
 	sf := sessionFile{Active: reg.active}
 	for _, s := range reg.sessions {
 		cwd := s.cwd
@@ -189,11 +195,17 @@ func saveSessionsCmd(cfgDir string, reg *SessionRegistry, activeName, activeCWD 
 		} else if s.backend != nil {
 			backendName = s.backend.name()
 		}
+		createdAt := s.createdAt
+		if createdAt.IsZero() {
+			createdAt = now
+		}
 		sf.Sessions = append(sf.Sessions, sessionRecord{
-			Name:     s.name,
-			CWD:      cwd,
-			Backend:  backendName,
-			ResumeID: s.resumeID,
+			Name:       s.name,
+			CWD:        cwd,
+			Backend:    backendName,
+			ResumeID:   s.resumeID,
+			CreatedAt:  createdAt,
+			LastUsedAt: now,
 		})
 	}
 	return func() tea.Msg {
