@@ -4,7 +4,7 @@ description: "Install community pipelines and executors — or build your own �
 order: 99
 ---
 
-gl1tch ships with a solid set of built-in executors, but the real power is what the community builds on top. Plugins add new executors to your assistant — a Jira client, a Slack poster, a custom code generator — and once installed, they work in any pipeline just like the built-ins. Think of it as an app store for your AI assistant.
+gl1tch ships with a solid set of built-in executors, but the real power is what the community builds on top. Plugins add new executors to your assistant — a MUD world manager, a weather fetcher, a push notifier — and once installed they work in any pipeline just like the built-ins. Think of it as an app store for your AI assistant.
 
 
 ## Quick Start
@@ -12,13 +12,13 @@ gl1tch ships with a solid set of built-in executors, but the real power is what 
 Install a plugin from GitHub with one command:
 
 ```bash
-glitch apm install owner/plugin-name
+glitch plugin install owner/plugin-name
 ```
 
 List what you have installed:
 
 ```bash
-glitch apm list
+glitch plugin list
 ```
 
 Use it in a pipeline immediately:
@@ -40,11 +40,11 @@ That's it. No restarts, no config edits.
 
 ```bash
 # Install latest version
-glitch apm install owner/repo
+glitch plugin install owner/repo
 
 # Pin to a specific version or branch
-glitch apm install owner/repo@v2.1.0
-glitch apm install owner/repo@main
+glitch plugin install owner/repo@v2.1.0
+glitch plugin install owner/repo@main
 ```
 
 gl1tch reads the plugin's manifest, installs the binary, and registers it as an executor. The plugin is ready to use in your pipelines immediately.
@@ -52,18 +52,19 @@ gl1tch reads the plugin's manifest, installs the binary, and registers it as an 
 ### Listing Installed Plugins
 
 ```bash
-glitch apm list
+glitch plugin list
 ```
 
 ```text
-my-plugin       owner/my-plugin       v1.0.0    ~/.local/bin/my-plugin
-codegen         owner/codegen         v2.1.0    ~/.local/bin/codegen
+gl1tch-mud      8op-org/gl1tch-mud      v1.0.0    ~/.local/bin/gl1tch-mud
+gl1tch-weather  8op-org/gl1tch-weather  v1.2.0    ~/.local/bin/gl1tch-weather
+gl1tch-notify   8op-org/gl1tch-notify   v0.9.0    ~/.local/bin/gl1tch-notify
 ```
 
 ### Removing a Plugin
 
 ```bash
-glitch apm remove plugin-name
+glitch plugin remove plugin-name
 ```
 
 
@@ -72,21 +73,21 @@ glitch apm remove plugin-name
 Once installed, a plugin becomes an executor. Reference it by name in any pipeline step:
 
 ```yaml
-name: notify-and-generate
+name: morning-brief
 version: "1"
 
 steps:
-  - id: generate
-    executor: codegen
+  - id: weather
+    executor: gl1tch-weather
     args:
-      prompt: "Write a Fibonacci function in Python"
+      location: "Austin, TX"
 
   - id: notify
-    executor: slack-poster
-    needs: [generate]
+    executor: gl1tch-notify
+    needs: [weather]
     args:
-      channel: "#dev"
-      message: "Code generation complete"
+      title: "Morning brief"
+      body: "{{steps.weather.output}}"
 ```
 
 
@@ -135,7 +136,7 @@ gl1tch picks the right binary for your platform automatically (`darwin-arm64`, `
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | yes | Unique plugin name — becomes the executor name |
-| `description` | yes | Short description shown in `glitch apm list` |
+| `description` | yes | Short description shown in `glitch plugin list` |
 | `binary` | no | Binary name on PATH; defaults to `name` |
 | `version` | no | Git ref, tag, or branch to install |
 | `install.go` | one of | Go module path for `go install` builds |
@@ -151,16 +152,69 @@ gl1tch picks the right binary for your platform automatically (`darwin-arm64`, `
 ## Examples
 
 
-### Slack Notification Plugin
+### gl1tch-mud
 
-Install and use a Slack posting plugin:
+Run a text MUD world as a pipeline executor. Each step can query room state, move the player, or trigger world events.
 
 ```bash
-glitch apm install acme/glitch-slack
+glitch plugin install 8op-org/gl1tch-mud
 ```
 
 ```yaml
-name: deploy-notify
+name: explore-sector
+version: "1"
+
+steps:
+  - id: look
+    executor: gl1tch-mud
+    args:
+      command: look
+
+  - id: describe
+    executor: llm
+    needs: [look]
+    prompt: |
+      Narrate this room in two sentences for a cyberpunk setting:
+      {{steps.look.output}}
+```
+
+
+### gl1tch-weather
+
+Fetch current conditions or forecasts. Useful as a data source step before any LLM summary or notification.
+
+```bash
+glitch plugin install 8op-org/gl1tch-weather
+```
+
+```yaml
+name: weather-digest
+version: "1"
+
+steps:
+  - id: fetch
+    executor: gl1tch-weather
+    args:
+      location: "Austin, TX"
+      units: imperial
+
+  - id: summarize
+    executor: llm
+    needs: [fetch]
+    prompt: "Summarize this forecast in one sentence: {{steps.fetch.output}}"
+```
+
+
+### gl1tch-notify
+
+Send desktop or push notifications when a pipeline finishes, fails, or hits a threshold.
+
+```bash
+glitch plugin install 8op-org/gl1tch-notify
+```
+
+```yaml
+name: deploy-and-notify
 version: "1"
 
 steps:
@@ -168,34 +222,12 @@ steps:
     executor: shell
     command: "make deploy"
 
-  - id: notify
-    executor: glitch-slack
+  - id: alert
+    executor: gl1tch-notify
     needs: [deploy]
     args:
-      channel: "#deploys"
-      message: "Deploy finished at {{now}}"
-```
-
-
-### Code Generator Plugin
-
-Pin to a specific release for reproducibility:
-
-```bash
-glitch apm install acme/glitch-codegen@v2.1.0
-```
-
-```yaml
-name: generate-tests
-version: "1"
-
-steps:
-  - id: generate
-    executor: glitch-codegen
-    args:
-      language: python
-      prompt: "Write unit tests for the attached function"
-      input: "{{steps.read.output}}"
+      title: "Deploy complete"
+      body: "{{steps.deploy.output}}"
 ```
 
 
@@ -203,7 +235,7 @@ steps:
 
 1. Create a GitHub repo with your binary and a `glitch-plugin.yaml` at the root.
 2. Tag a release: `git tag v1.0.0 && git push --tags`.
-3. Share the install command: `glitch apm install your-username/your-plugin`.
+3. Share the install command: `glitch plugin install your-username/your-plugin`.
 
 Anyone with gl1tch can install it in one command.
 
