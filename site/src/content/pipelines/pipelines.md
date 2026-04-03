@@ -17,7 +17,8 @@ version: "1"
 steps:
   - id: get-logs
     executor: shell
-    prompt: "git log --oneline -10"
+    vars:
+      cmd: "git log --oneline -10"
 
   - id: summarize
     executor: ollama
@@ -27,7 +28,7 @@ steps:
       Summarize these recent git commits in plain English.
       Focus on what changed, not how:
 
-      {{steps.get-logs.output}}
+      {{get "step.get-logs.data.value" .}}
 ```
 
 ```bash
@@ -127,25 +128,27 @@ version: "1"
 steps:
   - id: log
     executor: shell
-    prompt: "git log --oneline -20"
+    vars:
+      cmd: "git log --oneline -20"
 
   - id: diffstat
     executor: shell
-    prompt: "git diff HEAD~10 --stat"
+    vars:
+      cmd: "git diff HEAD~10 --stat"
 
   - id: summarize
-    executor: ollama
-    model: qwen2.5-coder:latest
+    executor: claude
+    model: claude-haiku-4-5-20251001
     needs: [log, diffstat]
     prompt: |
       Summarize recent git activity.
       Flag any changes that look risky (large deletions, core files, no tests nearby).
 
       commits:
-      {{steps.log.output}}
+      {{get "step.log.data.value" .}}
 
       diffstat:
-      {{steps.diffstat.output}}
+      {{get "step.diffstat.data.value" .}}
 ```
 
 `log` and `diffstat` run in parallel. `summarize` waits for both, then feeds both outputs to the model in a single pass.
@@ -165,7 +168,8 @@ Every pipeline is a list of steps. Each step has:
 steps:
   - id: fetch
     executor: shell
-    prompt: "curl -s https://api.example.com/status"
+    vars:
+      cmd: "curl -s https://api.example.com/status"
 ```
 
 ### Dependencies with `needs`
@@ -176,7 +180,8 @@ By default, steps with no `needs` run immediately (and in parallel if there are 
 steps:
   - id: fetch           # runs first
     executor: shell
-    prompt: "curl -s https://api.example.com/status"
+    vars:
+      cmd: "curl -s https://api.example.com/status"
 
   - id: analyze         # waits for fetch
     executor: claude
@@ -184,7 +189,7 @@ steps:
     needs: [fetch]
     prompt: |
       What does this API status response mean?
-      {{steps.fetch.output}}
+      {{get "step.fetch.data.value" .}}
 ```
 
 Add multiple IDs to `needs` to wait for several steps:
@@ -197,11 +202,11 @@ gl1tch runs `fetch-prod` and `fetch-staging` in parallel, then starts `analyze` 
 
 ### Passing Output Between Steps
 
-Use `{{steps.<id>.output}}` in any prompt or args field to inject a previous step's output:
+Use `{{get "step.<id>.data.value" .}}` in any prompt field to inject a previous step's output:
 
 ```yaml
 prompt: |
-  Here is the data: {{steps.fetch.output}}
+  Here is the data: {{get "step.fetch.data.value" .}}
   Summarize it.
 ```
 
@@ -211,7 +216,7 @@ Other template forms:
 
 | Expression | What it gives you |
 |------------|-------------------|
-| `{{steps.fetch.output}}` | Full stdout of the `fetch` step |
+| `{{get "step.fetch.data.value" .}}` | Full output of the `fetch` step |
 | `{{vars.repo}}` | A pipeline-level variable |
 | `{{env "HOME"}}` | An environment variable |
 
@@ -239,7 +244,7 @@ steps:
     prompt: |
       Here are the open issues for {{vars.repo}}:
 
-      {{steps.list-issues.output}}
+      {{get "step.list-issues.data.value" .}}
 
       Group them by label. For each group, list the issue numbers and titles.
       End with a one-sentence summary of the overall backlog health.
@@ -249,7 +254,7 @@ steps:
     needs: [digest]
     vars:
       path: "./issue-digest.md"
-    input: "{{steps.digest.output}}"
+    input: "{{get \"step.digest.data.value\" .}}"
 ```
 
 Run it:
@@ -267,7 +272,7 @@ The executor tells gl1tch what kind of work a step does.
 
 | Executor | What it does |
 |----------|-------------|
-| `shell` | Runs a shell command; `prompt` is the command string |
+| `shell` | Runs a shell command; `vars.cmd` is the command string |
 | `claude` | Sends `prompt` to a Claude model |
 | `ollama` | Sends `prompt` to a local Ollama model |
 | `gh` | Runs a `gh` CLI command; `vars.args` is the argument string |
@@ -287,7 +292,8 @@ For `claude` and `ollama` steps, set `model` to the model name. For shell-based 
 ```yaml
 - id: flaky-api
   executor: shell
-  prompt: "curl -f https://api.example.com/data"
+  vars:
+    cmd: "curl -f https://api.example.com/data"
   retry:
     max_attempts: 3
     interval: "5s"
@@ -298,12 +304,14 @@ For `claude` and `ollama` steps, set `model` to the model name. For shell-based 
 ```yaml
 - id: deploy
   executor: shell
-  prompt: "./deploy.sh"
+  vars:
+    cmd: "./deploy.sh"
   on_failure: notify-slack
 
 - id: notify-slack
   executor: shell
-  prompt: "curl -X POST $SLACK_WEBHOOK -d '{\"text\":\"deploy failed\"}'"
+  vars:
+    cmd: "curl -X POST $SLACK_WEBHOOK -d '{\"text\":\"deploy failed\"}'"
 ```
 
 ### Conditional Execution
@@ -311,7 +319,8 @@ For `claude` and `ollama` steps, set `model` to the model name. For shell-based 
 ```yaml
 - id: check
   executor: shell
-  prompt: "test -f ./lockfile && echo 'locked' || echo 'free'"
+  vars:
+    cmd: "test -f ./lockfile && echo 'locked' || echo 'free'"
   condition: "contains:free"
 
 - id: proceed
@@ -328,7 +337,7 @@ Condition values: `always`, `not_empty`, `contains:<string>`, `matches:<regex>`,
 - id: summarize-each
   executor: claude
   model: claude-haiku-4-5-20251001
-  for_each: "{{steps.list-files.output}}"
+  for_each: "{{get \"step.list-files.data.value\" .}}"
   prompt: |
     Summarize this file: {{item}}
 ```
@@ -402,13 +411,13 @@ steps:
   - id: extract        # fast local extraction
     executor: ollama
     model: llama3.2:latest
-    prompt: "Extract all TODO comments: {{steps.read-code.output}}"
+    prompt: "Extract all TODO comments: {{get \"step.read-code.data.value\" .}}"
 
   - id: prioritize     # cloud model for nuanced analysis
     executor: claude
     model: claude-sonnet-4-6
     needs: [extract]
-    prompt: "Prioritize these TODOs by risk: {{steps.extract.output}}"
+    prompt: "Prioritize these TODOs by risk: {{get \"step.extract.data.value\" .}}"
 ```
 
 
@@ -416,16 +425,7 @@ steps:
 
 ### Morning standup
 
-Asks gl1tch to build it:
-
-```text
-you:     i want a pipeline that reads my last day of commits and
-         writes a standup draft
-
-gl1tch:  saving as standup.pipeline.yaml
-```
-
-The tested pipeline:
+Reads your last 24 hours of commits and writes a standup draft.
 
 ```yaml
 name: standup
@@ -434,34 +434,49 @@ version: "1"
 steps:
   - id: commits
     executor: shell
-    prompt: "git log --since='24 hours ago' --oneline --no-merges"
+    vars:
+      cmd: "git log --since='24 hours ago' --oneline --no-merges"
 
   - id: draft
-    executor: ollama
-    model: qwen2.5-coder:latest
+    executor: claude
+    model: claude-haiku-4-5-20251001
     needs: [commits]
     prompt: |
       Write a standup update from these commits.
       Format: Yesterday / Today / Blockers. Keep it under 8 lines.
 
-      {{steps.commits.output}}
+      {{get "step.commits.data.value" .}}
 ```
 
-Run output:
+```bash
+glitch pipeline run standup
+```
+
+Actual output:
 
 ```text
-✓  commits  0.1s
-✓  draft    2.8s
+[step:commits] status:done
+[step:draft]   status:done
 
-Yesterday: finished executor discovery refactor, added retry policy
-  tests, fixed template rendering for nested steps.
-Today: wiring up the plugin manifest validator, then reviewing the
-  open PRs on the runner.
-Blockers: none.
+**Yesterday:** Fixed release pipeline issues — moved install.sh to correct
+tar path, fixed goreleaser formula config, corrected HOMEBREW_TAP_GITHUB_TOKEN
+secret name.
+
+**Today:** Shipped `glitch pipeline results` command (new feature) and
+documented it with architecture guidance and view navigation fixes.
+
+**Blockers:** None.
 ```
+
+> **NOTE:** Examples here use Claude Haiku for speed. Swap in a larger local model
+> like `qwen2.5-coder:latest` or `llama3.1:8b` via the `ollama` executor if you
+> prefer to keep everything local — they produce good results but take a few
+> seconds longer to load.
 
 
 ### Code review on a diff
+
+Fetches your current diff against main and routes it through a model for a focused review pass.
 
 ```yaml
 name: diff-review
@@ -470,11 +485,12 @@ version: "1"
 steps:
   - id: diff
     executor: shell
-    prompt: "git diff main --stat && git diff main"
+    vars:
+      cmd: "git diff main --stat && git diff main"
 
   - id: review
-    executor: ollama
-    model: qwen2.5-coder:latest
+    executor: claude
+    model: claude-haiku-4-5-20251001
     needs: [diff]
     prompt: |
       Review this diff. Focus on:
@@ -482,28 +498,32 @@ steps:
       - missing error handling
       - anything that would fail in production
 
-      {{steps.diff.output}}
+      {{get "step.diff.data.value" .}}
 ```
 
-Run output:
+Actual output:
 
 ```text
-✓  diff    0.1s
-✓  review  4.1s
+[step:diff]   status:done
+[step:review] status:done
 
-Overall: mostly clean. Three things worth looking at:
+**Diff Review: ✅ Safe to merge**
 
-1. executor/discovery.go:88 — LoadWrappersFromDir swallows errors
-   into a slice but the caller only logs them. If a sidecar fails
-   to load, the pipeline silently skips it. Consider returning an
-   error or at minimum logging at warn level.
+The change itself is correct and follows the existing pattern:
+- Adds "busd" to the recognized subcommand list alongside other commands
+- Matches the alphabetical ordering convention
+- Delegates to cmd.Execute() like all other subcommands
 
-2. pipeline/runner.go:1737 — prompt_id lookup uses GetPromptByTitle
-   which does a case-insensitive match. Two prompts that differ only
-   in case would be ambiguous. Worth a comment or an exact-match guard.
+**Verification:**
+- ✅ Command properly defined with init() registering to rootCmd
+- ✅ Subcommand structure in place (busd publish)
+- ✅ Error handling present in RunE function
+- ✅ Proper argument validation with cobra.RangeArgs(1, 2)
 
-3. No tests added for the new retry backoff path. The existing retry
-   tests only cover max_attempts. Edge case but worth covering.
+**Potential concern (not in diff, but noted):**
+Line 37 assigns json.RawMessage(args[1]) as the payload. Verify
+busd.PublishEvent() accepts raw bytes — if it expects a parsed
+object this will fail at runtime.
 ```
 
 
@@ -535,24 +555,10 @@ steps:
     prompt: |
       Compare these two answers to: "{{vars.question}}"
 
-      Answer A: {{steps.claude-answer.output}}
-      Answer B: {{steps.local-answer.output}}
+      Answer A: {{get "step.claude-answer.data.value" .}}
+      Answer B: {{get "step.local-answer.data.value" .}}
 
       Which is clearer and more accurate? One paragraph.
-```
-
-Run output:
-
-```text
-✓  claude-answer  1.2s
-✓  local-answer   2.1s   (parallel)
-✓  judge          1.4s
-
-Both answers are accurate. Answer A is more concise — it leads with
-the behavioral definition (a set of method signatures) before explaining
-implicit satisfaction. Answer B gives a good concrete analogy but buries
-the definition. For a developer new to Go, Answer A is the better starting
-point.
 ```
 
 
