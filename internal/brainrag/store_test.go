@@ -38,22 +38,23 @@ func TestRAGStore_IndexAndQuery(t *testing.T) {
 	// Query (embed query) → v0  (so note-0 and note-2 should rank higher than note-1)
 	embeddings := [][]float32{v0, v1, v2, v0}
 	srv := mockOllama(t, embeddings)
+	emb := NewOllamaEmbedder(srv.URL, "test-model")
 
 	s := openTestStore(t)
 	rs := NewRAGStore(s.DB(), "/test/cwd")
 
 	ctx := context.Background()
-	if err := rs.IndexNote(ctx, srv.URL, "test-model", "note-0", "text about Go"); err != nil {
+	if err := rs.IndexNote(ctx, emb, "note-0", "text about Go"); err != nil {
 		t.Fatalf("IndexNote 0: %v", err)
 	}
-	if err := rs.IndexNote(ctx, srv.URL, "test-model", "note-1", "text about Python"); err != nil {
+	if err := rs.IndexNote(ctx, emb, "note-1", "text about Python"); err != nil {
 		t.Fatalf("IndexNote 1: %v", err)
 	}
-	if err := rs.IndexNote(ctx, srv.URL, "test-model", "note-2", "text about Go interfaces"); err != nil {
+	if err := rs.IndexNote(ctx, emb, "note-2", "text about Go interfaces"); err != nil {
 		t.Fatalf("IndexNote 2: %v", err)
 	}
 
-	ids, err := rs.Query(ctx, srv.URL, "test-model", "query about Go", 2, nil)
+	ids, err := rs.Query(ctx, emb, "query about Go", 2, nil)
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
@@ -74,17 +75,18 @@ func TestRAGStore_IndexAndQuery_Filter(t *testing.T) {
 	// Index note-0,1,2 then query
 	embeddings := [][]float32{v0, v1, v2, v0}
 	srv := mockOllama(t, embeddings)
+	emb := NewOllamaEmbedder(srv.URL, "test-model")
 
 	s := openTestStore(t)
 	rs := NewRAGStore(s.DB(), "/test/cwd")
 
 	ctx := context.Background()
-	_ = rs.IndexNote(ctx, srv.URL, "test-model", "note-0", "text 0")
-	_ = rs.IndexNote(ctx, srv.URL, "test-model", "note-1", "text 1")
-	_ = rs.IndexNote(ctx, srv.URL, "test-model", "note-2", "text 2")
+	_ = rs.IndexNote(ctx, emb, "note-0", "text 0")
+	_ = rs.IndexNote(ctx, emb, "note-1", "text 1")
+	_ = rs.IndexNote(ctx, emb, "note-2", "text 2")
 
 	// Filter to only note-1 even though query vector aligns with note-0 and note-2.
-	ids, err := rs.Query(ctx, srv.URL, "test-model", "query", 5, []string{"note-1"})
+	ids, err := rs.Query(ctx, emb, "query", 5, []string{"note-1"})
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
@@ -106,9 +108,10 @@ func TestRAGStore_IdempotentIndex(t *testing.T) {
 	s := openTestStore(t)
 	rs := NewRAGStore(s.DB(), "/test/cwd")
 	ctx := context.Background()
+	emb := NewOllamaEmbedder(srv.URL, "test-model")
 
-	_ = rs.IndexNote(ctx, srv.URL, "test-model", "note-x", "same text")
-	_ = rs.IndexNote(ctx, srv.URL, "test-model", "note-x", "same text")
+	_ = rs.IndexNote(ctx, emb, "note-x", "same text")
+	_ = rs.IndexNote(ctx, emb, "note-x", "same text")
 
 	if callCount != 1 {
 		t.Errorf("expected 1 Ollama call for idempotent index, got %d", callCount)

@@ -63,10 +63,10 @@ func TestBrainE2E_CodebaseUpdate_HighConfidence(t *testing.T) {
 	})
 
 	allNotes, _ := s.AllBrainNotes(ctx)
+	emb := brainrag.NewOllamaEmbedder(brainrag.DefaultBaseURL, brainrag.DefaultEmbedModel)
 	rs := brainrag.NewRAGStore(s.DB(), t.TempDir())
 	for _, n := range allNotes {
-		_ = rs.IndexNote(ctx, brainrag.DefaultBaseURL, brainrag.DefaultEmbedModel,
-			fmt.Sprintf("%d", n.ID), n.Body)
+		_ = rs.IndexNote(ctx, emb, fmt.Sprintf("%d", n.ID), n.Body)
 	}
 
 	inj := &brainrag.BrainInjector{
@@ -74,8 +74,7 @@ func TestBrainE2E_CodebaseUpdate_HighConfidence(t *testing.T) {
 		Store:        s,
 		WorkspaceCtx: braincontext.Empty(),
 		TopK:         3,
-		BaseURL:      brainrag.DefaultBaseURL,
-		Model:        brainrag.DefaultEmbedModel,
+		Embedder:     emb,
 	}
 
 	// Step 3: run a write_brain pipeline step that uses the RAG context.

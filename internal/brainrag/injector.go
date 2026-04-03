@@ -15,9 +15,12 @@ type BrainInjector struct {
 	RAG          *RAGStore
 	Store        *store.Store
 	WorkspaceCtx braincontext.WorkspaceContext
-	TopK         int    // default 5
-	BaseURL      string // ollama base URL
-	Model        string // embedding model
+	TopK         int     // default 5
+	Embedder     Embedder
+	// Deprecated: set Embedder instead. BaseURL and Model are used to construct
+	// a default OllamaEmbedder when Embedder is nil.
+	BaseURL string
+	Model   string
 }
 
 // InjectInto queries the RAG store using prompt as the query text, fetches the
@@ -37,13 +40,10 @@ func (b *BrainInjector) InjectInto(ctx context.Context, prompt string) (string, 
 	if topK <= 0 {
 		topK = 5
 	}
-	baseURL := b.BaseURL
-	if baseURL == "" {
-		baseURL = DefaultBaseURL
-	}
-	model := b.Model
-	if model == "" {
-		model = DefaultEmbedModel
+
+	emb := b.Embedder
+	if emb == nil {
+		emb = NewOllamaEmbedder(b.BaseURL, b.Model)
 	}
 
 	// Use linked note IDs as filter when workspace context is set.
@@ -52,7 +52,7 @@ func (b *BrainInjector) InjectInto(ctx context.Context, prompt string) (string, 
 		filter = b.WorkspaceCtx.LinkedNoteIDs
 	}
 
-	noteIDs, err := b.RAG.Query(ctx, baseURL, model, prompt, topK, filter)
+	noteIDs, err := b.RAG.Query(ctx, emb, prompt, topK, filter)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[brainrag] warn: RAG query failed: %v\n", err)
 		return prompt, nil

@@ -62,8 +62,9 @@ func TestBrainInjector_FilterByLinkedNotes(t *testing.T) {
 	id1str := fmt.Sprintf("%d", id1)
 	id2str := fmt.Sprintf("%d", id2)
 
-	_ = rs.IndexNote(ctx, srv.URL, "test-model", id1str, "Go is great")
-	_ = rs.IndexNote(ctx, srv.URL, "test-model", id2str, "Python is cool")
+	emb := NewOllamaEmbedder(srv.URL, "test-model")
+	_ = rs.IndexNote(ctx, emb, id1str, "Go is great")
+	_ = rs.IndexNote(ctx, emb, id2str, "Python is cool")
 
 	inj := &BrainInjector{
 		RAG:   rs,
@@ -71,9 +72,8 @@ func TestBrainInjector_FilterByLinkedNotes(t *testing.T) {
 		WorkspaceCtx: braincontext.WorkspaceContext{
 			LinkedNoteIDs: []string{id2str}, // only return note 2
 		},
-		TopK:    5,
-		BaseURL: srv.URL,
-		Model:   "test-model",
+		TopK:     5,
+		Embedder: emb,
 	}
 
 	result, err := inj.InjectInto(ctx, "tell me about Python")

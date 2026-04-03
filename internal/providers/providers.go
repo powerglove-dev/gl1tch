@@ -3,6 +3,45 @@
 // tmux session, which models it supports, and how billing is tracked.
 package providers
 
+import (
+	"fmt"
+	"os"
+
+	"github.com/8op-org/gl1tch/internal/brainrag"
+)
+
+// EmbedConfig describes which embedding backend to use for brainrag operations.
+type EmbedConfig struct {
+	Provider   string `yaml:"provider"`    // "ollama" | "openai" | "voyage"
+	Model      string `yaml:"model"`
+	APIKeyEnv  string `yaml:"api_key_env"`
+	BaseURL    string `yaml:"base_url"`   // Ollama only
+	Dimensions int    `yaml:"dimensions"` // OpenAI only
+}
+
+// NewEmbedder constructs a brainrag.Embedder from cfg.
+// If cfg is zero value or Provider is "" or "ollama", an OllamaEmbedder is returned.
+func NewEmbedder(cfg EmbedConfig) (brainrag.Embedder, error) {
+	switch cfg.Provider {
+	case "", "ollama":
+		return brainrag.NewOllamaEmbedder(cfg.BaseURL, cfg.Model), nil
+	case "openai":
+		key := os.Getenv(cfg.APIKeyEnv)
+		if key == "" {
+			return nil, fmt.Errorf("providers: openai embed: env var %q is not set", cfg.APIKeyEnv)
+		}
+		return brainrag.NewOpenAIEmbedder(key, cfg.Model, cfg.Dimensions), nil
+	case "voyage":
+		key := os.Getenv(cfg.APIKeyEnv)
+		if key == "" {
+			return nil, fmt.Errorf("providers: voyage embed: env var %q is not set", cfg.APIKeyEnv)
+		}
+		return brainrag.NewVoyageEmbedder(key, cfg.Model), nil
+	default:
+		return nil, fmt.Errorf("providers: unknown embed provider %q", cfg.Provider)
+	}
+}
+
 // Profile describes a single AI provider integration.
 type Profile struct {
 	Name        string         `yaml:"name"`
@@ -12,6 +51,7 @@ type Profile struct {
 	Models      []Model        `yaml:"models"`
 	Session     SessionConfig  `yaml:"session"`
 	Pipeline    PipelineConfig `yaml:"pipeline"`
+	Embed       EmbedConfig    `yaml:"embed"`
 }
 
 // Model describes a single model offered by a provider, including its billing rates.

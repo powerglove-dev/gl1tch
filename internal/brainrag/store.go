@@ -59,37 +59,39 @@ func decodeVector(b []byte) []float32 {
 }
 
 // IndexNote computes an embedding for text and stores it under noteID scoped to r.cwd.
-// If an entry already exists with the same hash, it is a no-op.
-func (r *RAGStore) IndexNote(ctx context.Context, baseURL, model, noteID, text string) error {
+// If an entry already exists with the same hash and embed_id, it is a no-op.
+func (r *RAGStore) IndexNote(ctx context.Context, embedder Embedder, noteID, text string) error {
 	h := hashText(text)
+	embedID := embedder.ID()
 
-	var existingHash string
+	var existingHash, existingEmbedID string
 	err := r.db.QueryRowContext(ctx,
-		`SELECT hash FROM brain_vectors WHERE cwd = ? AND note_id = ?`,
+		`SELECT hash, embed_id FROM brain_vectors WHERE cwd = ? AND note_id = ?`,
 		r.cwd, noteID,
-	).Scan(&existingHash)
-	if err == nil && existingHash == h {
+	).Scan(&existingHash, &existingEmbedID)
+	if err == nil && existingHash == h && existingEmbedID == embedID {
 		return nil // already up-to-date
 	}
 	if err != nil && err != sql.ErrNoRows {
 		return fmt.Errorf("brainrag: check existing vector: %w", err)
 	}
 
-	vec, err := Embed(ctx, baseURL, model, text)
+	vec, err := embedder.Embed(ctx, text)
 	if err != nil {
 		return fmt.Errorf("brainrag: index note %q: %w", noteID, err)
 	}
 
 	blob := encodeVector(vec)
 	_, err = r.db.ExecContext(ctx,
-		`INSERT INTO brain_vectors (cwd, note_id, text, vector, hash)
-		 VALUES (?, ?, ?, ?, ?)
+		`INSERT INTO brain_vectors (cwd, note_id, text, vector, hash, embed_id)
+		 VALUES (?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(cwd, note_id) DO UPDATE SET
 		   text       = excluded.text,
 		   vector     = excluded.vector,
 		   hash       = excluded.hash,
+		   embed_id   = excluded.embed_id,
 		   indexed_at = CURRENT_TIMESTAMP`,
-		r.cwd, noteID, text, blob, h,
+		r.cwd, noteID, text, blob, h, embedID,
 	)
 	if err != nil {
 		return fmt.Errorf("brainrag: upsert vector for %q: %w", noteID, err)
@@ -98,9 +100,10 @@ func (r *RAGStore) IndexNote(ctx context.Context, baseURL, model, noteID, text s
 }
 
 // RefreshStale re-embeds notes whose SHA256(body) differs from the stored hash.
-// Ollama unavailability is handled gracefully: a warning is printed and stale
+// Embedder unavailability is handled gracefully: a warning is printed and stale
 // entries are skipped.
-func (r *RAGStore) RefreshStale(ctx context.Context, baseURL, model string, notes []store.BrainNote) error {
+func (r *RAGStore) RefreshStale(ctx context.Context, embedder Embedder, notes []store.BrainNote) error {
+	embedID := embedder.ID()
 	for _, n := range notes {
 		id := fmt.Sprintf("%d", n.ID)
 		h := hashText(n.Body)
@@ -118,7 +121,7 @@ func (r *RAGStore) RefreshStale(ctx context.Context, baseURL, model string, note
 			continue
 		}
 
-		vec, err := Embed(ctx, baseURL, model, n.Body)
+		vec, err := embedder.Embed(ctx, n.Body)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[brainrag] warn: could not embed note %s: %v\n", id, err)
 			continue
@@ -126,14 +129,15 @@ func (r *RAGStore) RefreshStale(ctx context.Context, baseURL, model string, note
 
 		blob := encodeVector(vec)
 		if _, err = r.db.ExecContext(ctx,
-			`INSERT INTO brain_vectors (cwd, note_id, text, vector, hash)
-			 VALUES (?, ?, ?, ?, ?)
+			`INSERT INTO brain_vectors (cwd, note_id, text, vector, hash, embed_id)
+			 VALUES (?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(cwd, note_id) DO UPDATE SET
 			   text       = excluded.text,
 			   vector     = excluded.vector,
 			   hash       = excluded.hash,
+			   embed_id   = excluded.embed_id,
 			   indexed_at = CURRENT_TIMESTAMP`,
-			r.cwd, id, n.Body, blob, h,
+			r.cwd, id, n.Body, blob, h, embedID,
 		); err != nil {
 			fmt.Fprintf(os.Stderr, "[brainrag] warn: upsert stale vector %s: %v\n", id, err)
 		}
@@ -143,17 +147,17 @@ func (r *RAGStore) RefreshStale(ctx context.Context, baseURL, model string, note
 
 // Query embeds the query text and returns the top-K most similar note IDs for r.cwd.
 // If filter is non-empty, only entries whose NoteID is in filter are considered.
-// Returns an empty slice (not an error) if Ollama is unavailable.
-func (r *RAGStore) Query(ctx context.Context, baseURL, model, q string, topK int, filter []string) ([]string, error) {
-	qVec, err := Embed(ctx, baseURL, model, q)
+// Returns an empty slice (not an error) if the embedder is unavailable.
+func (r *RAGStore) Query(ctx context.Context, embedder Embedder, q string, topK int, filter []string) ([]string, error) {
+	qVec, err := embedder.Embed(ctx, q)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[brainrag] warn: query embed failed: %v\n", err)
 		return nil, nil
 	}
 
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT note_id, vector FROM brain_vectors WHERE cwd = ?`,
-		r.cwd,
+		`SELECT note_id, vector FROM brain_vectors WHERE cwd = ? AND embed_id = ?`,
+		r.cwd, embedder.ID(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("brainrag: query vectors: %w", err)
@@ -209,17 +213,17 @@ func (r *RAGStore) Query(ctx context.Context, baseURL, model, q string, topK int
 
 // QueryWithText embeds the query and returns the top-K most similar entries
 // with both their note IDs and original text.
-// Returns an empty slice (not an error) if Ollama is unavailable.
-func (r *RAGStore) QueryWithText(ctx context.Context, baseURL, model, q string, topK int) ([]VectorEntry, error) {
-	qVec, err := Embed(ctx, baseURL, model, q)
+// Returns an empty slice (not an error) if the embedder is unavailable.
+func (r *RAGStore) QueryWithText(ctx context.Context, embedder Embedder, q string, topK int) ([]VectorEntry, error) {
+	qVec, err := embedder.Embed(ctx, q)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[brainrag] warn: query embed failed: %v\n", err)
 		return nil, nil
 	}
 
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT note_id, text, vector FROM brain_vectors WHERE cwd = ?`,
-		r.cwd,
+		`SELECT note_id, text, vector FROM brain_vectors WHERE cwd = ? AND embed_id = ?`,
+		r.cwd, embedder.ID(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("brainrag: query vectors: %w", err)

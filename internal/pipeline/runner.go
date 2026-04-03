@@ -328,17 +328,23 @@ func Run(ctx context.Context, p *Pipeline, mgr *executor.Manager, userInput stri
 			refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 			notes, _ := cfg.store.AllBrainNotes(refreshCtx)
-			baseURL := brainrag.DefaultBaseURL
-			model := brainrag.DefaultEmbedModel
-			if cfg.ragInjector != nil {
-				if cfg.ragInjector.BaseURL != "" {
-					baseURL = cfg.ragInjector.BaseURL
+			var emb brainrag.Embedder
+			if cfg.ragInjector != nil && cfg.ragInjector.Embedder != nil {
+				emb = cfg.ragInjector.Embedder
+			} else {
+				baseURL := brainrag.DefaultBaseURL
+				model := brainrag.DefaultEmbedModel
+				if cfg.ragInjector != nil {
+					if cfg.ragInjector.BaseURL != "" {
+						baseURL = cfg.ragInjector.BaseURL
+					}
+					if cfg.ragInjector.Model != "" {
+						model = cfg.ragInjector.Model
+					}
 				}
-				if cfg.ragInjector.Model != "" {
-					model = cfg.ragInjector.Model
-				}
+				emb = brainrag.NewOllamaEmbedder(baseURL, model)
 			}
-			_ = cfg.ragStore.RefreshStale(refreshCtx, baseURL, model, notes)
+			_ = cfg.ragStore.RefreshStale(refreshCtx, emb, notes)
 		}()
 		// Warn if refresh takes more than 2 seconds.
 		select {

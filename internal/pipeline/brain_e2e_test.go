@@ -37,8 +37,9 @@ func TestBrainE2E_IndexAndQuery_Ollama(t *testing.T) {
 		{"snippet-brainrag", "The brainrag package provides vector embedding and RAG for brain notes using Ollama."},
 	}
 
+	emb := brainrag.NewOllamaEmbedder(brainrag.DefaultBaseURL, brainrag.DefaultEmbedModel)
 	for _, snippet := range snippets {
-		if err := rs.IndexNote(ctx, brainrag.DefaultBaseURL, brainrag.DefaultEmbedModel, snippet.id, snippet.text); err != nil {
+		if err := rs.IndexNote(ctx, emb, snippet.id, snippet.text); err != nil {
 			t.Fatalf("IndexNote %s: %v", snippet.id, err)
 		}
 	}
@@ -60,8 +61,7 @@ func TestBrainE2E_IndexAndQuery_Ollama(t *testing.T) {
 	// Re-index with proper IDs from store.
 	rs2 := brainrag.NewRAGStore(s.DB(), "/test/e2e/store")
 	for _, n := range allNotes {
-		_ = rs2.IndexNote(ctx, brainrag.DefaultBaseURL, brainrag.DefaultEmbedModel,
-			fmt.Sprintf("%d", n.ID), n.Body)
+		_ = rs2.IndexNote(ctx, emb, fmt.Sprintf("%d", n.ID), n.Body)
 	}
 
 	inj := &brainrag.BrainInjector{
@@ -70,9 +70,8 @@ func TestBrainE2E_IndexAndQuery_Ollama(t *testing.T) {
 		WorkspaceCtx: braincontext.WorkspaceContext{
 			WorkspaceType: braincontext.WorkspacePipeline,
 		},
-		TopK:    3,
-		BaseURL: brainrag.DefaultBaseURL,
-		Model:   brainrag.DefaultEmbedModel,
+		TopK:     3,
+		Embedder: emb,
 	}
 
 	// Run a pipeline step that will have brain context injected.

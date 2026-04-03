@@ -163,15 +163,19 @@ var skipDirs = map[string]bool{
 	"systemprompts": true, // internal LLM system prompt templates — not source docs
 }
 
-// builtinIndexCode walks a path, chunks source files, embeds them with Ollama,
-// and stores the results in the RAG vector store (brain_vectors table in glitch.db).
+// builtinIndexCode walks a path, chunks source files, embeds them, and stores
+// the results in the RAG vector store (brain_vectors table in glitch.db).
 //
 // Args:
-//   - "path":       directory to walk (default ".")
-//   - "extensions": comma-separated list (default ".go,.ts,.py,.md")
-//   - "model":      embedding model (default "nomic-embed-text")
-//   - "base_url":   Ollama base URL (default "http://localhost:11434")
-//   - "chunk_size": max chars per chunk (default 1500)
+//   - "path":            directory to walk (default ".")
+//   - "extensions":      comma-separated list (default ".go,.ts,.py,.md")
+//   - "model":           embedding model (default "nomic-embed-text"); Ollama compat
+//   - "base_url":        Ollama base URL (default "http://localhost:11434"); Ollama compat
+//   - "embed_provider":  "ollama" | "openai" | "voyage" (default "ollama")
+//   - "embed_model":     provider-specific model (default: provider default)
+//   - "embed_api_key":   literal key or "$ENV_VAR" (read from env if starts with "$")
+//   - "embed_base_url":  Ollama base URL override (takes precedence over "base_url")
+//   - "chunk_size":      max chars per chunk (default 1500)
 func builtinIndexCode(ctx context.Context, args map[string]any, w io.Writer) (map[string]any, error) {
 	root := toString(args["path"])
 	if root == "" {
@@ -190,14 +194,15 @@ func builtinIndexCode(ctx context.Context, args map[string]any, w io.Writer) (ma
 		}
 	}
 
+	embedder, err := buildEmbedder(args)
+	if err != nil {
+		return nil, fmt.Errorf("builtin.index_code: %w", err)
+	}
+
+	// Keep "model" readable for the pre-scan recommendation logic.
 	model := toString(args["model"])
 	if model == "" {
 		model = brainrag.DefaultEmbedModel
-	}
-
-	baseURL := toString(args["base_url"])
-	if baseURL == "" {
-		baseURL = brainrag.DefaultBaseURL
 	}
 
 	chunkSize := 1500
@@ -289,7 +294,7 @@ func builtinIndexCode(ctx context.Context, args map[string]any, w io.Writer) (ma
 			lineEnd := lineStart + countLines(chunk)
 			noteID := fmt.Sprintf("file:%s:L%d-L%d", path, lineStart+1, lineEnd)
 
-			if embedErr := rs.IndexNote(ctx, baseURL, model, noteID, chunk); embedErr != nil {
+			if embedErr := rs.IndexNote(ctx, embedder, noteID, chunk); embedErr != nil {
 				fmt.Fprintf(os.Stderr, "[index_code] warn: embed %q chunk %d: %v\n", path, i, embedErr)
 				continue
 			}
@@ -361,4 +366,49 @@ func chunkStart(content string, chunkSize, i int) int {
 // countLines counts the number of newline characters in s.
 func countLines(s string) int {
 	return strings.Count(s, "\n")
+}
+
+// buildEmbedder constructs a brainrag.Embedder from pipeline action args.
+// Arg resolution order for Ollama compat:
+//   - "embed_provider" / "embed_model" / "embed_api_key" / "embed_base_url" take precedence.
+//   - Legacy "model" and "base_url" map to the Ollama provider.
+func buildEmbedder(args map[string]any) (brainrag.Embedder, error) {
+	provider := toString(args["embed_provider"])
+	embedModel := toString(args["embed_model"])
+	rawKey := toString(args["embed_api_key"])
+	embedBaseURL := toString(args["embed_base_url"])
+
+	// Resolve "$ENV_VAR" style keys.
+	apiKey := rawKey
+	if strings.HasPrefix(rawKey, "$") {
+		apiKey = os.Getenv(rawKey[1:])
+	}
+
+	// Fall back to legacy args when embed_provider is not set.
+	if provider == "" {
+		provider = "ollama"
+	}
+	if embedBaseURL == "" {
+		embedBaseURL = toString(args["base_url"])
+	}
+	if embedModel == "" && (provider == "ollama") {
+		embedModel = toString(args["model"])
+	}
+
+	switch provider {
+	case "", "ollama":
+		return brainrag.NewOllamaEmbedder(embedBaseURL, embedModel), nil
+	case "openai":
+		if apiKey == "" {
+			return nil, fmt.Errorf("embed_api_key is required for openai provider")
+		}
+		return brainrag.NewOpenAIEmbedder(apiKey, embedModel, 0), nil
+	case "voyage":
+		if apiKey == "" {
+			return nil, fmt.Errorf("embed_api_key is required for voyage provider")
+		}
+		return brainrag.NewVoyageEmbedder(apiKey, embedModel), nil
+	default:
+		return nil, fmt.Errorf("unknown embed_provider %q", provider)
+	}
 }

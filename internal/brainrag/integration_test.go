@@ -52,6 +52,7 @@ func TestRAGStore_RealIndexAndQuery(t *testing.T) {
 
 	s := openTestStore(t)
 	rs := NewRAGStore(s.DB(), "/test/cwd")
+	emb := NewOllamaEmbedder(DefaultBaseURL, DefaultEmbedModel)
 
 	ctx := context.Background()
 	texts := []struct {
@@ -64,13 +65,13 @@ func TestRAGStore_RealIndexAndQuery(t *testing.T) {
 	}
 
 	for _, tt := range texts {
-		if err := rs.IndexNote(ctx, DefaultBaseURL, DefaultEmbedModel, tt.id, tt.text); err != nil {
+		if err := rs.IndexNote(ctx, emb, tt.id, tt.text); err != nil {
 			t.Fatalf("IndexNote %s: %v", tt.id, err)
 		}
 	}
 
 	// Query for something about Go.
-	ids, err := rs.Query(ctx, DefaultBaseURL, DefaultEmbedModel, "compiled language designed at Google", 1, nil)
+	ids, err := rs.Query(ctx, emb, "compiled language designed at Google", 1, nil)
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}

@@ -70,9 +70,14 @@ const createBrainVectorsSchema = `CREATE TABLE IF NOT EXISTS brain_vectors (
   text        TEXT NOT NULL,
   vector      BLOB NOT NULL,
   hash        TEXT NOT NULL,
+  embed_id    TEXT NOT NULL DEFAULT '',
   indexed_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(cwd, note_id)
 )`
+
+// addBrainVectorsEmbedIDColumn is the migration that adds embed_id to the
+// brain_vectors table for databases created before this column existed.
+const addBrainVectorsEmbedIDColumn = `ALTER TABLE brain_vectors ADD COLUMN embed_id TEXT NOT NULL DEFAULT ''`
 
 // createStepCheckpointsSchema is the DDL for the step_checkpoints table.
 const createStepCheckpointsSchema = `CREATE TABLE IF NOT EXISTS step_checkpoints (
@@ -163,6 +168,26 @@ const createWorkflowCheckpointsSchema = `CREATE TABLE IF NOT EXISTS workflow_che
   created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 )`
 
+// applyBrainVectorsEmbedIDMigration adds the embed_id column to brain_vectors
+// if it does not already exist, then back-fills '' rows with the legacy Ollama ID.
+func applyBrainVectorsEmbedIDMigration(db *sql.DB) error {
+	var count int
+	row := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('brain_vectors') WHERE name='embed_id'`)
+	if err := row.Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		if _, err := db.Exec(addBrainVectorsEmbedIDColumn); err != nil {
+			return err
+		}
+		// Back-fill existing rows so they continue to work with the Ollama embedder.
+		if _, err := db.Exec(`UPDATE brain_vectors SET embed_id = 'ollama:nomic-embed-text' WHERE embed_id = ''`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // applySchema runs the schema migration against db.
 func applySchema(db *sql.DB) error {
 	if _, err := db.Exec(createSchema); err != nil {
@@ -193,6 +218,9 @@ func applySchema(db *sql.DB) error {
 		return err
 	}
 	if err := applyBrainVectorsTableMigration(db); err != nil {
+		return err
+	}
+	if err := applyBrainVectorsEmbedIDMigration(db); err != nil {
 		return err
 	}
 	if err := applyScoreEventsTableMigration(db); err != nil {

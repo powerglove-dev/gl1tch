@@ -20,11 +20,15 @@ func init() {
 // first with builtin.index_code.
 //
 // Args:
-//   - "query":    text to embed and search for (required; no-ops if empty)
-//   - "top_k":   number of chunks to return (default 6)
-//   - "model":   embedding model (default "nomic-embed-text")
-//   - "base_url": Ollama base URL (default "http://localhost:11434")
-//   - "cwd":     working directory scope used during indexing (default: current dir)
+//   - "query":          text to embed and search for (required; no-ops if empty)
+//   - "top_k":          number of chunks to return (default 6)
+//   - "model":          embedding model (default "nomic-embed-text"); Ollama compat
+//   - "base_url":       Ollama base URL (default "http://localhost:11434"); Ollama compat
+//   - "embed_provider": "ollama" | "openai" | "voyage" (default "ollama")
+//   - "embed_model":    provider-specific model (default: provider default)
+//   - "embed_api_key":  literal key or "$ENV_VAR" (read from env if starts with "$")
+//   - "embed_base_url": Ollama base URL override (takes precedence over "base_url")
+//   - "cwd":            working directory scope used during indexing (default: current dir)
 func builtinSearchCode(ctx context.Context, args map[string]any, w io.Writer) (map[string]any, error) {
 	query := strings.TrimSpace(toString(args["query"]))
 	if query == "" {
@@ -38,12 +42,11 @@ func builtinSearchCode(ctx context.Context, args map[string]any, w io.Writer) (m
 		}
 	}
 
-	model := toString(args["model"])
-	if model == "" {
-		model = brainrag.DefaultEmbedModel
+	embedder, err := buildEmbedder(args)
+	if err != nil {
+		return nil, fmt.Errorf("builtin.search_code: %w", err)
 	}
 
-	baseURL := toString(args["base_url"])
 	cwd := toString(args["cwd"])
 
 	s, err := store.Open()
@@ -54,7 +57,7 @@ func builtinSearchCode(ctx context.Context, args map[string]any, w io.Writer) (m
 
 	rs := brainrag.NewRAGStore(s.DB(), cwd)
 
-	entries, err := rs.QueryWithText(ctx, baseURL, model, query, topK)
+	entries, err := rs.QueryWithText(ctx, embedder, query, topK)
 	if err != nil {
 		return nil, fmt.Errorf("builtin.search_code: query: %w", err)
 	}
