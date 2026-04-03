@@ -1,0 +1,23 @@
+# gl1tch sidecar descriptor for the OpenAI Codex provider plugin.
+#
+# Install: copy this file to ~/.config/glitch/wrappers/codex.yaml
+# and ensure `gl1tch-codex` is on $PATH (run `make install`).
+#
+# Prerequisites: Codex CLI installed and authenticated.
+#   npm install -g @openai/codex
+#
+# Calling convention:
+#   input  — the prompt text, passed as stdin to gl1tch-codex
+#   vars   — GLITCH_MODEL sets the model (optional)
+
+name: codex
+description: "OpenAI Codex coding agent (https://github.com/openai/codex)"
+kind: agent
+command: gl1tch-codex
+models:
+  - id: codex-mini-latest
+    label: "Codex Mini (Latest)"
+  - id: o4-mini
+    label: "o4-mini"
+  - id: o3
+    label: "o3"

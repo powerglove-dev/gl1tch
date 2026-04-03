@@ -1,0 +1,42 @@
+# gl1tch sidecar descriptor for the OpenCode provider plugin.
+#
+# Install: copy this file to ~/.config/glitch/wrappers/opencode.yaml
+# and ensure `gl1tch-opencode` is on $PATH (run `make install`).
+#
+# Calling convention:
+#   input  — the prompt text, passed as stdin to gl1tch-opencode
+#   vars   — key/value pairs; the gl1tch runner passes vars.model as --model <value>
+#
+# Supported vars (set in pipeline step `vars:` block):
+#   model  (required) — Model in provider/model format, e.g. "ollama/llama3.2"
+#                       Passed to gl1tch-opencode as --model <value>.
+#                       Can also be provided as GLITCH_MODEL env var.
+#
+# Example pipeline step:
+#   - id: agent
+#     plugin: opencode
+#     prompt: "Refactor this function to use error wrapping."
+#     vars:
+#       model: ollama/llama3.2
+
+name: opencode
+description: "Agentic AI coding assistant via opencode (https://opencode.ai)"
+kind: agent
+command: gl1tch-opencode
+# Models listed here are defaults. opencode supports any Ollama model via
+# "ollama/<model>" format — customise this list to match your local Ollama setup.
+models:
+  - id: ollama/llama3.2:latest
+    label: "Llama 3.2 (Ollama)"
+  - id: ollama/llama3.2-16k:latest
+    label: "Llama 3.2 16k (Ollama)"
+  - id: ollama/qwen2.5:latest
+    label: "Qwen 2.5 (Ollama)"
+  - id: ollama/qwen2.5-16k:latest
+    label: "Qwen 2.5 16k (Ollama)"
+  - id: ollama/qwen2.5-coder:latest
+    label: "Qwen 2.5 Coder (Ollama)"
+  - id: ollama/qwen3:8b-16k
+    label: "Qwen 3 8B 16k (Ollama)"
+  - id: ollama/qwen3.5:latest
+    label: "Qwen 3.5 (Ollama)"

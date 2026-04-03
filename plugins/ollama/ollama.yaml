@@ -1,0 +1,43 @@
+# gl1tch sidecar descriptor for the Ollama provider plugin.
+#
+# Install: copy this file to ~/.config/glitch/wrappers/ollama.yaml
+# and ensure `gl1tch-ollama` is on $PATH (run `make install`).
+#
+# Calling convention (gl1tch sidecar protocol):
+#   input  — the prompt text, passed as stdin to gl1tch-ollama
+#   vars   — key/value pairs; the gl1tch runner passes vars.model as --model <value>
+#
+# Supported vars (set in pipeline step `vars:` block):
+#   model      (required) — Ollama model name, e.g. "llama3.2" or "qwen2.5"
+#                           Passed to gl1tch-ollama as --model <value> by the gl1tch runner.
+#                           Can also be provided directly as GLITCH_MODEL env var.
+#
+# Optional environment variables (for direct invocation or advanced use):
+#   GLITCH_OLLAMA_URL       — Base URL of the Ollama daemon.
+#                           Defaults to http://localhost:11434.
+#
+# Example pipeline step:
+#   - id: generate
+#     plugin: ollama
+#     prompt: "Explain BubbleTea in one paragraph."
+#     vars:
+#       model: llama3.2
+
+name: ollama
+description: "Run local AI models via the Ollama daemon (https://ollama.com)"
+kind: agent
+command: gl1tch-ollama
+# Default fallback models. If gl1tch can reach the Ollama daemon at runtime,
+# it will replace this list with the models actually installed on the system.
+# Customise here if you want to pin specific models regardless of runtime discovery.
+models:
+  - id: llama3.2:latest
+    label: "Llama 3.2"
+  - id: llama3.2-16k:latest
+    label: "Llama 3.2 (16k context)"
+  - id: qwen2.5:latest
+    label: "Qwen 2.5"
+  - id: qwen2.5-16k:latest
+    label: "Qwen 2.5 (16k context)"
+  - id: qwen3:8b-16k
+    label: "Qwen 3 8B (16k context)"

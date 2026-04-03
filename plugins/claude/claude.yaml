@@ -1,0 +1,27 @@
+# gl1tch sidecar descriptor for the Claude provider plugin.
+#
+# Install: copy this file to ~/.config/glitch/wrappers/claude.yaml
+# and ensure `gl1tch-claude` is on $PATH (run `make install`).
+#
+# Calling convention:
+#   input  — the prompt text, passed as stdin to gl1tch-claude
+#   vars   — GLITCH_MODEL is set to the selected model ID
+#
+# Example pipeline step:
+#   - id: agent
+#     plugin: claude
+#     prompt: "Review this code for security issues."
+#     vars:
+#       model: claude-sonnet-4-6
+
+name: claude
+description: "Claude AI assistant via the claude CLI (https://claude.ai/code)"
+kind: agent
+command: gl1tch-claude
+models:
+  - id: claude-opus-4-6
+    label: "Opus 4.6"
+  - id: claude-sonnet-4-6
+    label: "Sonnet 4.6"
+  - id: claude-haiku-4-5-20251001
+    label: "Haiku 4.5"

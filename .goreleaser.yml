@@ -30,7 +30,7 @@ builds:
   # by the release workflow before GoReleaser runs.
   - id: glitch-claude
     binary: glitch-claude
-    dir: gl1tch-executors/plugins/claude
+    dir: plugins/claude
     main: .
     env:
       - CGO_ENABLED=0
@@ -49,7 +49,7 @@ builds:
 
   - id: glitch-github-copilot
     binary: glitch-github-copilot
-    dir: gl1tch-executors/plugins/github-copilot
+    dir: plugins/github-copilot
     main: .
     env:
       - CGO_ENABLED=0
@@ -68,7 +68,7 @@ builds:
 
   - id: glitch-codex
     binary: glitch-codex
-    dir: gl1tch-executors/plugins/codex
+    dir: plugins/codex
     main: .
     env:
       - CGO_ENABLED=0
@@ -87,7 +87,7 @@ builds:
 
   - id: glitch-gemini
     binary: glitch-gemini
-    dir: gl1tch-executors/plugins/gemini
+    dir: plugins/gemini
     main: .
     env:
       - CGO_ENABLED=0
@@ -106,7 +106,7 @@ builds:
 
   - id: glitch-opencode
     binary: glitch-opencode
-    dir: gl1tch-executors/plugins/opencode
+    dir: plugins/opencode
     main: .
     env:
       - CGO_ENABLED=0
@@ -125,7 +125,7 @@ builds:
 
   - id: glitch-ollama
     binary: glitch-ollama
-    dir: gl1tch-executors/plugins/ollama
+    dir: plugins/ollama
     main: .
     env:
       - CGO_ENABLED=0
@@ -151,17 +151,17 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     # Bundle sidecar YAML files and the install script alongside the binaries.
     files:
-      - src: gl1tch-executors/plugins/claude/claude.yaml
+      - src: plugins/claude/claude.yaml
         dst: wrappers
-      - src: gl1tch-executors/plugins/github-copilot/github-copilot.yaml
+      - src: plugins/github-copilot/github-copilot.yaml
         dst: wrappers
-      - src: gl1tch-executors/plugins/codex/codex.yaml
+      - src: plugins/codex/codex.yaml
         dst: wrappers
-      - src: gl1tch-executors/plugins/gemini/gemini.yaml
+      - src: plugins/gemini/gemini.yaml
         dst: wrappers
-      - src: gl1tch-executors/plugins/opencode/opencode.yaml
+      - src: plugins/opencode/opencode.yaml
         dst: wrappers
-      - src: gl1tch-executors/plugins/ollama/ollama.yaml
+      - src: plugins/ollama/ollama.yaml
         dst: wrappers
       - src: install.sh
         dst: .
@@ -172,8 +172,6 @@ checksum:
 
 brews:
   - name: glitch
-    ids:
-      - glitch
     repository:
       owner: 8op-org
       name: homebrew-tap

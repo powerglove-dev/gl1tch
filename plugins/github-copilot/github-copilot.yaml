@@ -1,0 +1,18 @@
+# gl1tch sidecar descriptor for the GitHub Copilot provider plugin.
+#
+# Install: copy this file to ~/.config/glitch/wrappers/github-copilot.yaml
+# and ensure `gl1tch-github-copilot` is on $PATH (run `make install`).
+#
+# Prerequisites: gh CLI with copilot extension installed and authenticated.
+#   gh extension install github/gh-copilot
+#
+# Calling convention:
+#   input  — the prompt text, passed as stdin to gl1tch-github-copilot
+#
+# GitHub Copilot does not expose model selection via the CLI; the model step
+# is skipped automatically when no models are declared.
+
+name: github-copilot
+description: "GitHub Copilot suggestions via the gh CLI (https://cli.github.com)"
+kind: agent
+command: gl1tch-github-copilot
