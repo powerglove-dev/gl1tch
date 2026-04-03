@@ -32,7 +32,9 @@ import (
 	"sync"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // SocketPath returns the path to the Unix domain socket.
@@ -180,6 +182,14 @@ func (d *Daemon) PublishCtx(ctx context.Context, topic string, payload any) erro
 		return fmt.Errorf("busd: marshal event: %w", err)
 	}
 	frame = append(frame, '\n')
+
+	_, span := otel.Tracer("busd").Start(ctx, "bus.publish",
+		trace.WithAttributes(
+			attribute.String("bus.topic", topic),
+			attribute.Int("bus.payload_bytes", len(frame)),
+		),
+	)
+	defer span.End()
 
 	d.mu.RLock()
 	var targets []*client

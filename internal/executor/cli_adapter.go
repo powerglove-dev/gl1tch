@@ -72,6 +72,13 @@ type SidecarSchema struct {
 	Mode ModeBlock `yaml:"mode,omitempty"`
 	// Signals declares optional BUSD topic subscriptions with named handlers. Nil when absent.
 	Signals []SignalDeclaration `yaml:"signals,omitempty"`
+	// AgentLoop, when true, causes the supervisor to drive this plugin in an
+	// autonomous loop: execute → ask reasoning model what to do next → repeat.
+	AgentLoop bool `yaml:"agent_loop,omitempty"`
+	// MaxIterations caps the number of loop iterations when AgentLoop is true.
+	MaxIterations int `yaml:"max_iterations,omitempty"`
+	// LoopSleep is the duration to wait between loop iterations (e.g. "5s").
+	LoopSleep string `yaml:"loop_sleep,omitempty"`
 }
 
 // CliAdapter wraps an arbitrary CLI tool as a Tier 2 Executor.

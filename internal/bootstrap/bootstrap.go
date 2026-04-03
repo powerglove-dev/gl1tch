@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,8 +13,11 @@ import (
 	"github.com/8op-org/gl1tch/internal/assistant"
 	"github.com/8op-org/gl1tch/internal/busd"
 	"github.com/8op-org/gl1tch/internal/daemonwidget"
+	"github.com/8op-org/gl1tch/internal/executor"
 	"github.com/8op-org/gl1tch/internal/keybindings"
 	"github.com/8op-org/gl1tch/internal/layout"
+	"github.com/8op-org/gl1tch/internal/supervisor"
+	suphandlers "github.com/8op-org/gl1tch/internal/supervisor/handlers"
 	"github.com/8op-org/gl1tch/internal/systemprompts"
 	"github.com/8op-org/gl1tch/internal/themes"
 	"github.com/8op-org/gl1tch/internal/widgetdispatch"
@@ -283,6 +287,38 @@ func Run() error {
 	// BUSD is already listening so daemons can connect immediately.
 	daemons := daemonwidget.StartAll(filepath.Join(cfgDir, "wrappers"))
 	defer daemons.Stop()
+
+	// Start the reactive supervisor. It is non-critical — failures are logged
+	// but never crash the bootstrap process.
+	{
+		supCtx, supCancel := context.WithCancel(context.Background())
+		defer supCancel()
+
+		execMgr := executor.NewManager()
+		_ = execMgr.LoadWrappersFromDir(filepath.Join(cfgDir, "wrappers"))
+
+		sup := supervisor.New(cfgDir, execMgr)
+
+		// Build a bus publisher the handlers can use.
+		sockPath, _ := busd.SocketPath()
+		pub := suphandlers.NewBusPublisher(sockPath)
+
+		// Register the diagnosis handler (reacts to pipeline/agent failure events).
+		sup.RegisterHandler(suphandlers.NewDiagnosisHandler(execMgr, pub))
+
+		// Register agent loop handlers for any sidecar with agent_loop: true.
+		wrappersDir := filepath.Join(cfgDir, "wrappers")
+		for _, alCfg := range suphandlers.ScanAgentLoopSidecars(wrappersDir) {
+			sup.RegisterHandler(suphandlers.NewAgentLoopHandler(alCfg, execMgr, pub))
+		}
+
+		go func() {
+			if err := sup.Start(supCtx); err != nil {
+				slog.Warn("supervisor exited", "err", err)
+			}
+		}()
+		defer sup.Stop()
+	}
 
 	run := func(args ...string) error {
 		c := exec.Command("tmux", args...)

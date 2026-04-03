@@ -243,7 +243,7 @@ func tryPipelineBusSubscribeCmd(extraTopics ...string) tea.Cmd {
 			return pipelineBusDisconnectedMsg{}
 		}
 		subs := append(
-			[]string{"pipeline.run.*", "pipeline.step.*", "cron.job.*", "cron.entry.*", topics.ClarificationRequested, topics.GameRunScored},
+			[]string{"pipeline.run.*", "pipeline.step.*", "cron.job.*", "cron.entry.*", topics.ClarificationRequested, topics.GameRunScored, "notification.*"},
 			extraTopics...,
 		)
 		reg, _ := json.Marshal(map[string]any{
@@ -473,6 +473,40 @@ func (m Model) handlePipelineBusEvent(msg pipelineBusEventMsg) Model {
 				if m.feed[i].title == oldCronTitle {
 					m.feed[i].title = newCronTitle
 				}
+			}
+		}
+
+	// ── notification.* ────────────────────────────────────────────────────────
+
+	case topics.NotificationErrorDiagnosed, topics.NotificationAgentLoopComplete:
+		var payload struct {
+			Session  string `json:"session"`
+			Title    string `json:"title"`
+			Body     string `json:"body"`
+			Severity string `json:"severity"`
+		}
+		if json.Unmarshal(msg.payload, &payload) == nil {
+			// Prepend a feed entry showing the notification title.
+			id := fmt.Sprintf("notif-%d", time.Now().UnixNano())
+			title := payload.Title
+			if title == "" {
+				title = msg.topic
+			}
+			entry := feedEntry{
+				id:     id,
+				title:  title,
+				status: FeedDone,
+				ts:     time.Now(),
+			}
+			m = m.prependFeedEntry(entry)
+
+			// Mark the target session as needing attention.
+			sessionName := payload.Session
+			if sessionName == "" {
+				sessionName = "main"
+			}
+			if m.glitchChat.sessions != nil {
+				m.glitchChat.sessions.markAttention(sessionName)
 			}
 		}
 	}

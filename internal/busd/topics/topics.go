@@ -48,4 +48,8 @@ const (
 	WorkflowStepStarted = "workflow.step.started"
 	WorkflowStepDone    = "workflow.step.done"
 	WorkflowStepFailed  = "workflow.step.failed"
+
+	// Supervisor notification topics
+	NotificationErrorDiagnosed    = "notification.error.diagnosed"
+	NotificationAgentLoopComplete = "notification.agent.loop.completed"
 )
