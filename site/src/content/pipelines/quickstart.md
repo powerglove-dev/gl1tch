@@ -1,113 +1,130 @@
 ---
 title: "Your First Pipeline"
-description: "Install gl1tch and run your first AI-powered pipeline in under five minutes."
+description: "Install gl1tch and run your first AI-powered automation in under five minutes."
 order: 1
 ---
 
-gl1tch runs automations you write in YAML and executes them with real AI. This page gets you from zero to a working pipeline in under five minutes. No theory — just install, write, run.
+gl1tch runs AI-powered automations called pipelines. You tell it what you want — it routes to the right pipeline, or builds one on the spot. This page gets you from zero to a working pipeline in under five minutes.
 
-
-## Quick Start
-
-**Step 1 — Install:**
+## Install
 
 ```bash
 go install github.com/8op-org/gl1tch/cmd/glitch@latest
 ```
 
-You need Go 1.22+ and either [Ollama](https://ollama.ai) running locally or the [Claude CLI](https://claude.ai/download) authenticated. No Docker, no cloud account required.
+You need Go 1.22+ and at least one AI provider: [Ollama](https://ollama.ai) running locally, or the [Claude CLI](https://claude.ai/download) authenticated. No Docker, no cloud account required.
 
-**Step 2 — Write a pipeline:**
+## Run your first pipeline
 
-Create `hello.pipeline.yaml` anywhere on disk:
-
-```yaml
-name: hello
-version: "1"
-steps:
-  - id: greet
-    executor: claude
-    model: claude-haiku-4-5-20251001
-    prompt: |
-      Say hello in the style of a 1990s BBS sysop. Keep it under 3 lines.
-```
-
-**Step 3 — Run it:**
+gl1tch ships with `wf-git-pulse` — a pipeline that shows what's happening in any git repo right now:
 
 ```bash
-glitch pipeline run hello.pipeline.yaml
+glitch pipeline run wf-git-pulse
 ```
 
-You'll see a sysop greeting stream to your terminal. That's your first pipeline.
+```
+[pipeline] starting: wf-git-pulse
+[step:pulse] status:running
+[step:pulse] status:done
 
-> **TIP:** Using Ollama instead of Claude? Swap executor and model:
-> ```yaml
-> executor: ollama
-> model: qwen2.5-coder:latest
-> ```
+=== recent commits ===
+067ce08 feat(console): mud-chat-reply signal handler
+68a8da1 feat(model): add glitch model subcommand for plugin model discovery
+7cc9125 Merge pull request #40 from 8op-org/feature/router-improvements
+389150d feat(router): five intent routing improvements with full test coverage
+aa2faf2 chore: delete dead EditorPanel from buildershared
 
+=== diff stat since last commit ===
+ internal/console/signal_handlers.go | 38 +++++++++++++++++++++++++++++++++++++
+ 1 file changed, 38 insertions(+)
 
-## What Just Happened
-
-gl1tch read your YAML, found the `greet` step, sent your prompt to Claude, and streamed the response to stdout. Every pipeline run is stored locally so you can review it later.
-
-Single-step pipelines are useful for quick tasks. The real power comes from chaining steps together.
-
-
-## Chaining Steps
-
-Steps can pass their output to later steps. This pipeline fetches a GitHub repo description and summarizes it:
-
-```yaml
-name: git-summary
-version: "1"
-steps:
-  - id: get-repo
-    executor: gh
-    vars:
-      args: "repo view --json description"
-
-  - id: summarize
-    executor: claude
-    model: claude-haiku-4-5-20251001
-    needs: [get-repo]
-    prompt: |
-      Summarize this repo description in one sentence:
-      {{steps.get-repo.output}}
+=== untracked / modified ===
+ M site/src/content/pipelines/quickstart.md
 ```
 
-Two things to notice:
+That's a real pipeline run — `git log`, `git diff --stat`, and `git status` chained together in one step.
 
-- `needs: [get-repo]` — the `summarize` step waits for `get-repo` to finish before it runs.
-- `{{steps.get-repo.output}}` — injects the previous step's output into the prompt.
+## Add AI to the pipeline
 
-The `gh` executor wraps the [GitHub CLI](https://cli.github.com/). Make sure it's installed and authenticated before running this one.
-
-
-## Where to Save Your Pipelines
-
-`glitch pipeline run` accepts a file path or a pipeline name:
+The next step is pairing shell output with a local model. Ask gl1tch to summarize the same commits:
 
 ```bash
-# Run by file path (good for development)
-glitch pipeline run ./hello.pipeline.yaml
-
-# Run by name (looks in ~/.config/glitch/pipelines/)
-glitch pipeline run hello
+glitch ask --provider ollama "summarize my last 5 commits"
 ```
 
-Drop pipelines you use regularly into `~/.config/glitch/pipelines/`. They show up automatically in your gl1tch workspace.
+gl1tch fetches your commits with `git log`, then passes them to your local Ollama model:
 
+```
+[step:fetch] status:running
+[step:fetch] status:done
+[step:summarize] status:running
+[step:summarize] status:done
 
-## Next Steps
+Recent commits added a signal handler for in-game chat interaction and a
+subcommand for discovering plugin models. There were also improvements to
+the router with enhanced test coverage, and dead code was cleaned up by
+removing an unused EditorPanel class.
+```
 
-- [Pipelines](/docs/pipelines/pipelines) — Full guide to writing and structuring pipelines
-- [Console](/docs/pipelines/console) — Your gl1tch workspace: chat, launch, inspect runs
-- [Examples](/docs/pipelines/examples) — Copy-paste pipelines for real developer workflows
+No model flag needed. When you specify a provider without a model, gl1tch picks the cheapest available one automatically — in this case `qwen2.5:latest`.
 
+## Use Claude instead
 
-## See Also
+```bash
+glitch ask --provider claude "summarize my last 5 commits"
+```
 
-- [Pipelines](/docs/pipelines/pipelines)
-- [Console](/docs/pipelines/console)
-- [Examples](/docs/pipelines/examples)
+Same routing, same pipeline — Claude Haiku by default (the cheapest option), or pass `--model claude-sonnet-4-6` to upgrade.
+
+```
+[step:fetch] status:running
+[step:summarize] status:running
+[step:summarize] status:done
+
+**067ce08 — MUD chat reply handler**
+Added in-game chat integration. When players mention "glitch" in MUD chat,
+gl1tch generates a reply and publishes it back to the game's web chat UI.
+
+**68a8da1 — glitch model subcommand**
+New command that outputs the best available model in "provider/model" format.
+Enables plugins to resolve the user's configured model without hardcoding names.
+
+**389150d — Five intent routing improvements**
+Major routing overhaul: removed a gate blocking natural-language invocations,
+added fast-path extraction for cron expressions, and added near-miss clarification.
+```
+
+## Review a PR
+
+Pass gl1tch a GitHub PR URL and it routes to `pr-review` automatically:
+
+```bash
+glitch ask "https://github.com/8op-org/gl1tch/pull/40"
+```
+
+```
+[route] → pr-review (95%)
+[step:fetch_diff] status:running
+[step:fetch_comments] status:running
+[step:fix] status:running
+[step:fix] status:done
+```
+
+`pr-review` fetches the diff and reviewer comments, then produces corrected code. Requires `gh` authenticated.
+
+## Open the console
+
+For ongoing sessions — asking questions, running pipelines, switching between projects:
+
+```bash
+glitch
+```
+
+Everything available from the command line is available here, plus conversation history, brain context, and the inline docs viewer (`/docs`).
+
+## Next steps
+
+- [Pipelines](/docs/pipelines/pipelines) — What's inside a pipeline and how steps connect
+- [Console](/docs/pipelines/console) — Your gl1tch workspace in detail
+- [Brain](/docs/pipelines/brain) — How gl1tch remembers context across sessions
+- [Examples](/docs/pipelines/examples) — Ready-to-run pipelines for real developer workflows

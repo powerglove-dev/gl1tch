@@ -13,8 +13,9 @@ import (
 
 // SidecarModel is a single model entry declared in a sidecar YAML.
 type SidecarModel struct {
-	ID    string `yaml:"id"`
-	Label string `yaml:"label"`
+	ID      string `yaml:"id"`
+	Label   string `yaml:"label"`
+	Default bool   `yaml:"default"` // cheapest/preferred default when no model is specified
 }
 
 // SlashEntry is a single entry in a widget's slash-command menu.

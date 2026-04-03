@@ -22,6 +22,7 @@ type ModelOption struct {
 	ID        string
 	Label     string
 	Separator bool // visual divider — not selectable
+	Default   bool // cheapest/preferred default when no model is specified
 }
 
 // ProviderDef describes one AI provider and its available models.
@@ -108,7 +109,7 @@ func loadSidecarMeta(configDir string) map[string]sidecarMeta {
 		}
 		models := make([]ModelOption, 0, len(adapter.Models()))
 		for _, m := range adapter.Models() {
-			models = append(models, ModelOption{ID: m.ID, Label: m.Label})
+			models = append(models, ModelOption{ID: m.ID, Label: m.Label, Default: m.Default})
 		}
 		cmd := adapter.Command()
 		// If no models declared in sidecar, try --list-models autodetect.

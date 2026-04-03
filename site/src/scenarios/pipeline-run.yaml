@@ -1,0 +1,8 @@
+name: pipeline-run
+description: A pipeline mid-execution showing step progress output
+group: pipelines
+steps:
+  - launch: glitch
+  - send: "/pipeline run docs-improve --input 'quickstart'"
+  - wait_for: "[step:"
+  - screenshot: pipeline-mid-run

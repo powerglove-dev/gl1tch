@@ -1,0 +1,7 @@
+name: console-welcome
+description: gl1tch main console in its ready state — used on the homepage and docs index
+group: console
+steps:
+  - launch: glitch
+  - wait_for: "ask glitch"
+  - screenshot: welcome

@@ -514,8 +514,8 @@ func buildAskManager(providerFlag, modelFlag string) (mgr *executor.Manager, pro
 			if p.ID == providerFlag {
 				providerID = p.ID
 				model = modelFlag
-				if model == "" && len(p.Models) > 0 {
-					model = p.Models[0].ID
+				if model == "" {
+					model = cheapestModel(p.Models)
 				}
 				return
 			}
@@ -533,8 +533,8 @@ func buildAskManager(providerFlag, modelFlag string) (mgr *executor.Manager, pro
 		if localProviderIDs[p.ID] {
 			providerID = p.ID
 			model = modelFlag
-			if model == "" && len(p.Models) > 0 {
-				model = p.Models[0].ID
+			if model == "" {
+				model = cheapestModel(p.Models)
 			}
 			return
 		}
@@ -542,6 +542,25 @@ func buildAskManager(providerFlag, modelFlag string) (mgr *executor.Manager, pro
 
 	err = fmt.Errorf("no local provider available (is ollama running?); use --provider to specify one explicitly")
 	return
+}
+
+// cheapestModel returns the ID of the cheapest model in the list.
+// Prefers the first model marked default:true; if none, falls back to the last
+// selectable model (wrapper YAMLs are ordered most-capable → cheapest by convention).
+// Returns "" when the list is empty.
+func cheapestModel(models []picker.ModelOption) string {
+	for _, m := range models {
+		if m.Default && !m.Separator {
+			return m.ID
+		}
+	}
+	// Fallback: last non-separator model.
+	for i := len(models) - 1; i >= 0; i-- {
+		if !models[i].Separator {
+			return models[i].ID
+		}
+	}
+	return ""
 }
 
 // buildFullManager returns an executor manager with all AI providers and sidecars loaded.
