@@ -2,21 +2,33 @@
 import Base from '../layouts/Base.astro';
 import MacTerminal from '../components/MacTerminal.astro';
 import ProjectStats from '../components/ProjectStats.astro';
+import DocsScreen from '../components/screens/DocsScreen.astro';
 ---
 <Base>
   <main class="terminal-stage">
     <div class="terminal-workspace" id="terminal-workspace">
-      <div class="mac-terminal">
+      <div class="mac-terminal" id="mac-frame">
         <div class="mac-titlebar">
           <div class="mac-dots" aria-hidden="true">
             <span class="mac-dot mac-dot-red"></span>
             <span class="mac-dot mac-dot-yellow"></span>
             <span class="mac-dot mac-dot-green"></span>
           </div>
-          <span class="mac-title">GL1TCH</span>
+          <span class="mac-title" id="mac-frame-title">GL1TCH</span>
+          <!-- only visible in docs mode -->
+          <button class="mac-docs-close" id="mac-docs-close" onclick="DOCS_PANEL.close()" aria-label="Close docs" hidden>
+            esc
+          </button>
         </div>
-        <div class="mac-body" style="padding:0; background:#1a1b26;">
-          <MacTerminal />
+        <div class="mac-body" style="padding:0; background:#1a1b26; flex:1; overflow:hidden; display:flex; flex-direction:column;">
+          <!-- Terminal view -->
+          <div id="view-terminal" style="flex:1; overflow:hidden; display:flex; flex-direction:column;">
+            <MacTerminal />
+          </div>
+          <!-- Docs view — pre-rendered, hidden until /docs is typed -->
+          <div id="view-docs" style="flex:1; overflow:hidden; display:none;">
+            <DocsScreen />
+          </div>
         </div>
       </div>
     </div>
@@ -26,3 +38,99 @@ import ProjectStats from '../components/ProjectStats.astro';
     made with AI <span class="fg-comment">(mostly correct.. probably)</span> &middot; guided by adam s<span class="fg-purple">&dagger;</span>okes &middot; <a href="https://8op.org" target="_blank" rel="noopener">contributions welcome</a>
   </footer>
 </Base>
+
+<script>
+  const DOCS_PANEL = {
+    open() {
+      const frame = document.getElementById('mac-frame');
+      const vTerm = document.getElementById('view-terminal');
+      const vDocs = document.getElementById('view-docs');
+      const title = document.getElementById('mac-frame-title');
+      const closeBtn = document.getElementById('mac-docs-close');
+      if (!frame || !vTerm || !vDocs) return;
+
+      // snap frame to full screen first
+      frame.classList.add('is-docs');
+      if (title) title.textContent = 'GL1TCH — DOCS';
+      if (closeBtn) closeBtn.hidden = false;
+
+      // fade content in
+      vTerm.style.display = 'none';
+      vDocs.style.opacity = '0';
+      vDocs.style.display = '';
+      requestAnimationFrame(() => {
+        vDocs.style.opacity = '1';
+      });
+
+      const DS = (window as any).DS;
+      if (DS) DS.init();
+    },
+
+    close() {
+      const frame = document.getElementById('mac-frame');
+      const vTerm = document.getElementById('view-terminal');
+      const vDocs = document.getElementById('view-docs');
+      const title = document.getElementById('mac-frame-title');
+      const closeBtn = document.getElementById('mac-docs-close');
+      if (!frame || !vTerm || !vDocs) return;
+
+      vDocs.style.opacity = '0';
+      vDocs.addEventListener('transitionend', () => {
+        vDocs.style.display = 'none';
+        vTerm.style.display = '';
+        frame.classList.remove('is-docs');
+        if (title) title.textContent = 'GL1TCH';
+        if (closeBtn) closeBtn.hidden = true;
+        const input = document.getElementById('terminal-input') as HTMLInputElement | null;
+        input?.focus();
+      }, { once: true });
+    },
+  };
+
+  (window as any).DOCS_PANEL = DOCS_PANEL;
+
+  document.addEventListener('keydown', (e: KeyboardEvent) => {
+    const frame = document.getElementById('mac-frame');
+    if (!frame?.classList.contains('is-docs')) return;
+    if (e.key === 'Escape') { e.preventDefault(); DOCS_PANEL.close(); }
+  });
+</script>
+
+<style>
+#view-docs {
+  transition: opacity 0.18s ease;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Maximize the terminal frame when docs mode is active */
+#mac-frame.is-docs {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  width: 100% !important;
+  max-width: none !important;
+  height: 100% !important;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Esc button that appears in the titlebar when in docs mode */
+.mac-docs-close {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--current-line, #44475a);
+  color: var(--comment, #6272a4);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+  letter-spacing: 0.06em;
+  line-height: 1;
+}
+.mac-docs-close:hover {
+  color: var(--fg, #f8f8f2);
+  border-color: var(--fg, #f8f8f2);
+}
+</style>

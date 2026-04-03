@@ -1,32 +1,16 @@
 ---
-title: "Executors and Plugins"
-description: "The workers that run your steps. AI models, tools, builtins."
+title: "Executors"
+description: "Configure the AI providers and tools that run your pipeline steps."
 order: 3
 ---
 
-Every step in a pipeline has an `executor` field. That field tells the runner what does the work. There are three kinds of executors, and they all use the same field.
+Every pipeline step has an `executor` field. That field picks what does the work — an AI model, a CLI tool, or a lightweight builtin. Here's how to configure each one.
 
-## Native executors
+## Quick Start
 
-These are compiled into the gl1tch binary. No installation needed.
+Pick your provider and copy the YAML:
 
-### claude
-
-Runs Claude via the Claude CLI. Install and authenticate the CLI first — gl1tch delegates to it.
-
-```yaml
-- id: review
-  executor: claude
-  model: claude-sonnet-4-6
-  prompt: "Review this code for bugs."
-```
-
-Supports all Claude models. Use the full model identifier in the `model` field: `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`, and so on.
-
-### ollama
-
-Uses a locally running [Ollama](https://ollama.ai) instance. The runner connects to `localhost:11434` by default.
-
+**Local AI (Ollama):**
 ```yaml
 - id: analyze
   executor: ollama
@@ -34,30 +18,15 @@ Uses a locally running [Ollama](https://ollama.ai) instance. The runner connects
   prompt: "Explain what this function does."
 ```
 
-You need to have the model pulled first: `ollama pull qwen2.5-coder:latest`. The `model` field is the exact Ollama model tag.
-
-## Sidecar executors (CLI wrappers)
-
-Sidecar executors wrap any command-line tool. They're defined in YAML files in `~/.config/glitch/wrappers/` and loaded at startup. The gl1tch binary discovers them automatically.
-
-A sidecar YAML file looks like this:
-
+**Claude:**
 ```yaml
-name: gh
-description: "GitHub CLI wrapper"
-command: gh
-args: []
-kind: tool
+- id: review
+  executor: claude
+  model: claude-sonnet-4-6
+  prompt: "Review this code for bugs."
 ```
 
-When you use `executor: gh` in a pipeline, the runner finds this sidecar, spawns the `gh` process, passes input via stdin, and captures stdout.
-
-### Passing flags to sidecar executors
-
-Sidecar executors receive arguments through the step's `vars` map. Each key in `vars` is uppercased and prefixed with `GLITCH_` to form an environment variable. The sidecar's wrapper script reads these variables and forwards them to the underlying command.
-
-For the built-in `gh` sidecar, use `vars.args` to pass the full subcommand and flags:
-
+**GitHub CLI:**
 ```yaml
 - id: list-prs
   executor: gh
@@ -65,11 +34,63 @@ For the built-in `gh` sidecar, use `vars.args` to pass the full subcommand and f
     args: "pr list --json number,title,author"
 ```
 
-This sets `GLITCH_ARGS="pr list --json number,title,author"` in the sidecar's environment, which the `gh` wrapper expands as `gh pr list --json number,title,author`. The same `vars.args` convention applies to the `jq` sidecar and any custom sidecar that reads `GLITCH_ARGS`.
+## AI Providers
+
+### ollama
+
+Runs a model on your local [Ollama](https://ollama.ai) instance. Connects to `localhost:11434`. No API key. No data leaves your machine.
+
+```yaml
+- id: analyze
+  executor: ollama
+  model: qwen2.5-coder:latest
+  prompt: "What does this function do?\n\n{{steps.fetch.output}}"
+```
+
+Pull the model first:
+
+```bash
+ollama pull qwen2.5-coder:latest
+```
+
+The `model` field is the exact Ollama model tag. Use any model you have pulled.
+
+### claude
+
+Runs Claude via the Claude CLI. Install and authenticate the CLI before using this executor — gl1tch delegates to it.
+
+```yaml
+- id: review
+  executor: claude
+  model: claude-sonnet-4-6
+  prompt: |
+    Review this pull request diff for correctness and security.
+    {{steps.get-diff.output}}
+```
+
+Use the full model identifier in the `model` field.
+
+| Model | Description |
+|-------|-------------|
+| `claude-sonnet-4-6` | Best quality. Use for complex analysis and writing. |
+| `claude-haiku-4-5-20251001` | Faster. Use for classification, formatting, and simple transforms. |
+
+## Provider Table
+
+| Executor | Runs where | Needs |
+|----------|-----------|-------|
+| `ollama` | Your machine | Ollama running locally, model pulled |
+| `claude` | Anthropic API | Claude CLI installed and authenticated |
+
+> **TIP:** Use `ollama` for routing decisions and quick transforms. Use `claude` for tasks that benefit from a larger model — code review, complex reasoning, writing.
+
+## CLI Tool Executors
+
+These wrap command-line tools. They pass `vars.args` to the tool and capture stdout.
 
 ### gh
 
-GitHub CLI wrapper. Pass the gh command and all flags as `vars.args`:
+GitHub CLI wrapper. Requires the [GitHub CLI](https://cli.github.com/) installed and authenticated.
 
 ```yaml
 - id: list-prs
@@ -78,14 +99,14 @@ GitHub CLI wrapper. Pass the gh command and all flags as `vars.args`:
     args: "pr list --json number,title,author"
 ```
 
-Requires the [GitHub CLI](https://cli.github.com/) installed and authenticated via `gh auth login`.
+Pass any `gh` subcommand and flags as `vars.args`. Output is captured and available to downstream steps.
 
 ### jq
 
-Runs [jq](https://jqlang.github.io/jq/) on the input. Useful for transforming JSON between steps:
+Runs [jq](https://jqlang.github.io/jq/) on the step input. Use it to transform JSON between steps.
 
 ```yaml
-- id: extract-names
+- id: extract-titles
   executor: jq
   needs: [list-prs]
   input: "{{steps.list-prs.output}}"
@@ -95,20 +116,20 @@ Runs [jq](https://jqlang.github.io/jq/) on the input. Useful for transforming JS
 
 ### write
 
-Writes the step input to a file:
+Writes the step input to a file on disk.
 
 ```yaml
-- id: save
+- id: save-report
   executor: write
   needs: [review]
   vars:
-    path: "./output.md"
+    path: "./review.md"
   input: "{{steps.review.output}}"
 ```
 
-### Custom sidecars
+### Custom tool wrappers
 
-You can wrap any CLI tool. Create a YAML file in `~/.config/glitch/wrappers/`:
+Wrap any CLI tool by creating a YAML file in `~/.config/glitch/wrappers/`:
 
 ```yaml
 # ~/.config/glitch/wrappers/my-tool.yaml
@@ -119,17 +140,19 @@ args: ["--format", "json"]
 kind: tool
 ```
 
-Now use `executor: my-tool` in any pipeline. Input goes to stdin, output comes from stdout. Each key in the step's `vars` map is passed to the process as `GLITCH_<KEY>=<value>`.
+Now use `executor: my-tool` in any pipeline. Input goes to stdin, output comes from stdout. Each key in `vars` is passed to the process as `GLITCH_<KEY>=<value>`.
 
-The `kind` field matters: `tool` executors receive only the step input. `agent` executors (the default) receive the full execution context.
+The `kind` field controls what context the executor receives:
+- `tool` — receives only the step input
+- `agent` — receives the full execution context (default)
 
 ## Builtins
 
-Builtins are lightweight functions compiled into the runner. They don't spawn processes or call APIs. Use them for control flow, validation, and glue logic.
+Builtins are lightweight functions built into gl1tch. They don't spawn processes or call APIs. Use them for control flow, validation, and glue.
 
 ### builtin.assert
 
-Validates output. Fails the step if the assertion is false.
+Validates a value. Fails the step if the assertion is false. Use it to gate downstream steps on expected output.
 
 ```yaml
 - id: check
@@ -142,7 +165,7 @@ Validates output. Fails the step if the assertion is false.
 
 ### builtin.set_data
 
-Sets static data in the step output. Useful for injecting constants or seed values into the DAG.
+Sets static values in the step output. Useful for injecting constants or seed data into the pipeline.
 
 ```yaml
 - id: config
@@ -167,7 +190,7 @@ Logs a message during pipeline execution. Does not produce output for downstream
 
 ### builtin.sleep
 
-Pauses execution for a duration. Useful for rate limiting or waiting on external processes.
+Pauses execution for a duration. Useful for rate limiting.
 
 ```yaml
 - id: wait
@@ -178,10 +201,10 @@ Pauses execution for a duration. Useful for rate limiting or waiting on external
 
 ### builtin.http_get
 
-Makes a GET request to a URL and returns the response body.
+Makes a GET request and returns the response body.
 
 ```yaml
-- id: fetch-data
+- id: fetch-status
   executor: builtin.http_get
   args:
     url: "https://api.example.com/status"
@@ -190,7 +213,7 @@ Makes a GET request to a URL and returns the response body.
 
 ### builtin.index_code
 
-Indexes a codebase directory for semantic search. Uses an Ollama model for embeddings. Useful as a first step before asking questions about code.
+Indexes a codebase directory for semantic search using a local model. Run this as a first step before asking questions about a codebase.
 
 ```yaml
 - id: index
@@ -200,21 +223,21 @@ Indexes a codebase directory for semantic search. Uses an Ollama model for embed
     model: "qwen2.5-coder:latest"
 ```
 
-## Putting it together
+## Full Example: Code Review Pipeline
 
-Here's a real pipeline that uses multiple executor types in one flow -- a code review pipeline:
+Four steps, three executor types:
 
 ```yaml
 name: code-review
 version: "1"
 steps:
-  # Sidecar executor: fetch the PR diff
+  # Fetch the PR diff with the GitHub CLI
   - id: get-diff
     executor: gh
     vars:
       args: "pr diff 42"
 
-  # Native executor: AI reviews the diff
+  # AI review
   - id: review
     executor: claude
     model: claude-sonnet-4-6
@@ -225,14 +248,14 @@ steps:
 
       {{steps.get-diff.output}}
 
-  # Builtin: log a checkpoint
+  # Log a checkpoint
   - id: log-done
     executor: builtin.log
     needs: [review]
     args:
       message: "Review complete."
 
-  # Sidecar executor: write the review to disk
+  # Save the review to disk
   - id: save
     executor: write
     needs: [review]
@@ -241,4 +264,8 @@ steps:
     input: "{{steps.review.output}}"
 ```
 
-Four steps, three different executor types, one pipeline. The runner handles the dependency graph, streams output, and stores everything in the local database.
+## See Also
+
+- [Pipeline YAML Reference](/docs/pipelines/yaml-reference) — every field and what it does
+- [CLI Reference](/docs/pipelines/cli-reference) — running pipelines from the command line
+- [Workflows](/docs/pipelines/workflows) — chain multiple pipelines together

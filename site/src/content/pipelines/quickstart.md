@@ -1,39 +1,25 @@
 ---
 title: "Your First Pipeline"
-description: "Install gl1tch, write a pipeline YAML, run it. Five minutes."
+description: "Install gl1tch and run your first AI-powered pipeline in under five minutes."
 order: 1
 ---
 
-## Prerequisites
+gl1tch runs automations you write in YAML and executes them with real AI. This page gets you from zero to a working pipeline in under five minutes. No theory — just install, write, run.
 
-You need two things:
 
-- **Go 1.22+** installed on your machine. Run `go version` to check.
-- **An AI provider**: either the [Claude CLI](https://claude.ai/download) installed and authenticated, or [Ollama](https://ollama.ai) running locally with a model pulled.
+## Quick Start
 
-That's it. No Docker, no cloud account, no config ceremony.
-
-## Install
-
-From source (recommended for now):
-
-```bash
-git clone https://github.com/8op-org/gl1tch.git
-cd gl1tch
-go build ./cmd/glitch
-```
-
-Or grab it directly:
+**Step 1 — Install:**
 
 ```bash
 go install github.com/8op-org/gl1tch/cmd/glitch@latest
 ```
 
-Either way you end up with a `glitch` binary. Put it somewhere on your `$PATH`.
+You need Go 1.22+ and either [Ollama](https://ollama.ai) running locally or the [Claude CLI](https://claude.ai/download) authenticated. No Docker, no cloud account required.
 
-## Your first pipeline
+**Step 2 — Write a pipeline:**
 
-Create a file called `hello.pipeline.yaml`. Anywhere on disk is fine.
+Create `hello.pipeline.yaml` anywhere on disk:
 
 ```yaml
 name: hello
@@ -46,38 +32,31 @@ steps:
       Say hello in the style of a 1990s BBS sysop. Keep it under 3 lines.
 ```
 
-Run it:
+**Step 3 — Run it:**
 
 ```bash
 glitch pipeline run hello.pipeline.yaml
 ```
 
-The runner builds the executor, sends the prompt, and streams output to stdout. You should see something like a sysop greeting from 1994 appear in your terminal.
+You'll see a sysop greeting stream to your terminal. That's your first pipeline.
 
-If you're using Ollama instead of Claude, swap the executor and model:
+> **TIP:** Using Ollama instead of Claude? Swap executor and model:
+> ```yaml
+> executor: ollama
+> model: qwen2.5-coder:latest
+> ```
 
-```yaml
-- id: greet
-  executor: ollama
-  model: qwen2.5-coder:latest
-  prompt: |
-    Say hello in the style of a 1990s BBS sysop. Keep it under 3 lines.
-```
 
-## What just happened
+## What Just Happened
 
-When you run `glitch pipeline run`, the runner:
+gl1tch read your YAML, found the `greet` step, sent your prompt to Claude, and streamed the response to stdout. Every pipeline run is stored locally so you can review it later.
 
-1. Parses the YAML and validates the step DAG
-2. Resolves each step's executor (native like `claude`/`ollama`, or sidecar CLI wrappers loaded from `~/.config/glitch/wrappers/`)
-3. Runs steps in dependency order, streaming output as it goes
-4. Stores the run result in the local SQLite database
+Single-step pipelines are useful for quick tasks. The real power comes from chaining steps together.
 
-Single-step pipelines are fine for testing, but the real power is chaining.
 
-## Chaining steps
+## Chaining Steps
 
-Here's a two-step pipeline that fetches a repo description from GitHub and summarizes it:
+Steps can pass their output to later steps. This pipeline fetches a GitHub repo description and summarizes it:
 
 ```yaml
 name: git-summary
@@ -97,22 +76,38 @@ steps:
       {{steps.get-repo.output}}
 ```
 
-The `needs` field creates a dependency. `summarize` won't run until `get-repo` finishes. The `{{steps.get-repo.output}}` template expression injects the previous step's output into the prompt.
+Two things to notice:
 
-To use the `gh` executor, you need the [GitHub CLI](https://cli.github.com/) installed and authenticated. The `gh` executor is a sidecar wrapper -- a YAML file in `~/.config/glitch/wrappers/` that tells gl1tch how to call the `gh` command.
+- `needs: [get-repo]` — the `summarize` step waits for `get-repo` to finish before it runs.
+- `{{steps.get-repo.output}}` — injects the previous step's output into the prompt.
 
-## Where pipelines live
+The `gh` executor wraps the [GitHub CLI](https://cli.github.com/). Make sure it's installed and authenticated before running this one.
 
-The `glitch pipeline run` command accepts:
 
-- A **file path**: `glitch pipeline run ./my-pipeline.pipeline.yaml`
-- A **pipeline name**: `glitch pipeline run my-pipeline` -- this looks in `~/.config/glitch/pipelines/my-pipeline.pipeline.yaml`
+## Where to Save Your Pipelines
 
-For development, use file paths. For pipelines you run often, drop them in the config directory.
+`glitch pipeline run` accepts a file path or a pipeline name:
 
-## Next steps
+```bash
+# Run by file path (good for development)
+glitch pipeline run ./hello.pipeline.yaml
 
-- Read the [YAML Reference](/docs/pipelines/yaml-reference) for every field you can use
-- Learn about [Executors and Plugins](/docs/pipelines/executors) to understand what runs your steps
-- Explore the [Brain System](/docs/pipelines/brain) for persistent context across steps
-- Copy a [Real-World Pipeline](/docs/pipelines/examples) and adapt it
+# Run by name (looks in ~/.config/glitch/pipelines/)
+glitch pipeline run hello
+```
+
+Drop pipelines you use regularly into `~/.config/glitch/pipelines/`. They show up automatically in your gl1tch workspace.
+
+
+## Next Steps
+
+- [Pipelines](/docs/pipelines/pipelines) — Full guide to writing and structuring pipelines
+- [Console](/docs/pipelines/console) — Your gl1tch workspace: chat, launch, inspect runs
+- [Examples](/docs/pipelines/examples) — Copy-paste pipelines for real developer workflows
+
+
+## See Also
+
+- [Pipelines](/docs/pipelines/pipelines)
+- [Console](/docs/pipelines/console)
+- [Examples](/docs/pipelines/examples)

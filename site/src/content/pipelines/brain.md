@@ -1,45 +1,62 @@
 ---
 title: "The Brain System"
-description: "Steps write what they learn. Later steps read it. The model decides what's worth remembering."
+description: "Give your assistant memory — it records what it learns in one step and carries that knowledge into every step that follows."
 order: 4
 ---
 
-## How it works
+Your assistant reads, analyzes, and moves on — but without memory, every step starts from scratch. The brain system fixes that. When a step records a `<brain>` block, gl1tch stores it and injects it into every step that runs after. Your assistant remembers what it found so it can act on it later, automatically.
 
-Every step's output is scanned for `<brain>` blocks. If one is found and a store is available, it's persisted for the current run. Every subsequent step receives accumulated brain notes in its prompt preamble — automatically, before your prompt text.
 
-There are no YAML flags that control this. Brain scanning and injection are always on when a store is configured (which is the default when running via `glitch pipeline run`). The model decides what's worth remembering by whether it emits a `<brain>` block.
+## Quick Start
 
-## Writing to the brain
-
-Your prompt instructs the model to emit a brain block. gl1tch finds it, extracts it, stores it.
+Add one instruction to your prompt. Your assistant does the rest.
 
 ```yaml
+name: security-audit
+version: "1"
+
 steps:
   - id: audit
+    executor: ollama
+    model: qwen2.5-coder:latest
+    prompt: |
+      Audit this codebase for security issues.
+      Record your top findings in a <brain> block at the end.
+
+  - id: report
     executor: claude
     model: claude-sonnet-4-6
+    needs: [audit]
     prompt: |
-      Audit this codebase for security issues. Be specific.
-      Record your key findings in a <brain> block at the end.
+      Using the brain context from the audit above,
+      write a prioritized remediation plan.
 ```
 
-The model outputs its analysis, then appends:
+Run it:
 
+```bash
+glitch pipeline run security-audit.pipeline.yaml
 ```
+
+The `report` step receives the audit findings automatically — no template expressions, no copy-paste between steps.
+
+
+## How It Works
+
+Tell your assistant to emit a `<brain>` block. gl1tch finds it, stores it, and injects it into every later step's prompt before your text runs.
+
+Your assistant outputs its analysis, then appends:
+
+```text
 <brain tags="security,sql-injection">
 SQL injection in user_search (line 42), admin_filter (line 89),
 report_query (line 156). All use string concatenation. No parameterized queries.
 </brain>
 ```
 
-gl1tch extracts the block, stores it, moves on. The full output — including the brain block — still goes to stdout.
+The next step sees this before your prompt text:
 
-## Reading from the brain
-
-If brain notes exist for the current run, they appear in the next step's prompt preamble automatically. No opt-in needed. The model sees something like this before your prompt text:
-
-```
+```text
 ## Brain Notes (this run)
 
 [audit] [tags: security, sql-injection]
@@ -47,11 +64,29 @@ SQL injection in user_search (line 42), admin_filter (line 89),
 report_query (line 156). All use string concatenation. No parameterized queries.
 
 ---
+
+[your prompt follows here]
 ```
 
-Then your prompt follows. The model sees both.
+No configuration. Brain scanning is always on.
 
-## The brain block format
+
+## Writing to the Brain
+
+Your prompt is the only control you have — and it's all you need. Tell your assistant what to record, and it will emit a `<brain>` block.
+
+```yaml
+prompt: |
+  Find patterns in these GitHub issues. What areas keep breaking?
+  Record your top 3 findings in a <brain> block.
+
+  {{steps.fetch.output}}
+```
+
+The full output — including the brain block — still goes to stdout. gl1tch extracts and stores the block separately.
+
+
+## Brain Block Format
 
 ```xml
 <brain tags="tag1,tag2" type="finding" title="Short Title">
@@ -61,17 +96,52 @@ Then your prompt follows. The model sees both.
 
 All attributes are optional:
 
-| Attribute | What it's for |
-|-----------|--------------|
-| `tags` | Comma-separated labels. Useful for filtering later. |
-| `type` | `research`, `finding`, `data`, or `code`. |
-| `title` | Short label shown in the preamble header. |
+| Attribute | Purpose |
+|-----------|---------|
+| `tags` | Comma-separated labels for grouping related notes |
+| `type` | `research`, `finding`, `data`, or `code` |
+| `title` | Short label shown in the injected preamble header |
 
-Keep brain notes short. A four-sentence insight is useful. Four paragraphs is noise.
+Keep brain notes short. A focused two-sentence finding is useful. Four paragraphs is noise.
 
-## A real example
 
-This pipeline fetches open issues, has a local model find patterns, then has Claude synthesize recommendations. The brain carries the local model's findings to Claude automatically.
+## Telling Your Assistant the Context Is There
+
+Brain notes arrive before your prompt text automatically. Your assistant responds better when you mention them explicitly:
+
+```text
+Using the brain context from earlier steps in this run,
+summarize the findings and recommend next actions.
+```
+
+Not required. Noticeably better when included.
+
+
+## Brain vs. `{{steps.<id>.output}}`
+
+These two tools do different things. Use the right one for the job.
+
+| Use | When |
+|-----|------|
+| `{{steps.fetch.output}}` | You need raw data — JSON, a diff, a file list |
+| Brain | You want what your assistant *understood*, not what it *received* |
+
+The brain carries interpreted signal. Template expressions carry raw data. A good pipeline uses both.
+
+
+## How Long Brain Notes Live
+
+Within a single run, notes written by earlier steps inject into later steps automatically. That's the primary use case.
+
+Notes also persist to your assistant's long-term store. A brain note from last Tuesday is available for semantic retrieval in a pipeline you run today, when a RAG injector is configured.
+
+
+## Examples
+
+
+### Morning Issue Triage
+
+A fast-and-smart handoff: your local model finds patterns, Claude acts on them.
 
 ```yaml
 name: issue-triage
@@ -102,31 +172,61 @@ steps:
       suggest which issues to prioritize this sprint and why.
 ```
 
-Step 3 never references `{{steps.analyze.output}}`. It doesn't need to — the brain notes from step 2 are already in its preamble.
+The `recommend` step never references `{{steps.analyze.output}}` — the brain notes are already in its preamble.
 
-## Brain vs. `{{steps.<id>.output}}`
 
-Use `{{steps.<id>.output}}` when you need the full, raw output of a step — JSON, a diff, a file list.
+### Multi-Layer Code Review
 
-Use the brain when you want a step to record what it *understood*, not what it *received*. The brain carries interpreted signal. Template expressions carry raw data.
+Each layer records what it found. The final step synthesizes everything.
 
-A good pipeline uses both.
+```yaml
+name: layered-review
+version: "1"
 
-## Tell the model the context is there
+steps:
+  - id: security
+    executor: ollama
+    model: qwen2.5-coder:latest
+    prompt: |
+      Review this diff for security issues only.
+      Record your findings in a <brain> block tagged "security".
 
-The preamble arrives before your prompt, but models respond better when you mention it explicitly:
+      {{steps.diff.output}}
 
+  - id: performance
+    executor: ollama
+    model: qwen2.5-coder:latest
+    needs: [security]
+    prompt: |
+      Review this diff for performance issues only.
+      Record your findings in a <brain> block tagged "performance".
+
+      {{steps.diff.output}}
+
+  - id: summary
+    executor: claude
+    model: claude-sonnet-4-6
+    needs: [performance]
+    prompt: |
+      Using all brain context from this run, write a final
+      code review that combines security and performance findings.
 ```
-Using the brain context from earlier steps in this run,
-summarize the findings and recommend next actions.
-```
 
-Not required. Noticeably better when included.
 
-## How long brain notes live
+## Reference
 
-Brain notes are written to the gl1tch SQLite store and stay there. They don't get deleted between runs.
+| Concept | Detail |
+|---------|--------|
+| Brain scanning | Always on when running via `glitch pipeline run` |
+| Storage | Persisted to your assistant's SQLite store |
+| Injection timing | Before your prompt text in every subsequent step |
+| Scope within a run | All steps after the writing step receive the note |
+| Scope across runs | Available for semantic retrieval via RAG injector |
+| Max useful length | Two to four sentences per brain block |
 
-Within a single run, notes written by earlier steps are injected into later steps automatically. That's the primary use case.
 
-Across runs, all accumulated brain notes are indexed into the RAG store — the same vector store used by `builtin.index_code`. So a brain note written by a pipeline run last Tuesday is available for semantic retrieval in a pipeline you run today, as long as the RAG injector is configured.
+## See Also
+
+- [Pipelines](/docs/pipelines/pipelines) — step execution, input/output, and variable interpolation
+- [Prompts](/docs/pipelines/prompts) — save reusable instructions alongside brain-aware pipelines
+- [Cron](/docs/pipelines/cron) — schedule brain-powered pipelines to run while you sleep

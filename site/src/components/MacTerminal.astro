@@ -209,7 +209,11 @@ function processCommand(raw: string) {
     }
 
     if (name === 'docs' || name === 'd') {
-      window.location.href = '/docs';
+      if ((window as any).DOCS_PANEL) {
+        (window as any).DOCS_PANEL.open();
+      } else {
+        window.location.href = '/docs';
+      }
       return;
     }
 

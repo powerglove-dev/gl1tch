@@ -5,18 +5,27 @@ description: Run the gl1tch docs-improve pipeline to write or improve documentat
 
 The docs-improve pipeline handles everything: it picks the right file, writes the doc, runs a principal engineer review pass, checks TUI test coverage, commits, and opens a PR. Your job is to extract a clear focus, hand it off to the pipeline, and then — if the pipeline reports missing integration tests — write those tests before the PR is reviewed.
 
+## The two goals of gl1tch documentation
+
+Every doc page exists for exactly one of these reasons:
+
+1. **Get running fast** — a new user should be running their first pipeline in under 5 minutes. Quickstart, console, pipelines, examples, and brain are the highest-value pages.
+2. **Make it yours** — an experienced user should be able to customize everything: their AI providers, pipelines, themes, saved prompts, scheduled automations, and plugins.
+
+Internal architecture, implementation details, and infrastructure choices (tmux, BubbleTea, OTel, Go packages) are not user goals. The pipeline is instructed to keep them out of the docs unless the user literally needs to type a command involving them.
+
 ## How docs reach the two public surfaces
 
 All docs live in `site/src/content/pipelines/*.md`. Both surfaces read from this same Astro content collection at build time:
 
-- **`/docs` URL** (`site/src/pages/docs/`) — card grid linking to individual pages, built via `DocsLayout`
-- **Terminal `/docs` command** (`site/src/components/screens/DocsScreen.astro`) — inline sidebar+viewer panel shown when `/docs` is typed on the homepage
+- **`/docs` URL** (`site/src/pages/docs/`) — card grid linking to individual pages
+- **Terminal `/docs` command** — inline sidebar+viewer shown when `/docs` is typed on the homepage
 
 The site is a static Astro build. After docs are updated, the site must be rebuilt for either surface to show the new content.
 
 **CI/CD path (production):** `gh-pages.yml` triggers on any push to `site/**` and rebuilds + deploys automatically. After a PR is merged to main, both surfaces will show the updated docs within minutes.
 
-**Local preview:** If you want to verify the changes appear correctly in both the terminal panel and the `/docs` page before the PR merges:
+**Local preview:**
 ```bash
 cd /Users/stokes/Projects/gl1tch/site && npm run build
 ```
@@ -80,10 +89,24 @@ Then open `site/dist/` or run `task site:dev` to browse locally.
 
 ## Focus phrasing tips
 
-Lean toward the internal topic names the pipeline knows — they map to the required topic catalog:
-- philosophy, architecture, technologies, quickstart, yaml-reference, executors, brain, pipelines, workflows, plugins, themes, prompts, telemetry, cron, console, cli-reference, examples
+Lean toward what the user DOES with the feature, not the feature's internal name:
+- "cron" → `"scheduling pipelines to run automatically"`
+- "brain" → `"gl1tch remembering context across sessions"`
+- "console" → `"the interactive AI assistant"`
+- "plugins" → `"installing and building custom pipelines"`
+- "themes" → `"customizing the look of gl1tch"`
 
-If the user's phrasing is close but not exact (e.g., "the scheduler" → "cron"), translate naturally. Don't overthink it — the pipeline's pick step handles ambiguity.
+The topic catalogue in the pipeline maps these to the right file. Don't overthink the phrasing — the pipeline's pick step handles ambiguity.
+
+## What the pipeline avoids
+
+The `write_doc` and `verify` steps are explicitly instructed to:
+- Not mention tmux, BubbleTea, robfig/cron, OpenTelemetry, or Go package names in user-facing pages
+- Not lead with how something is built — always lead with what the user can do
+- Use "your" framing throughout: your assistant, your pipelines, your brain
+- Put a working example before any explanation
+
+If you review a PR from this pipeline and see internal implementation details surfaced to users, flag it and re-run the pipeline with a more specific focus.
 
 ## Why tests matter
 

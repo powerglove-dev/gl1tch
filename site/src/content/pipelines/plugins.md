@@ -1,302 +1,215 @@
 ---
 title: "Plugins"
-description: "Install and manage gl1tch plugins from GitHub, configure sidecar executors, and unlock plugin-driven pipelines."
+description: "Install community pipelines and executors — or build your own — to extend what your assistant can do."
 order: 99
 ---
 
-Plugins extend gl1tch with new executors and capabilities. The plugin system lets you discover, install, and activate plugins from GitHub repositories with a single command. Once installed, plugins become first-class executors available to any pipeline.
+gl1tch ships with a solid set of built-in executors, but the real power is what the community builds on top. Plugins add new executors to your assistant — a Jira client, a Slack poster, a custom code generator — and once installed, they work in any pipeline just like the built-ins. Think of it as an app store for your AI assistant.
 
 
-## Architecture overview
+## Quick Start
 
-The plugin system consists of three layers:
+Install a plugin from GitHub with one command:
 
-**1. Discovery & Installation** (`internal/pluginmanager/`)
-- `Installer` manages the full lifecycle: fetch manifest from GitHub, install the binary (via `go install` or GitHub Releases), write the sidecar YAML, and record metadata in a local registry.
-- `FetchManifest()` downloads `glitch-plugin.yaml` from a GitHub repo at a specified ref (branch, tag, or commit).
-- `InstallBinary()` handles both Go modules (`go install github.com/user/plugin/cmd/pluginname`) and pre-built GitHub Release assets.
-- Registry (`~/.config/glitch/plugins.yaml`) tracks all installed plugins: name, source, version, binary path, sidecar path, and install timestamp.
+```bash
+glitch apm install owner/plugin-name
+```
 
-**2. Sidecar Activation** (`~/.config/glitch/wrappers/`)
-- Each plugin installation writes a sidecar YAML file (`~/.config/glitch/wrappers/<plugin-name>.yaml`) that declares the executor's command, arguments, input/output schema, and signal handlers.
-- The sidecar format is identical to the `executor.SidecarSchema` used by the core executor subsystem.
-- Sidecars can be authored inline in the plugin manifest or generated automatically from the manifest.
+List what you have installed:
 
-**3. Agent Capability Provider** (`internal/apmmanager/`)
-- `AgentCapabilityProvider` interface lets pipelines request capabilities at runtime without knowing if the agent is installed.
-- `RequireAgent(ctx, agentID)` blocks until installation completes, enabling on-demand agent bootstrapping.
-- Messages (`AgentInstallStartMsg`, `AgentInstallDoneMsg`, `AgentInstallErrMsg`) integrate with the TUI to show install progress.
+```bash
+glitch apm list
+```
 
-
-## Technologies
-
-- **YAML** — Plugin manifests (`glitch-plugin.yaml`) and sidecar files use YAML 1.2 via `gopkg.in/yaml.v3`.
-- **GitHub API** — Plugin discovery and binary downloads use GitHub's raw content API and releases API.
-- **Go modules** — Go-based plugins are installed via `go install` with automatic `GOPRIVATE` / `GONOSUMDB` configuration for private repos.
-- **BubbleTea** — The APM manager TUI component provides a two-pane interface for browsing, installing, and managing agents.
-
-
-## Concepts
-
-**Plugin Manifest** (`glitch-plugin.yaml`)
-The authoritative source for a plugin. Defines the binary name, installation method, version, sidecar schema, and signal handlers. Located at the root of a plugin repository.
-
-**Sidecar YAML**
-An executor descriptor written to `~/.config/glitch/wrappers/<name>.yaml` during plugin installation. Declares the command, arguments, input/output schema, and category (e.g., "providers", "tools"). Enables the executor manager to invoke the plugin without code changes.
-
-**Plugin Reference**
-A string identifying a plugin: `owner/repo` (floating version, defaults to `main` or `master` branch) or `owner/repo@ref` (pinned to a branch, tag, or commit).
-
-**Install Method**
-Either `go` (source build via `go install`) or `release` (download pre-built binary from GitHub Releases). The manifest declares which method to use.
-
-**Registry**
-`~/.config/glitch/plugins.yaml` — a YAML file tracking all installed plugins: name, GitHub source, version, binary path, sidecar path, and install timestamp.
-
-**Signal Handler**
-A named function within a plugin binary that gl1tch invokes when a BUSD topic fires. Declared in the manifest's `sidecar.signals` list with `topic` (BUSD topic name) and `handler` (function name).
-
-
-## Configuration / YAML reference
-
-### Plugin Manifest Schema (`glitch-plugin.yaml`)
+Use it in a pipeline immediately:
 
 ```yaml
-name: <string>
-  # Canonical plugin name (used as executor name and registry key).
+steps:
+  - id: post
+    executor: plugin-name
+    args:
+      message: "Pipeline complete"
+```
 
-description: <string>
-  # Short human-readable description of what the plugin does.
+That's it. No restarts, no config edits.
 
-binary: <string, optional>
-  # Name of the installed binary on PATH.
-  # Defaults to name.
 
-version: <string, optional>
-  # Pinned version / git ref (branch, tag, or commit).
-  # If omitted, installer tries main or master.
+## Installing Plugins
+
+### From GitHub
+
+```bash
+# Install latest version
+glitch apm install owner/repo
+
+# Pin to a specific version or branch
+glitch apm install owner/repo@v2.1.0
+glitch apm install owner/repo@main
+```
+
+gl1tch reads the plugin's manifest, installs the binary, and registers it as an executor. The plugin is ready to use in your pipelines immediately.
+
+### Listing Installed Plugins
+
+```bash
+glitch apm list
+```
+
+```text
+my-plugin       owner/my-plugin       v1.0.0    ~/.local/bin/my-plugin
+codegen         owner/codegen         v2.1.0    ~/.local/bin/codegen
+```
+
+### Removing a Plugin
+
+```bash
+glitch apm remove plugin-name
+```
+
+
+## Using a Plugin in a Pipeline
+
+Once installed, a plugin becomes an executor. Reference it by name in any pipeline step:
+
+```yaml
+name: notify-and-generate
+version: "1"
+
+steps:
+  - id: generate
+    executor: codegen
+    args:
+      prompt: "Write a Fibonacci function in Python"
+
+  - id: notify
+    executor: slack-poster
+    needs: [generate]
+    args:
+      channel: "#dev"
+      message: "Code generation complete"
+```
+
+
+## Building Your Own Plugin
+
+A plugin is a GitHub repo with a `glitch-plugin.yaml` manifest at its root. The manifest tells gl1tch how to install the binary and how to invoke it.
+
+### Minimal manifest
+
+```yaml
+name: my-tool
+description: "Does something useful"
+binary: my-tool
 
 install:
-  go: <string, optional>
-    # Go module path for source build, e.g. github.com/user/plugin/cmd/tool
-    # Used when method is go; incompatible with release: true
-
-  release: <boolean, optional>
-    # If true, download pre-built binary from GitHub Releases.
-    # Asset name is inferred from binary name + GOOS + GOARCH.
+  go: github.com/you/my-tool/cmd/my-tool
 
 sidecar:
-  command: <string>
-    # Executable name or full path (e.g. mybin or /usr/local/bin/mybin).
-
-  args: <array[string], optional>
-    # Default arguments passed to the command (e.g. ["--quiet"]).
-
-  description: <string, optional>
-    # Override for the executor description.
-
-  category: <string, optional>
-    # Executor category (e.g. "providers", "tools").
-
-  kind: <string, optional>
-    # "agent" or "tool"; controls how the executor is invoked in pipelines.
-
-  input_schema: <string, optional>
-    # JSON Schema (as a string) describing expected input format.
-
-  output_schema: <string, optional>
-    # JSON Schema (as a string) describing output format.
-
-  signals:
-    - topic: <string>
-        # BUSD topic name (e.g. "chat.message.created").
-      handler: <string>
-        # Named function in the plugin binary to invoke (e.g. "OnMessageCreated").
+  command: my-tool
+  args: ["--format", "json"]
+  category: tools
+  kind: tool
 ```
 
-### Sidecar File Schema (`~/.config/glitch/wrappers/<name>.yaml`)
-
-Identical to the manifest `sidecar` block, but written to disk as a standalone YAML file. Generated automatically during installation.
-
-### Registry Entry Schema (`~/.config/glitch/plugins.yaml`)
+### Using a pre-built binary instead of Go source
 
 ```yaml
-plugins:
-  - name: <string>
-      # Plugin canonical name.
-    source: <string>
-      # GitHub source as "owner/repo".
-    version: <string>
-      # Installed version or ref.
-    binary_path: <string>
-      # Absolute path to the installed executable.
-    sidecar_path: <string>
-      # Absolute path to the sidecar YAML.
-    installed_at: <ISO8601 timestamp>
-      # When the plugin was installed.
+name: my-tool
+description: "Does something useful"
+binary: my-tool
+version: "v1.0.0"
+
+install:
+  release: true          # downloads from GitHub Releases
+
+sidecar:
+  command: my-tool
+  category: tools
+  kind: tool
 ```
+
+gl1tch picks the right binary for your platform automatically (`darwin-arm64`, `linux-x86_64`, etc.).
+
+### Manifest reference
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | yes | Unique plugin name — becomes the executor name |
+| `description` | yes | Short description shown in `glitch apm list` |
+| `binary` | no | Binary name on PATH; defaults to `name` |
+| `version` | no | Git ref, tag, or branch to install |
+| `install.go` | one of | Go module path for `go install` builds |
+| `install.release` | one of | `true` to download from GitHub Releases |
+| `sidecar.command` | yes | The executable gl1tch calls |
+| `sidecar.args` | no | Default arguments appended to every invocation |
+| `sidecar.category` | no | `"tools"` or `"providers"` |
+| `sidecar.kind` | no | `"tool"` or `"agent"` |
+| `sidecar.input_schema` | no | JSON Schema for the executor's expected input |
+| `sidecar.output_schema` | no | JSON Schema for the executor's output |
 
 
 ## Examples
 
-### Example 1: Install a Go plugin
+
+### Slack Notification Plugin
+
+Install and use a Slack posting plugin:
 
 ```bash
-glitch plugin install owner/my-plugin
+glitch apm install acme/glitch-slack
 ```
-
-Plugin repository structure:
-```
-owner/my-plugin/
-├── glitch-plugin.yaml
-├── cmd/
-│   └── myplugin/
-│       └── main.go
-└── go.mod
-```
-
-`glitch-plugin.yaml`:
-```yaml
-name: myplugin
-description: "A simple plugin that greets the world"
-binary: myplugin
-version: "v1.0.0"
-install:
-  go: github.com/owner/my-plugin/cmd/myplugin
-sidecar:
-  command: myplugin
-  args: ["--format", "json"]
-  category: tools
-  kind: tool
-  description: "Greet the world"
-  input_schema: |
-    {
-      "type": "object",
-      "properties": {
-        "name": {"type": "string"}
-      }
-    }
-  output_schema: |
-    {
-      "type": "object",
-      "properties": {
-        "greeting": {"type": "string"}
-      }
-    }
-```
-
-After `glitch plugin install owner/my-plugin@v1.0.0`:
-- Binary installed to `~/.local/bin/myplugin` (or `$GOPATH/bin/myplugin`)
-- Sidecar written to `~/.config/glitch/wrappers/myplugin.yaml`
-- Registry entry added to `~/.config/glitch/plugins.yaml`
-
-### Example 2: Install a pre-built Release plugin
-
-```bash
-glitch plugin install owner/prebuilt-plugin
-```
-
-`glitch-plugin.yaml` with release-based install:
-```yaml
-name: codegen
-description: "Code generation tool with pre-built binaries"
-binary: codegen
-version: "v2.1.0"
-install:
-  release: true
-sidecar:
-  command: codegen
-  category: tools
-  kind: tool
-  args: ["--mode", "generate"]
-```
-
-The installer:
-1. Fetches the manifest from the repo's `main` branch (or specified version)
-2. Downloads the release asset `codegen-darwin-arm64` or `codegen-linux-x86_64` (based on GOOS/GOARCH)
-3. Moves the binary to `~/.local/bin/codegen`
-4. Writes the sidecar to `~/.config/glitch/wrappers/codegen.yaml`
-
-### Example 3: Plugin with signal handlers
-
-`glitch-plugin.yaml`:
-```yaml
-name: chat-listener
-description: "Chat event listener and responder"
-binary: chat-listener
-install:
-  go: github.com/owner/chat-listener/cmd/chat-listener
-sidecar:
-  command: chat-listener
-  category: tools
-  signals:
-    - topic: "chat.message.created"
-      handler: "OnNewMessage"
-    - topic: "chat.user.joined"
-      handler: "OnUserJoined"
-```
-
-When a BUSD message is published to `chat.message.created`, gl1tch invokes the plugin binary with the signal topic and payload.
-
-### Example 4: Using a plugin in a pipeline
-
-Once installed, the plugin is available as an executor in any pipeline:
 
 ```yaml
-id: my-workflow
-name: "Workflow using installed plugins"
+name: deploy-notify
+version: "1"
+
 steps:
-  - id: greet
-    executor: myplugin
-    args:
-      name: "Alice"
-    vars: {}
+  - id: deploy
+    executor: shell
+    command: "make deploy"
 
-  - id: generate_code
-    executor: codegen
+  - id: notify
+    executor: glitch-slack
+    needs: [deploy]
     args:
-      prompt: "Write a Fibonacci function"
-    vars:
-      CODEGEN_LANG: python
+      channel: "#deploys"
+      message: "Deploy finished at {{now}}"
 ```
 
-The executor manager resolves `myplugin` by looking it up in the sidecar directory. The sidecar YAML is loaded, and the executor is invoked with the declared command and merged arguments.
 
-### Example 5: Listing installed plugins
+### Code Generator Plugin
+
+Pin to a specific release for reproducibility:
 
 ```bash
-glitch plugin list
+glitch apm install acme/glitch-codegen@v2.1.0
 ```
 
-Output from the registry:
-```
-myplugin                | owner/my-plugin       | v1.0.0       | ~/.local/bin/myplugin
-codegen                 | owner/prebuilt-plugin | v2.1.0       | ~/.local/bin/codegen
-chat-listener           | owner/chat-listener   | v1.5.2       | ~/.local/bin/chat-listener
-```
+```yaml
+name: generate-tests
+version: "1"
 
-### Example 6: On-demand agent installation via RequireAgent
-
-In a pipeline step that needs an APM agent:
-
-```go
-// Pipeline builtin step (e.g., builtin.agent_step) calls:
-agent, err := provider.RequireAgent(ctx, "api-architect")
-if err != nil {
-    return fmt.Errorf("need api-architect agent: %w", err)
-}
-// agent.ExecutorID is now registered and available
+steps:
+  - id: generate
+    executor: glitch-codegen
+    args:
+      language: python
+      prompt: "Write unit tests for the attached function"
+      input: "{{steps.read.output}}"
 ```
 
-The TUI shows progress:
-- `AgentInstallStartMsg` — spinner appears
-- `AgentInstallDoneMsg` — agent is live
-- `AgentInstallErrMsg` — error displayed to user
+
+### Publishing Your Own Plugin
+
+1. Create a GitHub repo with your binary and a `glitch-plugin.yaml` at the root.
+2. Tag a release: `git tag v1.0.0 && git push --tags`.
+3. Share the install command: `glitch apm install your-username/your-plugin`.
+
+Anyone with gl1tch can install it in one command.
 
 
 ## See Also
 
-- [Pipelines](./pipelines.md) — how plugins are used as executors in pipeline steps
-- [Executors](./executors.md) — how sidecar files integrate with the executor manager
-- [APM System](./apm.md) — on-demand agent installation and capability provisioning
-
+- [Pipelines](/docs/pipelines/pipelines) — how plugins work as executors in pipeline steps
+- [Cron](/docs/pipelines/cron) — schedule pipelines that use your installed plugins
+- [Brain](/docs/pipelines/brain) — combine plugins with memory for smarter automations

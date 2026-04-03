@@ -1,145 +1,204 @@
 ---
 title: "Prompts"
-description: "Save and test reusable prompts, inject them into pipelines, and iterate interactively."
+description: "Save the instructions you give your assistant most often — recall them instantly in any pipeline or live session."
 order: 99
 ---
 
-Prompts are persistent, searchable templates for AI interactions. gl1tch lets you author prompts once, test them interactively against live models, and inject them into pipeline steps—eliminating copy-paste, enabling fast iteration, and building a library of proven instructions.
-
-## Architecture
-
-The prompt system has three layers: **storage** (SQLite table), **authoring** (interactive TUI modal), and **injection** (pipeline step field).
-
-Prompts live in the `prompts` table in gl1tch's SQLite database. When you create or edit a prompt via the prompt manager TUI (`internal/promptmgr/`), changes persist immediately. Pipeline steps reference saved prompts by `prompt_id`; during execution, the `internal/pipeline/runner.go` resolves the prompt body from the store and prepends it to the step's input before execution.
-
-The prompt manager is a full-screen modal accessible from the jump window (press `j` then type "prompts") or via a configurable keybinding. It mirrors the architecture of other gl1tch modals: a BubbleTea model with independent panels for list navigation, editing, and live test output.
+Some instructions you write once and never want to type again. Your code review persona. Your commit message style. Your preferred debugging approach. The prompts system is your personal library — save a prompt once, drop it into any pipeline with a single field, and update it in one place when you want to change it everywhere.
 
 
-## Technologies
+## Quick Start
 
-- **SQLite** — Persistent storage with additive schema migrations; prompts are queried by ID or title.
-- **BubbleTea** — TUI framework for the three-panel prompt manager modal.
-- **Streaming executor** — The test runner panel streams model responses into a scrollable viewport without blocking the TUI.
+Open the prompt manager:
 
+```bash
+glitch prompts
+```
 
-## Concepts
+Press `n` to create a new prompt, give it a title and body, press `s` to save.
 
-**Prompt ID** — The unique identifier for a saved prompt. Used in pipeline `prompt_id` fields to reference the prompt.
-
-**Prompt Title** — Human-readable name (e.g., "Summarize code review"). Titles are displayed in the prompt manager list and fuzzy-searchable.
-
-**Prompt Body** — The instruction text sent to the model. When a prompt is injected via `prompt_id`, the full body is prepended to the step's input.
-
-**Model Slug** — The executor/model name (e.g., "openai", "ollama:mistral") associated with the prompt. The prompt manager shows this in the list so you can filter or browse prompts by their intended model.
-
-**Prompt Test Runner** — The inline panel in the prompt manager where you run a prompt against a selected model in real-time, view streamed output, and refine the prompt without leaving the TUI.
-
-**Fuzzy Search** — In the prompt manager list, press `/` to filter prompts by title or model slug. Search is incremental and case-insensitive.
-
-
-## Configuration / YAML Reference
-
-### Pipeline Step `prompt_id` Field
-
-Add an optional `prompt_id` field to any pipeline step that executes an agent or model call:
+Use it in a pipeline:
 
 ```yaml
 steps:
-  - id: generate_code
-    executor: openai
-    model: gpt-4
-    prompt_id: "Code generation best practices"
-    input: "Generate a function that..."
+  - id: review
+    executor: ollama
+    model: qwen2.5-coder:latest
+    prompt_id: "Code review persona"
+    input: "{{steps.diff.output}}"
 ```
 
-When the step runs, gl1tch resolves the prompt body from the store and prepends it to `input`. The executor receives:
+That's it. When the step runs, your saved prompt body prepends to the input automatically.
 
+
+## Managing Your Prompt Library
+
+### Create a prompt
+
+1. Run `glitch prompts`
+2. Press `n` — new prompt form opens
+3. Enter a title: `"Code review persona"`
+4. Enter the body:
+
+```text
+You are a senior engineer doing code review. Be direct and specific.
+Focus on correctness first, then performance, then style.
+Always suggest a fix, not just an observation.
 ```
-[prompt body from store]
 
-[step input]
+5. Press `s` to save
+
+### Find a prompt
+
+Press `/` in the prompt manager to filter by title. Search is incremental and case-insensitive.
+
+### Edit a prompt
+
+Navigate to it, press `e`. Changes apply to every pipeline that references it — immediately, on next run.
+
+### Test a prompt
+
+Press `t` from the prompt manager. A test panel opens and streams a live response from your configured model. Iterate before you commit the prompt to a pipeline.
+
+
+## Using Prompts in Pipelines
+
+Add `prompt_id` to any step that calls a model. The value is the exact title of your saved prompt.
+
+```yaml
+steps:
+  - id: review
+    executor: ollama
+    model: qwen2.5-coder:latest
+    prompt_id: "Code review persona"
+    input: |
+      Review these changes:
+      {{steps.diff.output}}
 ```
 
-**Fields:**
-- `prompt_id` (string, optional) — Title of the saved prompt to inject. If the prompt does not exist in the store, the step fails with a descriptive error. If omitted, step execution is identical to current behavior.
+When this step runs, the executor receives:
 
-**Behavior:**
-- Prompt body is prepended *before* any other input manipulation.
-- Brain context injection and RAG happen *after* prompt injection.
-- If `prompt_id` is set but empty, it is treated as omitted (no error).
+```text
+[your saved prompt body]
+
+[your step input]
+```
+
+The saved prompt always comes first. Brain context and any other injections happen after.
+
+> **NOTE:** If `prompt_id` references a title that doesn't exist in your library, the step fails with a clear error message. Use `glitch prompts` to verify the title before running.
 
 
 ## Examples
 
-### Create a Prompt in the TUI
 
-1. Press `j` to open the jump window.
-2. Type "prompts" and press Enter.
-3. Press `n` (or the bound key) to create a new prompt.
-4. Enter title: "Code review synthesis"
-5. Enter body:
-   ```
-   You are an expert code reviewer. Synthesize the key findings from code review comments.
-   Focus on:
-   - Security issues
-   - Performance bottlenecks
-   - Maintainability concerns
-   ```
-6. Select model: `ollama:mistral` (or your configured executor).
-7. Press `t` to test the prompt against a sample input.
-8. Press `s` to save.
+### Code Review Pipeline
 
-### Inject a Prompt into a Pipeline
+Save a prompt titled `"Code review persona"` with your preferred reviewer voice, then reuse it across multiple pipelines.
 
 ```yaml
-name: "weekly_codebase_review"
-steps:
-  - id: fetch_diffs
-    executor: shell
-    command: "git diff main --stat | head -20"
+name: weekly-review
+version: "1"
 
-  - id: analyze_changes
+steps:
+  - id: diff
+    executor: shell
+    command: "git diff main --stat | head -40"
+
+  - id: review
     executor: ollama
-    model: "mistral"
-    prompt_id: "Code review synthesis"
+    model: qwen2.5-coder:latest
+    needs: [diff]
+    prompt_id: "Code review persona"
     input: |
-      Analyze these recent code changes:
-      {{get "fetch_diffs.data.output" .}}
-    
-  - id: write_summary
+      Review these recent changes:
+      {{steps.diff.output}}
+
+  - id: save
     executor: shell
+    needs: [review]
     command: |
-      cat > weekly_review.md << 'EOF'
-      {{get "analyze_changes.data.output" .}}
-      EOF
+      echo "{{steps.review.output}}" > review-$(date +%Y%m%d).md
 ```
 
-When `analyze_changes` runs, the prompt body ("You are an expert code reviewer...") is prepended to the `input` before sending to ollama.
 
-### Use the Same Prompt Across Multiple Steps
+### Same Prompt Across Multiple Steps
+
+Both steps share the same persona. Edit the prompt once to update both.
 
 ```yaml
-name: "multi_stage_review"
-steps:
-  - id: review_api
-    executor: openai
-    model: gpt-4
-    prompt_id: "Code review synthesis"
-    input: "Review the API layer"
+name: layered-review
+version: "1"
 
-  - id: review_database
-    executor: openai
-    model: gpt-4
-    prompt_id: "Code review synthesis"
-    input: "Review the database layer"
+steps:
+  - id: review-api
+    executor: claude
+    model: claude-sonnet-4-6
+    prompt_id: "Code review persona"
+    input: "Review the API layer for correctness"
+
+  - id: review-db
+    executor: claude
+    model: claude-sonnet-4-6
+    prompt_id: "Code review persona"
+    input: "Review the database layer for correctness"
 ```
 
-Both steps share the same prompt; edits to "Code review synthesis" in the prompt manager apply to both instantly.
+
+### Commit Message Generator
+
+Save a prompt titled `"Commit message style"` that describes your project's conventions. Use it any time you want consistent commit messages.
+
+```yaml
+name: commit-helper
+version: "1"
+
+steps:
+  - id: diff
+    executor: shell
+    command: "git diff --cached"
+
+  - id: message
+    executor: ollama
+    model: qwen2.5-coder:latest
+    needs: [diff]
+    prompt_id: "Commit message style"
+    input: |
+      Generate a commit message for this diff:
+      {{steps.diff.output}}
+```
+
+
+## Reference
+
+### Pipeline step fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `prompt_id` | string | no | Title of the saved prompt to inject. Must match exactly. |
+
+### Prompt manager keyboard shortcuts
+
+| Key | Action |
+|-----|--------|
+| `n` | New prompt |
+| `e` | Edit selected prompt |
+| `t` | Test selected prompt against a model |
+| `s` | Save |
+| `/` | Filter/search by title |
+| `q` | Close the manager |
+
+### Injection order
+
+When a step has `prompt_id` set, the executor receives content in this order:
+
+1. Your saved prompt body
+2. Your step's `input` field
+3. Brain context (if any brain notes exist for this run)
 
 
 ## See Also
 
-- [Pipelines](/docs/pipelines.md) — Step execution, input/output, and variable interpolation
-- [Executors](/docs/executors.md) — Available models and how to configure them
-- [Brain](/docs/brain.md) — How brain context and RAG injection work alongside prompts
-
+- [Brain](/docs/pipelines/brain) — combine saved prompts with memory for smarter pipelines
+- [Pipelines](/docs/pipelines/pipelines) — full pipeline step reference
+- [Cron](/docs/pipelines/cron) — schedule pipelines that use your prompt library

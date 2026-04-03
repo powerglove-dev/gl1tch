@@ -1,156 +1,219 @@
 ---
 title: "Cron Scheduling"
-description: "Schedule recurring pipelines and agents with human-readable next-run times."
+description: "Schedule your pipelines to run automatically — wake up to results already waiting in your workspace."
 order: 9
 ---
 
-gl1tch's cron system executes pipelines and agents on a schedule, specified as standard 5-field cron expressions. Entries are stored in `~/.config/glitch/cron.yaml`, watched for changes, and hot-reloaded by the daemon. The TUI shows upcoming jobs with their next fire time in human-readable relative format (e.g. "in 4m", "in 2h 30m").
+Set a pipeline on a schedule and stop thinking about it. Your morning standup prep runs at 8 AM. Your nightly code review finishes while you sleep. Your dependency audit fires every Monday. gl1tch runs your pipelines on a cron schedule and logs the results — you just check in when you're ready.
 
 
-## Architecture
+## Quick Start
 
-The cron system has three layers:
-
-1. **Scheduler** (`internal/cron/scheduler.go`) — wraps `robfig/cron` and adds hot-reload via `fsnotify`. When a pipeline or agent runs, it publishes events to the internal event bus for logging and UI updates.
-2. **Config** (`internal/cron/config.go`) — reads/writes `~/.config/glitch/cron.yaml` atomically. Entries can be upserted from the agent runner modal or pipeline launcher without restarting the daemon.
-3. **Helpers** (`internal/cron/helpers.go`) — `NextRun()` parses a schedule and returns the next fire time; `FormatRelative()` converts that to human-readable strings like "in 2d 3h".
-
-Entry execution spawns a subprocess with `os/exec`. Output is logged to `~/.local/share/glitch/cron.log` and prefixed with the entry name for correlation.
-
-
-## Technologies
-
-- **robfig/cron/v3** — standard 5-field cron parser and scheduler loop. Supports minute, hour, day-of-month, month, and day-of-week fields. No timezone logic; uses the system clock.
-- **fsnotify** — watches `~/.config/glitch/cron.yaml` for changes and triggers a hot-reload within ~1 second.
-- **charmbracelet/log** — structured logging with timestamps, output to both stderr and the cron log file.
-
-
-## Concepts
-
-**Entry** — a single scheduled job. Has a name, cron expression, kind (pipeline or agent), and target file/name.
-
-**Schedule** — a 5-field cron expression: minute, hour, day-of-month, month, day-of-week. Supports `*`, ranges (`1-5`), steps (`*/15`), and lists (`1,3,5`). No seconds or timezone. Evaluated in the system timezone.
-
-**Kind** — either `pipeline` or `agent`. Determines how Target is resolved: as a `.pipeline.yaml` path (pipeline) or an agent name (agent).
-
-**Next-run time** — calculated by `NextRun()` after parsing the schedule. Displayed as a human-readable relative duration: "now", "in 4m", "in 2h 30m", "in 3d", etc.
-
-**Hot-reload** — the scheduler watches `~/.config/glitch/cron.yaml` for writes. When the file changes, all entries are re-parsed and the scheduler is updated in-place (no restart required).
-
-
-## Configuration
-
-Cron entries are stored in `~/.config/glitch/cron.yaml`. Each entry is a YAML object with these fields:
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | yes | Human-readable label for this job (must be unique) |
-| `schedule` | string | yes | 5-field cron expression (minute hour dom month dow) |
-| `kind` | string | yes | Either `pipeline` or `agent` |
-| `target` | string | yes | For pipeline: path to `.pipeline.yaml`. For agent: agent name. |
-| `args` | map[string]any | no | Key-value arguments passed to the target |
-| `input` | string | no | Optional input string mapped to `{{param.input}}` in pipelines |
-| `timeout` | string | no | Maximum duration (e.g. `"5m"`, `"30s"`). Zero = no timeout. |
-| `working_dir` | string | no | Working directory for the subprocess. Empty inherits the daemon's cwd. |
-
-The file must exist at `~/.config/glitch/cron.yaml`. If not present, `glitch cron start` creates it on first run.
-
-
-## Examples
-
-**Basic pipeline schedule** — run a cleanup pipeline daily at 2 AM:
+Create `~/.config/glitch/cron.yaml` with your first scheduled pipeline:
 
 ```yaml
 entries:
-  - name: nightly-cleanup
-    schedule: "0 2 * * *"
+  - name: morning-standup
+    schedule: "0 8 * * 1-5"
     kind: pipeline
-    target: ./pipelines/cleanup.pipeline.yaml
-    timeout: "10m"
-    working_dir: /home/user/projects/my-repo
+    target: ~/pipelines/standup.pipeline.yaml
+    timeout: "5m"
 ```
 
-**Agent with input** — run an agent every 15 minutes, passing custom input:
+Start the scheduler:
 
-```yaml
-entries:
-  - name: poll-status
-    schedule: "*/15 * * * *"
-    kind: agent
-    target: status-checker
-    input: "slack-alerts"
-    args:
-      channel: "#ops"
-      verbose: true
+```bash
+glitch cron start
 ```
 
-**Weekdays only** — run a report at 9 AM on weekdays (Monday–Friday):
+Check that it registered:
 
-```yaml
-entries:
-  - name: weekday-report
-    schedule: "0 9 * * 1-5"
-    kind: pipeline
-    target: ./pipelines/report.pipeline.yaml
-    timeout: "30m"
+```bash
+glitch cron list
 ```
 
-**Run immediately** (for testing):
-
-```
-glitch cron list  # shows all entries with next-run times
+```text
+morning-standup   0 8 * * 1-5   pipeline   standup.pipeline.yaml   in 14h 22m
 ```
 
-Then from the TUI (`glitch cron start` or press `m` from the switchboard Cron panel) to execute immediately outside its schedule.
+Your pipeline now runs every weekday at 8 AM without you touching it.
+
+
+## How Schedules Work
+
+Schedules use standard 5-field cron expressions:
+
+```text
+┌───── minute (0–59)
+│ ┌───── hour (0–23)
+│ │ ┌───── day of month (1–31)
+│ │ │ ┌───── month (1–12)
+│ │ │ │ ┌───── day of week (0–6, Sun=0)
+│ │ │ │ │
+* * * * *
+```
+
+Common patterns:
+
+| Schedule | Meaning |
+|----------|---------|
+| `0 8 * * 1-5` | 8 AM, Monday through Friday |
+| `0 2 * * *` | 2 AM every day |
+| `*/15 * * * *` | Every 15 minutes |
+| `0 9 * * 1` | 9 AM every Monday |
+| `30 17 * * 5` | 5:30 PM every Friday |
+
+Schedules run in your system timezone. No seconds field. No timezone suffix.
 
 
 ## Commands
 
 ### `glitch cron start`
 
-Start the cron daemon in a detached tmux session called `glitch-cron`. The session runs the BubbleTea TUI by default (or `glitch cron run` in non-interactive contexts like CI). Loads `~/.config/glitch/cron.yaml` and begins watching it for changes.
+Start the scheduler in your workspace. Loads `~/.config/glitch/cron.yaml` and watches it for changes — edit the file and your schedule updates within a second, no restart required.
 
-**Flags:**
-- `--force` — kill an existing `glitch-cron` session before starting.
+```bash
+glitch cron start
+glitch cron start --force   # restart if already running
+```
 
 ### `glitch cron stop`
 
-Kill the `glitch-cron` tmux session and stop the daemon.
+Stop the scheduler.
+
+```bash
+glitch cron stop
+```
 
 ### `glitch cron list`
 
-Print all configured entries in a table, showing name, schedule, kind, target, and next fire time in human-readable format. Next-run time includes both a relative duration ("in 4m") and an absolute timestamp ("14:30 UTC").
+Show all scheduled entries with their next fire time in plain English.
+
+```bash
+glitch cron list
+```
+
+```text
+morning-standup   0 8 * * 1-5    pipeline   standup.pipeline.yaml     in 14h 22m
+nightly-review    0 23 * * *     pipeline   code-review.pipeline.yaml  in 6h 44m
+dep-audit         0 9 * * 1      pipeline   deps.pipeline.yaml         in 3d 2h
+```
 
 ### `glitch cron logs`
 
-Tail the cron daemon log file at `~/.local/share/glitch/cron.log`. Each log line is prefixed with the entry name for correlation.
+Tail the scheduler log. Each line is prefixed with the entry name so you can follow multiple jobs at once.
 
-### `glitch cron run` (internal)
-
-The daemon entry point; invoked by `glitch cron start` inside the tmux session. Not intended for direct user invocation.
-
-### `glitch cron tui` (internal)
-
-Launches the BubbleTea TUI for job management. Embedded inside the daemon; hot-reloads on config changes. Provides a filterable job list, run-now action, and live log tail.
+```bash
+glitch cron logs
+```
 
 
-## Next-run time format
+## Configuration Reference
 
-Times are displayed as human-readable relative durations:
+All scheduled jobs live in `~/.config/glitch/cron.yaml`. The file is hot-reloaded on save.
 
-- **"now"** — within 1 second
-- **"in Xm"** — e.g. "in 4m" (less than 1 hour)
-- **"in Xh"** — e.g. "in 2h" (less than 1 day)
-- **"in Xh Ym"** — e.g. "in 2h 30m" (less than 1 day, both hours and minutes)
-- **"in Xd"** — e.g. "in 3d" (1+ days, same hour tomorrow or later)
-- **"in Xd Yh"** — e.g. "in 3d 2h" (1+ days with hours)
+```yaml
+entries:
+  - name: <string>          # unique name for this job
+    schedule: <string>      # 5-field cron expression
+    kind: pipeline          # "pipeline" or "agent"
+    target: <string>        # path to .pipeline.yaml, or agent name
+    timeout: <string>       # optional: "5m", "30s" — zero means no timeout
+    working_dir: <string>   # optional: working directory for the job
+    input: <string>         # optional: maps to {{param.input}} in pipelines
+    args:                   # optional: key-value args passed to the target
+      key: value
+```
 
-This format is used in `glitch cron list` output, the switchboard Cron panel, and the glitch-cron TUI.
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | yes | Unique label shown in `glitch cron list` |
+| `schedule` | yes | 5-field cron expression |
+| `kind` | yes | `pipeline` or `agent` |
+| `target` | yes | Path to a `.pipeline.yaml` or an agent name |
+| `timeout` | no | Max run duration — e.g. `"10m"`, `"30s"` |
+| `working_dir` | no | Directory the job runs in; inherits your workspace if empty |
+| `input` | no | String mapped to `{{param.input}}` inside the pipeline |
+| `args` | no | Key-value map passed to the target |
+
+
+## Examples
+
+
+### Morning Standup Brief
+
+Your assistant pulls open PRs and recent commits, summarizes the day ahead, and has it ready before you open your laptop.
+
+```yaml
+entries:
+  - name: morning-standup
+    schedule: "0 8 * * 1-5"
+    kind: pipeline
+    target: ~/pipelines/standup.pipeline.yaml
+    working_dir: ~/projects/my-repo
+    timeout: "5m"
+```
+
+
+### Nightly Code Review
+
+Run a full code quality check every night. Wake up to findings already in your log.
+
+```yaml
+entries:
+  - name: nightly-review
+    schedule: "0 23 * * *"
+    kind: pipeline
+    target: ~/pipelines/code-review.pipeline.yaml
+    working_dir: ~/projects/my-repo
+    timeout: "15m"
+```
+
+
+### Weekly Dependency Audit
+
+Every Monday morning, check for outdated or vulnerable dependencies before the week starts.
+
+```yaml
+entries:
+  - name: dep-audit
+    schedule: "0 9 * * 1"
+    kind: pipeline
+    target: ~/pipelines/dep-check.pipeline.yaml
+    working_dir: ~/projects/my-repo
+    timeout: "10m"
+```
+
+
+### Full `cron.yaml` with Multiple Jobs
+
+```yaml
+entries:
+  - name: morning-standup
+    schedule: "0 8 * * 1-5"
+    kind: pipeline
+    target: ~/pipelines/standup.pipeline.yaml
+    working_dir: ~/projects/my-repo
+    timeout: "5m"
+
+  - name: nightly-review
+    schedule: "0 23 * * *"
+    kind: pipeline
+    target: ~/pipelines/code-review.pipeline.yaml
+    working_dir: ~/projects/my-repo
+    timeout: "15m"
+
+  - name: dep-audit
+    schedule: "0 9 * * 1"
+    kind: pipeline
+    target: ~/pipelines/dep-check.pipeline.yaml
+    working_dir: ~/projects/my-repo
+    timeout: "10m"
+```
 
 
 ## See Also
 
-- [Pipelines](./pipelines.md) — running inline or scheduled pipelines
-- [Agents](./agents.md) — scheduling agent runs with recurring parameters
-- [Switchboard](./switchboard.md) — cron panel in the main dashboard (press `c` to focus, `m` to open the TUI)
-
+- [Pipelines](/docs/pipelines/pipelines) — build the pipelines you schedule here
+- [Brain](/docs/pipelines/brain) — add memory to scheduled pipelines so your assistant learns over time
+- [Plugins](/docs/pipelines/plugins) — extend what your scheduled pipelines can do

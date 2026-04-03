@@ -1,120 +1,394 @@
 ---
 title: "Pipelines"
-description: "Declarative multi-step workflows as a DAG with dependency injection, parallel execution, and structured output context."
+description: "Write YAML workflows that chain shell commands, AI models, and your own tools to automate any developer task."
 order: 2
 ---
 
-Pipelines are declarative workflows defined in YAML that gl1tch executes as a directed acyclic graph (DAG). Each step runs an executor—shell command, LLM model, builtin function, or plugin—and its output becomes context for downstream steps. Pipelines are auditable, repeatable, and chainable: once a pipeline finishes, its outputs feed the brain so the next pipeline runs smarter.
+A pipeline is a YAML file that tells gl1tch what to run, in what order, and how to pass results between steps. Write one pipeline for your standup. Another for PR review. Another for your deploy. gl1tch runs them on demand, chains their outputs together, and keeps a history of every run.
 
 
-## Architecture Overview
+## Quick Start
 
-A pipeline lives in `~/.config/glitch/pipelines/<name>.pipeline.yaml` and is executed by the runner in `internal/pipeline/runner.go`. The runner constructs a DAG from step `Needs` declarations, executes independent steps concurrently with goroutines, and manages an `ExecutionContext` that threads data between steps via template expressions.
+Here's a complete, working pipeline. Copy it, save it as `summarize.pipeline.yaml`, and run it:
 
-**Data flow:**
-1. Runner loads pipeline YAML → validates DAG (cycle detection, unknown references)
-2. Builds adjacency list mapping each step to its dependents
-3. Starts all steps with no dependencies
-4. As each step completes, enqueues its dependents if all their `Needs` are satisfied
-5. Collects step outputs into a shared context map: `step.<id>.data.<key>`
-6. Passes context to downstream steps via template interpolation
-7. Persists final outputs and brain notes to the store
-
-**Packages:**
-- `internal/pipeline` — core DAG builder, runner, executor interface, and builtins
-- `internal/executor` — registered executors (shell, LLM, plugins)
-- `internal/store` — SQLite checkpoint of runs and brain notes
-- `internal/brainrag` — optional RAG-based context injection
-
-## Technologies
-
-- **YAML** — declarative, version-controllable step definitions
-- **Goroutines** — parallel step execution within max_parallel bounds
-- **Go templates** — interpolation of `{ {steps.<id>.<key>}}` and builtin functions
-- **SQLite** — persistent storage of run history and brain output
-
-
-## Concepts
-
-**Step**
-A single unit of work: shell command, LLM prompt, user input, output write, or builtin action. Steps run within a lifecycle (Init → Execute → Cleanup) and can declare retry policies, failure handlers, and forwarding expressions.
-
-**Executor**
-A handler that runs a step: `shell`, `claude`, `ollama`, `builtin.assert`, `builtin.log`, etc. Executors are registered in `internal/executor` and identified by hierarchical name: `category.action`.
-
-**DAG (Directed Acyclic Graph)**
-The dependency graph formed by step `Needs` declarations. The runner detects cycles at load time and executes steps as soon as all their dependencies complete.
-
-**Needs**
-A list of step IDs that must complete before this step runs. Used to declare sequential or parallel chains. If `needs: []` (or omitted), the step runs immediately.
-
-**Condition**
-An expression evaluated after a step completes to decide whether to run the next step, skip it, or route to a failure handler. Syntax: `always`, `not_empty`, `contains:<string>`, `matches:<regex>`, `len > <n>`.
-
-**ExecutionContext**
-Shared mutable state (map[string]any) passed between steps. Accessed via dot-separated paths: `step.fetch.data.url`. Step outputs are stored as `step.<id>.data.<key>`.
-
-**Template Expression**
-Interpolation syntax in step Prompt, Input, Args, and Vars fields:
-- `{ {steps.<id>.<key>}}` — access step output by ID and key
-- `{{.param.<name>}}` — access pipeline-level var
-- `{{env "VAR_NAME"}}` — read environment variable
-- `{{"<expr>" | upper | trim}}` — builtin functions (replace, split, join, default, get, etc.)
-
-**ForEach**
-When a step declares `for_each: <list>`, the runner clones it N times (one per item) and collects outputs into an array. Items are newline-separated strings or a template expression that resolves to a list.
-
-**Brain**
-Persistent embedding store (`internal/store`) that checkpoints step outputs and LLM reasoning blocks (`<brain>` XML) from past runs. Pipelines can inject brain context into prompts so later steps see historical knowledge without manual threading.
-
-
-## Configuration / YAML Reference
-
-**Pipeline top-level:**
-- `name` (required, string) — pipeline identifier; used in discovery and routing
-- `version` (string) — semantic version; reserved for schema evolution
-- `description` (string) — one-sentence summary for discovery and routing
-- `trigger_phrases` (array of strings) — example imperative invocations ("run git pulse", "review my PR") embedded in the intent router instead of description when present
-- `steps` (array of Step) — ordered step definitions
-- `vars` (map) — pipeline-level context available to all steps as `{{.param.<name>}}`
-- `max_parallel` (integer) — maximum concurrent steps; defaults to 8 when zero
-- `write_brain` (boolean) — if true, all steps inject brain write instructions (can be overridden per step)
-- `game` (tri-state boolean, pointer) — nil=enabled, false=disabled; gates game scoring for this pipeline
-
-**Step fields:**
-
-Core execution:
-- `id` (required, string) — unique step identifier within the pipeline
-- `executor` (string) — executor name: `shell`, `claude`, `ollama`, `builtin.assert`, `category.action`, etc. Defaults to LLM if omitted and model is set.
-- `model` (string) — Ollama or Claude model name; required for LLM steps
-- `type` (string) — `input` (user prompt), `output` (write to disk), or omitted (executor step)
-
-Input & output:
-- `prompt` (string) — LLM prompt or shell command body; supports template syntax
-- `input` (string) — user-facing prompt for `type: input` steps
-- `args` (map) — structured arguments passed to executor; supports nested objects and template expressions (supersedes `vars`)
-- `vars` (map[string]string) — flat string variables passed to executor; used when `args` is not set
-- `inputs` (map[string]string) — explicit mapping of input names to template expressions, resolved before execution
-- `outputs` (map[string]string) — declares output keys that this step produces; full output string stored under each key
-- `publish_to` (string) — event bus topic to forward this step's output (e.g., `orcai.pipeline.step.done`)
-
-Branching & control flow:
-- `needs` (array of strings) — list of step IDs that must complete before this step runs; empty or omitted means run immediately
-- `condition` (string) — post-execution branch condition: `always`, `not_empty`, `contains:<str>`, `matches:<re>`, `len > <n>`; if false, skip downstream dependents
-- `retry` (object) — retry policy with `max_attempts` (int), `interval` (duration string), `backoff` (bool); applied on executor error
-- `on_failure` (string) — step ID to run if this step fails after all retries; exclusive with condition routing
-- `for_each` (string) — newline-separated list or template expression resolving to array; clones step N times and collects outputs
-
-Brain & context:
-- `no_brain` (boolean) — if true, suppress brain context injection (use for output-generation steps where brain markup would leak into content)
-- `write_brain` (tri-state boolean, pointer) — nil=inherit pipeline setting, true=force on, false=force off
-- `no_clarify` (boolean) — if true, suppress GLITCH_CLARIFY instruction for automated steps
-- `prompt_id` (string) — title of a saved prompt in the store; prepended to prompt body with blank-line separator (case-insensitive matching)
-
-**Retry policy:**
 ```yaml
-retry:
-  max_attempts: 3
-  interval: "5s"
-  backoff: true     # exponential backoff (not implemented yet, reserved)
-  on: "always"      # or "on_failure" (implicit default)
+name: summarize
+version: "1"
+steps:
+  - id: get-logs
+    executor: shell
+    prompt: "git log --oneline -10"
+
+  - id: summarize
+    executor: ollama
+    model: llama3.2:latest
+    needs: [get-logs]
+    prompt: |
+      Summarize these recent git commits in plain English.
+      Focus on what changed, not how:
+
+      {{steps.get-logs.output}}
+```
+
+```bash
+glitch pipeline run summarize.pipeline.yaml
+```
+
+Your last 10 commits feed straight into the model. The summary streams to your terminal.
+
+
+## How Pipelines Work
+
+### Steps
+
+Every pipeline is a list of steps. Each step has:
+
+- an `id` — a unique name you use to reference its output
+- an `executor` — what runs the step (`shell`, `claude`, `ollama`, `gh`, `write`, etc.)
+- a `prompt` or `args` — what to pass to the executor
+
+```yaml
+steps:
+  - id: fetch
+    executor: shell
+    prompt: "curl -s https://api.example.com/status"
+```
+
+### Dependencies with `needs`
+
+By default, steps with no `needs` run immediately (and in parallel if there are multiple). Add `needs` to make a step wait for another:
+
+```yaml
+steps:
+  - id: fetch           # runs first
+    executor: shell
+    prompt: "curl -s https://api.example.com/status"
+
+  - id: analyze         # waits for fetch
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    needs: [fetch]
+    prompt: |
+      What does this API status response mean?
+      {{steps.fetch.output}}
+```
+
+Add multiple IDs to `needs` to wait for several steps:
+
+```yaml
+needs: [fetch-prod, fetch-staging]
+```
+
+gl1tch runs `fetch-prod` and `fetch-staging` in parallel, then starts `analyze` as soon as both finish.
+
+### Passing Output Between Steps
+
+Use `{{steps.<id>.output}}` in any prompt or args field to inject a previous step's output:
+
+```yaml
+prompt: |
+  Here is the data: {{steps.fetch.output}}
+  Summarize it.
+```
+
+Template expressions work in `prompt`, `input`, `args`, and `vars` fields.
+
+Other template forms:
+
+| Expression | What it gives you |
+|------------|-------------------|
+| `{{steps.fetch.output}}` | Full stdout of the `fetch` step |
+| `{{vars.repo}}` | A pipeline-level variable |
+| `{{env "HOME"}}` | An environment variable |
+
+
+## Writing Your First Real Pipeline
+
+A three-step pipeline that checks GitHub for open issues and writes a summary report:
+
+```yaml
+name: issue-digest
+version: "1"
+vars:
+  repo: "your-org/your-repo"
+
+steps:
+  - id: list-issues
+    executor: gh
+    vars:
+      args: "issue list --repo {{vars.repo}} --state open --json number,title,labels,createdAt --limit 25"
+
+  - id: digest
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    needs: [list-issues]
+    prompt: |
+      Here are the open issues for {{vars.repo}}:
+
+      {{steps.list-issues.output}}
+
+      Group them by label. For each group, list the issue numbers and titles.
+      End with a one-sentence summary of the overall backlog health.
+
+  - id: save
+    executor: write
+    needs: [digest]
+    vars:
+      path: "./issue-digest.md"
+    input: "{{steps.digest.output}}"
+```
+
+Run it:
+
+```bash
+glitch pipeline run issue-digest.pipeline.yaml
+```
+
+The report saves to `./issue-digest.md`.
+
+
+## Executors
+
+The executor tells gl1tch what kind of work a step does.
+
+| Executor | What it does |
+|----------|-------------|
+| `shell` | Runs a shell command; `prompt` is the command string |
+| `claude` | Sends `prompt` to a Claude model |
+| `ollama` | Sends `prompt` to a local Ollama model |
+| `gh` | Runs a `gh` CLI command; `vars.args` is the argument string |
+| `write` | Writes `input` to `vars.path` on disk |
+| `builtin.log` | Logs a message to the terminal (useful for checkpoints) |
+| `builtin.assert` | Fails the pipeline if a condition is false |
+
+For `claude` and `ollama` steps, set `model` to the model name. For shell-based executors, use `vars.args` or `prompt` depending on the executor.
+
+> **TIP:** The `gh` executor requires the [GitHub CLI](https://cli.github.com/) installed and authenticated.
+
+
+## Control Flow
+
+### Retry on Failure
+
+```yaml
+- id: flaky-api
+  executor: shell
+  prompt: "curl -f https://api.example.com/data"
+  retry:
+    max_attempts: 3
+    interval: "5s"
+```
+
+### Run a Step on Failure
+
+```yaml
+- id: deploy
+  executor: shell
+  prompt: "./deploy.sh"
+  on_failure: notify-slack
+
+- id: notify-slack
+  executor: shell
+  prompt: "curl -X POST $SLACK_WEBHOOK -d '{\"text\":\"deploy failed\"}'"
+```
+
+### Conditional Execution
+
+```yaml
+- id: check
+  executor: shell
+  prompt: "test -f ./lockfile && echo 'locked' || echo 'free'"
+  condition: "contains:free"
+
+- id: proceed
+  executor: claude
+  needs: [check]
+  # only runs if check output contains "free"
+```
+
+Condition values: `always`, `not_empty`, `contains:<string>`, `matches:<regex>`, `len > <n>`.
+
+### Repeat a Step for Each Item
+
+```yaml
+- id: summarize-each
+  executor: claude
+  model: claude-haiku-4-5-20251001
+  for_each: "{{steps.list-files.output}}"
+  prompt: |
+    Summarize this file: {{item}}
+```
+
+`for_each` clones the step once per line of the input and collects all outputs.
+
+
+## Pipeline-Level Settings
+
+```yaml
+name: my-pipeline
+version: "1"
+description: "What this pipeline does"
+vars:
+  repo: "your-org/your-repo"
+  threshold: "50"
+max_parallel: 4       # max steps running at once (default: 8)
+steps:
+  - ...
+```
+
+| Field | Default | What it does |
+|-------|---------|-------------|
+| `name` | — | Pipeline identifier; used when running by name |
+| `version` | — | Schema version (use `"1"` for now) |
+| `description` | — | One-line summary shown in the launcher |
+| `vars` | — | Pipeline-level variables, accessed as `{{vars.key}}` |
+| `max_parallel` | `8` | Maximum steps running concurrently |
+
+
+## Customizing
+
+### Save Pipelines for Quick Access
+
+Drop your pipeline into `~/.config/glitch/pipelines/`:
+
+```bash
+cp issue-digest.pipeline.yaml ~/.config/glitch/pipelines/
+```
+
+Then run it by name from anywhere:
+
+```bash
+glitch pipeline run issue-digest
+```
+
+It also appears in the Pipeline Launcher in your workspace.
+
+### Use Variables for Flexibility
+
+Put anything that changes between runs in `vars`:
+
+```yaml
+vars:
+  env: "staging"
+  notify: "true"
+```
+
+Access them as `{{vars.env}}` in any step. Override them at runtime by passing environment variables:
+
+```bash
+GLITCH_VAR_ENV=production glitch pipeline run deploy
+```
+
+### Mix Local and Cloud Models
+
+Use a fast local model for data-heavy steps, a smarter cloud model for the reasoning step:
+
+```yaml
+steps:
+  - id: extract        # fast local extraction
+    executor: ollama
+    model: llama3.2:latest
+    prompt: "Extract all TODO comments: {{steps.read-code.output}}"
+
+  - id: prioritize     # cloud model for nuanced analysis
+    executor: claude
+    model: claude-sonnet-4-6
+    needs: [extract]
+    prompt: "Prioritize these TODOs by risk: {{steps.extract.output}}"
+```
+
+
+## Examples
+
+### Morning Standup Digest
+
+Fetches your commits and drafts a standup update:
+
+```yaml
+name: standup
+version: "1"
+vars:
+  repo: "your-org/your-repo"
+steps:
+  - id: commits
+    executor: gh
+    vars:
+      args: "api repos/{{vars.repo}}/commits?since=$(date -u -v-1d +%Y-%m-%dT%H:%M:%SZ) --jq '.[].commit.message'"
+  - id: draft
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    needs: [commits]
+    prompt: |
+      Write a brief standup based on these commits:
+      {{steps.commits.output}}
+      Format: Yesterday / Today / Blockers. Under 10 lines.
+```
+
+### Parallel Model Comparison
+
+Sends the same prompt to two models, compares their answers:
+
+```yaml
+name: compare
+version: "1"
+vars:
+  question: "Explain Go interfaces in two sentences."
+steps:
+  - id: claude-answer
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    prompt: "{{vars.question}}"
+  - id: local-answer
+    executor: ollama
+    model: llama3.2:latest
+    prompt: "{{vars.question}}"
+  - id: judge
+    executor: claude
+    model: claude-sonnet-4-6
+    needs: [claude-answer, local-answer]
+    prompt: |
+      Compare these two answers to: "{{vars.question}}"
+
+      Answer A: {{steps.claude-answer.output}}
+      Answer B: {{steps.local-answer.output}}
+
+      Which is more accurate and why?
+```
+
+`claude-answer` and `local-answer` run in parallel. `judge` waits for both.
+
+
+## Reference
+
+### Step Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | Yes | Unique step identifier |
+| `executor` | Yes | What runs the step |
+| `model` | For LLM steps | Model name |
+| `prompt` | Most executors | Command or LLM prompt |
+| `args` | Some executors | Structured key/value arguments |
+| `vars` | Some executors | Flat string arguments |
+| `needs` | No | List of step IDs to wait for |
+| `condition` | No | Branch condition after execution |
+| `retry` | No | Retry policy object |
+| `on_failure` | No | Step ID to run on failure |
+| `for_each` | No | Repeat step for each line of input |
+| `input` | `write` steps | Content to write |
+| `no_brain` | No | Suppress brain context injection |
+
+### Retry Policy Fields
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `max_attempts` | `1` | Total attempts including first |
+| `interval` | `"0s"` | Wait between attempts |
+| `backoff` | `false` | Exponential backoff (reserved) |
+
+
+## See Also
+
+- [Your First Pipeline](/docs/pipelines/quickstart) — Five-minute intro
+- [Examples](/docs/pipelines/examples) — Copy-paste pipelines for real workflows
+- [Console](/docs/pipelines/console) — Launch and monitor from your workspace
