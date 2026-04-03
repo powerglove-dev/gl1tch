@@ -175,7 +175,7 @@ brews:
     repository:
       owner: 8op-org
       name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_PLUGIN }}"
     homepage: "https://github.com/8op-org/gl1tch"
     description: "gl1tch — AI-native terminal task manager"
     license: "MIT"
@@ -183,7 +183,7 @@ brews:
       bin.install "glitch"
     test: |
       assert_match version.to_s, shell_output("#{bin}/glitch --version")
-    skip_upload: "{{ if .Env.HOMEBREW_TAP_GITHUB_TOKEN }}false{{ else }}true{{ end }}"
+    skip_upload: "{{ if .Env.HOMEBREW_TAP_GITHUB_PLUGIN }}false{{ else }}true{{ end }}"
 
 changelog:
   use: git
