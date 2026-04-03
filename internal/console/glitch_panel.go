@@ -1239,7 +1239,8 @@ func newGlitchPanel(cfgDir string, providers []picker.ProviderDef, s *store.Stor
 			} else {
 				for _, prov := range providers {
 					if prov.ID == providerID {
-						var args []string
+						// Include PipelineArgs so stream-json detection (for resume) works.
+						args := append([]string{}, prov.PipelineArgs...)
 						if modelID != "" {
 							args = append(args, "--model", modelID)
 						}
@@ -1632,7 +1633,8 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 				} else {
 					for _, prov := range p.providers {
 						if prov.ID == provID {
-							var args []string
+							// Include PipelineArgs so stream-json/resume detection works.
+							args := append([]string{}, prov.PipelineArgs...)
 							if modelID != "" {
 								args = append(args, "--model", modelID)
 							}

@@ -73,6 +73,9 @@ func GlitchConfigDir() string { return glitchConfigDir() }
 
 // glitchConfigDir returns ~/.config/glitch, or "" on error.
 func glitchConfigDir() string {
+	if d := os.Getenv("GLITCH_CONFIG_DIR"); d != "" {
+		return d
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
