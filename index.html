@@ -243,7 +243,9 @@ esc
 <p>Your last 10 commits feed straight into the model. The summary streams to your terminal.</p>
 <h2 id="building-a-pipeline-with-gl1tch">Building a Pipeline with gl1tch</h2>
 <p>You don’t have to write YAML by hand. Ask gl1tch to build it.</p>
-<p>Open your workspace (<code>glitch</code>), then describe what you want:</p>
+<p>Open your workspace (<code>glitch</code>):</p>
+<p><img src="/screenshots/pipelines/pipeline-build-01-ready.png" alt="gl1tch workspace ready"></p>
+<p>Describe what you want:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>you:     build me a pipeline that summarizes my recent git activity</span></span>
 <span class="line"><span>         and flags anything that looks risky</span></span>
 <span class="line"><span></span></span>
@@ -306,6 +308,7 @@ esc
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> pipeline</span><span style="color:#F1FA8C"> run</span><span style="color:#F1FA8C"> git-digest</span></span></code></pre>
 <p>Or run it from the console:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>/pipeline git-digest</span></span></code></pre>
+<p><img src="/screenshots/pipelines/pipeline-run-03-result.png" alt="gl1tch launching git-digest"></p>
 <hr>
 <p>Here’s the full pipeline that was generated and tested:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> git-digest</span></span>
