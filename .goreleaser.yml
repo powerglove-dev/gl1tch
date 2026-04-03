@@ -170,6 +170,23 @@ checksum:
   name_template: "checksums.txt"
   algorithm: sha256
 
+brews:
+  - name: glitch
+    ids:
+      - glitch
+    repository:
+      owner: 8op-org
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/8op-org/gl1tch"
+    description: "gl1tch — AI-native terminal task manager"
+    license: "MIT"
+    install: |
+      bin.install "glitch"
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/glitch --version")
+    skip_upload: false
+
 changelog:
   use: git
   sort: asc
