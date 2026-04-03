@@ -4,7 +4,7 @@ INDEX
 <h2 id="quick-start">Quick Start</h2>
 <p>Open the prompt manager:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> prompts</span></span></code></pre>
-<p>Press <code>n</code> to create a new prompt, give it a title and body, press <code>s</code> to save.</p>
+<p>Press <code>n</code> to create a new prompt, fill in the title and body, press <code>ctrl+s</code> to save.</p>
 <p>Use it in a pipeline:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">steps</span><span style="color:#FF79C6">:</span></span>
 <span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> review</span></span>
@@ -12,29 +12,116 @@ INDEX
 <span class="line"><span style="color:#8BE9FD">    model</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> qwen2.5-coder:latest</span></span>
 <span class="line"><span style="color:#8BE9FD">    prompt_id</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">Code review persona</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">    input</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">{{steps.diff.output}}</span><span style="color:#E9F284">"</span></span></code></pre>
-<p>That’s it. When the step runs, your saved prompt body prepends to the input automatically.</p>
-<h2 id="managing-your-prompt-library">Managing Your Prompt Library</h2>
-<h3 id="create-a-prompt">Create a prompt</h3>
-<ol>
-<li>Run <code>glitch prompts</code></li>
-<li>Press <code>n</code> — new prompt form opens</li>
-<li>Enter a title: <code>"Code review persona"</code></li>
-<li>Enter the body:</li>
-</ol>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>You are a senior engineer doing code review. Be direct and specific.</span></span>
-<span class="line"><span>Focus on correctness first, then performance, then style.</span></span>
-<span class="line"><span>Always suggest a fix, not just an observation.</span></span></code></pre>
-<ol start="5">
-<li>Press <code>s</code> to save</li>
-</ol>
-<h3 id="find-a-prompt">Find a prompt</h3>
-<p>Press <code>/</code> in the prompt manager to filter by title. Search is incremental and case-insensitive.</p>
-<h3 id="edit-a-prompt">Edit a prompt</h3>
-<p>Navigate to it, press <code>e</code>. Changes apply to every pipeline that references it — immediately, on next run.</p>
-<h3 id="test-a-prompt">Test a prompt</h3>
-<p>Press <code>t</code> from the prompt manager. A test panel opens and streams a live response from your configured model. Iterate before you commit the prompt to a pipeline.</p>
+<p>When the step runs, your saved prompt body prepends to the input automatically.</p>
+<h2 id="the-prompt-manager">The Prompt Manager</h2>
+<p>The manager has three panels. <code>tab</code> / <code>shift+tab</code> cycles between them.</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>┌─────────────────┬───────────────────────────────┐</span></span>
+<span class="line"><span>│  Prompt list    │  Editor                        │</span></span>
+<span class="line"><span>│                 │  Title ___________________     │</span></span>
+<span class="line"><span>│  > Code review  │  Body                          │</span></span>
+<span class="line"><span>│    Commit msg   │  ________________________      │</span></span>
+<span class="line"><span>│    Debug helper │  Model: ollama/qwen2.5-coder   │</span></span>
+<span class="line"><span>│                 │  CWD:   ~/Projects/myapp       │</span></span>
+<span class="line"><span>│                 ├───────────────────────────────┤</span></span>
+<span class="line"><span>│                 │  Runner output                 │</span></span>
+<span class="line"><span>└─────────────────┴───────────────────────────────┘</span></span></code></pre>
+<h3 id="list-panel-left">List panel (left)</h3>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody><tr><td><code>j</code> / <code>k</code></td><td>Navigate up and down</td></tr><tr><td><code>n</code></td><td>New prompt — opens editor with blank form</td></tr><tr><td><code>e</code> / <code>enter</code></td><td>Edit selected prompt</td></tr><tr><td><code>d</code></td><td>Delete selected prompt (asks to confirm)</td></tr><tr><td><code>tab</code></td><td>Move to editor panel</td></tr><tr><td>any other key</td><td>Types into the filter — fuzzy search by title or body</td></tr><tr><td><code>q</code> / <code>esc</code></td><td>Quit</td></tr></tbody></table>
+<h3 id="editor-panel-top-right">Editor panel (top-right)</h3>
+<p><code>tab</code> / <code>shift+tab</code> moves focus between Title → Body → Model → CWD.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody><tr><td><code>ctrl+s</code></td><td>Save prompt</td></tr><tr><td><code>ctrl+r</code></td><td>Run prompt against the selected model — output appears in runner panel</td></tr><tr><td><code>esc</code></td><td>Back to list</td></tr></tbody></table>
+<p>The <strong>Model</strong> field selects which executor runs when you test. The <strong>CWD</strong> field scopes the run to a project directory — useful when your prompt references local files.</p>
+<h3 id="runner-panel-bottom-right">Runner panel (bottom-right)</h3>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody><tr><td><code>ctrl+r</code></td><td>Run again from scratch</td></tr><tr><td><code>r</code></td><td>Open follow-up input — continue the conversation</td></tr><tr><td><code>p</code></td><td>Promote the response to the body editor for review and saving</td></tr><tr><td><code>j</code> / <code>k</code></td><td>Scroll output</td></tr><tr><td><code>esc</code></td><td>Back to editor</td></tr></tbody></table>
 <h2 id="using-prompts-in-pipelines">Using Prompts in Pipelines</h2>
-<p>Add <code>prompt_id</code> to any step that calls a model. The value is the exact title of your saved prompt.</p>
+<p>Add <code>prompt_id</code> to any step that calls a model. The value is the title of your saved prompt (case-insensitive).</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">steps</span><span style="color:#FF79C6">:</span></span>
 <span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> review</span></span>
 <span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ollama</span></span>
@@ -47,9 +134,8 @@ INDEX
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>[your saved prompt body]</span></span>
 <span class="line"><span></span></span>
 <span class="line"><span>[your step input]</span></span></code></pre>
-<p>The saved prompt always comes first. Brain context and any other injections happen after.</p>
 <blockquote>
-<p><strong>NOTE:</strong> If <code>prompt_id</code> references a title that doesn’t exist in your library, the step fails with a clear error message. Use <code>glitch prompts</code> to verify the title before running.</p>
+<p><strong>NOTE:</strong> If <code>prompt_id</code> references a title that doesn’t exist, the step fails with a clear error. Use <code>glitch prompts</code> to verify the title before running.</p>
 </blockquote>
 <h2 id="examples">Examples</h2>
 <h3 id="code-review-pipeline">Code Review Pipeline</h3>
@@ -94,7 +180,7 @@ INDEX
 <span class="line"><span style="color:#8BE9FD">    prompt_id</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">Code review persona</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">    input</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">Review the database layer for correctness</span><span style="color:#E9F284">"</span></span></code></pre>
 <h3 id="commit-message-generator">Commit Message Generator</h3>
-<p>Save a prompt titled <code>"Commit message style"</code> that describes your project’s conventions. Use it any time you want consistent commit messages.</p>
+<p>Save a prompt titled <code>"Commit message style"</code> that describes your project’s conventions.</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> commit-helper</span></span>
 <span class="line"><span style="color:#8BE9FD">version</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">1</span><span style="color:#E9F284">"</span></span>
 <span class="line"></span>
@@ -130,42 +216,7 @@ INDEX
 
 
 
-<table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>prompt_id</code></td><td>string</td><td>no</td><td>Title of the saved prompt to inject. Must match exactly.</td></tr></tbody></table>
-<h3 id="prompt-manager-keyboard-shortcuts">Prompt manager keyboard shortcuts</h3>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-<table><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody><tr><td><code>n</code></td><td>New prompt</td></tr><tr><td><code>e</code></td><td>Edit selected prompt</td></tr><tr><td><code>t</code></td><td>Test selected prompt against a model</td></tr><tr><td><code>s</code></td><td>Save</td></tr><tr><td><code>/</code></td><td>Filter/search by title</td></tr><tr><td><code>q</code></td><td>Close the manager</td></tr></tbody></table>
+<table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>prompt_id</code></td><td>string</td><td>no</td><td>Title of the saved prompt to inject. Case-insensitive match.</td></tr></tbody></table>
 <h3 id="injection-order">Injection order</h3>
 <p>When a step has <code>prompt_id</code> set, the executor receives content in this order:</p>
 <ol>
