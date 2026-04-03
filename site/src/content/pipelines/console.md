@@ -1,248 +1,167 @@
 ---
 title: "Console"
-description: "Chat with your AI assistant, launch pipelines, and watch your automations run — all from one workspace."
+description: "Talk to your AI assistant, launch pipelines, and manage your session — all from one conversation screen."
 order: 2
 ---
 
-Your gl1tch workspace is a single terminal screen that brings together everything: a conversation with your AI assistant, a list of your saved pipelines, and a live feed of everything that's running. Open it by launching gl1tch, then talk to it like a person or type a slash command to take action.
+gl1tch is a conversation. You open it in your terminal, type what you want, and your assistant handles it — whether that's answering a question, running a pipeline, or kicking off an automation. Everything happens in one screen. Your session keeps running even when you step away.
 
-
-## Quick Start
-
-Launch gl1tch and open your workspace:
+Launch it:
 
 ```bash
 glitch
 ```
 
-Your workspace opens with three regions:
-
-```text
-┌─────────────────────────────────────────────────────────────┐
-│ GL1TCH DECK — CONTROL PANEL                         hh:mm:ss │
-├──────────────────────┬──────────────────────────────────────┤
-│                      │                                       │
-│  PIPELINE LAUNCHER   │                                       │
-│  ─────────────────   │   ACTIVITY FEED                       │
-│  • backup            │   (live output, status badges)        │
-│  • standup           │                                       │
-│  • pr-triage         │                                       │
-│                      │                                       │
-│  ASSISTANT           │                                       │
-│  ─────────────────   │                                       │
-│  Provider: ollama    │                                       │
-│  Model: llama3.2     │                                       │
-│                      │                                       │
-│  > _                 │                                       │
-│                      │                                       │
-├──────────────────────┴──────────────────────────────────────┤
-│ [TAB] focus  [j/k] navigate  [↵] launch  [ESC] back         │
-└─────────────────────────────────────────────────────────────┘
-```
-
-Press `Tab` to move between regions. Use `j`/`k` to navigate lists. Press `↵` to launch a pipeline or send a message.
+The input prompt is at the bottom. Type anything and press `Enter`.
 
 
 ## Talking to Your Assistant
 
-Type anything in the assistant input and press `ctrl+↵` to send. Your assistant knows about your recent runs, what pipelines you have, and the current working directory.
-
-Ask questions:
+Ask questions in plain English:
 
 ```text
-why did the backup fail?
-what's the diff on PR 42?
-suggest a refactor for this function
+why did the backup pipeline fail?
+what changed in the last 10 commits?
+explain this error: connection refused on port 5432
 ```
 
-Give it direct commands:
+Give direct commands:
 
 ```text
-run standup
-launch pr-triage
-show pipelines
+run my standup pipeline
+show me my saved pipelines
+what pipelines do I have?
 ```
 
-Your assistant only launches a pipeline when you explicitly tell it to. Questions and analysis requests are answered directly without triggering a run.
-
-Press `c` from anywhere in the workspace to jump straight to the assistant input.
+Your assistant knows your current working directory, your recent pipeline runs, and your brain context. It answers based on what's actually in your project — not generic advice.
 
 
 ## Slash Commands
 
-Slash commands take immediate action without involving the AI.
+Slash commands take immediate action. Type `/` to see autocomplete.
 
-### Running Pipelines
+### Pipelines
 
 ```bash
-/pipeline backup              # run the "backup" pipeline by name
-/pipeline my-new-pipeline     # starts a creation flow if it doesn't exist yet
+/pipeline standup          # run the "standup" pipeline
+/pipeline pr-triage        # run any named pipeline
+/rerun standup             # re-run the last run of a pipeline
 ```
 
-Output streams to the Activity Feed in real time.
+### Terminal Splits
 
-### Managing Your Workspace
+Open a terminal pane alongside your assistant without leaving gl1tch:
 
 ```bash
-/terminal                     # open a new terminal pane (bottom, 25%)
-/terminal 50%                 # 50% split
-/terminal left 40%            # left side, 40% width
-/terminal in ~/projects/myapp # pane opens in that directory
-/terminal htop                # pane runs htop directly
+/terminal                  # new pane, 25% bottom
+/terminal 50%              # 50% split
+/terminal left 40%         # left side, 40% width
+/terminal ~/projects/myapp # pane opens in that directory
+/terminal htop             # pane runs a command directly
 ```
 
 ### Sessions
 
-Manage separate conversation threads without losing context:
+Keep separate conversation threads without losing context:
 
 ```bash
-/session new debug            # create a session named "debug"
-/session debug                # switch to it (shorthand: /s debug)
+/session new debug         # create a session named "debug"
+/session debug             # switch to it (shorthand: /s debug)
 ```
 
-Active session shows `●` in the footer. Background sessions with new activity show `◐`.
+Each session has its own full history. Active session shows `●` in the footer.
 
-### Other Commands
+### Switching Models
 
 ```bash
-/help                         # show command reference
-/quit                         # exit gl1tch
+/model ollama/qwen2.5-coder:latest
+/model claude/claude-sonnet-4-6
+/models                    # open the model picker
+```
+
+### Other
+
+```bash
+/cwd ~/projects/myapp      # change working directory
+/clear                     # clear the conversation
+/help                      # show command reference
+/quit                      # exit
 ```
 
 
-## Launching Pipelines From the Sidebar
-
-Your saved pipelines (`.pipeline.yaml` files in `~/.config/glitch/pipelines/`) appear in the left sidebar automatically.
-
-1. Press `Tab` to focus the Pipeline Launcher
-2. Use `j`/`k` to navigate to the pipeline you want
-3. Press `↵` to launch it
-4. Watch output stream in the Activity Feed
-
-While a pipeline is running, the launcher shows `[running]` and the feed updates live. When it finishes, the badge changes to `[done]` or `[failed]`.
-
-
-## The Activity Feed
-
-The Activity Feed shows everything that runs — pipeline output, assistant responses, errors. Each entry is timestamped and tagged.
-
-```text
-[14:23:05] [running] pipeline:standup
-  → Fetching commits...
-  → Writing standup...
-
-[14:23:18] [done] pipeline:standup
-  → standup.md saved.
-```
-
-Navigate with `j`/`k`. Press `↵` on any entry to open the full result — you'll see the complete output, step-by-step timings, and a re-run button.
-
-### Searching and Filtering
+## Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
-| `/` | Fuzzy search entries by name |
-| `f` | Cycle status filter: `all` → `running` → `done` → `failed` |
-| `j`/`k` | Navigate entries |
-| `↵` | Open full result |
-
-
-## Keyboard Reference
-
-### Navigation
-
-| Key | Action |
-|-----|--------|
-| `Tab` | Cycle focus: Launcher → Assistant → Feed → Launcher |
-| `Shift+Tab` | Cycle focus backward |
-| `h` / `←` | Focus left sidebar |
-| `l` / `→` | Focus Activity Feed |
-| `j` / `k` | Move up/down in current region |
-| `↵` | Launch / open / send |
-| `Esc` | Cancel or go back |
-
-### Workspace Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `c` | Jump to assistant input |
-| `T` | Open theme picker |
-| `R` | Refresh provider and model list |
-| `?` | Show help |
+| `Enter` | Send message |
+| `Esc` | Unfocus input |
+| `↑` / `↓` | Navigate input history |
+| `/help` | Show all commands |
 
 ### Chord Shortcuts
 
-Chord shortcuts start with `ctrl+space` followed by a key:
+Press `ctrl+space`, then the key:
 
 | Chord | Action |
 |-------|--------|
-| `ctrl+space a` | Focus assistant panel |
-| `ctrl+space r` | Reload gl1tch (picks up a new binary) |
-| `ctrl+space s` | Open the ops popup |
-| `ctrl+space \|` | Split pane horizontally |
-| `ctrl+space -` | Split pane vertically |
-| `ctrl+space x` | Kill current pane |
-| `ctrl+space ←/→/↑/↓` | Navigate panes by direction |
+| `ctrl+space d` | Detach (session keeps running) |
+| `ctrl+space r` | Reload gl1tch |
+| `ctrl+space a` | Focus assistant input |
+| `ctrl+space p` | Open pipeline builder |
+| `ctrl+space b` | Open brain editor |
 
 
-## Customizing
+## Detaching and Reattaching
 
-### Themes
+Your session keeps running after you detach. Scheduled pipelines fire, automations complete, results accumulate. Come back and it's all there.
 
-Press `T` to open the theme picker. Available themes:
+Detach: `ctrl+space d`
 
-| Theme | Style |
-|-------|-------|
-| **Dracula** | Dark, high-contrast purples and cyans (default) |
-| **Nord** | Cool arctic palette |
-| **Gruvbox** | Warm earthy tones |
-
-Your theme choice persists across sessions.
-
-### Named Sessions
-
-Create separate conversation threads for different contexts — debugging a deploy in one session, drafting docs in another:
+Reattach from your shell:
 
 ```bash
-/session new deploy-debug
-/session new docs-draft
-/s deploy-debug              # switch back
+glitch attach
 ```
 
-Each session keeps its own full history. Background sessions with new activity are highlighted so nothing gets missed.
+> **TIP:** Run long pipelines, detach, and come back to results. You don't have to watch it run.
 
 
 ## Examples
 
-### "Why did that fail?"
-
-After a pipeline fails, ask your assistant directly:
+### Ask about a failed run
 
 ```text
-why did backup fail?
+why did the standup pipeline fail last night?
 ```
 
-Your assistant sees the recent run output, exit code, and step details. It answers based on what actually happened.
+Your assistant sees the run output, exit code, and step timing. It tells you exactly what went wrong.
 
-### "Run something and explain it"
+### Run a pipeline and ask about the output
 
 ```text
-run standup explain
+run pr-triage
 ```
 
-The pipeline runs immediately. Once it finishes, your assistant narrates what it did and what the output means.
-
-### "Open a scratch terminal while a pipeline runs"
+Once it finishes, ask:
 
 ```text
-/terminal 50% right
+which PR should I look at first?
 ```
 
-A new pane opens on the right. Your pipeline keeps running and streaming to the Activity Feed. Use `ctrl+space →` to switch back to the feed.
+Your assistant uses the pipeline output as context for its answer.
+
+### Work in parallel with a terminal split
+
+```text
+/terminal 40% right
+```
+
+A pane opens on the right. Run tests, edit files, do whatever — your assistant stays on the left, ready for questions.
 
 
 ## See Also
 
-- [Pipelines](/docs/pipelines/pipelines) — Write and structure `.pipeline.yaml` files
-- [Examples](/docs/pipelines/examples) — Copy-paste pipelines for real workflows
 - [Your First Pipeline](/docs/pipelines/quickstart) — Get running in five minutes
+- [Pipelines](/docs/pipelines/pipelines) — Write and chain pipeline steps
+- [Brain](/docs/pipelines/brain) — Teach your assistant about your projects
+- [Scheduling](/docs/pipelines/cron) — Run pipelines automatically
