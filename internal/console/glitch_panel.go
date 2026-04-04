@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"regexp"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +23,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fsnotify/fsnotify"
 
+	"github.com/8op-org/gl1tch/internal/briefing"
 	"github.com/8op-org/gl1tch/internal/cron"
 	"github.com/8op-org/gl1tch/internal/executor"
 	"github.com/8op-org/gl1tch/internal/modal"
@@ -156,16 +158,16 @@ var glitchSlashCommands = []slashSuggestion{
 	{cmd: "/cwd",      hint: "[path] — set working directory"},
 	{cmd: "/prompt",   hint: "[name] — load or build a system prompt with AI"},
 	{cmd: "/pipeline", hint: "[name] — run a pipeline, or build one from scratch"},
-	{cmd: "/brain",    hint: "[query] — search notes, or start an interactive brain session"},
+	{cmd: "/brain",    hint: "[query|summary] — search notes, summary = what gl1tch knows about you"},
 	{cmd: "/rerun",    hint: "[name] — rerun a pipeline by name"},
 	{cmd: "/terminal", hint: "[cmd] — open split; -v -left -p N; list kill equalize focus"},
+	{cmd: "/briefing", hint: "[enable|disable|now] — daily morning briefing pipeline"},
 	{cmd: "/cron",     hint: "get help scheduling recurring jobs"},
 	{cmd: "/model",    hint: "[name] — switch provider/model inline"},
 	{cmd: "/themes",   hint: "open theme picker"},
 	{cmd: "/session",  hint: "[new|delete|name|#] — manage chat sessions"},
 	{cmd: "/s",        hint: "[name|#] — shorthand for /session"},
 	{cmd: "/shell",    hint: "[cmd] — run a shell command and show output"},
-	{cmd: "/weather",  hint: "[city] — current weather and forecast"},
 	{cmd: "/clear",    hint: "clear chat history"},
 	{cmd: "/quit",     hint: "exit glitch"},
 	{cmd: "/help",     hint: "this list"},
@@ -1083,6 +1085,94 @@ func glitchSaveBrainNote(st *store.Store, stepID, tags, body string) {
 	}()
 }
 
+// userModelBrainRe matches <brain ...> blocks used during user-model extraction.
+var userModelBrainRe = regexp.MustCompile(`(?s)<brain\b([^>]*?)>(.*?)</brain>`)
+
+// userModelAttrRe parses key="value" attribute pairs from a brain tag.
+var userModelAttrRe = regexp.MustCompile(`(\w+)=["']([^"']*)["']`)
+
+// glitchExtractUserModel runs user-model extraction in a background goroutine.
+// It calls the backend with an extraction prompt, parses <brain type="user_model">
+// blocks from the response, and upserts each as a capability note (run_id=0).
+// No-ops when turns < 3, store is nil, or backend is nil.
+func glitchExtractUserModel(turns []glitchTurn, st *store.Store, backend glitchBackend) {
+	if len(turns) < 3 || st == nil || backend == nil {
+		return
+	}
+	snapshot := make([]glitchTurn, len(turns))
+	copy(snapshot, turns)
+	go func() {
+		ctx := context.Background()
+
+		var conv strings.Builder
+		for _, t := range snapshot {
+			switch t.role {
+			case "user":
+				conv.WriteString("USER: ")
+			default:
+				conv.WriteString("GLITCH: ")
+			}
+			conv.WriteString(t.text)
+			conv.WriteString("\n\n")
+		}
+
+		prompt := "Review this conversation and extract 0-3 concise facts about the user's preferences, " +
+			"workflow, or coding style that would help a future AI session.\n\n" +
+			"Format each finding as:\n" +
+			"<brain type=\"user_model\" title=\"short title\" tags=\"preference\">\n" +
+			"one sentence describing the preference or pattern\n</brain>\n\n" +
+			"Only extract clearly stated or strongly implied patterns. " +
+			"If nothing notable, output nothing — no preamble.\n\n" +
+			"CONVERSATION:\n" + conv.String()
+
+		ch, done, err := backend.stream(ctx, nil, prompt, "", "", "")
+		if err != nil {
+			return
+		}
+		var resp strings.Builder
+		for tok := range ch {
+			resp.WriteString(tok)
+		}
+		if done != nil {
+			for range done {
+			}
+		}
+		response := resp.String()
+
+		for _, m := range userModelBrainRe.FindAllStringSubmatch(response, -1) {
+			attrs := make(map[string]string)
+			for _, a := range userModelAttrRe.FindAllStringSubmatch(m[1], -1) {
+				attrs[a[1]] = a[2]
+			}
+			body := strings.TrimSpace(m[2])
+			if body == "" {
+				continue
+			}
+			title := attrs["title"]
+			stepID := "user-model"
+			if title != "" {
+				stepID = "user-model:" + strings.ToLower(strings.ReplaceAll(title, " ", "-"))
+			}
+			var parts []string
+			if t := attrs["type"]; t != "" {
+				parts = append(parts, "type:"+t)
+			}
+			if title != "" {
+				parts = append(parts, "title:"+title)
+			}
+			if tags := attrs["tags"]; tags != "" {
+				parts = append(parts, "tags:"+tags)
+			}
+			_ = st.UpsertCapabilityNote(ctx, store.BrainNote{
+				StepID:    stepID,
+				CreatedAt: time.Now().UnixMilli(),
+				Tags:      strings.Join(parts, " "),
+				Body:      body,
+			})
+		}
+	}()
+}
+
 // ── glitch panel ──────────────────────────────────────────────────────────────
 
 // glitchPromptFlow tracks state for the /prompt guided wizard.
@@ -1335,6 +1425,7 @@ func (p *glitchChatPanel) setBackendCWD(dir string) {
 // the registry, switches the active session to name, and loads that session's state.
 func (p glitchChatPanel) switchToSession(name string) glitchChatPanel {
 	if cur := p.sessions.Active(); cur != nil {
+		glitchExtractUserModel(p.turns, p.store, p.backend)
 		cur.messages = p.messages
 		cur.turns = p.turns
 		cur.cwd = p.launchCWD
@@ -1880,6 +1971,50 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					userText = "/session" + strings.TrimPrefix(userText, "/s")
 				}
 				switch cmd {
+				case "/briefing":
+					briefingArgs := strings.Fields(userText)
+					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
+					sub := ""
+					if len(briefingArgs) > 1 {
+						sub = briefingArgs[1]
+					}
+					switch sub {
+					case "enable":
+						ppath, count, err := briefing.Enable()
+						if err != nil {
+							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "briefing: " + err.Error()})
+							return p, nil
+						}
+						p.messages = append(p.messages, glitchEntry{
+							who:  glitchSpeakerBot,
+							text: fmt.Sprintf("morning briefing enabled — runs at 8 AM daily.\npipeline: %s\nscheduled jobs: %d\n\nuse /briefing now to run it immediately.", ppath, count),
+						})
+					case "disable":
+						count, err := briefing.Disable()
+						if err != nil {
+							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "briefing: " + err.Error()})
+							return p, nil
+						}
+						p.messages = append(p.messages, glitchEntry{
+							who:  glitchSpeakerBot,
+							text: fmt.Sprintf("morning briefing disabled. (%d scheduled jobs remain)", count),
+						})
+					case "now":
+						p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "running morning briefing..."})
+						return p, func() tea.Msg {
+							return glitchRerunMsg{name: "morning-briefing", kind: "pipeline"}
+						}
+					default:
+						status := "disabled"
+						if briefing.IsEnabled() {
+							status = "enabled (runs at 8 AM daily)"
+						}
+						p.messages = append(p.messages, glitchEntry{
+							who:  glitchSpeakerBot,
+							text: "morning briefing: " + status + "\n\ncommands:\n  /briefing enable   — schedule at 8 AM daily\n  /briefing disable  — remove from schedule\n  /briefing now      — run immediately",
+						})
+					}
+					return p, nil
 				case "/cron":
 					cronArgs := strings.Fields(userText)
 					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
@@ -1956,7 +2091,45 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 						p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "brain not available."})
 						return p, nil
 					}
-					if len(brainArgs) > 1 {
+					if len(brainArgs) > 1 && brainArgs[1] == "summary" {
+						// /brain summary — show user model notes.
+						capNotes, err := p.store.CapabilityNotes(context.Background())
+						if err != nil {
+							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "brain: failed to read notes: " + err.Error()})
+							return p, nil
+						}
+						var userModelNotes []store.BrainNote
+						for _, n := range capNotes {
+							if strings.Contains(n.Tags, "type:user_model") {
+								userModelNotes = append(userModelNotes, n)
+							}
+						}
+						if len(userModelNotes) == 0 {
+							p.messages = append(p.messages, glitchEntry{
+								who:  glitchSpeakerBot,
+								text: "nothing saved yet — gl1tch will learn your preferences as you use it.\n\nstart a few chat sessions and type /clear when done. brain will pick up on patterns over time.",
+							})
+							return p, nil
+						}
+						var sb strings.Builder
+						sb.WriteString(fmt.Sprintf("here's what gl1tch knows about you (%d note(s)):\n", len(userModelNotes)))
+						for _, n := range userModelNotes {
+							title := ""
+							for _, part := range strings.Fields(n.Tags) {
+								if strings.HasPrefix(part, "title:") {
+									title = strings.TrimPrefix(part, "title:")
+									break
+								}
+							}
+							if title != "" {
+								sb.WriteString("\n• " + title + "\n  " + n.Body)
+							} else {
+								sb.WriteString("\n• " + n.Body)
+							}
+						}
+						p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: sb.String()})
+						return p, nil
+					} else if len(brainArgs) > 1 {
 						// Keyword search — synchronous, no streaming.
 						query := strings.ToLower(strings.Join(brainArgs[1:], " "))
 						notes, err := p.store.AllBrainNotes(context.Background())
@@ -2251,6 +2424,7 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "▶ session: " + name})
 					return p, saveSessionsCmd(p.cfgDir, p.sessions, p.sessions.active, p.launchCWD, p.backend)
 				case "/clear":
+					glitchExtractUserModel(p.turns, p.store, p.backend)
 					p.messages = nil
 					p.turns = nil
 					// Keep the active session's stored state in sync.
@@ -2476,29 +2650,7 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
 					p.messages = append(p.messages, glitchEntry{
 						who: glitchSpeakerBot,
-						text: "slash commands:\n\n  getting started\n  /init             — first-run wizard\n  /models           — pick a provider and model\n\n  build things\n  /prompt [name]    — load or build a system prompt with AI\n  /pipeline [name]  — run a pipeline, or build one from scratch\n  /brain [query]    — search notes, or start an interactive brain session\n\n  run things\n  /rerun [name]     — rerun a pipeline by name\n  /shell [cmd]      — run a shell command and show output\n  /weather [city]   — current weather and forecast\n  /terminal [cmd]   — open split (-v bottom, -left, -p N%); or: list kill equalize focus\n  /cron             — get help scheduling recurring jobs\n  /trace            — show OTel trace for the selected feed entry\n\n  modes\n  /mud              — jack into The Gibson — takes over chat as MUD terminal\n\n  workspace\n  /session [name]   — switch or create a named session\n  /cwd [path]       — set working directory\n  /model [name]     — switch provider/model inline\n  /themes           — open theme picker\n  /clear            — clear chat history\n  /quit             — exit glitch\n  /help             — this list\n\nscroll: j/k or [/] when scroll-focused (tab to switch)",
-					})
-					return p, nil
-				case "/weather":
-					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
-					city := strings.TrimSpace(strings.TrimPrefix(userText, "/weather"))
-					var weatherCmd *exec.Cmd
-					if city == "" {
-						weatherCmd = exec.Command("glitch-weather")
-					} else {
-						weatherCmd = exec.Command("glitch-weather", strings.Fields(city)...)
-					}
-					out, weatherErr := weatherCmd.CombinedOutput()
-					weatherOut := strings.TrimRight(string(out), "\n")
-					if weatherErr != nil && weatherOut == "" {
-						weatherOut = weatherErr.Error()
-					}
-					if weatherOut == "" {
-						weatherOut = "(no output)"
-					}
-					p.messages = append(p.messages, glitchEntry{
-						who:  glitchSpeakerBot,
-						text: weatherOut,
+						text: "slash commands:\n\n  getting started\n  /init             — first-run wizard\n  /models           — pick a provider and model\n\n  build things\n  /prompt [name]    — load or build a system prompt with AI\n  /pipeline [name]  — run a pipeline, or build one from scratch\n  /brain [query]    — search notes; /brain summary — what gl1tch knows about you\n  /briefing         — daily morning briefing: enable, disable, or run now\n\n  run things\n  /rerun [name]     — rerun a pipeline by name\n  /shell [cmd]      — run a shell command and show output\n  /weather [city]   — current weather and forecast\n  /terminal [cmd]   — open split (-v bottom, -left, -p N%); or: list kill equalize focus\n  /cron             — get help scheduling recurring jobs\n  /trace            — show OTel trace for the selected feed entry\n\n  modes\n  /mud              — jack into The Gibson — takes over chat as MUD terminal\n\n  workspace\n  /session [name]   — switch or create a named session\n  /cwd [path]       — set working directory\n  /model [name]     — switch provider/model inline\n  /themes           — open theme picker\n  /clear            — clear chat history\n  /quit             — exit glitch\n  /help             — this list\n\nscroll: j/k or [/] when scroll-focused (tab to switch)",
 					})
 					return p, nil
 				case "/trace":
@@ -3058,7 +3210,7 @@ func isNonBlockingCmd(s string) bool {
 	}
 	cmd := strings.ToLower(strings.Fields(s)[0])
 	switch cmd {
-	case "/session", "/s", "/clear", "/cwd", "/quit", "/exit", "/trace", "/themes", "/model", "/models", "/shell":
+	case "/session", "/s", "/clear", "/cwd", "/quit", "/exit", "/trace", "/themes", "/model", "/models", "/shell", "/briefing":
 		return true
 	}
 	return false
