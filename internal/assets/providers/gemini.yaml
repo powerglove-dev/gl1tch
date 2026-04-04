@@ -19,3 +19,9 @@ session:
   window_name: "{{.name}}:{{.model}}"
   launch_args: []
   env: {}
+pipeline:
+  args:
+    - "--output-format"
+    - "stream-json"
+    - "--approval-mode"
+    - "yolo"

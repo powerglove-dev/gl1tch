@@ -41,9 +41,9 @@ func main() {
 	os.Exit(code)
 }
 
-// execGemini runs `gemini [--model <model>]` with the prompt on stdin.
+// execGemini runs `gemini -p --approval-mode yolo [--model <model>]` with the prompt on stdin.
 func execGemini(model, prompt string, stdout, stderr io.Writer) int {
-	var args []string
+	args := []string{"-p", "--approval-mode", "yolo"}
 	if model != "" {
 		args = append(args, "--model", model)
 	}

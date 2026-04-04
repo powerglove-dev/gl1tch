@@ -165,6 +165,7 @@ var glitchSlashCommands = []slashSuggestion{
 	{cmd: "/session",  hint: "[new|delete|name|#] — manage chat sessions"},
 	{cmd: "/s",        hint: "[name|#] — shorthand for /session"},
 	{cmd: "/shell",    hint: "[cmd] — run a shell command and show output"},
+	{cmd: "/weather",  hint: "[city] — current weather and forecast"},
 	{cmd: "/clear",    hint: "clear chat history"},
 	{cmd: "/quit",     hint: "exit glitch"},
 	{cmd: "/help",     hint: "this list"},
@@ -2475,7 +2476,29 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
 					p.messages = append(p.messages, glitchEntry{
 						who: glitchSpeakerBot,
-						text: "slash commands:\n\n  getting started\n  /init             — first-run wizard\n  /models           — pick a provider and model\n\n  build things\n  /prompt [name]    — load or build a system prompt with AI\n  /pipeline [name]  — run a pipeline, or build one from scratch\n  /brain [query]    — search notes, or start an interactive brain session\n\n  run things\n  /rerun [name]     — rerun a pipeline by name\n  /shell [cmd]      — run a shell command and show output\n  /terminal [cmd]   — open split (-v bottom, -left, -p N%); or: list kill equalize focus\n  /cron             — get help scheduling recurring jobs\n  /trace            — show OTel trace for the selected feed entry\n\n  modes\n  /mud              — jack into The Gibson — takes over chat as MUD terminal\n\n  workspace\n  /session [name]   — switch or create a named session\n  /cwd [path]       — set working directory\n  /model [name]     — switch provider/model inline\n  /themes           — open theme picker\n  /clear            — clear chat history\n  /quit             — exit glitch\n  /help             — this list\n\nscroll: j/k or [/] when scroll-focused (tab to switch)",
+						text: "slash commands:\n\n  getting started\n  /init             — first-run wizard\n  /models           — pick a provider and model\n\n  build things\n  /prompt [name]    — load or build a system prompt with AI\n  /pipeline [name]  — run a pipeline, or build one from scratch\n  /brain [query]    — search notes, or start an interactive brain session\n\n  run things\n  /rerun [name]     — rerun a pipeline by name\n  /shell [cmd]      — run a shell command and show output\n  /weather [city]   — current weather and forecast\n  /terminal [cmd]   — open split (-v bottom, -left, -p N%); or: list kill equalize focus\n  /cron             — get help scheduling recurring jobs\n  /trace            — show OTel trace for the selected feed entry\n\n  modes\n  /mud              — jack into The Gibson — takes over chat as MUD terminal\n\n  workspace\n  /session [name]   — switch or create a named session\n  /cwd [path]       — set working directory\n  /model [name]     — switch provider/model inline\n  /themes           — open theme picker\n  /clear            — clear chat history\n  /quit             — exit glitch\n  /help             — this list\n\nscroll: j/k or [/] when scroll-focused (tab to switch)",
+					})
+					return p, nil
+				case "/weather":
+					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
+					city := strings.TrimSpace(strings.TrimPrefix(userText, "/weather"))
+					var weatherCmd *exec.Cmd
+					if city == "" {
+						weatherCmd = exec.Command("glitch-weather")
+					} else {
+						weatherCmd = exec.Command("glitch-weather", strings.Fields(city)...)
+					}
+					out, weatherErr := weatherCmd.CombinedOutput()
+					weatherOut := strings.TrimRight(string(out), "\n")
+					if weatherErr != nil && weatherOut == "" {
+						weatherOut = weatherErr.Error()
+					}
+					if weatherOut == "" {
+						weatherOut = "(no output)"
+					}
+					p.messages = append(p.messages, glitchEntry{
+						who:  glitchSpeakerBot,
+						text: weatherOut,
 					})
 					return p, nil
 				case "/trace":

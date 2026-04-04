@@ -27,9 +27,9 @@ var knownModels = []struct {
 	{"o3", "o3"},
 }
 
-// execCodex runs `codex --prompt <prompt> [--model <model>]`.
+// execCodex runs `codex --prompt <prompt> [--model <model>]` with full tool access.
 func execCodex(model, prompt string, stdout, stderr io.Writer) int {
-	args := []string{"--prompt", prompt}
+	args := []string{"--prompt", prompt, "--dangerously-bypass-approvals-and-sandbox"}
 	if model != "" {
 		args = append(args, "--model", model)
 	}
