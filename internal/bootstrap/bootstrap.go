@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/8op-org/gl1tch/internal/assistant"
 	"github.com/8op-org/gl1tch/internal/busd"
@@ -287,6 +289,17 @@ func Run() error {
 	// BUSD is already listening so daemons can connect immediately.
 	daemons := daemonwidget.StartAll(filepath.Join(cfgDir, "wrappers"))
 	defer daemons.Stop()
+
+	// Catch SIGHUP (terminal closed) and SIGTERM so deferred daemon cleanup runs.
+	// Go does not run deferred functions when a process exits due to a signal by
+	// default, which would orphan systray daemons like gl1tch-notify.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		daemons.Stop()
+		os.Exit(0)
+	}()
 
 	// Start the reactive supervisor. It is non-critical — failures are logged
 	// but never crash the bootstrap process.

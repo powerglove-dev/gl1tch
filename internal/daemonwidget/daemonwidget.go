@@ -113,6 +113,11 @@ func StartAll(wrappersDir string) *Manager {
 			continue
 		}
 
+		// Kill any orphaned instance of this daemon before starting a fresh one.
+		// This prevents duplicate systray icons when the previous glitch session
+		// exited without running cleanup (e.g. SIGKILL).
+		exec.Command("pkill", "-f", sc.Command).Run() //nolint:errcheck
+
 		cmd := exec.Command(sc.Command, sc.Args...)
 		cmd.Stdout = nil
 		cmd.Stderr = os.Stderr
