@@ -1,20 +1,21 @@
 <!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Cron Scheduling — GLITCH</title><meta name="description" content="Schedule your pipelines to run automatically — wake up to results already waiting in your workspace."><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="stylesheet" href="/css/bbs.css"></head> <body> <canvas id="hexbg" aria-hidden="true"></canvas>  <div class="docs-page" id="docs-page"> <button class="docs-hamburger" id="docs-hamburger" aria-label="Toggle sidebar"> <span class="docs-hamburger-icon">[=]</span> </button> <aside class="docs-sidebar" id="docs-sidebar"> <div class="docs-sidebar-header"> <a href="/" class="docs-logo-link"> <span class="fg-purple bold">GL1TCH</span> </a> <a href="/" class="docs-back-link">&larr; back to terminal</a> </div> <nav class="docs-nav"> <a class="docs-nav-link" href="/docs/">
 INDEX
-</a> <div class="docs-nav-section"> <div class="docs-nav-section-label"> <span class="fg-comment">&#x250C;&#x2500;</span> PIPELINES </div> <a class="docs-nav-link" href="/docs/pipelines/philosophy"> Philosophy </a><a class="docs-nav-link" href="/docs/pipelines/quickstart"> Your First Pipeline </a><a class="docs-nav-link" href="/docs/pipelines/console"> Console </a><a class="docs-nav-link" href="/docs/pipelines/pipelines"> Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/yaml-reference"> Pipeline YAML Reference </a><a class="docs-nav-link" href="/docs/pipelines/executors"> Executors </a><a class="docs-nav-link" href="/docs/pipelines/brain"> The Brain System </a><a class="docs-nav-link" href="/docs/pipelines/examples"> Pipeline Examples </a><a class="docs-nav-link" href="/docs/pipelines/workflows"> Workflows </a><a class="docs-nav-link" href="/docs/pipelines/cli-reference"> CLI Reference </a><a class="docs-nav-link" href="/docs/pipelines/troubleshooting"> Troubleshooting </a><a class="docs-nav-link active" href="/docs/pipelines/cron"> Cron Scheduling </a><a class="docs-nav-link" href="/docs/pipelines/architecture"> Architecture </a><a class="docs-nav-link" href="/docs/pipelines/technologies"> Technologies </a><a class="docs-nav-link" href="/docs/pipelines/game"> Game System </a><a class="docs-nav-link" href="/docs/pipelines/themes"> Themes </a><a class="docs-nav-link" href="/docs/pipelines/customization"> Customization </a><a class="docs-nav-link" href="/docs/pipelines/plugins"> Plugins </a><a class="docs-nav-link" href="/docs/pipelines/prompts"> Prompts </a><a class="docs-nav-link" href="/docs/pipelines/telemetry"> Telemetry </a> <div class="docs-nav-section-end"> <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span> </div> </div> </nav> </aside> <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div> <main class="docs-main"> <div class="docs-content"> <div class="docs-breadcrumb"> <a href="/docs/">docs</a> <span class="fg-comment"> / </span> <a href="/docs/">pipelines</a> </div> <article>  <h1 class="docs-page-title">Cron Scheduling</h1> <p class="docs-page-desc">Schedule your pipelines to run automatically — wake up to results already waiting in your workspace.</p> <div class="docs-article"> <p>Set a pipeline on a schedule and stop thinking about it. Your morning standup prep runs at 8 AM. Your nightly code review finishes while you sleep. Your dependency audit fires every Monday. gl1tch runs your pipelines on a cron schedule and logs the results — you just check in when you’re ready.</p>
+</a> <div class="docs-nav-section"> <div class="docs-nav-section-label"> <span class="fg-comment">&#x250C;&#x2500;</span> PIPELINES </div> <a class="docs-nav-link" href="/docs/pipelines/philosophy"> Philosophy </a><a class="docs-nav-link" href="/docs/pipelines/quickstart"> Your First Pipeline </a><a class="docs-nav-link" href="/docs/pipelines/console"> Console </a><a class="docs-nav-link" href="/docs/pipelines/pipelines"> Pipelines </a><a class="docs-nav-link" href="/docs/pipelines/yaml-reference"> Pipeline YAML Reference </a><a class="docs-nav-link" href="/docs/pipelines/executors"> Executors </a><a class="docs-nav-link" href="/docs/pipelines/brain"> The Brain System </a><a class="docs-nav-link" href="/docs/pipelines/examples"> Pipeline Examples </a><a class="docs-nav-link" href="/docs/pipelines/workflows"> Workflows </a><a class="docs-nav-link" href="/docs/pipelines/cli-reference"> CLI Reference </a><a class="docs-nav-link" href="/docs/pipelines/troubleshooting"> Troubleshooting </a><a class="docs-nav-link active" href="/docs/pipelines/cron"> Cron Scheduling </a><a class="docs-nav-link" href="/docs/pipelines/architecture"> Architecture </a><a class="docs-nav-link" href="/docs/pipelines/technologies"> Technologies </a><a class="docs-nav-link" href="/docs/pipelines/game"> Game System </a><a class="docs-nav-link" href="/docs/pipelines/themes"> Themes </a><a class="docs-nav-link" href="/docs/pipelines/customization"> Customization </a><a class="docs-nav-link" href="/docs/pipelines/plugins"> Plugins </a><a class="docs-nav-link" href="/docs/pipelines/prompts"> Prompts </a><a class="docs-nav-link" href="/docs/pipelines/telemetry"> Telemetry </a> <div class="docs-nav-section-end"> <span class="fg-comment">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span> </div> </div> </nav> </aside> <div class="docs-sidebar-overlay" id="docs-sidebar-overlay"></div> <main class="docs-main"> <div class="docs-content"> <div class="docs-breadcrumb"> <a href="/docs/">docs</a> <span class="fg-comment"> / </span> <a href="/docs/">pipelines</a> </div> <article>  <h1 class="docs-page-title">Cron Scheduling</h1> <p class="docs-page-desc">Schedule your pipelines to run automatically — wake up to results already waiting in your workspace.</p> <div class="docs-article"> <p>Set a pipeline on a schedule and stop thinking about it. Your morning git digest runs at 8 AM. Your nightly docs audit finishes while you sleep. Your weekly dependency check fires every Monday. gl1tch runs your pipelines on a cron schedule and logs the results — you check in when you’re ready.</p>
 <h2 id="quick-start">Quick Start</h2>
 <p>Create <code>~/.config/glitch/cron.yaml</code> with your first scheduled pipeline:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">entries</span><span style="color:#FF79C6">:</span></span>
-<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> morning-standup</span></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> git-digest</span></span>
 <span class="line"><span style="color:#8BE9FD">    schedule</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">0 8 * * 1-5</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">    kind</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> pipeline</span></span>
-<span class="line"><span style="color:#8BE9FD">    target</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ~/pipelines/standup.pipeline.yaml</span></span>
-<span class="line"><span style="color:#8BE9FD">    timeout</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">5m</span><span style="color:#E9F284">"</span></span></code></pre>
+<span class="line"><span style="color:#8BE9FD">    target</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> git-digest</span></span>
+<span class="line"><span style="color:#8BE9FD">    timeout</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">5m</span><span style="color:#E9F284">"</span></span>
+<span class="line"><span style="color:#8BE9FD">    working_dir</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ~/projects/my-repo</span></span></code></pre>
 <p>Start the scheduler:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> cron</span><span style="color:#F1FA8C"> start</span></span></code></pre>
 <p>Check that it registered:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> cron</span><span style="color:#F1FA8C"> list</span></span></code></pre>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>morning-standup   0 8 * * 1-5   pipeline   standup.pipeline.yaml   in 14h 22m</span></span></code></pre>
-<p>Your pipeline now runs every weekday at 8 AM without you touching it.</p>
+<p>Your pipeline now runs every weekday at 8 AM without you touching it. When it fires, gl1tch picks it up:</p>
+<p><img src="/screenshots/cron/cron-pipeline-launching.png" alt="gl1tch launching a scheduled pipeline"></p>
 <h2 id="how-schedules-work">How Schedules Work</h2>
 <p>Schedules use standard 5-field cron expressions:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>┌───── minute (0–59)</span></span>
@@ -54,7 +55,11 @@ INDEX
 
 
 
-<table><thead><tr><th>Schedule</th><th>Meaning</th></tr></thead><tbody><tr><td><code>0 8 * * 1-5</code></td><td>8 AM, Monday through Friday</td></tr><tr><td><code>0 2 * * *</code></td><td>2 AM every day</td></tr><tr><td><code>*/15 * * * *</code></td><td>Every 15 minutes</td></tr><tr><td><code>0 9 * * 1</code></td><td>9 AM every Monday</td></tr><tr><td><code>30 17 * * 5</code></td><td>5:30 PM every Friday</td></tr></tbody></table>
+
+
+
+
+<table><thead><tr><th>Schedule</th><th>Meaning</th></tr></thead><tbody><tr><td><code>0 8 * * 1-5</code></td><td>8 AM, Monday through Friday</td></tr><tr><td><code>0 2 * * *</code></td><td>2 AM every day</td></tr><tr><td><code>*/15 * * * *</code></td><td>Every 15 minutes</td></tr><tr><td><code>0 9 * * 1</code></td><td>9 AM every Monday</td></tr><tr><td><code>0 * * * *</code></td><td>Every hour on the hour</td></tr><tr><td><code>30 * * * *</code></td><td>Every hour at :30</td></tr></tbody></table>
 <p>Schedules run in your system timezone. No seconds field. No timezone suffix.</p>
 <h2 id="commands">Commands</h2>
 <h3 id="glitch-cron-start"><code>glitch cron start</code></h3>
@@ -67,9 +72,6 @@ INDEX
 <h3 id="glitch-cron-list"><code>glitch cron list</code></h3>
 <p>Show all scheduled entries with their next fire time in plain English.</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> cron</span><span style="color:#F1FA8C"> list</span></span></code></pre>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>morning-standup   0 8 * * 1-5    pipeline   standup.pipeline.yaml     in 14h 22m</span></span>
-<span class="line"><span>nightly-review    0 23 * * *     pipeline   code-review.pipeline.yaml  in 6h 44m</span></span>
-<span class="line"><span>dep-audit         0 9 * * 1      pipeline   deps.pipeline.yaml         in 3d 2h</span></span></code></pre>
 <h3 id="glitch-cron-logs"><code>glitch cron logs</code></h3>
 <p>Tail the scheduler log. Each line is prefixed with the entry name so you can follow multiple jobs at once.</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> cron</span><span style="color:#F1FA8C"> logs</span></span></code></pre>
@@ -79,7 +81,7 @@ INDEX
 <span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> &#x3C;string></span><span style="color:#6272A4">          # unique name for this job</span></span>
 <span class="line"><span style="color:#8BE9FD">    schedule</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> &#x3C;string></span><span style="color:#6272A4">      # 5-field cron expression</span></span>
 <span class="line"><span style="color:#8BE9FD">    kind</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> pipeline</span><span style="color:#6272A4">          # "pipeline" or "agent"</span></span>
-<span class="line"><span style="color:#8BE9FD">    target</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> &#x3C;string></span><span style="color:#6272A4">        # path to .pipeline.yaml, or agent name</span></span>
+<span class="line"><span style="color:#8BE9FD">    target</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> &#x3C;string></span><span style="color:#6272A4">        # pipeline name or path to .pipeline.yaml</span></span>
 <span class="line"><span style="color:#8BE9FD">    timeout</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> &#x3C;string></span><span style="color:#6272A4">       # optional: "5m", "30s" — zero means no timeout</span></span>
 <span class="line"><span style="color:#8BE9FD">    working_dir</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> &#x3C;string></span><span style="color:#6272A4">   # optional: working directory for the job</span></span>
 <span class="line"><span style="color:#8BE9FD">    input</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> &#x3C;string></span><span style="color:#6272A4">         # optional: maps to {{param.input}} in pipelines</span></span>
@@ -135,57 +137,59 @@ INDEX
 
 
 
-<table><thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>name</code></td><td>yes</td><td>Unique label shown in <code>glitch cron list</code></td></tr><tr><td><code>schedule</code></td><td>yes</td><td>5-field cron expression</td></tr><tr><td><code>kind</code></td><td>yes</td><td><code>pipeline</code> or <code>agent</code></td></tr><tr><td><code>target</code></td><td>yes</td><td>Path to a <code>.pipeline.yaml</code> or an agent name</td></tr><tr><td><code>timeout</code></td><td>no</td><td>Max run duration — e.g. <code>"10m"</code>, <code>"30s"</code></td></tr><tr><td><code>working_dir</code></td><td>no</td><td>Directory the job runs in; inherits your workspace if empty</td></tr><tr><td><code>input</code></td><td>no</td><td>String mapped to <code>{{param.input}}</code> inside the pipeline</td></tr><tr><td><code>args</code></td><td>no</td><td>Key-value map passed to the target</td></tr></tbody></table>
+<table><thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>name</code></td><td>yes</td><td>Unique label shown in <code>glitch cron list</code></td></tr><tr><td><code>schedule</code></td><td>yes</td><td>5-field cron expression</td></tr><tr><td><code>kind</code></td><td>yes</td><td><code>pipeline</code> or <code>agent</code></td></tr><tr><td><code>target</code></td><td>yes</td><td>Pipeline name or path to a <code>.pipeline.yaml</code></td></tr><tr><td><code>timeout</code></td><td>no</td><td>Max run duration — e.g. <code>"10m"</code>, <code>"30s"</code></td></tr><tr><td><code>working_dir</code></td><td>no</td><td>Directory the job runs in; inherits your workspace if empty</td></tr><tr><td><code>input</code></td><td>no</td><td>String mapped to <code>{{param.input}}</code> inside the pipeline</td></tr><tr><td><code>args</code></td><td>no</td><td>Key-value map passed to the target</td></tr></tbody></table>
 <h2 id="examples">Examples</h2>
-<h3 id="morning-standup-brief">Morning Standup Brief</h3>
-<p>Your assistant pulls open PRs and recent commits, summarizes the day ahead, and has it ready before you open your laptop.</p>
+<h3 id="hourly-docs-improvement">Hourly Docs Improvement</h3>
+<p>Run a docs-improve pipeline every hour to continuously catch and fix stale content.</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">entries</span><span style="color:#FF79C6">:</span></span>
-<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> morning-standup</span></span>
-<span class="line"><span style="color:#8BE9FD">    schedule</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">0 8 * * 1-5</span><span style="color:#E9F284">"</span></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> docs-improve</span></span>
+<span class="line"><span style="color:#8BE9FD">    schedule</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">0 * * * *</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">    kind</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> pipeline</span></span>
-<span class="line"><span style="color:#8BE9FD">    target</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ~/pipelines/standup.pipeline.yaml</span></span>
-<span class="line"><span style="color:#8BE9FD">    working_dir</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ~/projects/my-repo</span></span>
-<span class="line"><span style="color:#8BE9FD">    timeout</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">5m</span><span style="color:#E9F284">"</span></span></code></pre>
-<h3 id="nightly-code-review">Nightly Code Review</h3>
-<p>Run a full code quality check every night. Wake up to findings already in your log.</p>
+<span class="line"><span style="color:#8BE9FD">    target</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> docs-improve</span></span>
+<span class="line"><span style="color:#8BE9FD">    input</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> themes documentation</span></span>
+<span class="line"><span style="color:#8BE9FD">    timeout</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> 15m</span></span>
+<span class="line"><span style="color:#8BE9FD">    working_dir</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ~/projects/my-repo</span></span></code></pre>
+<h3 id="docs-audit-on-the-half-hour">Docs Audit on the Half-Hour</h3>
+<p>Run a separate audit pass 30 minutes after each improvement cycle.</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">entries</span><span style="color:#FF79C6">:</span></span>
-<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> nightly-review</span></span>
-<span class="line"><span style="color:#8BE9FD">    schedule</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">0 23 * * *</span><span style="color:#E9F284">"</span></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> docs-audit</span></span>
+<span class="line"><span style="color:#8BE9FD">    schedule</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">30 * * * *</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">    kind</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> pipeline</span></span>
-<span class="line"><span style="color:#8BE9FD">    target</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ~/pipelines/code-review.pipeline.yaml</span></span>
-<span class="line"><span style="color:#8BE9FD">    working_dir</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ~/projects/my-repo</span></span>
-<span class="line"><span style="color:#8BE9FD">    timeout</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">15m</span><span style="color:#E9F284">"</span></span></code></pre>
-<h3 id="weekly-dependency-audit">Weekly Dependency Audit</h3>
-<p>Every Monday morning, check for outdated or vulnerable dependencies before the week starts.</p>
+<span class="line"><span style="color:#8BE9FD">    target</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> sync-docs</span></span>
+<span class="line"><span style="color:#8BE9FD">    timeout</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> 10m</span></span>
+<span class="line"><span style="color:#8BE9FD">    working_dir</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ~/projects/my-repo</span></span></code></pre>
+<h3 id="nightly-world-build">Nightly World Build</h3>
+<p>A heavier job that runs once a day at 5 AM — plenty of time to finish before you’re back at your desk.</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">entries</span><span style="color:#FF79C6">:</span></span>
-<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> dep-audit</span></span>
-<span class="line"><span style="color:#8BE9FD">    schedule</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">0 9 * * 1</span><span style="color:#E9F284">"</span></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> nightly-build</span></span>
+<span class="line"><span style="color:#8BE9FD">    schedule</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">0 5 * * *</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">    kind</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> pipeline</span></span>
-<span class="line"><span style="color:#8BE9FD">    target</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ~/pipelines/dep-check.pipeline.yaml</span></span>
-<span class="line"><span style="color:#8BE9FD">    working_dir</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ~/projects/my-repo</span></span>
-<span class="line"><span style="color:#8BE9FD">    timeout</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">10m</span><span style="color:#E9F284">"</span></span></code></pre>
+<span class="line"><span style="color:#8BE9FD">    target</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> my-build-pipeline</span></span>
+<span class="line"><span style="color:#8BE9FD">    timeout</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> 45m</span></span>
+<span class="line"><span style="color:#8BE9FD">    working_dir</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ~/projects/my-repo</span></span></code></pre>
 <h3 id="full-cronyaml-with-multiple-jobs">Full <code>cron.yaml</code> with Multiple Jobs</h3>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">entries</span><span style="color:#FF79C6">:</span></span>
-<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> morning-standup</span></span>
-<span class="line"><span style="color:#8BE9FD">    schedule</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">0 8 * * 1-5</span><span style="color:#E9F284">"</span></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> docs-improve</span></span>
+<span class="line"><span style="color:#8BE9FD">    schedule</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">0 * * * *</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">    kind</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> pipeline</span></span>
-<span class="line"><span style="color:#8BE9FD">    target</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ~/pipelines/standup.pipeline.yaml</span></span>
+<span class="line"><span style="color:#8BE9FD">    target</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> docs-improve</span></span>
+<span class="line"><span style="color:#8BE9FD">    input</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> themes documentation</span></span>
+<span class="line"><span style="color:#8BE9FD">    timeout</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> 15m</span></span>
 <span class="line"><span style="color:#8BE9FD">    working_dir</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ~/projects/my-repo</span></span>
-<span class="line"><span style="color:#8BE9FD">    timeout</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">5m</span><span style="color:#E9F284">"</span></span>
 <span class="line"></span>
-<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> nightly-review</span></span>
-<span class="line"><span style="color:#8BE9FD">    schedule</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">0 23 * * *</span><span style="color:#E9F284">"</span></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> docs-audit</span></span>
+<span class="line"><span style="color:#8BE9FD">    schedule</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">30 * * * *</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">    kind</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> pipeline</span></span>
-<span class="line"><span style="color:#8BE9FD">    target</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ~/pipelines/code-review.pipeline.yaml</span></span>
+<span class="line"><span style="color:#8BE9FD">    target</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> sync-docs</span></span>
+<span class="line"><span style="color:#8BE9FD">    timeout</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> 10m</span></span>
 <span class="line"><span style="color:#8BE9FD">    working_dir</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ~/projects/my-repo</span></span>
-<span class="line"><span style="color:#8BE9FD">    timeout</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">15m</span><span style="color:#E9F284">"</span></span>
 <span class="line"></span>
-<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> dep-audit</span></span>
-<span class="line"><span style="color:#8BE9FD">    schedule</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">0 9 * * 1</span><span style="color:#E9F284">"</span></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> nightly-build</span></span>
+<span class="line"><span style="color:#8BE9FD">    schedule</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">0 5 * * *</span><span style="color:#E9F284">"</span></span>
 <span class="line"><span style="color:#8BE9FD">    kind</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> pipeline</span></span>
-<span class="line"><span style="color:#8BE9FD">    target</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ~/pipelines/dep-check.pipeline.yaml</span></span>
-<span class="line"><span style="color:#8BE9FD">    working_dir</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ~/projects/my-repo</span></span>
-<span class="line"><span style="color:#8BE9FD">    timeout</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">10m</span><span style="color:#E9F284">"</span></span></code></pre>
+<span class="line"><span style="color:#8BE9FD">    target</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> my-build-pipeline</span></span>
+<span class="line"><span style="color:#8BE9FD">    timeout</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> 45m</span></span>
+<span class="line"><span style="color:#8BE9FD">    working_dir</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ~/projects/my-repo</span></span></code></pre>
 <h2 id="see-also">See Also</h2>
 <ul>
 <li><a href="/docs/pipelines/pipelines">Pipelines</a> — build the pipelines you schedule here</li>
