@@ -104,6 +104,38 @@ func isTUIAlive(t *testing.T, session string) bool {
 	return strings.Contains(c, "│") || strings.Contains(c, "ask glitch")
 }
 
+// sendCWDCmd sends a /cwd <path> command directly (no Escape) so an in-flight
+// Ollama intro stream does not get cancelled before we can confirm the path.
+// Enter still submits multi-token commands even when autocomplete is visible.
+func sendCWDCmd(t *testing.T, session, path string) {
+	t.Helper()
+	if err := exec.Command("tmux", "send-keys", "-t", session, "/cwd "+path, "Enter").Run(); err != nil {
+		t.Fatalf("send /cwd %s: %v", path, err)
+	}
+}
+
+// cwdSetConfirmed returns true when path appears in the hint bar (bottom 6 lines)
+// OR in a "cwd set to:" feed line. The hint bar is the reliable signal because
+// the Ollama intro stream can scroll the feed message off-screen.
+func cwdSetConfirmed(session, path string, t *testing.T) bool {
+	t.Helper()
+	c := tmuxCapture(t, session)
+	if strings.Contains(c, "cwd set to: "+path) {
+		return true
+	}
+	lines := strings.Split(c, "\n")
+	tail := lines
+	if len(lines) > 6 {
+		tail = lines[len(lines)-6:]
+	}
+	for _, l := range tail {
+		if strings.Contains(l, path) {
+			return true
+		}
+	}
+	return false
+}
+
 // ── /cwd ─────────────────────────────────────────────────────────────────────
 
 func TestTmux_Cmd_CWD(t *testing.T) {
@@ -208,10 +240,24 @@ func TestTmux_Cmd_CWD_ReSwitch(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	sendSlashCmd(t, session, "/cwd /var")
-	if !waitFor(3*time.Second, func() bool {
-		return strings.Contains(tmuxCapture(t, session), "cwd set to: /var")
+	// Wait for /var to appear in the hint bar (bottom-right). The chat feed
+	// confirmation may be scrolled off-screen by the Ollama intro stream, so
+	// the hint bar is the reliable signal that the CWD was accepted.
+	if !waitFor(5*time.Second, func() bool {
+		c := tmuxCapture(t, session)
+		lines := strings.Split(c, "\n")
+		tail := lines
+		if len(lines) > 6 {
+			tail = lines[len(lines)-6:]
+		}
+		for _, l := range tail {
+			if strings.Contains(l, "/var") {
+				return true
+			}
+		}
+		return strings.Contains(c, "cwd set to: /var")
 	}) {
-		t.Fatalf("/cwd /var did not confirm:\n%s", tmuxCapture(t, session))
+		t.Fatalf("/cwd /var did not update hint bar:\n%s", tmuxCapture(t, session))
 	}
 	time.Sleep(200 * time.Millisecond)
 
@@ -592,6 +638,33 @@ func TestTmux_Cmd_Prompt_WithText(t *testing.T) {
 	}
 }
 
+func TestTmux_Cmd_Prompt_LoadSaved(t *testing.T) {
+	session, cfgDir, cleanup := setupTUISession(t, "prompt-load", nil)
+	defer cleanup()
+
+	// Seed a prompt file so /prompt test-load finds it.
+	promptsDir := filepath.Join(cfgDir, "prompts")
+	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir prompts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(promptsDir, "test-load.md"), []byte("be direct and concise"), 0o644); err != nil {
+		t.Fatalf("write prompt file: %v", err)
+	}
+
+	sendSlashCmd(t, session, "/prompt test-load")
+
+	ok := waitFor(3*time.Second, func() bool {
+		c := tmuxCapture(t, session)
+		return strings.Contains(c, "test-load")
+	})
+	if !ok {
+		t.Errorf("/prompt test-load did not display saved prompt:\n%s", tmuxCapture(t, session))
+	}
+	if !isTUIAlive(t, session) {
+		t.Errorf("TUI died after /prompt test-load")
+	}
+}
+
 // ── /quit and /exit ───────────────────────────────────────────────────────────
 
 func TestTmux_Cmd_Quit(t *testing.T) {
@@ -900,6 +973,175 @@ func TestTmux_PRReview_DirectCommand(t *testing.T) {
 	})
 	if !ok {
 		t.Errorf("/pipeline github-pr-review did not launch:\n%s", tmuxCapture(t, session))
+	}
+}
+
+// ── /session + CWD ───────────────────────────────────────────────────────────
+
+// TestTmux_Session_NewInheritsCurrentCWD verifies that a new session inherits
+// the CWD that was active when it was created. This guards against the bug
+// where new sessions showed a stale CWD from a previous session.
+func TestTmux_Session_NewInheritsCurrentCWD(t *testing.T) {
+	session, _, cleanup := setupTUISession(t, "sess-inherit", nil)
+	defer cleanup()
+
+	// Set a distinctive CWD in the main session. Use sendCWDCmd (no Escape) so
+	// an in-flight Ollama intro stream is not accidentally cancelled.
+	sendCWDCmd(t, session, "/tmp")
+	if !waitFor(10*time.Second, func() bool { return cwdSetConfirmed(session, "/tmp", t) }) {
+		t.Fatalf("/cwd /tmp did not confirm:\n%s", tmuxCapture(t, session))
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	// Create and switch to a new session — it should inherit /tmp.
+	sendSlashCmd(t, session, "/session alpha")
+	if !waitFor(3*time.Second, func() bool {
+		return strings.Contains(tmuxCapture(t, session), "session: alpha")
+	}) {
+		t.Fatalf("/session alpha did not switch:\n%s", tmuxCapture(t, session))
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	// The hint bar should still show /tmp (inherited from the parent session).
+	if !waitFor(3*time.Second, func() bool { return cwdSetConfirmed(session, "/tmp", t) }) {
+		t.Errorf("new session alpha did not inherit /tmp in hint bar:\n%s", tmuxCapture(t, session))
+	}
+}
+
+// TestTmux_Session_SwitchUpdatesHintBarCWD verifies that switching to a session
+// with a different CWD updates the hint bar to show that session's directory.
+// This is the core of the "it still thinks I'm in another dir" regression.
+func TestTmux_Session_SwitchUpdatesHintBarCWD(t *testing.T) {
+	session, _, cleanup := setupTUISession(t, "sess-switch-cwd", nil)
+	defer cleanup()
+
+	// Session "main" — set CWD to /tmp.
+	sendCWDCmd(t, session, "/tmp")
+	if !waitFor(10*time.Second, func() bool { return cwdSetConfirmed(session, "/tmp", t) }) {
+		t.Fatalf("/cwd /tmp did not confirm:\n%s", tmuxCapture(t, session))
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	// Create session "beta" with a different CWD.
+	sendSlashCmd(t, session, "/session beta")
+	if !waitFor(3*time.Second, func() bool {
+		return strings.Contains(tmuxCapture(t, session), "session: beta")
+	}) {
+		t.Fatalf("/session beta did not switch:\n%s", tmuxCapture(t, session))
+	}
+	// Wait for any in-flight Ollama intro stream to finish so /cwd /var has a
+	// clean slate. The hint bar switches from "spinning" to "enter send" once
+	// streaming stops.
+	if !waitFor(10*time.Second, func() bool {
+		return strings.Contains(tmuxCapture(t, session), "enter send")
+	}) {
+		t.Logf("note: intro stream still running after 10s; proceeding anyway")
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	sendCWDCmd(t, session, "/var")
+	// Wait for /var intro stream to settle, then confirm via bare /cwd (more
+	// reliable than hint bar polling when an intro stream may still be live).
+	if !waitFor(10*time.Second, func() bool {
+		return strings.Contains(tmuxCapture(t, session), "enter send")
+	}) {
+		t.Logf("note: /var intro stream still running after 10s")
+	}
+	time.Sleep(100 * time.Millisecond)
+	sendSlashCmd(t, session, "/cwd")
+	if !waitFor(3*time.Second, func() bool {
+		return strings.Contains(tmuxCapture(t, session), "current cwd: /var")
+	}) {
+		t.Fatalf("/cwd /var in beta did not confirm via bare /cwd:\n%s", tmuxCapture(t, session))
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	// Switch back to main — hint bar must show /tmp, not /var.
+	sendSlashCmd(t, session, "/session main")
+	if !waitFor(3*time.Second, func() bool {
+		return strings.Contains(tmuxCapture(t, session), "session: main")
+	}) {
+		t.Fatalf("/session main did not switch back:\n%s", tmuxCapture(t, session))
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	if !waitFor(3*time.Second, func() bool { return cwdSetConfirmed(session, "/tmp", t) }) {
+		t.Errorf("hint bar does not show /tmp after switching back to main:\n%s", tmuxCapture(t, session))
+	}
+	// Confirm /var is gone from the hint bar.
+	c := tmuxCapture(t, session)
+	lines := strings.Split(c, "\n")
+	tail := lines
+	if len(lines) > 6 {
+		tail = lines[len(lines)-6:]
+	}
+	for _, l := range tail {
+		if strings.Contains(l, "/var") {
+			t.Errorf("hint bar still shows /var after switching back to main:\n%s", c)
+			return
+		}
+	}
+}
+
+// TestTmux_Session_CWDReportedAfterSwitch verifies that /cwd (no args) after a
+// session switch reports the new session's CWD, not the previous one.
+func TestTmux_Session_CWDReportedAfterSwitch(t *testing.T) {
+	session, _, cleanup := setupTUISession(t, "sess-cwd-rpt", nil)
+	defer cleanup()
+
+	// Set main's CWD to /tmp.
+	sendCWDCmd(t, session, "/tmp")
+	if !waitFor(10*time.Second, func() bool { return cwdSetConfirmed(session, "/tmp", t) }) {
+		t.Fatalf("/cwd /tmp did not confirm:\n%s", tmuxCapture(t, session))
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	// Create session "gamma" and give it /var.
+	sendSlashCmd(t, session, "/session gamma")
+	if !waitFor(3*time.Second, func() bool {
+		return strings.Contains(tmuxCapture(t, session), "session: gamma")
+	}) {
+		t.Fatalf("/session gamma did not switch:\n%s", tmuxCapture(t, session))
+	}
+	// Wait for any in-flight intro stream to settle before changing CWD.
+	if !waitFor(10*time.Second, func() bool {
+		return strings.Contains(tmuxCapture(t, session), "enter send")
+	}) {
+		t.Logf("note: intro stream still running after 10s; proceeding anyway")
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	sendCWDCmd(t, session, "/var")
+	// Wait for /var intro to settle, then confirm via bare /cwd.
+	if !waitFor(10*time.Second, func() bool {
+		return strings.Contains(tmuxCapture(t, session), "enter send")
+	}) {
+		t.Logf("note: /var intro stream still running after 10s")
+	}
+	time.Sleep(100 * time.Millisecond)
+	sendSlashCmd(t, session, "/cwd")
+	if !waitFor(3*time.Second, func() bool {
+		return strings.Contains(tmuxCapture(t, session), "current cwd: /var")
+	}) {
+		t.Fatalf("/cwd /var in gamma did not confirm via bare /cwd:\n%s", tmuxCapture(t, session))
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	// Switch back to main; bare /cwd must report /tmp.
+	sendSlashCmd(t, session, "/session main")
+	if !waitFor(3*time.Second, func() bool {
+		return strings.Contains(tmuxCapture(t, session), "session: main")
+	}) {
+		t.Fatalf("/session main did not switch back:\n%s", tmuxCapture(t, session))
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	sendSlashCmd(t, session, "/cwd")
+	ok := waitFor(3*time.Second, func() bool {
+		return strings.Contains(tmuxCapture(t, session), "current cwd: /tmp")
+	})
+	if !ok {
+		t.Errorf("after switching back to main, /cwd did not report /tmp:\n%s", tmuxCapture(t, session))
 	}
 }
 
