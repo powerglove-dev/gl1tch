@@ -1290,7 +1290,13 @@ func newGlitchPanel(cfgDir string, providers []picker.ProviderDef, s *store.Stor
 			}
 			// Don't override main session's CWD — use the live launchCWD from startup.
 			if rec.CWD != "" && rec.Name != "main" {
-				s.cwd = rec.CWD
+				cwd := rec.CWD
+				if strings.HasPrefix(cwd, "~/") {
+					if home, err := os.UserHomeDir(); err == nil {
+						cwd = filepath.Join(home, cwd[2:])
+					}
+				}
+				s.cwd = cwd
 			}
 			if rec.Backend != "" {
 				s.backend = lookupBackend(rec.Backend, providers)
@@ -2066,6 +2072,11 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 						return p, nil
 					}
 					newCWD := strings.Join(args[1:], " ")
+					if strings.HasPrefix(newCWD, "~/") {
+						if home, err := os.UserHomeDir(); err == nil {
+							newCWD = filepath.Join(home, newCWD[2:])
+						}
+					}
 					p.launchCWD = newCWD
 					p.setBackendCWD(newCWD)
 					p.messages = append(p.messages, glitchEntry{

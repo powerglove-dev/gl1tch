@@ -24,6 +24,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -57,6 +61,36 @@ func canLaunch(display string) bool {
 		return hasDisplay()
 	default: // "", "headless", or any unrecognised value — always launch
 		return true
+	}
+}
+
+// killAndWait terminates any running process whose command line matches
+// cmdPath and blocks until the process is gone (or 2 s elapses). It uses
+// pgrep to find the PID, SIGTERM to request a clean exit, then polls
+// kill -0 (existence check) so callers never see a double icon.
+func killAndWait(cmdPath string) {
+	out, err := exec.Command("pgrep", "-f", cmdPath).Output()
+	if err != nil {
+		return // no match — nothing to kill
+	}
+	for _, line := range strings.Fields(strings.TrimSpace(string(out))) {
+		pid, err := strconv.Atoi(line)
+		if err != nil {
+			continue
+		}
+		proc, err := os.FindProcess(pid)
+		if err != nil {
+			continue
+		}
+		proc.Signal(syscall.SIGTERM) //nolint:errcheck
+
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if proc.Signal(syscall.Signal(0)) != nil {
+				break // process is gone
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
 }
 
@@ -113,10 +147,10 @@ func StartAll(wrappersDir string) *Manager {
 			continue
 		}
 
-		// Kill any orphaned instance of this daemon before starting a fresh one.
-		// This prevents duplicate systray icons when the previous glitch session
-		// exited without running cleanup (e.g. SIGKILL).
-		exec.Command("pkill", "-f", sc.Command).Run() //nolint:errcheck
+		// Kill any orphaned instance before starting a fresh one and wait for
+		// it to fully exit. This prevents duplicate systray icons when the
+		// previous session exited without cleanup (e.g. SIGKILL).
+		killAndWait(sc.Command)
 
 		cmd := exec.Command(sc.Command, sc.Args...)
 		cmd.Stdout = nil

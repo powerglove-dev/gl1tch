@@ -217,6 +217,15 @@ function processCommand(raw: string) {
       return;
     }
 
+    if (name === 'ecosystem' || name === 'plugins') {
+      if ((window as any).ECOSYSTEM_PANEL) {
+        (window as any).ECOSYSTEM_PANEL.open();
+      } else {
+        window.location.href = '/ecosystem';
+      }
+      return;
+    }
+
     if (name === 'pipelines' || name === 'pipeline') {
       showRandomPipeline();
       return;
@@ -684,7 +693,7 @@ function clearTerminal() {
 function tabComplete() {
   if (!db || !inputEl.value.startsWith('/')) return;
   const partial = inputEl.value.slice(1).toLowerCase();
-  const allCmds = [...Object.keys(db.commands), 'screenshots', 'clear', 'docs'];
+  const allCmds = [...Object.keys(db.commands), 'screenshots', 'clear', 'docs', 'ecosystem', 'plugins'];
   const matches = allCmds.filter(c => c.startsWith(partial));
   if (matches.length === 1) {
     inputEl.value = `/${matches[0]}`;

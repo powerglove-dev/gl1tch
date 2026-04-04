@@ -1,0 +1,426 @@
+---
+const providers = [
+  {
+    id: 'ollama',
+    name: 'ollama',
+    binary: 'glitch-ollama',
+    description: 'Run any local model via Ollama. Ships with gl1tch — the default provider for all internal ops.',
+    models: 'any model pulled to Ollama',
+    accentColor: 'var(--green)',
+    docsUrl: 'https://ollama.com',
+    status: 'bundled',
+  },
+  {
+    id: 'claude',
+    name: 'claude',
+    binary: 'glitch-claude',
+    description: 'Claude AI assistant via the claude CLI.',
+    models: 'opus-4-6 · sonnet-4-6 · haiku-4-5',
+    accentColor: 'var(--purple)',
+    docsUrl: 'https://claude.ai/code',
+    status: 'bundled',
+  },
+  {
+    id: 'gemini',
+    name: 'gemini',
+    binary: 'glitch-gemini',
+    description: 'Google Gemini via the gemini CLI.',
+    models: '2.5-pro · 2.5-flash · 2.0-flash · 1.5-pro',
+    accentColor: 'var(--cyan)',
+    docsUrl: 'https://ai.google.dev/gemini-api/docs/gemini-cli',
+    status: 'bundled',
+  },
+  {
+    id: 'codex',
+    name: 'codex',
+    binary: 'glitch-codex',
+    description: 'OpenAI Codex coding agent.',
+    models: 'codex-mini-latest · o4-mini · o3',
+    accentColor: 'var(--orange)',
+    docsUrl: 'https://github.com/openai/codex',
+    status: 'bundled',
+  },
+  {
+    id: 'github-copilot',
+    name: 'github-copilot',
+    binary: 'glitch-github-copilot',
+    description: 'GitHub Copilot suggestions via the gh CLI.',
+    models: null,
+    accentColor: 'var(--yellow)',
+    docsUrl: 'https://cli.github.com',
+    status: 'bundled',
+  },
+  {
+    id: 'opencode',
+    name: 'opencode',
+    binary: 'glitch-opencode',
+    description: 'Agentic AI coding via opencode. Pairs with any provider/model string.',
+    models: 'any provider/model (e.g. ollama/llama3.2)',
+    accentColor: 'var(--pink)',
+    docsUrl: 'https://opencode.ai',
+    status: 'bundled',
+  },
+];
+
+const community = [
+  {
+    id: 'gl1tch-weather',
+    name: 'gl1tch-weather',
+    binary: 'glitch-weather',
+    description: 'Pull live weather data into your pipelines.',
+    install: 'glitch plugin install adam-stokes/gl1tch-weather',
+    accentColor: 'var(--cyan)',
+    status: 'installable',
+  },
+  {
+    id: 'gl1tch-notify',
+    name: 'gl1tch-notify',
+    binary: 'glitch-notify',
+    description: 'Desktop and push notifications from pipeline steps.',
+    install: 'glitch plugin install adam-stokes/gl1tch-notify',
+    accentColor: 'var(--yellow)',
+    status: 'installable',
+  },
+  {
+    id: 'gl1tch-mud',
+    name: 'gl1tch-mud',
+    binary: 'glitch-mud',
+    description: 'Text MUD world executor — run procedural world generation pipelines.',
+    install: 'glitch plugin install adam-stokes/gl1tch-mud',
+    accentColor: 'var(--green)',
+    status: 'installable',
+  },
+];
+---
+
+<div class="eco-root">
+  <div class="eco-wrap">
+
+    <!-- sidebar -->
+    <nav class="eco-sidebar" aria-label="Plugin list">
+      <div class="eco-sidebar-label">providers</div>
+      {providers.map(p => (
+        <a class="eco-nav-item" href={`#eco-${p.id}`} onclick="ECO.goto(this)">
+          <span class="eco-nav-dot" style={`color: ${p.accentColor}`}>●</span>
+          <span class="eco-nav-label">{p.name}</span>
+        </a>
+      ))}
+      <div class="eco-sidebar-label eco-sidebar-label-community">community</div>
+      {community.map(p => (
+        <a class="eco-nav-item" href={`#eco-${p.id}`} onclick="ECO.goto(this)">
+          <span class="eco-nav-dot" style={`color: ${p.accentColor}`}>●</span>
+          <span class="eco-nav-label">{p.name}</span>
+        </a>
+      ))}
+    </nav>
+
+    <!-- content -->
+    <div class="eco-body" id="eco-body">
+
+      <!-- providers -->
+      <section class="eco-section">
+        <div class="eco-section-heading">
+          <span class="eco-section-comment">// </span>PROVIDERS
+          <span class="eco-section-sub">— bundled, zero install</span>
+        </div>
+
+        {providers.map(p => (
+          <div class="eco-card" id={`eco-${p.id}`} style={`border-left-color: ${p.accentColor}`}>
+            <div class="eco-card-header">
+              <span class="eco-card-name" style={`color: ${p.accentColor}`}>{p.name}</span>
+              <span class="eco-card-badge">bundled</span>
+            </div>
+            <p class="eco-card-desc">{p.description}</p>
+            <div class="eco-card-meta">
+              <div class="eco-meta-row">
+                <span class="eco-meta-key">binary</span>
+                <code class="eco-meta-val">{p.binary}</code>
+              </div>
+              {p.models && (
+                <div class="eco-meta-row">
+                  <span class="eco-meta-key">models</span>
+                  <span class="eco-meta-val eco-meta-dim">{p.models}</span>
+                </div>
+              )}
+              <div class="eco-meta-row">
+                <span class="eco-meta-key">docs</span>
+                <a class="eco-meta-val eco-meta-link" href={p.docsUrl} target="_blank" rel="noopener">
+                  {p.docsUrl.replace(/^https?:\/\//, '')}
+                </a>
+              </div>
+            </div>
+          </div>
+        ))}
+      </section>
+
+      <!-- community -->
+      <section class="eco-section">
+        <div class="eco-section-heading">
+          <span class="eco-section-comment">// </span>COMMUNITY
+          <span class="eco-section-sub">— install from GitHub</span>
+        </div>
+
+        {community.map(p => (
+          <div class="eco-card" id={`eco-${p.id}`} style={`border-left-color: ${p.accentColor}`}>
+            <div class="eco-card-header">
+              <span class="eco-card-name" style={`color: ${p.accentColor}`}>{p.name}</span>
+              <span class="eco-card-badge eco-card-badge-install">installable</span>
+            </div>
+            <p class="eco-card-desc">{p.description}</p>
+            <div class="eco-card-meta">
+              <div class="eco-meta-row">
+                <span class="eco-meta-key">binary</span>
+                <code class="eco-meta-val">{p.binary}</code>
+              </div>
+              <div class="eco-meta-row">
+                <span class="eco-meta-key">install</span>
+                <code class="eco-meta-val eco-install-cmd">{p.install}</code>
+              </div>
+            </div>
+          </div>
+        ))}
+
+        <div class="eco-build-note">
+          <span class="eco-section-comment">// </span>
+          any repo with a <code>glitch-plugin.yaml</code> at its root is installable
+        </div>
+      </section>
+
+    </div><!-- /eco-body -->
+  </div>
+</div>
+
+<script>
+  const ECO = {
+    goto(link: HTMLAnchorElement) {
+      const href = link.getAttribute('href') ?? '';
+      const id = href.slice(1); // strip #
+      const el = document.getElementById(id);
+      if (!el) return;
+
+      document.querySelectorAll('.eco-nav-item').forEach(a => a.classList.remove('active'));
+      link.classList.add('active');
+
+      const body = document.getElementById('eco-body');
+      if (body) {
+        const offset = el.offsetTop - 24;
+        body.scrollTo({ top: offset, behavior: 'smooth' });
+      }
+    },
+  };
+
+  (window as any).ECO = ECO;
+</script>
+
+<style is:global>
+.eco-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.eco-wrap {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* sidebar */
+.eco-sidebar {
+  width: 180px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-right: 1px solid var(--current-line);
+  padding: 16px 0 40px;
+  background: var(--darkbg);
+  scrollbar-width: none;
+}
+.eco-sidebar::-webkit-scrollbar { display: none; }
+
+.eco-sidebar-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--comment);
+  opacity: 0.45;
+  padding: 0 14px 8px;
+}
+
+.eco-sidebar-label-community {
+  padding-top: 16px;
+}
+
+.eco-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  color: var(--comment);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 5px 14px;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-left: 2px solid transparent;
+  transition: color 0.1s, border-color 0.1s, background 0.1s;
+  line-height: 1.4;
+}
+.eco-nav-item:hover {
+  color: var(--fg);
+  background: rgba(255,255,255,0.03);
+  text-decoration: none;
+}
+.eco-nav-item.active {
+  color: var(--fg);
+  background: rgba(255,255,255,0.04);
+  border-left-color: var(--purple);
+}
+
+.eco-nav-dot {
+  font-size: 7px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.eco-nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10.5px;
+}
+
+/* body */
+.eco-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 20px 28px 60px;
+  min-width: 0;
+}
+.eco-body::-webkit-scrollbar       { width: 3px; }
+.eco-body::-webkit-scrollbar-track { background: transparent; }
+.eco-body::-webkit-scrollbar-thumb { background: var(--comment); }
+
+/* sections */
+.eco-section {
+  margin-bottom: 32px;
+}
+
+.eco-section-heading {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin-bottom: 16px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--current-line);
+}
+
+.eco-section-comment { color: var(--comment); font-size: 9px; }
+.eco-section-sub { color: var(--comment); font-size: 9px; letter-spacing: 0; text-transform: none; }
+
+/* plugin cards */
+.eco-card {
+  border: 1px solid var(--current-line);
+  border-left-width: 2px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  transition: background 0.12s;
+}
+.eco-card:hover {
+  background: rgba(255,255,255,0.02);
+}
+
+.eco-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.eco-card-name {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.eco-card-badge {
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border: 1px solid var(--current-line);
+  color: var(--comment);
+  padding: 1px 5px;
+}
+.eco-card-badge-install {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+
+.eco-card-desc {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--comment);
+  margin: 0 0 10px;
+}
+
+.eco-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.eco-meta-row {
+  display: flex;
+  gap: 10px;
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.eco-meta-key {
+  min-width: 46px;
+  flex-shrink: 0;
+  color: var(--comment);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  padding-top: 1px;
+}
+
+.eco-meta-val {
+  color: var(--fg);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+}
+
+.eco-meta-dim { color: var(--comment); }
+
+.eco-meta-link {
+  color: var(--purple);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(135,135,175,0.25);
+  font-size: 10px;
+}
+.eco-meta-link:hover { color: var(--cyan); border-bottom-color: var(--cyan); }
+
+.eco-install-cmd { color: var(--cyan); }
+
+.eco-build-note {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--comment);
+  margin-top: 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--current-line);
+  border-left: 2px solid var(--comment);
+}
+.eco-build-note code {
+  color: var(--cyan);
+  font-family: inherit;
+}
+</style>

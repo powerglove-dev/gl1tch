@@ -47,6 +47,13 @@ const navSections = [
           INDEX
         </a>
 
+        <a
+          class:list={['docs-nav-link', { active: currentPath === '/ecosystem' || currentPath === '/ecosystem/' }]}
+          href="/ecosystem"
+        >
+          ECOSYSTEM
+        </a>
+
         {navSections.map(section => (
           <div class="docs-nav-section">
             <div class="docs-nav-section-label">

@@ -3,6 +3,7 @@ import Base from '../layouts/Base.astro';
 import MacTerminal from '../components/MacTerminal.astro';
 import ProjectStats from '../components/ProjectStats.astro';
 import DocsScreen from '../components/screens/DocsScreen.astro';
+import EcosystemScreen from '../components/screens/EcosystemScreen.astro';
 ---
 <Base>
   <main class="terminal-stage">
@@ -28,6 +29,10 @@ import DocsScreen from '../components/screens/DocsScreen.astro';
           <!-- Docs view — pre-rendered, hidden until /docs is typed -->
           <div id="view-docs" style="flex:1; overflow:hidden; display:none;">
             <DocsScreen />
+          </div>
+          <!-- Ecosystem view — pre-rendered, hidden until /ecosystem is typed -->
+          <div id="view-ecosystem" style="flex:1; overflow:hidden; display:none;">
+            <EcosystemScreen />
           </div>
         </div>
       </div>
@@ -89,6 +94,52 @@ import DocsScreen from '../components/screens/DocsScreen.astro';
 
   (window as any).DOCS_PANEL = DOCS_PANEL;
 
+  const ECOSYSTEM_PANEL = {
+    open() {
+      const frame = document.getElementById('mac-frame');
+      const vTerm = document.getElementById('view-terminal');
+      const vDocs = document.getElementById('view-docs');
+      const vEco = document.getElementById('view-ecosystem');
+      const title = document.getElementById('mac-frame-title');
+      const closeBtn = document.getElementById('mac-docs-close');
+      if (!frame || !vTerm || !vEco) return;
+
+      // hide other views
+      if (vTerm) vTerm.style.display = 'none';
+      if (vDocs) vDocs.style.display = 'none';
+
+      frame.classList.add('is-docs');
+      if (title) title.textContent = 'GL1TCH — ECOSYSTEM';
+      if (closeBtn) closeBtn.hidden = false;
+
+      vEco.style.opacity = '0';
+      vEco.style.display = '';
+      requestAnimationFrame(() => { vEco.style.opacity = '1'; });
+    },
+
+    close() {
+      const frame = document.getElementById('mac-frame');
+      const vTerm = document.getElementById('view-terminal');
+      const vEco = document.getElementById('view-ecosystem');
+      const title = document.getElementById('mac-frame-title');
+      const closeBtn = document.getElementById('mac-docs-close');
+      if (!frame || !vTerm || !vEco) return;
+
+      vEco.style.opacity = '0';
+      vEco.addEventListener('transitionend', () => {
+        vEco.style.display = 'none';
+        vTerm.style.display = '';
+        frame.classList.remove('is-docs');
+        if (title) title.textContent = 'GL1TCH';
+        if (closeBtn) closeBtn.hidden = true;
+        const input = document.getElementById('terminal-input') as HTMLInputElement | null;
+        input?.focus();
+      }, { once: true });
+    },
+  };
+
+  (window as any).ECOSYSTEM_PANEL = ECOSYSTEM_PANEL;
+
   document.addEventListener('keydown', (e: KeyboardEvent) => {
     const frame = document.getElementById('mac-frame');
     if (!frame?.classList.contains('is-docs')) return;
@@ -98,6 +149,12 @@ import DocsScreen from '../components/screens/DocsScreen.astro';
 
 <style>
 #view-docs {
+  transition: opacity 0.18s ease;
+  flex: 1;
+  overflow: hidden;
+}
+
+#view-ecosystem {
   transition: opacity 0.18s ease;
   flex: 1;
   overflow: hidden;
