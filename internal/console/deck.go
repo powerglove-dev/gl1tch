@@ -2992,14 +2992,10 @@ func (m Model) submitAgentJob(input string) (Model, tea.Cmd) {
 		entryName = fmt.Sprintf("agent-%s-%d", prov.ID, time.Now().UnixNano())
 	}
 
-	// Resolve CWD and optionally create a git worktree for isolation.
+	// Resolve CWD for the agent session.
 	cwd := m.sendPanel.CWD()
 	if cwd == "" {
 		cwd = m.launchCWD
-	}
-	if worktreePath, _ := picker.GetOrCreateWorktreeFrom(cwd, entryName); worktreePath != "" {
-		picker.CopyDotEnv(cwd, worktreePath)
-		cwd = worktreePath
 	}
 
 	// Write a single-step pipeline so the run goes through the pipeline
