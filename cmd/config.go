@@ -98,15 +98,6 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("config init: write wrappers: %w", err)
 	}
 
-	// Write bundled example pipelines to ~/.config/glitch/pipelines/.
-	pipelinesDir := filepath.Join(cfgDir, "pipelines")
-	if err := os.MkdirAll(pipelinesDir, 0o755); err != nil {
-		return fmt.Errorf("config init: mkdir pipelines: %w", err)
-	}
-	if err := writeEmbeddedDirFilter(assets.ExamplesFS, "examples", pipelinesDir, ".pipeline.yaml"); err != nil {
-		return fmt.Errorf("config init: write examples: %w", err)
-	}
-
 	return nil
 }
 
