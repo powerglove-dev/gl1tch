@@ -30,75 +30,87 @@ esc
 <li><a href="/docs/pipelines/architecture">Architecture</a> — what happens when you run a pipeline</li>
 <li><a href="/docs/pipelines/yaml-reference">Pipeline YAML Reference</a> — writing your first pipeline</li>
 <li><a href="/docs/pipelines/technologies">Technologies</a> — what runs under the hood</li>
-</ul> </div> </article><article id="ds-article-quickstart" class="ds-article" aria-hidden="true"> <div class="ds-article-meta"> <span class="ds-article-title fg-purple">Your First Pipeline</span> <span class="ds-article-desc fg-comment">Install gl1tch and run your first AI-powered automation in under five minutes.</span> </div> <div class="ds-content"> <p>gl1tch runs AI-powered automations called pipelines. You tell it what you want — it routes to the right pipeline, or builds one on the spot. This page gets you from zero to a working pipeline in under five minutes.</p>
+</ul> </div> </article><article id="ds-article-quickstart" class="ds-article" aria-hidden="true"> <div class="ds-article-meta"> <span class="ds-article-title fg-purple">Your First Pipeline</span> <span class="ds-article-desc fg-comment">Install gl1tch and run your first AI-powered automation in under five minutes.</span> </div> <div class="ds-content"> <p>gl1tch runs AI-powered automations called pipelines. This page gets you from zero to a working pipeline — everything on this page has been tested on a fresh machine.</p>
+<h2 id="requirements">Requirements</h2>
+<ul>
+<li><strong>tmux</strong> — gl1tch runs inside a tmux session</li>
+<li><strong>An AI provider</strong> — Ollama (local, free) or the Claude CLI (cloud)</li>
+<li><strong>20GB+ disk</strong> if using Ollama (the default coding model is ~5GB; <code>llama3.2</code> is ~2GB)</li>
+<li><strong>4GB+ RAM</strong> to run a local model</li>
+</ul>
+<p>Install tmux if you don’t have it:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">brew</span><span style="color:#F1FA8C"> install</span><span style="color:#F1FA8C"> tmux</span><span style="color:#6272A4">          # macOS</span></span>
+<span class="line"><span style="color:#50FA7B">sudo</span><span style="color:#F1FA8C"> apt</span><span style="color:#F1FA8C"> install</span><span style="color:#F1FA8C"> tmux</span><span style="color:#6272A4">      # Ubuntu / Debian</span></span></code></pre>
 <h2 id="install">Install</h2>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">brew</span><span style="color:#F1FA8C"> install</span><span style="color:#F1FA8C"> 8op-org/tap/glitch</span></span></code></pre>
-<p>Or build from source with Go 1.22+:</p>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">go</span><span style="color:#F1FA8C"> install</span><span style="color:#F1FA8C"> github.com/8op-org/gl1tch/cmd/glitch@latest</span></span></code></pre>
-<p>You also need at least one AI provider: <a href="https://ollama.ai">Ollama</a> running locally, or the <a href="https://claude.ai/download">Claude CLI</a> authenticated. No Docker, no cloud account required.</p>
+<p><strong>Linux</strong> — download the release tarball and run the install script:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">curl</span><span style="color:#BD93F9"> -L</span><span style="color:#F1FA8C"> https://github.com/8op-org/gl1tch/releases/latest/download/glitch_linux_amd64.tar.gz</span><span style="color:#FF79C6"> \</span></span>
+<span class="line"><span style="color:#FF79C6">  |</span><span style="color:#50FA7B"> tar</span><span style="color:#F1FA8C"> xz</span><span style="color:#BD93F9"> -C</span><span style="color:#F1FA8C"> /tmp/glitch-install</span></span>
+<span class="line"><span style="color:#8BE9FD">cd</span><span style="color:#F1FA8C"> /tmp/glitch-install</span><span style="color:#F8F8F2"> &#x26;&#x26; </span><span style="color:#50FA7B">./install.sh</span></span></code></pre>
+<p>Use <code>glitch_linux_arm64.tar.gz</code> on ARM64 machines. The script installs <code>glitch</code> and all provider binaries to <code>~/.local/bin</code> — make sure it’s on your <code>$PATH</code>.</p>
+<h2 id="set-up-an-ai-provider">Set up an AI provider</h2>
+<p>You need at least one before you can run pipelines.</p>
+<h3 id="ollama-local-no-api-cost">Ollama (local, no API cost)</h3>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">curl</span><span style="color:#BD93F9"> -fsSL</span><span style="color:#F1FA8C"> https://ollama.com/install.sh</span><span style="color:#FF79C6"> |</span><span style="color:#50FA7B"> sh</span></span>
+<span class="line"><span style="color:#50FA7B">ollama</span><span style="color:#F1FA8C"> pull</span><span style="color:#F1FA8C"> llama3.2</span><span style="color:#6272A4">          # ~2GB, good all-around</span></span></code></pre>
+<p>On Linux, Ollama installs as a systemd service and starts automatically. On macOS, start it with <code>ollama serve</code>.</p>
+<h3 id="claude-cli-cloud">Claude CLI (cloud)</h3>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">brew</span><span style="color:#F1FA8C"> install</span><span style="color:#F1FA8C"> claude</span><span style="color:#6272A4">           # macOS</span></span>
+<span class="line"><span style="color:#6272A4"># or download from https://claude.ai/download</span></span>
+<span class="line"><span style="color:#50FA7B">claude</span><span style="color:#6272A4">                        # authenticate on first run</span></span></code></pre>
+<h2 id="initialize-your-workspace">Initialize your workspace</h2>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> config</span><span style="color:#F1FA8C"> init</span></span></code></pre>
+<p>This writes your default config, executor wrappers, and the <code>wf-git-pulse</code> example pipeline to <code>~/.config/glitch</code>. You only need to run this once.</p>
+<p>Verify your provider is reachable:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> model</span><span style="color:#6272A4">          # prints the best available provider/model</span></span></code></pre>
 <h2 id="run-your-first-pipeline">Run your first pipeline</h2>
-<p>gl1tch ships with <code>wf-git-pulse</code> — a pipeline that shows what’s happening in any git repo right now:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> pipeline</span><span style="color:#F1FA8C"> run</span><span style="color:#F1FA8C"> wf-git-pulse</span></span></code></pre>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>[pipeline] starting: wf-git-pulse</span></span>
-<span class="line"><span>[step:pulse] status:running</span></span>
-<span class="line"><span>[step:pulse] status:done</span></span>
+<p>This pipeline shows what’s happening in the current git repo — recent commits, diff stat, and working tree status. It runs entirely with shell steps, no AI model required.</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>[step:log] status:done</span></span>
+<span class="line"><span>[step:diffstat] status:done</span></span>
+<span class="line"><span>[step:status] status:done</span></span>
 <span class="line"><span></span></span>
 <span class="line"><span>=== recent commits ===</span></span>
-<span class="line"><span>067ce08 feat(console): mud-chat-reply signal handler</span></span>
-<span class="line"><span>68a8da1 feat(model): add glitch model subcommand for plugin model discovery</span></span>
-<span class="line"><span>7cc9125 Merge pull request #40 from 8op-org/feature/router-improvements</span></span>
-<span class="line"><span>389150d feat(router): five intent routing improvements with full test coverage</span></span>
-<span class="line"><span>aa2faf2 chore: delete dead EditorPanel from buildershared</span></span>
-<span class="line"><span></span></span>
-<span class="line"><span>=== diff stat since last commit ===</span></span>
-<span class="line"><span> internal/console/signal_handlers.go | 38 +++++++++++++++++++++++++++++++++++++</span></span>
-<span class="line"><span> 1 file changed, 38 insertions(+)</span></span>
-<span class="line"><span></span></span>
-<span class="line"><span>=== untracked / modified ===</span></span>
-<span class="line"><span> M site/src/content/pipelines/quickstart.md</span></span></code></pre>
-<p>That’s a real pipeline run — <code>git log</code>, <code>git diff --stat</code>, and <code>git status</code> chained together in one step.</p>
-<h2 id="add-ai-to-the-pipeline">Add AI to the pipeline</h2>
-<p>Ask gl1tch to summarize the same commits. You can type this directly in the console, or run it from your terminal — both work exactly the same way:</p>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>summarize my last 5 commits</span></span></code></pre>
-<p>From the terminal:</p>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> ask</span><span style="color:#BD93F9"> --provider</span><span style="color:#F1FA8C"> ollama</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">summarize my last 5 commits</span><span style="color:#E9F284">"</span></span></code></pre>
-<p>gl1tch fetches your commits with <code>git log</code>, passes them to your local model, and streams the result:</p>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>[step:fetch] status:running</span></span>
-<span class="line"><span>[step:fetch] status:done</span></span>
-<span class="line"><span>[step:summarize] status:running</span></span>
-<span class="line"><span>[step:summarize] status:done</span></span>
-<span class="line"><span></span></span>
-<span class="line"><span>Recent commits added a signal handler for in-game chat interaction and a</span></span>
-<span class="line"><span>subcommand for discovering plugin models. There were also improvements to</span></span>
-<span class="line"><span>the router with enhanced test coverage, and dead code was cleaned up by</span></span>
-<span class="line"><span>removing an unused EditorPanel class.</span></span></code></pre>
-<p>No model flag needed — gl1tch picks your default Ollama model automatically (<code>qwen2.5:latest</code> unless you configure otherwise).</p>
-<blockquote>
-<p><strong>Note:</strong> Pipelines that use tools, run shell commands autonomously, or coordinate multi-agent workflows require a larger local model with tool/function-calling support. Smaller models handle summarization and generation steps well; for agentic tasks pull a capable model like <code>ollama pull qwen3:8b</code> and pass <code>--model qwen3:8b</code>.</p>
-</blockquote>
-<h2 id="use-claude-if-you-prefer-a-cloud-provider">Use Claude if you prefer a cloud provider</h2>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> ask</span><span style="color:#BD93F9"> --provider</span><span style="color:#F1FA8C"> claude</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">summarize my last 5 commits</span><span style="color:#E9F284">"</span></span></code></pre>
-<p>gl1tch picks Claude Haiku by default (the cheapest option). Pass <code>--model claude-sonnet-4-6</code> to upgrade.</p>
-<h2 id="review-a-pr">Review a PR</h2>
-<p>Pass gl1tch a GitHub PR URL — in the console or from the terminal:</p>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>https://github.com/8op-org/gl1tch/pull/40</span></span></code></pre>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> ask</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">https://github.com/8op-org/gl1tch/pull/40</span><span style="color:#E9F284">"</span></span></code></pre>
-<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>[route] → pr-review (95%)</span></span>
-<span class="line"><span>[step:fetch_diff] status:running</span></span>
-<span class="line"><span>[step:fetch_comments] status:running</span></span>
-<span class="line"><span>[step:fix] status:running</span></span>
-<span class="line"><span>[step:fix] status:done</span></span></code></pre>
-<p><code>pr-review</code> fetches the diff and reviewer comments, then produces corrected code. Requires <code>gh</code> authenticated.</p>
+<span class="line"><span>3a9f1c2 feat: add pipeline resume support</span></span>
+<span class="line"><span>8d2e047 fix: brain context injection on retry</span></span>
+<span class="line"><span>...</span></span></code></pre>
 <h2 id="open-the-console">Open the console</h2>
-<p>For ongoing sessions — asking questions, running pipelines, switching between projects:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span></span></code></pre>
-<p>Everything available from the command line is available here, plus conversation history, brain context, and the inline docs viewer (<code>/docs</code>).</p>
+<p>This opens your workspace in a tmux session. Everything available from the command line is here — plus conversation history, brain context, and the inline docs viewer (<code>/docs</code>).</p>
+<h2 id="ask-gl1tch-something">Ask gl1tch something</h2>
+<p>From the console or the terminal:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> ask</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">summarize my last 5 commits</span><span style="color:#E9F284">"</span></span></code></pre>
+<p>gl1tch routes the request to a pipeline if one matches, or handles it directly.</p>
+<h2 id="write-your-own-pipeline">Write your own pipeline</h2>
+<p>Save this as <code>~/.config/glitch/pipelines/git-summary.pipeline.yaml</code>:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="yaml"><code><span class="line"><span style="color:#8BE9FD">name</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> git-summary</span></span>
+<span class="line"><span style="color:#8BE9FD">version</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">1</span><span style="color:#E9F284">"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#8BE9FD">steps</span><span style="color:#FF79C6">:</span></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> log</span></span>
+<span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> shell</span></span>
+<span class="line"><span style="color:#8BE9FD">    vars</span><span style="color:#FF79C6">:</span></span>
+<span class="line"><span style="color:#8BE9FD">      cmd</span><span style="color:#FF79C6">:</span><span style="color:#E9F284"> "</span><span style="color:#F1FA8C">git log --oneline -10</span><span style="color:#E9F284">"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#FF79C6">  -</span><span style="color:#8BE9FD"> id</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> summarize</span></span>
+<span class="line"><span style="color:#8BE9FD">    executor</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> ollama</span></span>
+<span class="line"><span style="color:#8BE9FD">    model</span><span style="color:#FF79C6">:</span><span style="color:#F1FA8C"> llama3.2</span></span>
+<span class="line"><span style="color:#8BE9FD">    needs</span><span style="color:#FF79C6">:</span><span style="color:#F8F8F2"> [</span><span style="color:#F1FA8C">log</span><span style="color:#F8F8F2">]</span></span>
+<span class="line"><span style="color:#8BE9FD">    prompt</span><span style="color:#FF79C6">:</span><span style="color:#FF79C6"> |</span></span>
+<span class="line"><span style="color:#F1FA8C">      Here are the last 10 git commits:</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F1FA8C">      {{steps.log.output}}</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F1FA8C">      Summarize what's been worked on in 3-4 sentences. Be specific about what changed.</span></span></code></pre>
+<p>Run it:</p>
+<pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span><span style="color:#F1FA8C"> pipeline</span><span style="color:#F1FA8C"> run</span><span style="color:#F1FA8C"> git-summary</span></span></code></pre>
+<p>Swap <code>executor: ollama</code> + <code>model: llama3.2</code> for <code>executor: claude</code> + <code>model: claude-haiku-4-5-20251001</code> if you’re using Claude instead.</p>
 <h2 id="next-steps">Next steps</h2>
 <ul>
-<li><a href="/docs/pipelines/pipelines">Pipelines</a> — What’s inside a pipeline and how steps connect</li>
-<li><a href="/docs/pipelines/console">Console</a> — Your gl1tch workspace in detail</li>
-<li><a href="/docs/pipelines/brain">Brain</a> — How gl1tch remembers context across sessions</li>
-<li><a href="/docs/pipelines/examples">Examples</a> — Ready-to-run pipelines for real developer workflows</li>
+<li><a href="/docs/pipelines/pipelines">Pipelines</a> — what’s inside a pipeline and how steps connect</li>
+<li><a href="/docs/pipelines/executors">Executors</a> — all available executors</li>
+<li><a href="/docs/pipelines/console">Console</a> — your gl1tch workspace in detail</li>
+<li><a href="/docs/pipelines/examples">Examples</a> — ready-to-run pipelines for real developer workflows</li>
 </ul> </div> </article><article id="ds-article-console" class="ds-article" aria-hidden="true"> <div class="ds-article-meta"> <span class="ds-article-title fg-purple">Console</span> <span class="ds-article-desc fg-comment">Talk to your AI assistant, launch pipelines, and manage your session — all from one conversation screen.</span> </div> <div class="ds-content"> <p>gl1tch is a conversation. You open it in your terminal, type what you want, and your assistant handles it — whether that’s answering a question, running a pipeline, or kicking off an automation. Everything happens in one screen. Your session keeps running even when you step away.</p>
 <p>Launch it:</p>
 <pre class="astro-code dracula" style="background-color:#282A36;color:#F8F8F2; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#50FA7B">glitch</span></span></code></pre>
