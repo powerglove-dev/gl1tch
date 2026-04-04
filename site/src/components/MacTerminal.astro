@@ -294,12 +294,15 @@ async function showInstall() {
   const { os, arch } = await detectPlatform();
 
   if (!rel || !rel.version) {
-    // No release published yet — fall back to source install
+    // No release published yet — show brew as primary
     typewrite(
-      'No binary release found yet.\n\n' +
-      'Install from source:\n\n' +
-      '  go install github.com/8op-org/gl1tch@latest\n\n' +
-      'Make sure $GOPATH/bin is on your $PATH.'
+      'Install via Homebrew (recommended):\n\n' +
+      '  brew install 8op-org/tap/glitch\n\n' +
+      'Or build from source:\n\n' +
+      '  go install github.com/8op-org/gl1tch/cmd/glitch@latest\n\n' +
+      'Then pull a local model:\n\n' +
+      '  ollama pull qwen2.5-coder:latest\n\n' +
+      'Run `glitch`. That\'s it.'
     );
     return;
   }
@@ -332,6 +335,10 @@ async function showInstall() {
       : (arch === 'arm64' ? 'Linux — ARM64' : 'Linux — x86_64');
 
     lines += `${label}\n\n`;
+    if (os === 'darwin') {
+      lines += `  brew install 8op-org/tap/glitch\n\n`;
+      lines += `Or download the binary directly:\n\n`;
+    }
     if (url) {
       lines += `  curl -L "${url}" | tar xz -C /tmp/glitch-install\n`;
       lines += `  cd /tmp/glitch-install && ./install.sh\n\n`;
