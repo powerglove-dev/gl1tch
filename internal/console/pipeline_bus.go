@@ -243,7 +243,7 @@ func tryPipelineBusSubscribeCmd(extraTopics ...string) tea.Cmd {
 			return pipelineBusDisconnectedMsg{}
 		}
 		subs := append(
-			[]string{"pipeline.run.*", "pipeline.step.*", "cron.job.*", "cron.entry.*", topics.ClarificationRequested, topics.GameRunScored, "notification.*"},
+			[]string{"pipeline.run.*", "pipeline.step.*", "cron.job.*", "cron.entry.*", topics.ClarificationRequested, topics.GameRunScored, "notification.*", "mud.world.*"},
 			extraTopics...,
 		)
 		reg, _ := json.Marshal(map[string]any{

@@ -1309,6 +1309,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case pipelineBusEventMsg:
+		// Update TDF header when the MUD switches worlds.
+		if msg.topic == "mud.world.switch" {
+			var p struct {
+				World string `json:"world"`
+			}
+			if json.Unmarshal(msg.payload, &p) == nil && p.World != "" {
+				m.refreshTDFHeader(strings.ToUpper(p.World))
+			}
+			if m.pipelineBusCh != nil {
+				return m, waitForPipelineBusEvent(m.pipelineBusCh)
+			}
+			return m, nil
+		}
 		// Forward clarification requests to the gl1tch chat panel.
 		if msg.topic == topics.ClarificationRequested {
 			var req store.ClarificationRequest
