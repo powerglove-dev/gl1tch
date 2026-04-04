@@ -3154,7 +3154,7 @@ func (p glitchChatPanel) build(height, width int, pal styles.ANSIPalette) []stri
 	} else {
 		subtitleArrow = ">>"
 	}
-	subtitleBase := subtitleArrow + " GL1TCH AI assistant  //  " + providerLabel
+	subtitleBase := subtitleArrow + " " + providerLabel
 	subtitleVisW := len(subtitleBase) // approximate (ASCII only)
 	subtitle := subtitleBase
 	if p.sessions != nil {

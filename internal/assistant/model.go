@@ -427,7 +427,7 @@ func (m Model) View() string {
 	} else {
 		providerName = "no provider"
 	}
-	subtitle := ">> GL1TCH AI assistant  //  " + providerName
+	subtitle := ">> " + providerName
 	sb.WriteString(padCenter(dimStyle.Render(subtitle), len(subtitle), m.width) + "\n")
 
 	// Divider.
