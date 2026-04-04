@@ -148,6 +148,82 @@ func TestTmux_Cmd_CWD_WithPath(t *testing.T) {
 	}
 }
 
+// TestTmux_Cmd_CWD_TUIAlive verifies the TUI stays alive after a /cwd command.
+func TestTmux_Cmd_CWD_TUIAlive(t *testing.T) {
+	session, _, cleanup := setupTUISession(t, "cwd-alive", nil)
+	defer cleanup()
+
+	sendSlashCmd(t, session, "/cwd /tmp")
+
+	if !waitFor(3*time.Second, func() bool {
+		return strings.Contains(tmuxCapture(t, session), "cwd set to:")
+	}) {
+		t.Fatalf("/cwd /tmp did not produce confirmation:\n%s", tmuxCapture(t, session))
+	}
+	if !isTUIAlive(t, session) {
+		t.Errorf("TUI died after /cwd")
+	}
+}
+
+// TestTmux_Cmd_CWD_HintBar verifies the hint bar at the bottom of the TUI
+// reflects the new working directory after a /cwd switch.  The hint bar is
+// rendered in the last few visible lines of the 50-row pane.
+func TestTmux_Cmd_CWD_HintBar(t *testing.T) {
+	session, _, cleanup := setupTUISession(t, "cwd-bar", nil)
+	defer cleanup()
+
+	sendSlashCmd(t, session, "/cwd /tmp")
+
+	ok := waitFor(3*time.Second, func() bool {
+		c := tmuxCapture(t, session)
+		lines := strings.Split(c, "\n")
+		tail := lines
+		if len(lines) > 6 {
+			tail = lines[len(lines)-6:]
+		}
+		for _, l := range tail {
+			if strings.Contains(l, "/tmp") {
+				return true
+			}
+		}
+		return false
+	})
+	if !ok {
+		t.Errorf("hint bar did not show /tmp after /cwd switch:\n%s", tmuxCapture(t, session))
+	}
+}
+
+// TestTmux_Cmd_CWD_ReSwitch verifies that switching CWD a second time replaces
+// the first path — a bare /cwd must report the most-recently set directory.
+func TestTmux_Cmd_CWD_ReSwitch(t *testing.T) {
+	session, _, cleanup := setupTUISession(t, "cwd-reswitch", nil)
+	defer cleanup()
+
+	sendSlashCmd(t, session, "/cwd /tmp")
+	if !waitFor(3*time.Second, func() bool {
+		return strings.Contains(tmuxCapture(t, session), "cwd set to: /tmp")
+	}) {
+		t.Fatalf("first /cwd /tmp did not confirm:\n%s", tmuxCapture(t, session))
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	sendSlashCmd(t, session, "/cwd /var")
+	if !waitFor(3*time.Second, func() bool {
+		return strings.Contains(tmuxCapture(t, session), "cwd set to: /var")
+	}) {
+		t.Fatalf("/cwd /var did not confirm:\n%s", tmuxCapture(t, session))
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	sendSlashCmd(t, session, "/cwd")
+	ok := waitFor(3*time.Second, func() bool {
+		return strings.Contains(tmuxCapture(t, session), "current cwd: /var")
+	})
+	if !ok {
+		t.Errorf("after two /cwd switches, bare /cwd did not show /var:\n%s", tmuxCapture(t, session))
+	}
+}
+
 // ── /brain ────────────────────────────────────────────────────────────────────
 
 func TestTmux_Cmd_Brain_Empty(t *testing.T) {

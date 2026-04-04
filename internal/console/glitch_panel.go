@@ -1563,8 +1563,24 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 		if s := p.sessions.Active(); s != nil {
 			sessResumeID = s.resumeID
 		}
+		brainCtx := glitchLoadBrainContext(st)
+		if cwd := p.launchCWD; cwd != "" {
+			cwdLine := "Current working directory: " + cwd
+			if brainCtx != "" {
+				brainCtx = cwdLine + "\n" + brainCtx
+			} else {
+				brainCtx = cwdLine
+			}
+		}
+		if nearMissHint != "" {
+			if brainCtx != "" {
+				brainCtx = brainCtx + "\n" + nearMissHint
+			} else {
+				brainCtx = nearMissHint
+			}
+		}
 		return p, tea.Batch(glitchTick(), func() tea.Msg {
-			tokenCh, doneCh, err := backend.stream(ctx, turns, prompt, glitchLoadBrainContext(st), nearMissHint, sessResumeID)
+			tokenCh, doneCh, err := backend.stream(ctx, turns, prompt, brainCtx, "", sessResumeID)
 			if err != nil {
 				return glitchErrMsg{err: err}
 			}
