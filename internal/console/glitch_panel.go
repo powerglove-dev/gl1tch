@@ -680,10 +680,20 @@ type glitchCLIBackend struct {
 	providerName string
 	command      string
 	args         []string
+	dir          string // working directory for subprocess; empty = inherit gl1tch's cwd
 }
 
 func newGlitchCLIBackend(providerName, command string, args []string) *glitchCLIBackend {
 	return &glitchCLIBackend{providerName: providerName, command: command, args: args}
+}
+
+func (b *glitchCLIBackend) setCWD(dir string) {
+	if strings.HasPrefix(dir, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			dir = filepath.Join(home, dir[2:])
+		}
+	}
+	b.dir = dir
 }
 
 func (b *glitchCLIBackend) name() string { return b.providerName }
@@ -795,6 +805,9 @@ func (b *glitchCLIBackend) stream(ctx context.Context, turns []glitchTurn, userM
 
 	cmd := exec.CommandContext(ctx, b.command, args...)
 	cmd.Stdin = strings.NewReader(stdin)
+	if b.dir != "" {
+		cmd.Dir = b.dir
+	}
 
 	pr, pw := io.Pipe()
 	cmd.Stdout = pw
@@ -1103,7 +1116,7 @@ type glitchChatPanel struct {
 	focused      bool
 	cfgDir       string
 	store        *store.Store // for brain context in run analysis
-	launchCWD    string       // working directory at startup, for CWD-aware intro
+	launchCWD    string       // working directory; updated on /cwd and session restore
 	wizardActive    bool // true when /init wizard is running
 	wizardPhase     int  // current wizard step index
 	wizardStartMsg  int  // p.messages index where the current wizard started
@@ -1300,6 +1313,16 @@ func newGlitchPanel(cfgDir string, providers []picker.ProviderDef, s *store.Stor
 	return p
 }
 
+// setBackendCWD propagates dir to the backend subprocess if it supports it.
+// glitchOllamaBackend already gets CWD via brainCtx; only glitchCLIBackend
+// needs the directory set on cmd.Dir so tool calls land in the right place.
+func (p *glitchChatPanel) setBackendCWD(dir string) {
+	type cwdSetter interface{ setCWD(string) }
+	if cs, ok := p.backend.(cwdSetter); ok {
+		cs.setCWD(dir)
+	}
+}
+
 // switchToSession saves the current session's messages/turns/cwd/backend into
 // the registry, switches the active session to name, and loads that session's state.
 func (p glitchChatPanel) switchToSession(name string) glitchChatPanel {
@@ -1315,6 +1338,7 @@ func (p glitchChatPanel) switchToSession(name string) glitchChatPanel {
 	p.turns = next.turns
 	if next.cwd != "" {
 		p.launchCWD = next.cwd
+		p.setBackendCWD(next.cwd)
 	}
 	if next.backend != nil {
 		p.backend = next.backend
@@ -2042,6 +2066,7 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					}
 					newCWD := strings.Join(args[1:], " ")
 					p.launchCWD = newCWD
+					p.setBackendCWD(newCWD)
 					p.messages = append(p.messages, glitchEntry{
 						who:  glitchSpeakerBot,
 						text: "cwd set to: " + newCWD,

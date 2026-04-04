@@ -445,7 +445,8 @@ func imax(a, b int) int {
 }
 
 // render draws the cell grid onto a new RGBA image.
-func render(grid [][]cell) *image.RGBA {
+// minCols and minRows force a minimum canvas size; 0 means use actual content size.
+func render(grid [][]cell, minCols, minRows int) *image.RGBA {
 	cols := 0
 	for _, row := range grid {
 		if len(row) > cols {
@@ -453,6 +454,12 @@ func render(grid [][]cell) *image.RGBA {
 		}
 	}
 	rows := len(grid)
+	if minCols > cols {
+		cols = minCols
+	}
+	if minRows > rows {
+		rows = minRows
+	}
 	if rows == 0 || cols == 0 {
 		return image.NewRGBA(image.Rect(0, 0, 1, 1))
 	}
@@ -497,10 +504,12 @@ func render(grid [][]cell) *image.RGBA {
 
 func main() {
 	outPath := flag.String("o", "out.png", "output PNG file path")
+	minCols := flag.Int("cols", 200, "minimum canvas width in terminal columns (0 = auto)")
+	minRows := flag.Int("rows", 50, "minimum canvas height in terminal rows (0 = auto)")
 	flag.Parse()
 
 	grid := parse(os.Stdin)
-	img := render(grid)
+	img := render(grid, *minCols, *minRows)
 
 	f, err := os.Create(*outPath)
 	if err != nil {

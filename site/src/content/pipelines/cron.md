@@ -4,7 +4,7 @@ description: "Schedule your pipelines to run automatically — wake up to result
 order: 9
 ---
 
-Set a pipeline on a schedule and stop thinking about it. Your morning standup prep runs at 8 AM. Your nightly code review finishes while you sleep. Your dependency audit fires every Monday. gl1tch runs your pipelines on a cron schedule and logs the results — you just check in when you're ready.
+Set a pipeline on a schedule and stop thinking about it. Your morning git digest runs at 8 AM. Your nightly docs audit finishes while you sleep. Your weekly dependency check fires every Monday. gl1tch runs your pipelines on a cron schedule and logs the results — you check in when you're ready.
 
 
 ## Quick Start
@@ -13,11 +13,12 @@ Create `~/.config/glitch/cron.yaml` with your first scheduled pipeline:
 
 ```yaml
 entries:
-  - name: morning-standup
+  - name: git-digest
     schedule: "0 8 * * 1-5"
     kind: pipeline
-    target: ~/pipelines/standup.pipeline.yaml
+    target: git-digest
     timeout: "5m"
+    working_dir: ~/projects/my-repo
 ```
 
 Start the scheduler:
@@ -32,11 +33,9 @@ Check that it registered:
 glitch cron list
 ```
 
-```text
-morning-standup   0 8 * * 1-5   pipeline   standup.pipeline.yaml   in 14h 22m
-```
+Your pipeline now runs every weekday at 8 AM without you touching it. When it fires, gl1tch picks it up:
 
-Your pipeline now runs every weekday at 8 AM without you touching it.
+![gl1tch launching a scheduled pipeline](/screenshots/cron/cron-pipeline-launching.png)
 
 
 ## How Schedules Work
@@ -61,7 +60,8 @@ Common patterns:
 | `0 2 * * *` | 2 AM every day |
 | `*/15 * * * *` | Every 15 minutes |
 | `0 9 * * 1` | 9 AM every Monday |
-| `30 17 * * 5` | 5:30 PM every Friday |
+| `0 * * * *` | Every hour on the hour |
+| `30 * * * *` | Every hour at :30 |
 
 Schedules run in your system timezone. No seconds field. No timezone suffix.
 
@@ -93,12 +93,6 @@ Show all scheduled entries with their next fire time in plain English.
 glitch cron list
 ```
 
-```text
-morning-standup   0 8 * * 1-5    pipeline   standup.pipeline.yaml     in 14h 22m
-nightly-review    0 23 * * *     pipeline   code-review.pipeline.yaml  in 6h 44m
-dep-audit         0 9 * * 1      pipeline   deps.pipeline.yaml         in 3d 2h
-```
-
 ### `glitch cron logs`
 
 Tail the scheduler log. Each line is prefixed with the entry name so you can follow multiple jobs at once.
@@ -117,7 +111,7 @@ entries:
   - name: <string>          # unique name for this job
     schedule: <string>      # 5-field cron expression
     kind: pipeline          # "pipeline" or "agent"
-    target: <string>        # path to .pipeline.yaml, or agent name
+    target: <string>        # pipeline name or path to .pipeline.yaml
     timeout: <string>       # optional: "5m", "30s" — zero means no timeout
     working_dir: <string>   # optional: working directory for the job
     input: <string>         # optional: maps to {{param.input}} in pipelines
@@ -130,7 +124,7 @@ entries:
 | `name` | yes | Unique label shown in `glitch cron list` |
 | `schedule` | yes | 5-field cron expression |
 | `kind` | yes | `pipeline` or `agent` |
-| `target` | yes | Path to a `.pipeline.yaml` or an agent name |
+| `target` | yes | Pipeline name or path to a `.pipeline.yaml` |
 | `timeout` | no | Max run duration — e.g. `"10m"`, `"30s"` |
 | `working_dir` | no | Directory the job runs in; inherits your workspace if empty |
 | `input` | no | String mapped to `{{param.input}}` inside the pipeline |
@@ -139,49 +133,49 @@ entries:
 
 ## Examples
 
+### Hourly Docs Improvement
 
-### Morning Standup Brief
-
-Your assistant pulls open PRs and recent commits, summarizes the day ahead, and has it ready before you open your laptop.
+Run a docs-improve pipeline every hour to continuously catch and fix stale content.
 
 ```yaml
 entries:
-  - name: morning-standup
-    schedule: "0 8 * * 1-5"
+  - name: docs-improve
+    schedule: "0 * * * *"
     kind: pipeline
-    target: ~/pipelines/standup.pipeline.yaml
+    target: docs-improve
+    input: themes documentation
+    timeout: 15m
     working_dir: ~/projects/my-repo
-    timeout: "5m"
 ```
 
 
-### Nightly Code Review
+### Docs Audit on the Half-Hour
 
-Run a full code quality check every night. Wake up to findings already in your log.
+Run a separate audit pass 30 minutes after each improvement cycle.
 
 ```yaml
 entries:
-  - name: nightly-review
-    schedule: "0 23 * * *"
+  - name: docs-audit
+    schedule: "30 * * * *"
     kind: pipeline
-    target: ~/pipelines/code-review.pipeline.yaml
+    target: sync-docs
+    timeout: 10m
     working_dir: ~/projects/my-repo
-    timeout: "15m"
 ```
 
 
-### Weekly Dependency Audit
+### Nightly World Build
 
-Every Monday morning, check for outdated or vulnerable dependencies before the week starts.
+A heavier job that runs once a day at 5 AM — plenty of time to finish before you're back at your desk.
 
 ```yaml
 entries:
-  - name: dep-audit
-    schedule: "0 9 * * 1"
+  - name: nightly-build
+    schedule: "0 5 * * *"
     kind: pipeline
-    target: ~/pipelines/dep-check.pipeline.yaml
+    target: my-build-pipeline
+    timeout: 45m
     working_dir: ~/projects/my-repo
-    timeout: "10m"
 ```
 
 
@@ -189,26 +183,27 @@ entries:
 
 ```yaml
 entries:
-  - name: morning-standup
-    schedule: "0 8 * * 1-5"
+  - name: docs-improve
+    schedule: "0 * * * *"
     kind: pipeline
-    target: ~/pipelines/standup.pipeline.yaml
+    target: docs-improve
+    input: themes documentation
+    timeout: 15m
     working_dir: ~/projects/my-repo
-    timeout: "5m"
 
-  - name: nightly-review
-    schedule: "0 23 * * *"
+  - name: docs-audit
+    schedule: "30 * * * *"
     kind: pipeline
-    target: ~/pipelines/code-review.pipeline.yaml
+    target: sync-docs
+    timeout: 10m
     working_dir: ~/projects/my-repo
-    timeout: "15m"
 
-  - name: dep-audit
-    schedule: "0 9 * * 1"
+  - name: nightly-build
+    schedule: "0 5 * * *"
     kind: pipeline
-    target: ~/pipelines/dep-check.pipeline.yaml
+    target: my-build-pipeline
+    timeout: 45m
     working_dir: ~/projects/my-repo
-    timeout: "10m"
 ```
 
 
