@@ -2860,28 +2860,9 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					if p.widgetRegistry != nil {
 						if cfg := p.widgetRegistry.FindByTrigger(cmd); cfg != nil {
 							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
-							sessionName := cfg.Schema.Name
-
-							// If a session for this widget already exists, switch to it.
-							if existing := p.sessions.get(sessionName); existing != nil {
-								var switchCmd tea.Cmd
-								p, switchCmd = p.switchToSession(sessionName)
-								p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "▶ session: " + sessionName})
-								return p, tea.Batch(switchCmd, saveSessionsCmd(p.cfgDir, p.sessions, p.sessions.active, p.launchCWD, p.backend))
-							}
-
-							// Create a new session for this widget and start its process.
-							s := p.sessions.create(sessionName)
-							s.cwd = p.launchCWD
-							s.backend = p.backend
-							s.activeWidget = cfg
-							var switchCmd tea.Cmd
-							p, switchCmd = p.switchToSession(sessionName)
-							p.messages = append(p.messages, glitchEntry{
-								who:  glitchSpeakerBot,
-								text: "launching " + cfg.Schema.Name + " — starting up...",
-							})
-							return p, tea.Batch(switchCmd, widgetStartCmd(cfg, sessionName), saveSessionsCmd(p.cfgDir, p.sessions, p.sessions.active, p.launchCWD, p.backend))
+							// Activate the widget as a mode on the current session.
+							// Widgets are overlays — they never create or switch sessions.
+							return p, widgetStartCmd(cfg, p.sessions.active)
 						}
 					}
 				}
