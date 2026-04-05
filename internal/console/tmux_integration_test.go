@@ -1,5 +1,11 @@
 package console_test
 
+// tmux_integration_test.go — legacy tmux-based integration tests.
+//
+// These tests require tmux in PATH and skip automatically when it is not
+// present. They are preserved for environments that still have tmux available.
+// For the primary UI integration test on macOS, see iterm2_integration_test.go.
+
 import (
 	"encoding/json"
 	"fmt"
@@ -14,87 +20,6 @@ import (
 	"github.com/8op-org/gl1tch/internal/console"
 	"github.com/8op-org/gl1tch/internal/game"
 )
-
-// tmuxAvailable returns true if tmux is in PATH.
-func tmuxAvailable() bool {
-	_, err := exec.LookPath("tmux")
-	return err == nil
-}
-
-// buildGlitchBinary compiles the glitch binary into a temp dir and returns
-// the path. The test is skipped if go build fails.
-func buildGlitchBinary(t *testing.T) string {
-	t.Helper()
-	binDir := t.TempDir()
-	binPath := filepath.Join(binDir, "glitch")
-	// Resolve the module root: go up from internal/console to the project root.
-	moduleRoot, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("resolve module root: %v", err)
-	}
-	cmd := exec.Command("go", "build", "-o", binPath, ".")
-	cmd.Dir = moduleRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Skipf("go build failed (skip tmux test): %v\n%s", err, out)
-	}
-	return binPath
-}
-
-// tmuxCapture returns the visible text content of the given tmux pane.
-func tmuxCapture(t *testing.T, session string) string {
-	t.Helper()
-	out, err := exec.Command("tmux", "capture-pane", "-p", "-t", session).Output()
-	if err != nil {
-		t.Logf("tmux capture-pane error: %v", err)
-		return ""
-	}
-	return string(out)
-}
-
-// tmuxSend sends keys to the given tmux session.
-func tmuxSend(session string, keys ...string) error {
-	for _, k := range keys {
-		if err := exec.Command("tmux", "send-keys", "-t", session, k, "").Run(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// waitFor polls fn every 200ms for up to maxWait, returning true when fn returns true.
-func waitFor(maxWait time.Duration, fn func() bool) bool {
-	deadline := time.Now().Add(maxWait)
-	for time.Now().Before(deadline) {
-		if fn() {
-			return true
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	return false
-}
-
-// newTmuxSession creates a detached tmux session and returns a cleanup func.
-// The session is sized 220x50 to give the TUI enough room to render.
-func newTmuxSession(t *testing.T, name, command string, env []string) func() {
-	t.Helper()
-	args := []string{"new-session", "-d", "-s", name, "-x", "220", "-y", "50"}
-	// Use -e to pass each env var explicitly into the session, overriding any
-	// stale values the tmux server may have inherited from previous test runs.
-	for _, kv := range env {
-		args = append(args, "-e", kv)
-	}
-	if command != "" {
-		args = append(args, command)
-	}
-	cmd := exec.Command("tmux", args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("tmux new-session: %v\n%s", err, out)
-	}
-	return func() {
-		exec.Command("tmux", "kill-session", "-t", name).Run() //nolint:errcheck
-	}
-}
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
@@ -685,8 +610,7 @@ models:
 
 	c := tmuxCapture(t, session2)
 	t.Logf("run 2 pane:\n%s", c)
-	// Verify the resumed session produced a response. The glitch persona won't
-	// repeat the codeword literally, but it will reply — proving context resumed.
+	// Verify the resumed session produced a response.
 	if strings.Count(c, "GL1TCH") < 2 {
 		t.Errorf("run 2: no response received in resumed session:\n%s", c)
 	}
@@ -723,8 +647,6 @@ func TestTmux_GlitchChatGetsResponse(t *testing.T) {
 	exec.Command("tmux", "send-keys", "-t", session, "hello glitch", "Enter").Run() //nolint:errcheck
 
 	// Expect GL1TCH to show something — a reply, an error, or a pipeline message.
-	// Any response proves routing is not stuck. "YOU" appears when the message
-	// is appended to the chat; we wait for that first, then a bot response.
 	if !waitFor(4*time.Second, func() bool {
 		return strings.Contains(tmuxCapture(t, session), "YOU")
 	}) {

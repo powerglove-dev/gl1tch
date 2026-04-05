@@ -109,17 +109,16 @@ type StepInfo struct {
 }
 
 type feedEntry struct {
-	id         string
-	title      string
-	status     FeedStatus
-	ts         time.Time
-	lines      []string
-	steps      []StepInfo
-	cwd        string // working directory the job runs in, shown in feed and signal board
-	tmuxWindow string // fully-qualified target "session:glitch-<feedID>", empty if no window
-	logFile    string // /tmp/glitch-<feedID>.log
-	doneFile   string // non-empty for window-mode jobs; written by the shell when the command exits
-	archived   bool   // true when the user has dismissed this entry from the board
+	id       string
+	title    string
+	status   FeedStatus
+	ts       time.Time
+	lines    []string
+	steps    []StepInfo
+	cwd      string // working directory the job runs in, shown in feed and signal board
+	logFile  string // /tmp/glitch-<feedID>.log
+	doneFile string // non-empty for subprocess jobs; written by the shell when the command exits
+	archived bool   // true when the user has dismissed this entry from the board
 }
 
 // ── Section types ─────────────────────────────────────────────────────────────
@@ -139,8 +138,7 @@ type jobHandle struct {
 	id           string
 	cancel       context.CancelFunc
 	ch           chan tea.Msg
-	tmuxWindow   string
-	logFile      string // /tmp/glitch-<feedID>.log — tailed in the tmux window
+	logFile      string // /tmp/glitch-<feedID>.log — subprocess output
 	storeRunID   int64  // non-zero when run was recorded in the result store
 	pipelineName string // non-empty for pipeline jobs; matched against busd RunStarted payload
 	actAgent     string // activity feed agent name; empty for non-agent jobs
@@ -210,43 +208,6 @@ type tickMsg time.Time
 // inboxEditorDoneMsg is dispatched when the $EDITOR process launched from the
 // inbox detail view exits.
 type inboxEditorDoneMsg struct{ err error }
-
-// ── Window / telemetry types (preserved from sidebar for backwards compat) ────
-
-// Window represents a tmux window (excluding window 0).
-type Window struct {
-	Index  int
-	Name   string
-	Active bool
-}
-
-// ParseWindows parses output of:
-//
-//	tmux list-windows -t glitch -F "#{window_index} #{window_name} #{window_active}"
-//
-// Skips window 0 (the GLITCH home window).
-func ParseWindows(output string) []Window {
-	var windows []Window
-	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
-		if line == "" {
-			continue
-		}
-		parts := strings.Fields(line)
-		if len(parts) < 3 {
-			continue
-		}
-		idx, err := strconv.Atoi(parts[0])
-		if err != nil || idx == 0 {
-			continue
-		}
-		windows = append(windows, Window{
-			Index:  idx,
-			Name:   parts[1],
-			Active: parts[2] == "1",
-		})
-	}
-	return windows
-}
 
 // TelemetryMsg carries a parsed telemetry event from the bus.
 type TelemetryMsg struct {
@@ -337,9 +298,6 @@ type Model struct {
 	lastNarrationAt  time.Time // set each time a narration is allowed through
 	recentRunCount   int       // completions in current 60s window
 	runWindowStart   time.Time // start of the current run-count window
-	// lastPipelinePane is the tmux pane ID (%N) of the most recently launched
-	// pipeline pane. Used to stack subsequent pipelines below it.
-	lastPipelinePane string
 	// widgetRegistry holds all widget-capable sidecars loaded at startup.
 	widgetRegistry *WidgetRegistry
 	// signalHandlers maps handler names to dispatch functions.
@@ -462,10 +420,6 @@ func NewWithStore(s *store.Store) Model {
 
 	return m
 }
-
-// NewWithWindows is kept for backward-compat with sidebar-based callers.
-// It ignores the window list and calls New().
-func NewWithWindows(_ []Window) Model { return New() }
 
 // NewWithPipelines creates a Model with a fixed pipeline list — used in tests.
 func NewWithPipelines(pipelines []string) Model {
@@ -761,19 +715,6 @@ func (m Model) AddStepLines(feedID, stepID string, lines []string) Model {
 	return m.appendStepLines(feedID, stepID, lines)
 }
 
-// AddFeedEntryWithTmux adds a feed entry with a tmux window — used in tests.
-func (m Model) AddFeedEntryWithTmux(id, title string, status FeedStatus, tmuxWindow string) Model {
-	entry := feedEntry{
-		id:         id,
-		title:      title,
-		status:     status,
-		ts:         time.Now(),
-		tmuxWindow: tmuxWindow,
-	}
-	m.feed = append([]feedEntry{entry}, m.feed...)
-	return m
-}
-
 // ── Theme helpers ─────────────────────────────────────────────────────────────
 
 // activeBundle returns the currently active theme bundle, or nil if no registry.
@@ -855,11 +796,6 @@ func (m *Model) refreshTDFHeader(logo ...string) {
 
 // Init starts the tick command and the inbox poll.
 func (m Model) Init() tea.Cmd {
-	// If cron.yaml already has entries, ensure the daemon is running so
-	// existing schedules fire without requiring the user to reschedule.
-	if entries, err := orcaicron.LoadConfig(); err == nil && len(entries) > 0 {
-		go ensureCronDaemon()
-	}
 	cmds := []tea.Cmd{
 		recoverOrphanedRunsCmd(m.store), // seed runs AFTER recovery completes
 		tickCmd(),
@@ -1224,7 +1160,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case FeedLineMsg:
 		m = m.appendFeedLine(msg.ID, msg.Line)
 		// For in-process (agent) jobs the log file is written here.
-		// Window-mode (pipeline) jobs write via tee in the shell — skip.
+		// Subprocess (pipeline) jobs write directly to logFile — skip.
 		for _, e := range m.feed {
 			if e.id == msg.ID && e.logFile != "" && e.doneFile == "" {
 				appendToFile(e.logFile, stripANSI(msg.Line)+"\n")
@@ -1577,15 +1513,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.input != "" {
 				shellCmd += " --input " + shellescape(msg.input)
 			}
-			windowName, logFile, doneFile := createJobPane(feedID, shellCmd, name, m.launchCWD, m.lastPipelinePane, m.paneThemeEnv())
-			if windowName != "" {
-				m.lastPipelinePane = windowName
-			}
+			logFile, doneFile, _ := startJobProcess(feedID, shellCmd, m.launchCWD, m.paneThemeEnv())
 			ch := make(chan tea.Msg, 256)
 			_, cancel := context.WithCancel(context.Background())
 			jh := &jobHandle{
 				id: feedID, cancel: cancel, ch: ch,
-				tmuxWindow: windowName, logFile: logFile, pipelineName: name,
+				logFile: logFile, pipelineName: name,
 				session: m.glitchChat.sessions.active,
 			}
 			m.activeJobs[feedID] = jh
@@ -1615,7 +1548,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case glitchQuitMsg:
-		exec.Command("pkill", "tmux").Run() //nolint:errcheck
 		return m, tea.Quit
 
 	case glitchWidgetOutputMsg:
@@ -2112,8 +2044,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			for _, jh := range m.activeJobs {
 				jh.cancel()
 			}
-			exec.Command("tmux", "kill-session", "-t", "glitch-cron").Run() //nolint:errcheck
-			exec.Command("tmux", "kill-session", "-t", "glitch").Run()      //nolint:errcheck
 			return m, tea.Quit
 		default:
 			m.confirmQuit = false
@@ -2268,14 +2198,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case "J":
-		if !m.confirmDelete && !m.confirmQuit {
-			return m, func() tea.Msg {
-				self, _ := os.Executable()
-				exec.Command("tmux", "display-popup", "-E", "-w", "80%", "-h", "70%",
-					filepath.Clean(self)+" widget jump-window").Run() //nolint:errcheck
-				return nil
-			}
-		}
+		// Jump-window popup is no longer supported without tmux.
 		return m, nil
 
 	case "pgdown", "]":
@@ -2397,13 +2320,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				if entry.status == FeedRunning {
 					if jh, ok := m.activeJobs[entry.id]; ok {
 						jh.cancel()
-						if jh.tmuxWindow != "" {
-							if strings.HasPrefix(jh.tmuxWindow, "%") {
-								exec.Command("tmux", "kill-pane", "-t", jh.tmuxWindow).Run() //nolint:errcheck
-							} else {
-								exec.Command("tmux", "kill-window", "-t", jh.tmuxWindow).Run() //nolint:errcheck
-							}
-						}
 						if jh.storeRunID != 0 && m.store != nil {
 							var out string
 							for _, e := range m.feed {
@@ -2710,9 +2626,6 @@ func (m Model) handlePipelineLaunchOverlay(msg tea.KeyMsg) (Model, tea.Cmd) {
 			if entries, err := orcaicron.LoadConfig(); err == nil {
 				m.scheduledJobCount = len(entries)
 			}
-			// Auto-start cron daemon if not already running.
-			go ensureCronDaemon()
-
 			feedID := fmt.Sprintf("sched-%d", time.Now().UnixNano())
 			confirmEntry := feedEntry{
 				id:     feedID,
@@ -2768,26 +2681,13 @@ func (m Model) execDeletePipeline() (Model, tea.Cmd) {
 	return m, nil
 }
 
-// openEditorInWindow opens path in $EDITOR (or vi) via a new tmux window and
-// switches the user to it immediately.
+// openEditorInWindow opens path in $EDITOR (or vi) as a subprocess.
 func openEditorInWindow(path string) {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
 		editor = "vi"
 	}
-	session := currentTmuxSession()
-	if session == "" {
-		return
-	}
-	cmd := editor + " " + path
-	out, err := exec.Command("tmux", "new-window", "-d", "-P", "-F", "#{window_id}", "-t", session+":", "-n", "glitch-edit", cmd).Output()
-	if err != nil {
-		return
-	}
-	winID := strings.TrimSpace(string(out))
-	if winID != "" {
-		exec.Command("tmux", "select-window", "-t", session+":"+winID).Run() //nolint:errcheck
-	}
+	exec.Command(editor, path).Start() //nolint:errcheck
 }
 
 func (m Model) handleEnter() (Model, tea.Cmd) {
@@ -2814,19 +2714,8 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Signal board: navigate directly into the job's tmux window.
+	// Signal board: enter key — no tmux navigation available.
 	if m.signalBoardFocused {
-		filtered := fuzzyFeed(m.signalBoard.query, m.filteredFeed())
-		if len(filtered) > 0 && m.signalBoard.selectedIdx < len(filtered) {
-			tw := filtered[m.signalBoard.selectedIdx].tmuxWindow
-			if tw != "" {
-				if strings.HasPrefix(tw, "%") {
-					exec.Command("tmux", "select-pane", "-t", tw).Run() //nolint:errcheck
-				} else {
-					exec.Command("tmux", "select-window", "-t", tw).Run() //nolint:errcheck
-				}
-			}
-		}
 		return m, nil
 	}
 
@@ -2907,16 +2796,13 @@ func (m Model) launchPendingPipeline(cwd string) (Model, tea.Cmd) {
 		shellCmd += " --input " + shellescape(m.pendingPipelineInput)
 		m.pendingPipelineInput = ""
 	}
-	windowName, logFile, doneFile := createJobPane(feedID, shellCmd, name, cwd, m.lastPipelinePane, m.paneThemeEnv())
-	if windowName != "" {
-		m.lastPipelinePane = windowName
-	}
+	logFile, doneFile, _ := startJobProcess(feedID, shellCmd, cwd, m.paneThemeEnv())
 
 	ch := make(chan tea.Msg, 256)
 	_, cancel := context.WithCancel(context.Background())
 	jh := &jobHandle{
 		id: feedID, cancel: cancel, ch: ch,
-		tmuxWindow: windowName, logFile: logFile, pipelineName: name,
+		logFile: logFile, pipelineName: name,
 		actAgent: m.pendingActAgent, actLabel: m.pendingActLabel,
 		executorID: m.pendingExecutorID, modelID: m.pendingModelID,
 		session: m.glitchChat.sessions.active,
@@ -3143,13 +3029,10 @@ func (m Model) submitRerun(msg modal.RerunConfirmedMsg) (Model, tea.Cmd) {
 			escaped := strings.ReplaceAll(additionalContext, "'", `'\''`)
 			shellCmd = "GLITCH_CONTEXT='" + escaped + "' " + shellCmd
 		}
-		windowName, logFile, doneFile := createJobPane(feedID, shellCmd, run.Name, cwd, m.lastPipelinePane, m.paneThemeEnv())
-		if windowName != "" {
-			m.lastPipelinePane = windowName
-		}
+		logFile, doneFile, _ := startJobProcess(feedID, shellCmd, cwd, m.paneThemeEnv())
 		ch := make(chan tea.Msg, 256)
 		_, cancel := context.WithCancel(context.Background())
-		jh := &jobHandle{id: feedID, cancel: cancel, ch: ch, tmuxWindow: windowName, logFile: logFile, pipelineName: run.Name, session: m.glitchChat.sessions.active}
+		jh := &jobHandle{id: feedID, cancel: cancel, ch: ch, logFile: logFile, pipelineName: run.Name, session: m.glitchChat.sessions.active}
 		m.activeJobs[feedID] = jh
 		startLogWatcher(feedID, logFile, doneFile, ch)
 		return m, drainChan(ch)
@@ -4540,35 +4423,3 @@ func Run() {
 	}
 }
 
-// RunToggle opens the deck as a tmux popup.
-func RunToggle() {
-	bin := resolveDeckBin()
-	exec.Command("tmux", "display-popup", "-E", "-w", "100%", "-h", "100%", bin).Run() //nolint:errcheck
-}
-
-func resolveDeckBin() string {
-	if bin, err := exec.LookPath("glitch-sysop"); err == nil {
-		return bin
-	}
-	self, _ := os.Executable()
-	if resolved, err := filepath.EvalSymlinks(self); err == nil {
-		self = resolved
-	}
-	return filepath.Join(filepath.Dir(self), "glitch-sysop")
-}
-
-// ensureCronDaemon starts the glitch-cron tmux session if it does not already exist.
-func ensureCronDaemon() {
-	// Check if glitch-cron session exists.
-	err := exec.Command("tmux", "has-session", "-t", "glitch-cron").Run()
-	if err == nil {
-		return // already running
-	}
-	// Find the glitch binary next to the running binary.
-	self, _ := os.Executable()
-	bin := self
-	if altBin, err := exec.LookPath("glitch"); err == nil {
-		bin = altBin
-	}
-	exec.Command(bin, "cron", "start").Run() //nolint:errcheck
-}

@@ -2,8 +2,8 @@
 // their sidecar YAML as background processes on gl1tch session start.
 //
 // Each daemon binary is started with cmd.Start() (non-blocking) immediately
-// after the BUSD event bus is ready. Processes are tracked and killed on
-// Stop(). If a daemon exits early it is left dead — no restart logic for MVP.
+// after the BUSD event bus is ready. Processes are tracked per entry and
+// automatically restarted on unexpected exit with a 3-second backoff.
 //
 // Display requirements
 //
@@ -26,6 +26,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -94,14 +95,72 @@ func killAndWait(cmdPath string) {
 	}
 }
 
-// Manager tracks running daemon processes.
+// daemonEntry tracks a single running daemon with its restart state.
+type daemonEntry struct {
+	sc      sidecar
+	cmd     *exec.Cmd
+	mu      sync.Mutex
+	stopped bool // set to true when Stop() is called so restart loop exits
+}
+
+// Manager supervises daemon processes, restarting them on unexpected exit.
 type Manager struct {
-	procs []*exec.Cmd
+	entries []*daemonEntry
+	wg      sync.WaitGroup
+}
+
+// startEntry starts the daemon process for the given entry and launches a
+// supervision goroutine that restarts it on unexpected exit.
+func (m *Manager) startEntry(entry *daemonEntry) {
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		for {
+			entry.mu.Lock()
+			if entry.stopped {
+				entry.mu.Unlock()
+				return
+			}
+			cmd := exec.Command(entry.sc.Command, entry.sc.Args...)
+			cmd.Stdout = nil
+			cmd.Stderr = os.Stderr
+			entry.cmd = cmd
+			entry.mu.Unlock()
+
+			if err := cmd.Start(); err != nil {
+				fmt.Fprintf(os.Stderr, "glitch: daemonwidget: start %q: %v\n", entry.sc.Command, err)
+				// Back off before retrying so we don't spin hard on a bad binary.
+				time.Sleep(3 * time.Second)
+				entry.mu.Lock()
+				if entry.stopped {
+					entry.mu.Unlock()
+					return
+				}
+				entry.mu.Unlock()
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "glitch: daemonwidget: started %s (pid %d, display:%q)\n",
+				entry.sc.Name, cmd.Process.Pid, entry.sc.Display)
+
+			// Wait for the process to exit.
+			_ = cmd.Wait()
+
+			entry.mu.Lock()
+			if entry.stopped {
+				entry.mu.Unlock()
+				return
+			}
+			entry.mu.Unlock()
+
+			fmt.Fprintf(os.Stderr, "glitch: daemonwidget: %s exited unexpectedly, restarting in 3s\n", entry.sc.Name)
+			time.Sleep(3 * time.Second)
+		}
+	}()
 }
 
 // StartAll scans wrappersDir for sidecar YAMLs with daemon:true and starts
-// each eligible one as a background process. Daemons whose display requirement
-// cannot be satisfied in the current environment are skipped with a log line.
+// each eligible one as a supervised background process. Daemons whose display
+// requirement cannot be satisfied in the current environment are skipped.
 // Errors for individual daemons are printed to stderr and skipped — a single
 // bad entry will not prevent the others from launching.
 func StartAll(wrappersDir string) *Manager {
@@ -152,29 +211,24 @@ func StartAll(wrappersDir string) *Manager {
 		// previous session exited without cleanup (e.g. SIGKILL).
 		killAndWait(sc.Command)
 
-		cmd := exec.Command(sc.Command, sc.Args...)
-		cmd.Stdout = nil
-		cmd.Stderr = os.Stderr
-
-		if err := cmd.Start(); err != nil {
-			fmt.Fprintf(os.Stderr, "glitch: daemonwidget: start %q: %v\n", sc.Command, err)
-			continue
-		}
-
-		fmt.Fprintf(os.Stderr, "glitch: daemonwidget: started %s (pid %d, display:%q)\n", sc.Name, cmd.Process.Pid, sc.Display)
-		m.procs = append(m.procs, cmd)
+		de := &daemonEntry{sc: sc}
+		m.entries = append(m.entries, de)
+		m.startEntry(de)
 	}
 
 	return m
 }
 
-// Stop signals all running daemon processes to exit and reaps them.
-// Errors are ignored — best-effort cleanup on session shutdown.
+// Stop signals all running daemon processes to exit and waits for their
+// supervision goroutines to finish. Errors are ignored — best-effort cleanup.
 func (m *Manager) Stop() {
-	for _, cmd := range m.procs {
-		if cmd.Process != nil {
-			cmd.Process.Kill() //nolint:errcheck
-			cmd.Wait()         //nolint:errcheck
+	for _, de := range m.entries {
+		de.mu.Lock()
+		de.stopped = true
+		if de.cmd != nil && de.cmd.Process != nil {
+			de.cmd.Process.Kill() //nolint:errcheck
 		}
+		de.mu.Unlock()
 	}
+	m.wg.Wait()
 }

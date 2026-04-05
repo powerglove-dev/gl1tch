@@ -69,23 +69,21 @@ func (tp ThemePicker) currentBundle(dark, light []themes.Bundle) *themes.Bundle 
 	return &bundles[idx]
 }
 
-// PreviewTheme applies a theme's colors to tmux and publishes a busd event
-// WITHOUT persisting to disk. Used for live preview during picker navigation.
+// PreviewTheme publishes a busd theme-changed event WITHOUT persisting to disk.
+// Used for live preview during picker navigation.
 func PreviewTheme(bundle themes.Bundle) {
-	themes.ApplyTmux(&bundle)
 	if sockPath, err := busd.SocketPath(); err == nil {
 		_ = busd.PublishEvent(sockPath, themes.TopicThemeChanged, themes.ThemeChangedPayload{Name: bundle.Name})
 	}
 }
 
-// ApplyThemeSelection activates the chosen theme: updates the registry, applies
-// tmux colors, publishes a busd event, persists to disk, and rebuilds the
-// global translation chain so theme-bundled strings take effect immediately.
+// ApplyThemeSelection activates the chosen theme: updates the registry,
+// publishes a busd event, persists to disk, and rebuilds the global
+// translation chain so theme-bundled strings take effect immediately.
 func ApplyThemeSelection(chosen themes.Bundle) {
 	if gr := themes.GlobalRegistry(); gr != nil {
 		_ = gr.SetActive(chosen.Name)
 	}
-	themes.ApplyTmux(&chosen)
 	if sockPath, err := busd.SocketPath(); err == nil {
 		_ = busd.PublishEvent(sockPath, themes.TopicThemeChanged, themes.ThemeChangedPayload{Name: chosen.Name})
 	}

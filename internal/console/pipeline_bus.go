@@ -338,14 +338,6 @@ func (m Model) handlePipelineBusEvent(msg pipelineBusEventMsg) Model {
 				status: FeedRunning,
 				ts:     time.Now(),
 			}
-			// Inherit the tmux window from the active job handle so signal board
-			// "enter" can navigate to the running pipeline window.
-			for _, jh := range m.activeJobs {
-				if jh.pipelineName == payload.Pipeline {
-					entry.tmuxWindow = jh.tmuxWindow
-					break
-				}
-			}
 			m = m.prependFeedEntry(entry)
 		}
 

@@ -1,113 +1,81 @@
 package console
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// currentTmuxSession returns the name of the current tmux session by reading the
-// TMUX environment variable or falling back to `tmux display-message -p '#S'`.
-func currentTmuxSession() string {
-	tmuxEnv := strings.TrimSpace(os.Getenv("TMUX"))
-	if tmuxEnv != "" {
-		// TMUX=/tmp/tmux-1000/default,12345,0 — session name is the first field,
-		// but it's actually the socket path. We need `tmux display-message -p '#S'`.
-		// Fall through to exec approach for accuracy.
-	}
-	out, err := exec.Command("tmux", "display-message", "-p", "#S").Output()
-	if err == nil {
-		return strings.TrimSpace(string(out))
-	}
-	return ""
-}
-
-// createJobWindow creates a detached tmux window named "glitch-<feedID>".
-//
-// label is the human-readable pipeline/agent name stored as the tmux user
-// option @glitch-label so the jump-window popup can display it instead of the
-// raw window name. Pass an empty string to skip setting the option.
-//
-// startDir, when non-empty, sets the working directory for the new tmux window
-// via the -c flag. Pass an empty string to inherit the session's default.
-//
-// If shellCmd is non-empty the window runs the command, tees output to logFile,
-// and writes the exit code to doneFile. remain-on-exit keeps the window alive
-// after the command finishes so the user can inspect the scrollback. Use
-// startLogWatcher to receive FeedLineMsg / jobDoneMsg / jobFailedMsg events.
-//
-// If shellCmd is empty the window runs tail -f on logFile (legacy path for
-// in-process agent jobs that write to logFile themselves).
-//
-// Returns (target, logFile, doneFile). All empty strings if tmux is unavailable.
-func createJobWindow(feedID, shellCmd, label, startDir string) (target, logFile, doneFile string) {
-	// Never create real tmux windows during go test runs.
-	if strings.HasSuffix(os.Args[0], ".test") {
-		return "", "", ""
-	}
-	if _, err := exec.LookPath("tmux"); err != nil {
-		return "", "", ""
-	}
-	session := currentTmuxSession()
-	if session == "" {
-		return "", "", ""
-	}
-	windowName := "glitch-" + feedID
+// startJobProcess runs shellCmd as a subprocess, writing stdout+stderr to
+// logFile and writing the exit code to doneFile on completion.
+// extraEnv is a space-separated list of KEY=VALUE pairs prepended to the env.
+// startDir, if non-empty, sets the working directory for the subprocess.
+// Returns (logFile, doneFile, error).
+func startJobProcess(feedID, shellCmd, startDir, extraEnv string) (logFile, doneFile string, err error) {
 	logFile = fmt.Sprintf("%s/glitch-%s.log", os.TempDir(), feedID)
 	doneFile = fmt.Sprintf("%s/glitch-%s.done", os.TempDir(), feedID)
-	target = session + ":" + windowName
 
 	// Pre-create empty log so the watcher can open it immediately.
 	os.WriteFile(logFile, nil, 0o600) //nolint:errcheck
 
-	var windowCmd string
-	if shellCmd != "" {
-		// Tee output to log file; write exit code to done file on completion;
-		// then exec $SHELL so the pane transitions to a live interactive shell
-		// rather than showing "[pane is dead]". remain-on-exit is set as a
-		// safety net in case $SHELL itself exits.
-		windowCmd = fmt.Sprintf("{ %s ; } 2>&1 | tee %s ; echo $? > %s ; exec $SHELL", shellCmd, logFile, doneFile)
-	} else {
-		// Legacy: in-process agent job — tail the log file live.
-		windowCmd = "tail -f " + logFile + " 2>/dev/null"
+	expandedDir := expandTilde(startDir)
+
+	// Build the full shell command: optional cd + optional env + shellCmd.
+	fullCmd := shellCmd
+	if expandedDir != "" {
+		fullCmd = fmt.Sprintf("cd %q && %s", expandedDir, fullCmd)
+	}
+	if extraEnv != "" {
+		fullCmd = extraEnv + " " + fullCmd
 	}
 
-	// Use -t "session:" (trailing colon) to always append at the end of the
-	// window list, avoiding index conflicts when multiple windows are created
-	// in rapid succession.
-	args := []string{"new-window", "-d", "-t", session + ":", "-n", windowName, "-P", "-F", "#{window_id}"}
-	if startDir != "" {
-		args = append(args, "-c", startDir)
+	lf, err := os.OpenFile(logFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return logFile, doneFile, fmt.Errorf("open log file: %w", err)
 	}
-	args = append(args, windowCmd)
-	out, err := exec.Command("tmux", args...).Output()
-	if err == nil {
-		if id := strings.TrimSpace(string(out)); id != "" {
-			target = session + ":" + id // stable @N ID, survives auto-rename
+
+	cmd := exec.Command("sh", "-c", fullCmd)
+	if expandedDir != "" {
+		cmd.Dir = expandedDir
+	}
+	cmd.Stdout = lf
+	cmd.Stderr = lf
+
+	if err := cmd.Start(); err != nil {
+		lf.Close()
+		return logFile, doneFile, fmt.Errorf("start job: %w", err)
+	}
+
+	go func() {
+		defer lf.Close()
+		exitCode := 0
+		if err := cmd.Wait(); err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				exitCode = exitErr.ExitCode()
+			} else {
+				exitCode = 1
+			}
 		}
-	}
+		os.WriteFile(doneFile, []byte(strconv.Itoa(exitCode)), 0o600) //nolint:errcheck
+	}()
 
-	// Keep window alive after command exits and disable auto-rename.
-	exec.Command("tmux", "set-window-option", "-t", target, "remain-on-exit", "on").Run()    //nolint:errcheck
-	exec.Command("tmux", "set-window-option", "-t", target, "automatic-rename", "off").Run() //nolint:errcheck
-	if label != "" {
-		exec.Command("tmux", "set-window-option", "-t", target, "@glitch-label", label).Run() //nolint:errcheck
-	}
-
-	return target, logFile, doneFile
+	return logFile, doneFile, nil
 }
 
 // startLogWatcher launches a background goroutine that tails logFile for new
 // content, sending FeedLineMsg values to ch. When doneFile appears it reads the
 // exit code and sends jobDoneMsg (exit 0) or jobFailedMsg (non-zero), then exits.
 func startLogWatcher(feedID, logFile, doneFile string, ch chan<- tea.Msg) {
-	// No log file means no tmux window was created (e.g. test mode). Signal
+	// No log file means no job was created (e.g. test mode). Signal
 	// done immediately so drainChan callers are not left blocking.
 	if logFile == "" {
 		close(ch)
@@ -157,111 +125,20 @@ func startLogWatcher(feedID, logFile, doneFile string, ch chan<- tea.Msg) {
 	}()
 }
 
-// currentTmuxPane returns the pane ID of the running process as set by tmux
-// in the TMUX_PANE environment variable (e.g. "%42"). Empty when not in tmux.
-func currentTmuxPane() string {
-	return strings.TrimSpace(os.Getenv("TMUX_PANE"))
-}
-
-// terminalPane holds basic info about a non-glitch pane in the current window.
+// terminalPane holds basic info about a non-glitch pane.
+// Kept for API compatibility; always empty since tmux has been removed.
 type terminalPane struct {
-	id      string // tmux pane ID, e.g. "%43"
-	index   string // tmux pane index within the window
-	command string // current command running in the pane
-	size    string // "WxH"
+	id      string
+	index   string
+	command string
+	size    string
 }
 
-// listTerminalPanes returns all panes in the current tmux window that are NOT
-// the gl1tch pane (identified by TMUX_PANE). Ordered by pane index.
-func listTerminalPanes() []terminalPane {
-	glitchID := currentTmuxPane()
-	out, err := exec.Command("tmux", "list-panes", "-F",
-		"#{pane_id}\t#{pane_index}\t#{pane_current_command}\t#{pane_width}x#{pane_height}").Output()
-	if err != nil {
-		return nil
-	}
-	var panes []terminalPane
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		parts := strings.SplitN(line, "\t", 4)
-		if len(parts) < 4 || parts[0] == glitchID {
-			continue
-		}
-		panes = append(panes, terminalPane{
-			id:      parts[0],
-			index:   parts[1],
-			command: parts[2],
-			size:    parts[3],
-		})
-	}
-	return panes
-}
+// currentTmuxPane always returns empty string since tmux has been removed.
+func currentTmuxPane() string { return "" }
 
-// createJobPane creates an inline tmux pane for a pipeline job instead of a
-// separate window. The first pipeline is split horizontally from the glitch
-// pane at 50 % (side-by-side). Subsequent pipelines are split vertically
-// below lastPaneID so they stack evenly on the right side of the screen.
-//
-// extraEnv, if non-empty, is prepended to the shell command as environment
-// variable assignments (e.g. "FORCE_COLOR=1 GLITCH_COL_ACCENT=bd93f9 ...").
-//
-// Returns (paneID, logFile, doneFile). All empty strings if tmux is
-// unavailable or no TMUX_PANE is set for the first split.
-func createJobPane(feedID, shellCmd, label, startDir, lastPaneID, extraEnv string) (paneID, logFile, doneFile string) {
-	if strings.HasSuffix(os.Args[0], ".test") {
-		return "", "", ""
-	}
-	if _, err := exec.LookPath("tmux"); err != nil {
-		return "", "", ""
-	}
-	glitchPane := currentTmuxPane()
-	if glitchPane == "" && lastPaneID == "" {
-		return "", "", ""
-	}
-
-	logFile = fmt.Sprintf("%s/glitch-%s.log", os.TempDir(), feedID)
-	doneFile = fmt.Sprintf("%s/glitch-%s.done", os.TempDir(), feedID)
-	os.WriteFile(logFile, nil, 0o600) //nolint:errcheck
-
-	envPrefix := ""
-	if extraEnv != "" {
-		envPrefix = extraEnv + " "
-	}
-	expandedDir := expandTilde(startDir)
-	cdPrefix := ""
-	if expandedDir != "" {
-		cdPrefix = fmt.Sprintf("cd %q && ", expandedDir)
-	}
-	windowCmd := fmt.Sprintf("%s%s{ %s ; } 2>&1 | tee %s ; echo $? > %s ; exec $SHELL", envPrefix, cdPrefix, shellCmd, logFile, doneFile)
-
-	var args []string
-	if lastPaneID == "" {
-		// First pipeline: split the glitch pane in half horizontally (left=glitch, right=pipeline).
-		args = []string{"split-window", "-h", "-l", "50%", "-t", glitchPane, "-P", "-F", "#{pane_id}"}
-	} else {
-		// Subsequent pipelines: split vertically below the last pipeline pane.
-		args = []string{"split-window", "-v", "-t", lastPaneID, "-P", "-F", "#{pane_id}"}
-	}
-	if expandedDir != "" {
-		args = append(args, "-c", expandedDir)
-	}
-	args = append(args, windowCmd)
-
-	out, err := exec.Command("tmux", args...).Output()
-	if err != nil {
-		return "", logFile, doneFile
-	}
-	paneID = strings.TrimSpace(string(out))
-	if paneID == "" {
-		return "", logFile, doneFile
-	}
-
-	// Keep pane alive after command exits so the user can inspect output.
-	exec.Command("tmux", "set-option", "-pt", paneID, "remain-on-exit", "on").Run() //nolint:errcheck
-	if label != "" {
-		exec.Command("tmux", "select-pane", "-t", paneID, "-T", label).Run() //nolint:errcheck
-	}
-	return paneID, logFile, doneFile
-}
+// listTerminalPanes always returns nil since tmux has been removed.
+func listTerminalPanes() []terminalPane { return nil }
 
 // expandTilde replaces a leading "~" with the user's home directory.
 // Paths that don't start with "~" are returned unchanged.

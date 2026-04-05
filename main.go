@@ -5,13 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"syscall"
 
 	"github.com/8op-org/gl1tch/cmd"
 	"github.com/8op-org/gl1tch/internal/bootstrap"
-	"github.com/8op-org/gl1tch/internal/console"
 	"github.com/8op-org/gl1tch/internal/telemetry"
 )
 
@@ -36,7 +34,6 @@ func main() {
 			return
 		case "_reload":
 			bootstrap.WriteReloadMarker() //nolint:errcheck
-			exec.Command("tmux", "detach-client").Run() //nolint:errcheck
 			return
 		case "ask", "busd", "help", "model", "pipeline", "workflow", "completion", "config", "cron", "widget", "backup", "restore", "game", "plugin":
 			cmd.Execute()
@@ -49,13 +46,7 @@ func main() {
 		}
 	}
 
-	// If already inside a tmux session, run the switchboard TUI directly —
-	// we were launched as the window command by bootstrap.
-	if os.Getenv("TMUX") != "" {
-		console.Run()
-		return
-	}
-
+	// Run bootstrap, which sets up background services and starts the TUI.
 	err = bootstrap.Run()
 	if errors.Is(err, bootstrap.ErrReload) {
 		// Replace this process with the binary on disk — picks up a newly
