@@ -78,9 +78,10 @@ type glitchRerunMsg struct {
 
 // glitchIntentMsg carries the result of an async intent-routing check.
 type glitchIntentMsg struct {
-	result *router.RouteResult
-	prompt string
-	turns  []glitchTurn
+	result      *router.RouteResult
+	prompt      string
+	turns       []glitchTurn
+	passthrough bool // true when routing is suppressed (CLI provider pass-through mode)
 }
 
 // glitchCWDMsg is returned to the deck to update the working directory.
@@ -1798,29 +1799,32 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 		st := p.store
 		turns := trimTurns(msg.turns)
 		prompt := msg.prompt
-		// Build a near-miss hint for the LLM so it can suggest the right pipeline name.
-		var nearMissHint string
-		if msg.result != nil && msg.result.NearMiss != nil {
-			nearMissHint = fmt.Sprintf("The user may be asking about the pipeline '%s' (match confidence %.0f%%). If so, suggest they say 'run %s' to trigger it directly.", msg.result.NearMiss.Name, msg.result.NearMissScore*100, msg.result.NearMiss.Name)
-		}
 		var sessResumeID string
 		if s := p.sessions.Active(); s != nil {
 			sessResumeID = s.resumeID
 		}
-		brainCtx := glitchLoadBrainContext(st)
-		if cwd := p.launchCWD; cwd != "" {
-			cwdLine := "Current working directory: " + cwd
-			if brainCtx != "" {
-				brainCtx = cwdLine + "\n" + brainCtx
-			} else {
-				brainCtx = cwdLine
+		var brainCtx string
+		if !msg.passthrough {
+			// Build a near-miss hint for the LLM so it can suggest the right pipeline name.
+			var nearMissHint string
+			if msg.result != nil && msg.result.NearMiss != nil {
+				nearMissHint = fmt.Sprintf("The user may be asking about the pipeline '%s' (match confidence %.0f%%). If so, suggest they say 'run %s' to trigger it directly.", msg.result.NearMiss.Name, msg.result.NearMissScore*100, msg.result.NearMiss.Name)
 			}
-		}
-		if nearMissHint != "" {
-			if brainCtx != "" {
-				brainCtx = brainCtx + "\n" + nearMissHint
-			} else {
-				brainCtx = nearMissHint
+			brainCtx = glitchLoadBrainContext(st)
+			if cwd := p.launchCWD; cwd != "" {
+				cwdLine := "Current working directory: " + cwd
+				if brainCtx != "" {
+					brainCtx = cwdLine + "\n" + brainCtx
+				} else {
+					brainCtx = cwdLine
+				}
+			}
+			if nearMissHint != "" {
+				if brainCtx != "" {
+					brainCtx = brainCtx + "\n" + nearMissHint
+				} else {
+					brainCtx = nearMissHint
+				}
 			}
 		}
 		return p, tea.Batch(glitchTick(), func() tea.Msg {
@@ -1836,21 +1840,21 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 
 	case glitchNarrationMsg:
 		if msg.text != "" {
-			p.messages = append(p.messages, glitchEntry{
+			appendNotification(&p, glitchEntry{
 				who:  glitchSpeakerBot,
 				text: msg.text,
 				ts:   time.Now(),
-			})
+			}, false)
 		}
 		return p, nil
 
 	case glitchWidgetOutputMsg:
 		if msg.text != "" {
-			p.messages = append(p.messages, glitchEntry{
+			appendNotification(&p, glitchEntry{
 				who:         glitchSpeakerGame,
 				text:        msg.text,
 				widgetLabel: msg.speaker,
-			})
+			}, false)
 		}
 		return p, nil
 
@@ -2557,7 +2561,7 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 							if s.name == p.sessions.active {
 								marker = "▶ "
 							}
-							lines = append(lines, fmt.Sprintf("%s%d: %s", marker, i+1, s.name))
+							lines = append(lines, fmt.Sprintf("%s%d: %s", marker, i+1, sessionDisplayName(s.name)))
 						}
 						lines = append(lines, "\nuse /session <name|#> — switch or create\n    /session new <name> — explicit create\n    /session delete <name> — remove a session")
 						p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: strings.Join(lines, "\n")})
@@ -2620,16 +2624,19 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					}
 					var switchCmd tea.Cmd
 					p, switchCmd = p.switchToSession(name)
-					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "▶ session: " + name})
+					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "▶ session: " + sessionDisplayName(name)})
 					return p, tea.Batch(switchCmd, saveSessionsCmd(p.cfgDir, p.sessions, p.sessions.active, p.launchCWD, p.backend))
 				case "/clear":
 					glitchExtractUserModel(p.turns, p.store, p.backend)
 					p.messages = nil
 					p.turns = nil
-					// Keep the active session's stored state in sync.
+					// Keep the active session's stored state in sync and reset the
+					// provider resume ID so the next exchange starts a fresh conversation.
 					if cur := p.sessions.Active(); cur != nil {
 						cur.messages = nil
 						cur.turns = nil
+						cur.resumeID = ""
+						cur.resumed = false
 					}
 					p.scrollOffset = 0
 					p.scrollFocused = false
@@ -2876,6 +2883,33 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					text: "no provider available. run /models to pick one, or check your config.",
 				})
 				return p, nil
+			}
+			// In a CLI provider session (any session other than "main"), gl1tch stays
+			// silent and passes input straight to the provider. The intent router only
+			// engages when the user explicitly prefixes with @glitch or @gl1tch.
+			// The "main" session is the gl1tch home — routing is always active there.
+			if _, isCLI := p.backend.(*glitchCLIBackend); isCLI && p.sessions.active != "main" {
+				glitchPrefixes := []string{"@glitch ", "@gl1tch "}
+				matched := ""
+				for _, pfx := range glitchPrefixes {
+					if strings.HasPrefix(strings.ToLower(userText), pfx) {
+						matched = pfx
+						break
+					}
+				}
+				if matched == "" {
+					// Pure pass-through: no routing, no brain context, no spinner.
+					turns := trimTurns(p.turns[:len(p.turns)-1])
+					userTextCopy := userText
+					p.streaming = true
+					return p, tea.Batch(glitchTick(), func() tea.Msg {
+						return glitchIntentMsg{result: nil, prompt: userTextCopy, turns: turns, passthrough: true}
+					})
+				}
+				// Strip the @glitch/@gl1tch prefix and route normally.
+				stripped := userText[len(matched):]
+				p.turns[len(p.turns)-1].text = stripped
+				userText = stripped
 			}
 			// Try intent routing before falling back to LLM chat.
 			// The router owns intent classification — no pre-filtering here.
@@ -3152,6 +3186,32 @@ func (p glitchChatPanel) buildRunAnalysisPrompt(run store.Run, failed bool) stri
 	return sb.String()
 }
 
+// ── Notification routing ──────────────────────────────────────────────────────
+
+// appendNotification routes a bot-initiated entry to the "main" session so
+// notifications never appear inside CLI-provider chat sessions.
+// If "main" is already active the entry goes to p.messages directly.
+// Otherwise it is buffered into the "main" session object and "main" is marked
+// as needing attention so the tab badge lights up.
+// urgent=true uses markAttention (higher priority badge) instead of markUnread.
+func appendNotification(p *glitchChatPanel, entry glitchEntry, urgent bool) {
+	if p.sessions == nil || p.sessions.active == "main" {
+		p.messages = append(p.messages, entry)
+		return
+	}
+	if s := p.sessions.get("main"); s != nil {
+		s.messages = append(s.messages, entry)
+		if urgent {
+			p.sessions.markAttention("main")
+		} else {
+			p.sessions.markUnread("main")
+		}
+		return
+	}
+	// Fallback: "main" session not found — go to active session.
+	p.messages = append(p.messages, entry)
+}
+
 // ── Clarification routing ─────────────────────────────────────────────────────
 
 // injectClarification receives a ClarificationRequest and queues it for
@@ -3181,11 +3241,11 @@ func (p glitchChatPanel) injectClarification(req store.ClarificationRequest) (gl
 			names = append(names, pipelineNameFromReq(r))
 		}
 		summary := fmt.Sprintf("%d pipelines need input: %s", len(p.batchAccum), strings.Join(names, ", "))
-		p.messages = append(p.messages, glitchEntry{
+		appendNotification(&p, glitchEntry{
 			who:  glitchSpeakerBot,
 			text: summary,
 			ts:   now,
-		})
+		}, true)
 	}
 
 	for _, r := range p.batchAccum {
@@ -3203,14 +3263,14 @@ func (p glitchChatPanel) injectClarification(req store.ClarificationRequest) (gl
 			if urgent {
 				intro = pname + " is blocked — needs input now"
 			}
-			p.messages = append(p.messages, glitchEntry{
+			appendNotification(&p, glitchEntry{
 				who:  glitchSpeakerBot,
 				text: intro,
 				ts:   now,
-			})
+			}, true)
 		}
 
-		p.messages = append(p.messages, glitchEntry{
+		appendNotification(&p, glitchEntry{
 			who: glitchSpeakerBot,
 			ts:  now,
 			clarification: &clarificationMeta{
@@ -3220,7 +3280,7 @@ func (p glitchChatPanel) injectClarification(req store.ClarificationRequest) (gl
 				question:     r.Question,
 			},
 			text: r.Question,
-		})
+		}, true)
 		if urgent {
 			p.clarificationUrgent = true
 		}

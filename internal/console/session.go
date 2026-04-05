@@ -54,6 +54,15 @@ func newSessionRegistry() *SessionRegistry {
 	}
 }
 
+// sessionDisplayName returns the human-facing label for a session.
+// The canonical "main" session is branded as "gl1tch" in the UI.
+func sessionDisplayName(name string) string {
+	if name == "main" {
+		return "gl1tch"
+	}
+	return name
+}
+
 // Active returns the currently active session.
 func (r *SessionRegistry) Active() *chatSession {
 	return r.get(r.active)

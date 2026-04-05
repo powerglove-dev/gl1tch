@@ -3301,16 +3301,17 @@ func (m Model) renderSessionFooter(w int) string {
 
 	var parts []string
 	for _, s := range reg.sessions {
+		displayName := sessionDisplayName(s.name)
 		var label string
 		switch {
 		case s.name == reg.active:
-			label = pal.Accent + "▶ " + s.name + panelrender.RST
+			label = pal.Accent + "▶ " + displayName + panelrender.RST
 		case s.status == SessionAttention:
-			label = pal.Error + "● " + s.name + panelrender.RST
+			label = pal.Error + "● " + displayName + panelrender.RST
 		case s.status == SessionUnread:
-			label = pal.Accent + "○ " + s.name + panelrender.RST
+			label = pal.Accent + "○ " + displayName + panelrender.RST
 		default:
-			label = pal.Dim + s.name + panelrender.RST
+			label = pal.Dim + displayName + panelrender.RST
 		}
 		parts = append(parts, label)
 	}
