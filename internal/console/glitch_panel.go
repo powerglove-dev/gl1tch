@@ -2128,7 +2128,7 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 			// Exception: session-switching commands (/session, /s) are always passed
 			// through so the user can switch sessions without exiting the widget first.
 			widgetCmd := strings.Fields(userText)[0]
-			if p.activeWidget != nil && widgetCmd != "/session" && widgetCmd != "/s" {
+			if p.activeWidget != nil && widgetCmd != "/session" && widgetCmd != "/s" && widgetCmd != "/quit" {
 				cfg := p.activeWidget
 				if userText == cfg.Schema.Mode.ExitCommand {
 					// Close the process stdin so the binary's scanner loop exits cleanly.
