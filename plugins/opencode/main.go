@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/8op-org/gl1tch/glitchctx"
 )
 
 // pullOllamaModel ensures the Ollama model is present, pulling it only when necessary.
@@ -177,6 +179,7 @@ func run(
 		return 1, fmt.Errorf("pulling Ollama model: %w", err)
 	}
 
-	code := executor(model, prompt, stdout, stderr)
+	fullPrompt := glitchctx.BuildShellContext() + "\n## User Request\n" + prompt
+	code := executor(model, fullPrompt, stdout, stderr)
 	return code, nil
 }

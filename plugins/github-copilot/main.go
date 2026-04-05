@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/8op-org/gl1tch/glitchctx"
 )
 
 func main() {
@@ -34,14 +37,14 @@ var knownModels = []struct {
 // execCopilot runs `copilot --prompt <prompt> [--model <model>]`.
 // --allow-all is intentionally omitted: it causes the CLI to explore the local
 // codebase before answering, which blocks indefinitely for large prompts.
-// Without it, tool calls fail fast and the model answers from inline context.
 func execCopilot(model, prompt string, stdout, stderr io.Writer) int {
 	args := []string{"--prompt", prompt}
 	if model != "" {
 		args = append(args, "--model", model)
 	}
 	cmd := exec.Command("copilot", args...)
-	cmd.Stdout = stdout
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
 		if exit, ok := err.(*exec.ExitError); ok {
@@ -50,6 +53,9 @@ func execCopilot(model, prompt string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+
+	out := glitchctx.ProcessBlocks(buf.String(), stdout, stderr)
+	fmt.Fprint(stdout, out)
 	return 0
 }
 
@@ -61,7 +67,6 @@ func run(
 	stderr io.Writer,
 	executor func(model, prompt string, stdout, stderr io.Writer) int,
 ) (int, error) {
-	// Handle --list-models before any binary checks.
 	for _, arg := range args {
 		if arg == "--list-models" {
 			out, err := json.Marshal(knownModels)
@@ -86,6 +91,7 @@ func run(
 		return 1, fmt.Errorf("prompt is required: no input received on stdin")
 	}
 
+	fullPrompt := glitchctx.ProtocolInstructions + glitchctx.BuildShellContext() + "\n## User Request\n" + prompt
 	model := os.Getenv("GLITCH_MODEL")
-	return executor(model, prompt, stdout, stderr), nil
+	return executor(model, fullPrompt, stdout, stderr), nil
 }

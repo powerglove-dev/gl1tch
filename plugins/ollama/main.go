@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/8op-org/gl1tch/glitchctx"
 )
 
 func main() {
@@ -232,7 +234,8 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, get
 		}
 	}
 
-	result, err := callOllama(baseURL, model, prompt, options)
+	fullPrompt := glitchctx.ProtocolInstructions + glitchctx.BuildShellContext() + "\n## User Request\n" + prompt
+	result, err := callOllama(baseURL, model, fullPrompt, options)
 	if err != nil {
 		// Reactive fallback: model may have become unavailable between the check and inference.
 		if strings.Contains(err.Error(), "not found") {
@@ -250,7 +253,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, get
 		}
 	}
 
-	fmt.Fprint(stdout, result.Response)
+	fmt.Fprint(stdout, glitchctx.ProcessBlocks(result.Response, stdout, stderr))
 
 	// Emit token usage as a gl1tch-stats line so the gl1tch game engine can
 	// award XP based on actual token counts from the Ollama API response.
