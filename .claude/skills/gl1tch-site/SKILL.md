@@ -229,12 +229,13 @@ sleep <N>
 ```
 
 **Step: screenshot** (group=console, name=welcome)
-```bash
-REPO="/Users/stokes/Projects/gl1tch"
-mkdir -p "$REPO/site/public/screenshots/console"
-WIN_ID=$(osascript -e 'tell application "iTerm2" to get id of front window')
-screencapture -x -l "$WIN_ID" "$REPO/site/public/screenshots/console/welcome.png"
+
+Use **Cmd+Shift+4 → Space → click the iTerm2 window** to capture just the window. Save to:
 ```
+site/public/screenshots/<group>/<name>.png
+```
+
+> `screencapture -l` requires Screen Recording permission granted to the *calling process*. If running from a Claude Code session that permission is not reliably held. Manual Cmd+Shift+4 window capture always works and produces a clean, shadow-free PNG at the correct retina resolution.
 
 **Step: quit**
 ```bash

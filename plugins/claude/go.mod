@@ -1,3 +1,3 @@
-module github.com/adam-stokes/orcai-plugins/plugins/claude
+module github.com/adam-stokes/gl1tch-plugins/plugins/claude
 
-go 1.26.1
+go 1.24.0
