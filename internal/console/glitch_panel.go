@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -96,6 +97,39 @@ type glitchWidgetModeMsg struct{ cfg *WidgetConfig }
 type glitchWidgetOutputMsg struct {
 	text    string
 	speaker string // label shown in the chat panel
+}
+
+// widgetProcess holds a running widget binary with its I/O pipes.
+// It is stored in chatSession so the process survives session switches.
+type widgetProcess struct {
+	cmd   *exec.Cmd
+	stdin io.WriteCloser
+	outCh <-chan string // one line per send; closed when process exits
+}
+
+// sendLine writes text followed by a newline to the widget's stdin.
+func (wp *widgetProcess) sendLine(text string) error {
+	_, err := fmt.Fprintln(wp.stdin, text)
+	return err
+}
+
+// glitchWidgetLineMsg carries a single line of stdout/stderr from a
+// persistent widget process. session identifies which chatSession owns it.
+type glitchWidgetLineMsg struct {
+	line    string
+	speaker string
+	session string
+}
+
+// glitchWidgetExitedMsg is dispatched when a persistent widget process exits.
+type glitchWidgetExitedMsg struct{ session string }
+
+// glitchWidgetStartedMsg is dispatched when widgetStartCmd successfully
+// launches the widget binary. The proc is ready to receive input.
+type glitchWidgetStartedMsg struct {
+	proc    *widgetProcess
+	cfg     *WidgetConfig
+	session string
 }
 
 // glitchModelMsg is returned to the deck after a model switch (informational).
@@ -1281,6 +1315,69 @@ func widgetExecCmd(cfg *WidgetConfig, input string) tea.Cmd {
 	}
 }
 
+// widgetStartCmd launches the widget binary as a persistent process and returns
+// a glitchWidgetStartedMsg on success or glitchNarrationMsg on failure.
+func widgetStartCmd(cfg *WidgetConfig, sessionName string) tea.Cmd {
+	return func() tea.Msg {
+		binary, err := exec.LookPath(cfg.Schema.Command) //nolint:gosec
+		if err != nil {
+			hint := "not found"
+			if cfg.Schema.Description != "" {
+				hint = cfg.Schema.Description
+			}
+			return glitchNarrationMsg{text: cfg.Schema.Name + " not found — " + hint}
+		}
+		cmd := exec.Command(binary) //nolint:gosec
+		stdinPipe, err := cmd.StdinPipe()
+		if err != nil {
+			return glitchNarrationMsg{text: cfg.Schema.Name + ": stdin pipe: " + err.Error()}
+		}
+		stdoutPipe, err := cmd.StdoutPipe()
+		if err != nil {
+			return glitchNarrationMsg{text: cfg.Schema.Name + ": stdout pipe: " + err.Error()}
+		}
+		stderrPipe, err := cmd.StderrPipe()
+		if err != nil {
+			return glitchNarrationMsg{text: cfg.Schema.Name + ": stderr pipe: " + err.Error()}
+		}
+		if err := cmd.Start(); err != nil {
+			return glitchNarrationMsg{text: "failed to start " + cfg.Schema.Name + ": " + err.Error()}
+		}
+		outCh := make(chan string, 32)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		scanLines := func(r io.Reader) {
+			defer wg.Done()
+			sc := bufio.NewScanner(r)
+			for sc.Scan() {
+				outCh <- sc.Text()
+			}
+		}
+		go scanLines(stdoutPipe)
+		go scanLines(stderrPipe)
+		go func() {
+			wg.Wait()
+			close(outCh)
+			cmd.Wait() //nolint:errcheck
+		}()
+		proc := &widgetProcess{cmd: cmd, stdin: stdinPipe, outCh: outCh}
+		return glitchWidgetStartedMsg{proc: proc, cfg: cfg, session: sessionName}
+	}
+}
+
+// widgetReadLineCmd waits for the next line from a persistent widget process
+// and returns it as a glitchWidgetLineMsg. Returns glitchWidgetExitedMsg when
+// the process exits (outCh closed).
+func widgetReadLineCmd(proc *widgetProcess, speaker, session string) tea.Cmd {
+	return func() tea.Msg {
+		line, ok := <-proc.outCh
+		if !ok {
+			return glitchWidgetExitedMsg{session: session}
+		}
+		return glitchWidgetLineMsg{line: line, speaker: speaker, session: session}
+	}
+}
+
 func buildPanelRouter(cfgDir string) *router.HybridRouter {
 	mgr := executor.NewManager()
 	if cfgDir != "" {
@@ -1403,8 +1500,9 @@ func newGlitchPanel(cfgDir string, providers []picker.ProviderDef, s *store.Stor
 			}
 		}
 		// Switch to the previously active session (non-main only).
+		// Discard the cmd — no widget processes survive restart.
 		if activeName != "main" && p.sessions.get(activeName) != nil {
-			p = p.switchToSession(activeName)
+			p, _ = p.switchToSession(activeName)
 		}
 	}
 
@@ -1421,20 +1519,26 @@ func (p *glitchChatPanel) setBackendCWD(dir string) {
 	}
 }
 
-// switchToSession saves the current session's messages/turns/cwd/backend into
-// the registry, switches the active session to name, and loads that session's state.
-func (p glitchChatPanel) switchToSession(name string) glitchChatPanel {
+// switchToSession saves the current session's state into the registry, switches
+// the active session to name, and loads that session's state. Returns a Cmd to
+// restart reading from a widget process if the incoming session has one running,
+// or to clear the TDF header if we are leaving a widget session.
+func (p glitchChatPanel) switchToSession(name string) (glitchChatPanel, tea.Cmd) {
+	prevWidget := p.activeWidget // remember before we overwrite
 	if cur := p.sessions.Active(); cur != nil {
 		glitchExtractUserModel(p.turns, p.store, p.backend)
 		cur.messages = p.messages
 		cur.turns = p.turns
 		cur.cwd = p.launchCWD
 		cur.backend = p.backend
+		cur.activeWidget = p.activeWidget
+		// widgetProc is a pointer already stored in cur; no copy needed.
 	}
 	p.sessions.switchTo(name)
 	next := p.sessions.Active()
 	p.messages = next.messages
 	p.turns = next.turns
+	p.activeWidget = next.activeWidget
 	if next.cwd != "" {
 		p.launchCWD = next.cwd
 		p.setBackendCWD(next.cwd)
@@ -1444,7 +1548,24 @@ func (p glitchChatPanel) switchToSession(name string) glitchChatPanel {
 	}
 	p.scrollOffset = 0
 	p.scrollFocused = false
-	return p
+
+	// Only touch the TDF header when widget mode changes:
+	//   entering a widget session → restore logo and restart read loop
+	//   leaving a widget session  → clear the logo
+	// Normal session switches (no widgets) fire no extra cmd.
+	var cmd tea.Cmd
+	if next.widgetProc != nil && next.activeWidget != nil {
+		cfg := next.activeWidget
+		proc := next.widgetProc
+		cmd = tea.Batch(
+			func() tea.Msg { return glitchWidgetModeMsg{cfg: cfg} },
+			widgetReadLineCmd(proc, cfg.Schema.Mode.Speaker, name),
+		)
+	} else if prevWidget != nil {
+		// Leaving a widget session — clear the TDF header.
+		cmd = func() tea.Msg { return glitchWidgetModeMsg{cfg: nil} }
+	}
+	return p, cmd
 }
 
 // initCmd returns the init Cmd for the GLITCH panel (intro streaming if first run,
@@ -1733,6 +1854,60 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 		}
 		return p, nil
 
+	case glitchWidgetStartedMsg:
+		// Attach the running process to its session and begin reading output.
+		if s := p.sessions.get(msg.session); s != nil {
+			s.widgetProc = msg.proc
+		}
+		if msg.session == p.sessions.active {
+			p.activeWidget = msg.cfg
+			cmds := []tea.Cmd{
+				func() tea.Msg { return glitchWidgetModeMsg{cfg: msg.cfg} },
+				widgetReadLineCmd(msg.proc, msg.cfg.Schema.Mode.Speaker, msg.session),
+			}
+			if msg.cfg.Schema.Mode.OnActivate != "" {
+				msg.proc.sendLine(msg.cfg.Schema.Mode.OnActivate) //nolint:errcheck
+			}
+			return p, tea.Batch(cmds...)
+		}
+		return p, nil
+
+	case glitchWidgetLineMsg:
+		// Output from a persistent widget process — route to the owning session.
+		entry := glitchEntry{who: glitchSpeakerGame, text: msg.line, widgetLabel: msg.speaker}
+		if msg.session == p.sessions.active {
+			if msg.line != "" {
+				p.messages = append(p.messages, entry)
+			}
+			// Keep the read loop going.
+			if s := p.sessions.get(msg.session); s != nil && s.widgetProc != nil {
+				return p, widgetReadLineCmd(s.widgetProc, msg.speaker, msg.session)
+			}
+		} else {
+			// Append to the background session and mark it unread.
+			if s := p.sessions.get(msg.session); s != nil {
+				if msg.line != "" {
+					s.messages = append(s.messages, entry)
+					p.sessions.markUnread(msg.session)
+				}
+				if s.widgetProc != nil {
+					return p, widgetReadLineCmd(s.widgetProc, msg.speaker, msg.session)
+				}
+			}
+		}
+		return p, nil
+
+	case glitchWidgetExitedMsg:
+		// Widget process exited — clean up and clear widget mode if active.
+		if s := p.sessions.get(msg.session); s != nil {
+			s.widgetProc = nil
+		}
+		if msg.session == p.sessions.active {
+			p.activeWidget = nil
+			return p, func() tea.Msg { return glitchWidgetModeMsg{cfg: nil} }
+		}
+		return p, nil
+
 	case clarificationUrgencyTickMsg:
 		p = p.reevaluateUrgency()
 		return p, clarificationUrgencyTick()
@@ -1948,18 +2123,33 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 				return p.handlePipelineFlowInput(userText)
 			}
 
-			// Widget mode: route ALL input to the active widget binary before any
+			// Widget mode: route ALL input to the active widget process before any
 			// glitch slash-command handling so /help, /quit, etc. are not intercepted.
 			if p.activeWidget != nil {
 				cfg := p.activeWidget
 				if userText == cfg.Schema.Mode.ExitCommand {
+					// Close the process stdin so the binary's scanner loop exits cleanly.
+					if s := p.sessions.Active(); s != nil && s.widgetProc != nil {
+						s.widgetProc.stdin.Close()
+						s.widgetProc = nil
+					}
 					p.activeWidget = nil
 					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
 					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: cfg.Schema.Name + " deactivated."})
 					return p, func() tea.Msg { return glitchWidgetModeMsg{cfg: nil} }
 				}
 				p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
-				return p, widgetExecCmd(cfg, userText)
+				// Write to the persistent process stdin; output streams back via widgetReadLineCmd.
+				if s := p.sessions.Active(); s != nil && s.widgetProc != nil {
+					proc := s.widgetProc
+					if err := proc.sendLine(userText); err != nil {
+						// Process died unexpectedly.
+						s.widgetProc = nil
+						p.activeWidget = nil
+						return p, func() tea.Msg { return glitchWidgetModeMsg{cfg: nil} }
+					}
+				}
+				return p, nil
 			}
 
 			// Handle slash commands before appending to conversation.
@@ -2386,6 +2576,11 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "cannot delete the active session — switch to another session first"})
 							return p, nil
 						}
+						// Kill any running widget process before removing the session.
+						if s := p.sessions.get(target); s != nil && s.widgetProc != nil {
+							s.widgetProc.stdin.Close()
+							s.widgetProc = nil
+						}
 						if !p.sessions.delete(target) {
 							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "session '" + target + "' not found"})
 							return p, nil
@@ -2420,9 +2615,10 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 						s.cwd = p.launchCWD
 						s.backend = p.backend
 					}
-					p = p.switchToSession(name)
+					var switchCmd tea.Cmd
+					p, switchCmd = p.switchToSession(name)
 					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "▶ session: " + name})
-					return p, saveSessionsCmd(p.cfgDir, p.sessions, p.sessions.active, p.launchCWD, p.backend)
+					return p, tea.Batch(switchCmd, saveSessionsCmd(p.cfgDir, p.sessions, p.sessions.active, p.launchCWD, p.backend))
 				case "/clear":
 					glitchExtractUserModel(p.turns, p.store, p.backend)
 					p.messages = nil
@@ -2661,25 +2857,28 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 					if p.widgetRegistry != nil {
 						if cfg := p.widgetRegistry.FindByTrigger(cmd); cfg != nil {
 							p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
-							if p.activeWidget != nil {
-								p.messages = append(p.messages, glitchEntry{
-									who:  glitchSpeakerBot,
-									text: cfg.Schema.Mode.Speaker + " already active. type '" + cfg.Schema.Mode.ExitCommand + "' to exit.",
-								})
-								return p, nil
+							sessionName := cfg.Schema.Name
+
+							// If a session for this widget already exists, switch to it.
+							if existing := p.sessions.get(sessionName); existing != nil {
+								var switchCmd tea.Cmd
+								p, switchCmd = p.switchToSession(sessionName)
+								p.messages = append(p.messages, glitchEntry{who: glitchSpeakerBot, text: "▶ session: " + sessionName})
+								return p, tea.Batch(switchCmd, saveSessionsCmd(p.cfgDir, p.sessions, p.sessions.active, p.launchCWD, p.backend))
 							}
-							p.activeWidget = cfg
+
+							// Create a new session for this widget and start its process.
+							s := p.sessions.create(sessionName)
+							s.cwd = p.launchCWD
+							s.backend = p.backend
+							s.activeWidget = cfg
+							var switchCmd tea.Cmd
+							p, switchCmd = p.switchToSession(sessionName)
 							p.messages = append(p.messages, glitchEntry{
 								who:  glitchSpeakerBot,
-								text: "activating " + cfg.Schema.Name + ". i'll be watching.",
+								text: "launching " + cfg.Schema.Name + " — starting up...",
 							})
-							cmds := []tea.Cmd{
-								func() tea.Msg { return glitchWidgetModeMsg{cfg: cfg} },
-							}
-							if cfg.Schema.Mode.OnActivate != "" {
-								cmds = append(cmds, widgetExecCmd(cfg, cfg.Schema.Mode.OnActivate))
-							}
-							return p, tea.Batch(cmds...)
+							return p, tea.Batch(switchCmd, widgetStartCmd(cfg, sessionName), saveSessionsCmd(p.cfgDir, p.sessions, p.sessions.active, p.launchCWD, p.backend))
 						}
 					}
 				}

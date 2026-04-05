@@ -35,6 +35,10 @@ type chatSession struct {
 	resumeID  string        // provider-side conversation ID for resumption (e.g. Claude session_id)
 	createdAt time.Time     // when this session was first created
 	resumed   bool          // true when history was loaded from history.jsonl on startup
+
+	// Widget sessions: non-nil when this session is owned by a plugin widget.
+	activeWidget *WidgetConfig  // the widget config for this session
+	widgetProc   *widgetProcess // the running widget process (nil until started)
 }
 
 // SessionRegistry manages named chat sessions.
