@@ -1,0 +1,9 @@
+name: session-tabs
+description: Footer tab bar showing gl1tch tab and an active claude provider session tab
+group: console
+steps:
+  - launch: glitch
+  - wait_for: "ask glitch"
+  - send: "/session new claude"
+  - wait_for: "▶ session: claude"
+  - screenshot: session_tabs

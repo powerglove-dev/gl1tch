@@ -157,7 +157,9 @@ After editing, open a PR targeting `main` with your `site/**` changes. CI/CD han
 
 ## Mode 3: Screenshots
 
-Screenshots are PNG assets committed to `site/public/screenshots/<group>/`. They are rendered from tmux ANSI output via `tuishot` — not screencapture, not browser screenshots.
+Screenshots are PNG assets committed to `site/public/screenshots/<group>/`. They are captured from a live gl1tch TUI running in iTerm2 using `screencapture` — not tmux, not tuishot.
+
+**All screenshots must be the same size.** The standard window geometry is **120 columns × 50 rows**. Always set this before capturing.
 
 ### Scenario files
 
@@ -169,70 +171,89 @@ description: gl1tch main console ready state — shown on the homepage
 group: console
 steps:
   - launch: glitch
-  - wait_for: "ask glitch"
+  - wait: 3
   - screenshot: welcome
 ```
 
 ```yaml
-name: pipeline-run
-description: A pipeline run mid-execution, showing step progress
-group: pipelines
+name: session-tabs
+description: Footer tab bar showing gl1tch tab and an active claude session
+group: console
 steps:
   - launch: glitch
-  - send: "/pipeline run docs-improve --input 'quickstart'"
-  - wait_for: "[step:"
-  - screenshot: pipeline-mid-run
+  - wait: 3
+  - send: "/session new claude"
+  - wait: 2
+  - screenshot: session_tabs
 ```
 
 **Scenario step reference:**
 
 | step | what it does |
 |------|-------------|
-| `launch: glitch` | Ensures a `glitch-site` tmux session exists with gl1tch running. Creates it if missing. |
-| `send: "<text>"` | `tmux send-keys -t glitch-site "<text>" Enter` |
-| `wait_for: "<str>"` | Polls `tmux capture-pane -p -e -t glitch-site` until `<str>` appears. 10s timeout. |
-| `screenshot: <name>` | Captures and renders the pane to `site/public/screenshots/<group>/<name>.png` |
-| `clear` | Sends Ctrl+C, waits 1 second |
+| `launch: glitch` | Opens a new iTerm2 window at 120×50, runs `glitch`, brings iTerm2 to front |
+| `send: "<text>"` | `osascript` write text → Enter in the current iTerm2 session |
+| `wait: N` | `sleep N` — pause N seconds for TUI to render |
+| `screenshot: <name>` | Captures the iTerm2 window to `site/public/screenshots/<group>/<name>.png` |
+| `quit` | Sends `/quit` Enter, sleeps 1s, closes the iTerm2 window |
 
 ### Executing a scenario
 
-Read the YAML and execute each step with tmux. The session name is always `glitch-site`. Example shell sequence for a single scenario:
+Read the YAML and execute each step using osascript + screencapture. The group comes from the scenario frontmatter.
 
+**Step: launch**
 ```bash
-SESSION="glitch-site"
-REPO="/Users/stokes/Projects/gl1tch"
-
-# Ensure session exists with gl1tch running
-tmux has-session -t "$SESSION" 2>/dev/null || \
-  tmux new-session -d -s "$SESSION" -x 220 -y 50 \
-    bash -c "GLITCH_CONFIG_DIR=~/.config/glitch $REPO/gl1tch"
-
-# For each step, execute accordingly...
-
-# Capture + render for a screenshot step (group=console, name=welcome):
-TMPFILE=$(mktemp)
-tmux capture-pane -p -e -t "$SESSION" > "$TMPFILE"
-mkdir -p "$REPO/site/public/screenshots/console"
-~/.local/bin/tuishot -o "$REPO/site/public/screenshots/console/welcome.png" < "$TMPFILE"
-rm -f "$TMPFILE"
+osascript <<'ASEOF'
+tell application "iTerm2"
+  activate
+  set newWindow to (create window with default profile)
+  tell newWindow
+    tell current session
+      set columns to 120
+      set rows to 50
+      write text "glitch"
+    end tell
+  end tell
+end tell
+ASEOF
 ```
 
-If `tuishot` is not built:
+**Step: send**
 ```bash
-go build -o ~/.local/bin/tuishot /Users/stokes/Projects/gl1tch/cmd/tuishot/
+osascript -e 'tell application "iTerm2" to tell current window to tell current session to write text "<text>"'
+```
+
+**Step: wait**
+```bash
+sleep <N>
+```
+
+**Step: screenshot** (group=console, name=welcome)
+```bash
+REPO="/Users/stokes/Projects/gl1tch"
+mkdir -p "$REPO/site/public/screenshots/console"
+WIN_ID=$(osascript -e 'tell application "iTerm2" to get id of front window')
+screencapture -x -l "$WIN_ID" "$REPO/site/public/screenshots/console/welcome.png"
+```
+
+**Step: quit**
+```bash
+osascript -e 'tell application "iTerm2" to tell current window to tell current session to write text "/quit"'
+sleep 1
+osascript -e 'tell application "iTerm2" to tell front window to close'
 ```
 
 ### Refreshing all screenshots
 
-When the user asks to "refresh screenshots" or "update screenshots for the site", loop all scenario files:
+When the user asks to "refresh screenshots" or "update screenshots for the site", execute each scenario file sequentially:
 
 ```bash
 for f in /Users/stokes/Projects/gl1tch/site/src/scenarios/*.yaml; do
-  # execute scenario $f
+  # read and execute scenario $f
 done
 ```
 
-Execute scenarios sequentially. After all run, commit the changed PNGs:
+After all scenarios complete, commit the changed PNGs:
 
 ```bash
 git add site/public/screenshots/
