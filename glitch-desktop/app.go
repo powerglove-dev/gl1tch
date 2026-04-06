@@ -280,6 +280,142 @@ func (a *App) AskProvider(providerID, model, prompt, workspaceID, agentPath stri
 	}()
 }
 
+// ── Prompts ────────────────────────────────────────────────────────────
+
+// ListPrompts returns all saved prompts as JSON.
+func (a *App) ListPrompts() string {
+	return glitchd.ListAllPrompts(a.ctx)
+}
+
+// CreatePrompt saves a new prompt and returns it as JSON.
+func (a *App) CreatePrompt(title, body, modelSlug string) string {
+	return glitchd.CreatePrompt(a.ctx, title, body, modelSlug)
+}
+
+// DeletePrompt removes a prompt by ID.
+func (a *App) DeletePrompt(id int64) {
+	glitchd.DeletePromptByID(a.ctx, id)
+}
+
+// GetWorkflowFileDetails returns metadata about a workflow YAML file on disk:
+// description and the list of inner steps with their executor and a short
+// prompt preview. Used by the step editor in the desktop builder so users
+// can see what a workflow does without leaving the chat.
+func (a *App) GetWorkflowFileDetails(path string) string {
+	return glitchd.GetWorkflowFileDetails(path)
+}
+
+// ── Chain execution ─────────────────────────────────────────────────────
+
+// RunChain executes a builder chain (JSON-encoded list of ChainStep) sequentially.
+// Each step's output flows into the next via {{ steps.step-N.value }} refs.
+// userText is appended as a final implicit prompt step if non-empty.
+func (a *App) RunChain(stepsJSON, userText, workspaceID, defaultProvider, defaultModel string) {
+	go func() {
+		// Build system context from workspace.
+		var dirs []string
+		var agents []glitchd.AgentInfo
+		var pipes []glitchd.PipelineInfo
+		if workspaceID != "" {
+			if st, err := glitchd.OpenStore(); err == nil {
+				if ws, err := st.GetWorkspace(a.ctx, workspaceID); err == nil {
+					dirs = ws.Directories
+				}
+			}
+			agents = glitchd.ListAgents(dirs)
+			pipes = glitchd.DiscoverWorkspacePipelines(dirs)
+		}
+		systemCtx := glitchd.BuildSystemContext(dirs, agents, pipes)
+
+		// Start clarification poller for the duration of the run.
+		clarifyCtx, clarifyCancel := context.WithCancel(context.Background())
+		go a.pollClarifications(clarifyCtx)
+
+		tokenCh := make(chan string, 64)
+		go func() {
+			for token := range tokenCh {
+				runtime.EventsEmit(a.ctx, "chat:chunk", token)
+			}
+		}()
+
+		err := glitchd.RunChain(a.ctx, glitchd.RunChainOpts{
+			StepsJSON:       stepsJSON,
+			UserText:        userText,
+			WorkspaceID:     workspaceID,
+			DefaultProvider: defaultProvider,
+			DefaultModel:    defaultModel,
+			SystemCtx:       systemCtx,
+		}, tokenCh)
+		clarifyCancel()
+
+		if err != nil {
+			runtime.EventsEmit(a.ctx, "chat:error", err.Error())
+			return
+		}
+		runtime.EventsEmit(a.ctx, "chat:done", nil)
+	}()
+}
+
+// ── Chat Workflows ─────────────────────────────────────────────────────
+
+// ListChatWorkflows returns saved workflows for a workspace as JSON.
+func (a *App) ListChatWorkflows(workspaceID string) string {
+	return glitchd.ListChatWorkflows(a.ctx, workspaceID)
+}
+
+// SaveChatWorkflow saves a new workflow and returns it as JSON.
+func (a *App) SaveChatWorkflow(workspaceID, name, stepsJSON string) string {
+	return glitchd.SaveChatWorkflow(a.ctx, workspaceID, name, stepsJSON)
+}
+
+// UpdateChatWorkflow modifies an existing workflow.
+func (a *App) UpdateChatWorkflow(id int64, name, stepsJSON string) {
+	glitchd.UpdateChatWorkflow(a.ctx, id, name, stepsJSON)
+}
+
+// DeleteChatWorkflow removes a workflow.
+func (a *App) DeleteChatWorkflow(id int64) {
+	glitchd.DeleteChatWorkflow(a.ctx, id)
+}
+
+// ── Clarification ──────────────────────────────────────────────────────
+
+// AnswerClarification writes the user's answer for a pending clarification.
+func (a *App) AnswerClarification(runID, answer string) {
+	glitchd.AnswerClarification(runID, answer)
+}
+
+// pollClarifications polls the DB for pending clarification requests during
+// pipeline runs and forwards them to the frontend as Wails events.
+func (a *App) pollClarifications(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	notified := map[string]bool{}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			reqs, err := glitchd.LoadPendingClarifications()
+			if err != nil {
+				continue
+			}
+			for _, req := range reqs {
+				if notified[req.RunID] {
+					continue
+				}
+				notified[req.RunID] = true
+				runtime.EventsEmit(a.ctx, "chat:clarify", map[string]string{
+					"run_id":   req.RunID,
+					"step_id":  req.StepID,
+					"question": req.Question,
+				})
+			}
+		}
+	}
+}
+
 // ── Pipelines ───────────────────────────────────────────────────────────
 
 // ListPipelines returns discovered pipelines from the active workspace's directories.
@@ -303,6 +439,10 @@ func (a *App) ListPipelines(workspaceID string) string {
 // RunPipeline executes a pipeline and streams output as chat events.
 func (a *App) RunPipeline(pipelinePath, input string) {
 	go func() {
+		// Start polling for clarification requests during this pipeline run.
+		clarifyCtx, clarifyCancel := context.WithCancel(context.Background())
+		go a.pollClarifications(clarifyCtx)
+
 		tokenCh := make(chan string, 64)
 		go func() {
 			for token := range tokenCh {
@@ -310,7 +450,10 @@ func (a *App) RunPipeline(pipelinePath, input string) {
 			}
 		}()
 
-		if err := glitchd.RunPipeline(a.ctx, pipelinePath, input, tokenCh); err != nil {
+		err := glitchd.RunPipeline(a.ctx, pipelinePath, input, tokenCh)
+		clarifyCancel()
+
+		if err != nil {
 			runtime.EventsEmit(a.ctx, "chat:error", err.Error())
 			return
 		}

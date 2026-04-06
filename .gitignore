@@ -41,4 +41,18 @@ traces.jsonl
 .claude/worktrees/
 .claude/*.log
 .claude/screenshots/
+.claude/scheduled_tasks.lock
 tuishot
+
+# Plugin binaries (built locally)
+plugins/*/github-copilot
+plugins/*/ollama
+plugins/*/opencode
+
+# Runtime brain dir + scratch
+glitch_db/
+
+# Desktop frontend build cache
+glitch-desktop/frontend/package-lock.json
+glitch-desktop/frontend/package.json.md5
+glitch-desktop/frontend/tsconfig.tsbuildinfo

@@ -3,19 +3,33 @@
 
 export function AddWorkspaceDirectory(arg1:string):Promise<void>;
 
+export function AnswerClarification(arg1:string,arg2:string):Promise<void>;
+
 export function AskProvider(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
 export function AskScoped(arg1:string,arg2:string):Promise<void>;
 
+export function CreatePrompt(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function CreateWorkspace(arg1:string):Promise<string>;
+
+export function DeleteChatWorkflow(arg1:number):Promise<void>;
+
+export function DeletePrompt(arg1:number):Promise<void>;
 
 export function DeleteWorkspace(arg1:string):Promise<void>;
 
 export function Doctor():Promise<void>;
 
+export function GetWorkflowFileDetails(arg1:string):Promise<string>;
+
 export function ListAgents(arg1:string):Promise<string>;
 
+export function ListChatWorkflows(arg1:string):Promise<string>;
+
 export function ListPipelines(arg1:string):Promise<string>;
+
+export function ListPrompts():Promise<string>;
 
 export function ListProviders():Promise<string>;
 
@@ -27,10 +41,16 @@ export function Ready():Promise<void>;
 
 export function RemoveWorkspaceDirectory(arg1:string,arg2:string):Promise<void>;
 
+export function RunChain(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
+
 export function RunPipeline(arg1:string,arg2:string):Promise<void>;
+
+export function SaveChatWorkflow(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function SaveMessage(arg1:string,arg2:string):Promise<void>;
 
 export function SavePipeline(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function UpdateChatWorkflow(arg1:number,arg2:string,arg3:string):Promise<void>;
 
 export function UpdateWorkspaceTitle(arg1:string,arg2:string):Promise<void>;

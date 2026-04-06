@@ -45,7 +45,12 @@ func DiscoverPipelines(dir string) ([]PipelineRef, error) {
 
 	var refs []PipelineRef
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".pipeline.yaml") {
+		if e.IsDir() {
+			continue
+		}
+		// Accept both legacy .pipeline.yaml and current .workflow.yaml extensions.
+		// They share the same YAML schema; the rename is UI-level only.
+		if !strings.HasSuffix(e.Name(), ".pipeline.yaml") && !strings.HasSuffix(e.Name(), ".workflow.yaml") {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())

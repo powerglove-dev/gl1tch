@@ -182,6 +182,18 @@ const createPersonalBestsSchema = `CREATE TABLE IF NOT EXISTS game_personal_best
   recorded_at INTEGER NOT NULL
 )`
 
+// createChatWorkflowsSchema is the DDL for saved chat workflows
+// (composable builder workflows authored from the desktop UI).
+const createChatWorkflowsSchema = `CREATE TABLE IF NOT EXISTS chat_workflows (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  workspace_id TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  steps_json   TEXT NOT NULL,
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_workflows_ws ON chat_workflows(workspace_id);`
+
 // createWorkflowCheckpointsSchema is the DDL for the workflow_checkpoints table.
 const createWorkflowCheckpointsSchema = `CREATE TABLE IF NOT EXISTS workflow_checkpoints (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -268,7 +280,16 @@ func applySchema(db *sql.DB) error {
 	if err := applyPersonalBestsTableMigration(db); err != nil {
 		return err
 	}
-	return applyWorkspacesTableMigration(db)
+	if err := applyWorkspacesTableMigration(db); err != nil {
+		return err
+	}
+	return applyChatWorkflowsTableMigration(db)
+}
+
+// applyChatWorkflowsTableMigration creates the chat_workflows table.
+func applyChatWorkflowsTableMigration(db *sql.DB) error {
+	_, err := db.Exec(createChatWorkflowsSchema)
+	return err
 }
 
 // applyStepCheckpointsTableMigration creates the step_checkpoints table if it

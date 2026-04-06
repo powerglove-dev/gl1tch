@@ -6,6 +6,10 @@ export function AddWorkspaceDirectory(arg1) {
   return window['go']['main']['App']['AddWorkspaceDirectory'](arg1);
 }
 
+export function AnswerClarification(arg1, arg2) {
+  return window['go']['main']['App']['AnswerClarification'](arg1, arg2);
+}
+
 export function AskProvider(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['AskProvider'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -14,8 +18,20 @@ export function AskScoped(arg1, arg2) {
   return window['go']['main']['App']['AskScoped'](arg1, arg2);
 }
 
+export function CreatePrompt(arg1, arg2, arg3) {
+  return window['go']['main']['App']['CreatePrompt'](arg1, arg2, arg3);
+}
+
 export function CreateWorkspace(arg1) {
   return window['go']['main']['App']['CreateWorkspace'](arg1);
+}
+
+export function DeleteChatWorkflow(arg1) {
+  return window['go']['main']['App']['DeleteChatWorkflow'](arg1);
+}
+
+export function DeletePrompt(arg1) {
+  return window['go']['main']['App']['DeletePrompt'](arg1);
 }
 
 export function DeleteWorkspace(arg1) {
@@ -26,12 +42,24 @@ export function Doctor() {
   return window['go']['main']['App']['Doctor']();
 }
 
+export function GetWorkflowFileDetails(arg1) {
+  return window['go']['main']['App']['GetWorkflowFileDetails'](arg1);
+}
+
 export function ListAgents(arg1) {
   return window['go']['main']['App']['ListAgents'](arg1);
 }
 
+export function ListChatWorkflows(arg1) {
+  return window['go']['main']['App']['ListChatWorkflows'](arg1);
+}
+
 export function ListPipelines(arg1) {
   return window['go']['main']['App']['ListPipelines'](arg1);
+}
+
+export function ListPrompts() {
+  return window['go']['main']['App']['ListPrompts']();
 }
 
 export function ListProviders() {
@@ -54,8 +82,16 @@ export function RemoveWorkspaceDirectory(arg1, arg2) {
   return window['go']['main']['App']['RemoveWorkspaceDirectory'](arg1, arg2);
 }
 
+export function RunChain(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['RunChain'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function RunPipeline(arg1, arg2) {
   return window['go']['main']['App']['RunPipeline'](arg1, arg2);
+}
+
+export function SaveChatWorkflow(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SaveChatWorkflow'](arg1, arg2, arg3);
 }
 
 export function SaveMessage(arg1, arg2) {
@@ -64,6 +100,10 @@ export function SaveMessage(arg1, arg2) {
 
 export function SavePipeline(arg1, arg2, arg3) {
   return window['go']['main']['App']['SavePipeline'](arg1, arg2, arg3);
+}
+
+export function UpdateChatWorkflow(arg1, arg2, arg3) {
+  return window['go']['main']['App']['UpdateChatWorkflow'](arg1, arg2, arg3);
 }
 
 export function UpdateWorkspaceTitle(arg1, arg2) {

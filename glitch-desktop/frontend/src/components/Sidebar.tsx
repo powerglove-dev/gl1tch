@@ -9,7 +9,8 @@ import {
   X,
   Folder,
   Trash2,
-  Pencil,
+  FileText,
+  Workflow,
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import type { Workspace } from "@/lib/types";
@@ -24,15 +25,25 @@ interface SidebarSectionProps {
 
 function SidebarSection({ title, icon, children, defaultOpen = true, count, searchable }: SidebarSectionProps & { searchable?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
+  const [userToggled, setUserToggled] = useState(false);
   const [search, setSearch] = useState("");
 
+  // Auto-expand once data arrives, unless the user has manually toggled.
+  // This handles the common case where data loads after the section mounts.
+  useEffect(() => {
+    if (!userToggled && count != null && count > 0 && !open) {
+      setOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [count]);
+
   return (
-    <div style={{ marginBottom: 2 }}>
+    <div style={{ marginBottom: 6 }}>
       <button
-        onClick={() => setOpen(!open)}
+        onClick={() => { setUserToggled(true); setOpen(!open); }}
         style={{
-          width: "100%", display: "flex", alignItems: "center", gap: 6,
-          padding: "6px 12px", fontSize: 11, fontWeight: 600,
+          width: "100%", display: "flex", alignItems: "center", gap: 8,
+          padding: "8px 14px", fontSize: 11, fontWeight: 600,
           textTransform: "uppercase", letterSpacing: "0.06em",
           color: "var(--fg-dim)", background: "none", border: "none", cursor: "pointer",
         }}
@@ -45,16 +56,16 @@ function SidebarSection({ title, icon, children, defaultOpen = true, count, sear
         )}
       </button>
       {open && (
-        <div style={{ padding: "0 8px" }}>
+        <div style={{ padding: "2px 10px 4px" }}>
           {searchable && count != null && count > 5 && (
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Filter..."
               style={{
-                width: "100%", padding: "3px 8px", marginBottom: 4,
+                width: "100%", padding: "4px 10px", marginBottom: 6,
                 background: "var(--bg)", border: "1px solid var(--border)",
-                borderRadius: 4, color: "var(--fg)", fontSize: 11,
+                borderRadius: 6, color: "var(--fg)", fontSize: 11,
                 outline: "none", fontFamily: "inherit",
               }}
             />
@@ -67,10 +78,15 @@ function SidebarSection({ title, icon, children, defaultOpen = true, count, sear
 }
 
 function EmptyState({ text }: { text: string }) {
-  return <div style={{ padding: "10px 12px", fontSize: 11, color: "var(--fg-dim)", fontStyle: "italic" }}>{text}</div>;
+  return <div style={{ padding: "12px 14px", fontSize: 11, color: "var(--fg-dim)", fontStyle: "italic" }}>{text}</div>;
 }
 
-export interface PipelineEntry {
+/**
+ * A workflow file discovered on disk (.workflow.yaml or legacy .pipeline.yaml).
+ * These are the "imported" half of the unified Workflows section, alongside
+ * saved chain workflows from the DB (WorkflowEntry).
+ */
+export interface WorkflowFileEntry {
   name: string;
   description: string;
   path: string;
@@ -85,6 +101,21 @@ export interface AgentEntry {
   invoke: string;
 }
 
+export interface PromptEntry {
+  ID: number;
+  Title: string;
+  Body: string;
+  ModelSlug: string;
+  UpdatedAt: number;
+}
+
+export interface WorkflowEntry {
+  ID: number;
+  Name: string;
+  StepsJSON: string;
+  UpdatedAt: number;
+}
+
 interface Props {
   onNewWorkspace: () => void;
   workspaces: Workspace[];
@@ -94,12 +125,19 @@ interface Props {
   onRenameWorkspace: (id: string, title: string) => void;
   directories: string[];
   agents: AgentEntry[];
-  pipelines: PipelineEntry[];
+  workflowFiles: WorkflowFileEntry[];
+  prompts: PromptEntry[];
+  workflows: WorkflowEntry[];
   selectedAgent: string | null;
   onAddDirectory: () => void;
   onRemoveDirectory: (dir: string) => void;
-  onRunPipeline: (path: string) => void;
-  onSelectAgent: (name: string) => void;
+  onAddWorkflowFile: (p: WorkflowFileEntry) => void;
+  onAddAgent: (name: string) => void;
+  onAddPrompt: (p: PromptEntry) => void;
+  onLoadWorkflow: (w: WorkflowEntry) => void;
+  onRunWorkflow: (w: WorkflowEntry) => void;
+  onDeleteWorkflow: (id: number) => void;
+  onDeletePrompt: (id: number) => void;
 }
 
 function WorkspaceItem({
@@ -130,8 +168,8 @@ function WorkspaceItem({
       onClick={() => { if (!editing) onSwitch(); }}
       onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
       style={{
-        display: "flex", alignItems: "center", gap: 6,
-        padding: "5px 8px", borderRadius: 6, fontSize: 12,
+        display: "flex", alignItems: "center", gap: 8,
+        padding: "6px 10px", borderRadius: 6, fontSize: 12,
         color: isActive ? "var(--fg-bright)" : "var(--fg)",
         background: isActive ? "var(--bg-surface)" : "transparent",
         cursor: "pointer", transition: "background 0.1s",
@@ -150,7 +188,7 @@ function WorkspaceItem({
           onClick={(e) => e.stopPropagation()}
           style={{
             flex: 1, background: "var(--bg)", border: "1px solid var(--border-bright)",
-            borderRadius: 4, padding: "1px 4px", color: "var(--fg)", fontSize: 12,
+            borderRadius: 4, padding: "2px 6px", color: "var(--fg)", fontSize: 12,
             fontFamily: "inherit", outline: "none",
           }}
         />
@@ -174,21 +212,23 @@ function WorkspaceItem({
 export function Sidebar({
   onNewWorkspace, workspaces, activeWorkspaceId,
   onSwitchWorkspace, onDeleteWorkspace, onRenameWorkspace,
-  directories, agents, pipelines, selectedAgent,
-  onAddDirectory, onRemoveDirectory, onRunPipeline, onSelectAgent,
+  directories, agents, workflowFiles, prompts, workflows, selectedAgent,
+  onAddDirectory, onRemoveDirectory, onAddWorkflowFile, onAddAgent,
+  onAddPrompt, onLoadWorkflow, onRunWorkflow, onDeleteWorkflow, onDeletePrompt,
 }: Props) {
+  const totalWorkflows = workflows.length + workflowFiles.length;
   return (
     <div style={{
       height: "100%", background: "var(--bg-dark)", borderRight: "1px solid var(--border)",
-      display: "flex", flexDirection: "column", width: 220,
+      display: "flex", flexDirection: "column", width: 240,
     }}>
       {/* New workspace button */}
-      <div style={{ padding: "10px 10px 8px" }}>
+      <div style={{ padding: "12px 12px 10px" }}>
         <button
           onClick={onNewWorkspace}
           style={{
             width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-            padding: "7px 10px", borderRadius: 8, background: "var(--bg-surface)",
+            padding: "8px 12px", borderRadius: 8, background: "var(--bg-surface)",
             border: "1px solid var(--border)", color: "var(--fg)", fontSize: 12, fontWeight: 500, cursor: "pointer",
           }}
         >
@@ -199,7 +239,7 @@ export function Sidebar({
 
       <div style={{ flex: 1, overflowY: "auto", paddingTop: 4 }}>
         {/* Per-workspace directories */}
-        <SidebarSection title="Directories" icon={<FolderOpen size={11} />} count={directories.length}>
+        <SidebarSection title="Directories" icon={<FolderOpen size={12} />} count={directories.length}>
           {directories.length === 0 ? (
             <EmptyState text={activeWorkspaceId ? "No directories in this workspace" : "Create a chat first"} />
           ) : (
@@ -207,8 +247,8 @@ export function Sidebar({
               <div
                 key={dir}
                 style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  padding: "4px 8px", borderRadius: 6, fontSize: 11, color: "var(--fg)",
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "5px 10px", borderRadius: 6, fontSize: 11, color: "var(--fg)",
                 }}
               >
                 <Folder size={11} style={{ color: "var(--yellow)", flexShrink: 0 }} />
@@ -229,7 +269,7 @@ export function Sidebar({
             <button
               onClick={onAddDirectory}
               style={{
-                display: "flex", alignItems: "center", gap: 5, padding: "5px 8px", marginTop: 2,
+                display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", marginTop: 4,
                 borderRadius: 6, fontSize: 11, color: "var(--fg-dim)", background: "none", border: "none",
                 cursor: "pointer", width: "100%",
               }}
@@ -241,7 +281,7 @@ export function Sidebar({
         </SidebarSection>
 
         {/* Workspaces / conversations */}
-        <SidebarSection title="Workspaces" icon={<MessageSquare size={11} />} count={workspaces.length}>
+        <SidebarSection title="Workspaces" icon={<MessageSquare size={12} />} count={workspaces.length}>
           {workspaces.length === 0 ? (
             <EmptyState text="No workspaces yet" />
           ) : (
@@ -258,32 +298,99 @@ export function Sidebar({
           )}
         </SidebarSection>
 
-        <SidebarSection title="Pipelines" icon={<Play size={11} />} count={pipelines.length} defaultOpen={pipelines.length > 0}>
-          {pipelines.length === 0 ? (
-            <EmptyState text="No pipelines in workspace dirs" />
+        <SidebarSection title="Workflows" icon={<Workflow size={12} />} count={totalWorkflows} defaultOpen={totalWorkflows > 0}>
+          {totalWorkflows === 0 ? (
+            <EmptyState text="No workflows yet — build one in the chain bar" />
           ) : (
-            pipelines.map((p) => (
-              <div
-                key={p.path}
-                onClick={() => onRunPipeline(p.path)}
-                style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  padding: "4px 8px", borderRadius: 6, fontSize: 11,
-                  color: "var(--fg)", cursor: "pointer",
-                }}
-                title={p.description + " (" + p.project + ")"}
-              >
-                <Play size={9} style={{ color: "var(--green)", flexShrink: 0 }} />
-                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {p.name}
-                </span>
-                <span style={{ fontSize: 9, color: "var(--fg-dim)" }}>{p.project}</span>
-              </div>
-            ))
+            <>
+              {/* Saved chat workflows (user-built) */}
+              {workflows.map((w) => (
+                <div
+                  key={"wf-" + w.ID}
+                  onClick={() => onLoadWorkflow(w)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "5px 10px", borderRadius: 6, fontSize: 11,
+                    color: "var(--fg)", cursor: "pointer",
+                  }}
+                  title="Click to load into builder"
+                >
+                  <Workflow size={10} style={{ color: "var(--cyan)", flexShrink: 0 }} />
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {w.Name}
+                  </span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onRunWorkflow(w); }}
+                    style={{ background: "none", border: "none", color: "var(--green)", cursor: "pointer", padding: 2, borderRadius: 4, display: "flex", opacity: 0.7 }}
+                    title="Run immediately"
+                  >
+                    <Play size={9} />
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onDeleteWorkflow(w.ID); }}
+                    style={{ background: "none", border: "none", color: "var(--fg-dim)", cursor: "pointer", padding: 2, borderRadius: 4, display: "flex", opacity: 0.2 }}
+                  >
+                    <Trash2 size={9} />
+                  </button>
+                </div>
+              ))}
+              {/* Workflow files discovered on disk (.workflow.yaml) */}
+              {workflowFiles.map((p) => (
+                <div
+                  key={"wf-file-" + p.path}
+                  onClick={() => onAddWorkflowFile(p)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "5px 10px", borderRadius: 6, fontSize: 11,
+                    color: "var(--fg)", cursor: "pointer",
+                  }}
+                  title={p.description + " · from " + p.project + " (click to add to builder)"}
+                >
+                  <Workflow size={10} style={{ color: "var(--cyan)", flexShrink: 0 }} />
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {p.name}
+                  </span>
+                  <span style={{ fontSize: 9, color: "var(--fg-dim)" }}>{p.project}</span>
+                </div>
+              ))}
+            </>
           )}
         </SidebarSection>
 
-        <SidebarSection title="Skills & Agents" icon={<Bot size={11} />} count={agents.length} defaultOpen={agents.length > 0} searchable>
+        <SidebarSection title="Prompts" icon={<FileText size={12} />} count={prompts.length} defaultOpen={prompts.length > 0} searchable>
+          {(filter: string) => {
+            const filtered = prompts.filter((p) =>
+              !filter || p.Title.toLowerCase().includes(filter.toLowerCase())
+            );
+            if (filtered.length === 0) return <EmptyState text={prompts.length ? "No matches" : "No saved prompts"} />;
+            return filtered.map((p) => (
+              <div
+                key={p.ID}
+                onClick={() => onAddPrompt(p)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "5px 10px", borderRadius: 6, fontSize: 11,
+                  color: "var(--fg)", cursor: "pointer",
+                }}
+                title={p.Body.length > 120 ? p.Body.slice(0, 120) + "..." : p.Body}
+              >
+                <FileText size={9} style={{ color: "var(--orange)", flexShrink: 0 }} />
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {p.Title}
+                </span>
+                {p.ModelSlug && <span style={{ fontSize: 9, color: "var(--fg-dim)" }}>{p.ModelSlug}</span>}
+                <button
+                  onClick={(e) => { e.stopPropagation(); onDeletePrompt(p.ID); }}
+                  style={{ background: "none", border: "none", color: "var(--fg-dim)", cursor: "pointer", padding: 2, borderRadius: 4, display: "flex", opacity: 0.2 }}
+                >
+                  <Trash2 size={9} />
+                </button>
+              </div>
+            ));
+          }}
+        </SidebarSection>
+
+        <SidebarSection title="Skills & Agents" icon={<Bot size={12} />} count={agents.length} defaultOpen={agents.length > 0} searchable>
           {(filter: string) => {
             const filtered = agents.filter((a) =>
               !filter || a.name.toLowerCase().includes(filter.toLowerCase())
@@ -292,10 +399,10 @@ export function Sidebar({
             return filtered.map((a) => (
               <div
                 key={a.kind + ":" + a.name}
-                onClick={() => onSelectAgent(a.name)}
+                onClick={() => onAddAgent(a.name)}
                 style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  padding: "4px 8px", borderRadius: 6, fontSize: 11,
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "5px 10px", borderRadius: 6, fontSize: 11,
                   color: selectedAgent === a.name ? "var(--fg-bright)" : "var(--fg)",
                   background: selectedAgent === a.name ? "var(--purple)" + "22" : "transparent",
                   cursor: "pointer",
@@ -314,13 +421,13 @@ export function Sidebar({
           }}
         </SidebarSection>
 
-        <SidebarSection title="Activity" icon={<Activity size={11} />} defaultOpen={false}>
+        <SidebarSection title="Activity" icon={<Activity size={12} />} defaultOpen={false}>
           <EmptyState text="No recent activity" />
         </SidebarSection>
       </div>
 
-      <div style={{ padding: "8px 12px", borderTop: "1px solid var(--border)", fontSize: 10, color: "var(--fg-dim)" }}>
-        <kbd style={{ padding: "1px 5px", borderRadius: 4, background: "var(--bg-surface)", fontSize: 10, border: "1px solid var(--border)" }}>{"\u2318"}K</kbd> Commands
+      <div style={{ padding: "10px 14px", borderTop: "1px solid var(--border)", fontSize: 10, color: "var(--fg-dim)" }}>
+        <kbd style={{ padding: "2px 6px", borderRadius: 4, background: "var(--bg-surface)", fontSize: 10, border: "1px solid var(--border)" }}>{"\u2318"}K</kbd> Commands
       </div>
     </div>
   );
