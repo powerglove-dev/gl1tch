@@ -21,6 +21,12 @@ var (
 )
 
 func main() {
+	// Load .env early so all code paths (TUI + CLI subcommands) see the vars.
+	if home, err := os.UserHomeDir(); err == nil {
+		bootstrap.LoadDotenv(filepath.Join(home, ".config", "glitch", ".env"))
+	}
+	bootstrap.LoadDotenv(".env")
+
 	ctx := context.Background()
 	shutdown, err := telemetry.Setup(ctx, "gl1tch")
 	if err == nil {

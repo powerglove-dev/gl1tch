@@ -120,10 +120,21 @@ func (q *QueryEngine) generateQuery(ctx context.Context, question string) (map[s
 	prompt := fmt.Sprintf(`You are an Elasticsearch query generator. Return ONLY valid JSON — no explanation.
 
 Indices:
-- glitch-events: type(keyword), source(keyword), repo(keyword), author(keyword), message(text), body(text), timestamp(date)
+- glitch-events: type(keyword), source(keyword), repo(keyword), author(keyword), message(text), body(text), metadata(object), timestamp(date)
 - glitch-summaries: scope(keyword), date(date), summary(text), timestamp(date)
 - glitch-pipelines: name(keyword), status(keyword), stdout(text), model(keyword), provider(keyword), timestamp(date)
 - glitch-insights: type(keyword), pattern(text), recommendation(text), timestamp(date)
+
+Sources in glitch-events:
+- source:"git" — git commits (type: git.commit)
+- source:"github" — PRs and issues (type: github.pr, github.issue)
+- source:"claude" — Claude Code conversations (type: claude.prompt, claude.session.*)
+- source:"copilot" — Copilot CLI history (type: copilot.command, copilot.log)
+- source:"mattermost" — chat messages (type: mattermost.message, mattermost.direct, mattermost.mention, mattermost.group)
+  metadata fields: channel_name(keyword), channel_type(keyword), post_id(keyword)
+
+When the user mentions a chat channel name (e.g. "devchat", "business"), filter with: {"term": {"metadata.channel_name.keyword": "DevChat"}}
+When the user asks about chat/messages/mattermost, filter with: {"term": {"source": "mattermost"}}
 
 Today: %s  Yesterday: %s  Week ago: %s
 
@@ -133,7 +144,8 @@ Rules:
 - Always include: "sort": [{"timestamp": {"order": "desc", "unmapped_type": "date"}}]
 - For time ranges use ISO dates not date math: "range": {"timestamp": {"gte": "%s"}}
 - Default size: 20
-- Use multi_match with fields [message, body, summary, pattern, stdout, name]
+- Use multi_match with fields [message, body, summary, pattern, stdout, name] for free-text search
+- Use term filters on source, type, metadata.channel_name.keyword for precise filtering
 
 JSON:`, today, dayAgo, weekAgo, question, dayAgo)
 
@@ -185,7 +197,7 @@ func ensureSafeSort(query map[string]any) {
 func (q *QueryEngine) synthesize(ctx context.Context, question string, results *esearch.SearchResponse) (string, error) {
 	context := formatResults(results)
 
-	prompt := fmt.Sprintf(`You are gl1tch, an AI observer assistant for a developer. You have access to indexed data from git repos, pipelines, and other sources.
+	prompt := fmt.Sprintf(`You are gl1tch, an AI observer assistant for a developer. You have access to indexed data from git repos, GitHub PRs/issues, Claude Code sessions, Copilot CLI, Mattermost chat channels, pipelines, and other sources. Each result includes a "source" field indicating where it came from.
 
 Based on the following data from your observation indices, answer the user's question concisely and helpfully.
 
@@ -206,7 +218,7 @@ Rules:
 func (q *QueryEngine) streamSynthesize(ctx context.Context, question string, results *esearch.SearchResponse, tokenCh chan<- string) error {
 	context := formatResults(results)
 
-	prompt := fmt.Sprintf(`You are gl1tch, an AI observer assistant for a developer. You have access to indexed data from git repos, pipelines, and other sources.
+	prompt := fmt.Sprintf(`You are gl1tch, an AI observer assistant for a developer. You have access to indexed data from git repos, GitHub PRs/issues, Claude Code sessions, Copilot CLI, Mattermost chat channels, pipelines, and other sources. Each result includes a "source" field indicating where it came from.
 
 Based on the following data from your observation indices, answer the user's question concisely and helpfully.
 

@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -58,6 +60,34 @@ func checkReload() error {
 	return ErrReload
 }
 
+// LoadDotenv reads a .env file and sets any variables not already in the
+// environment. Supports KEY=VALUE, KEY="VALUE", and # comments.
+func LoadDotenv(path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || line[0] == '#' {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		k = strings.TrimSpace(k)
+		v = strings.TrimSpace(v)
+		v = strings.Trim(v, `"'`)
+		if _, set := os.LookupEnv(k); !set {
+			os.Setenv(k, v)
+		}
+	}
+}
+
 // Run is the main entrypoint: sets up config, starts background services
 // under the supervisor, and runs the BubbleTea TUI.
 func Run() error {
@@ -65,6 +95,10 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("finding home dir: %w", err)
 	}
+
+	// Load .env from the glitch config directory, then the working directory.
+	LoadDotenv(filepath.Join(home, configSubdir, ".env"))
+	LoadDotenv(".env")
 	cfgDir := filepath.Join(home, configSubdir)
 
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
