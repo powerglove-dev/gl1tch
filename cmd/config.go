@@ -43,20 +43,6 @@ panes:
     size: 40%
 `
 
-const defaultKeybindingsYAML = `# glitch keybinding configuration
-# Only keys listed here are bound. Remove entries to preserve your tmux bindings.
-bindings:
-  # Pane resizing (5 cells per keypress)
-  - key: "M-h"
-    action: resize-pane-left
-  - key: "M-l"
-    action: resize-pane-right
-  - key: "M-k"
-    action: resize-pane-up
-  - key: "M-j"
-    action: resize-pane-down
-`
-
 func runConfigInit(cmd *cobra.Command, args []string) error {
 	cfgDir, err := glitchConfigDir()
 	if err != nil {
@@ -66,13 +52,12 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("config init: mkdir %s: %w", cfgDir, err)
 	}
 
-	// Write layout and keybindings.
+	// Write layout config.
 	files := []struct {
 		name    string
 		content string
 	}{
 		{"layout.yaml", defaultLayoutYAML},
-		{"keybindings.yaml", defaultKeybindingsYAML},
 	}
 
 	for _, f := range files {

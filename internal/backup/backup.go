@@ -41,7 +41,6 @@ var configTargets = []string{
 	"themes",
 	"cron.yaml",
 	"layout.yaml",
-	"keybindings.yaml",
 	"config.yaml",
 	"translations.yaml",
 }

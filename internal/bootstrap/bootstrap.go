@@ -14,7 +14,6 @@ import (
 	"github.com/8op-org/gl1tch/internal/console"
 	"github.com/8op-org/gl1tch/internal/daemonwidget"
 	"github.com/8op-org/gl1tch/internal/executor"
-	"github.com/8op-org/gl1tch/internal/keybindings"
 	"github.com/8op-org/gl1tch/internal/supervisor"
 	suphandlers "github.com/8op-org/gl1tch/internal/supervisor/handlers"
 	"github.com/8op-org/gl1tch/internal/systemprompts"
@@ -61,18 +60,6 @@ func checkReload() error {
 	return ErrReload
 }
 
-// applyKeybindings loads keybindings.yaml from cfgDir and applies it.
-// Missing file is silently ignored. Errors are logged as warnings.
-func applyKeybindings(cfgDir string) {
-	kbCfg, err := keybindings.LoadConfig(filepath.Join(cfgDir, "keybindings.yaml"))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "glitch: warning: load keybindings config: %v\n", err)
-	} else if len(kbCfg.Bindings) > 0 {
-		if err := keybindings.Apply(kbCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "glitch: warning: apply keybindings: %v\n", err)
-		}
-	}
-}
 
 // Run is the main entrypoint: sets up config, starts background services,
 // and runs the BubbleTea TUI directly (no tmux required).
@@ -99,9 +86,6 @@ func Run() error {
 	if err := systemprompts.EnsureInstalled(cfgDir); err != nil {
 		fmt.Fprintf(os.Stderr, "glitch: warning: install system prompts: %v\n", err)
 	}
-
-	// Apply keybindings configuration.
-	applyKeybindings(cfgDir)
 
 	// Start the Unix socket event bus daemon BEFORE any widget binaries are
 	// launched so they can connect on startup.

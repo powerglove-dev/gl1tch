@@ -36,8 +36,3 @@ func TestDefaultLayoutYAML_NonEmpty(t *testing.T) {
 	}
 }
 
-func TestDefaultKeybindingsYAML_NonEmpty(t *testing.T) {
-	if defaultKeybindingsYAML == "" {
-		t.Fatal("defaultKeybindingsYAML must not be empty")
-	}
-}
