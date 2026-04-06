@@ -29,16 +29,15 @@ type WorkspaceContext struct {
 // Empty returns a zero-value WorkspaceContext.
 func Empty() WorkspaceContext { return WorkspaceContext{} }
 
-// sidecarPath returns the path of the .brain.json sidecar for a given pipeline file.
-// e.g. /pipelines/my.pipeline.yaml → /pipelines/my.brain.json
-func sidecarPath(pipelinePath string) string {
-	base := filepath.Base(pipelinePath)
-	// Strip .pipeline.yaml or .yaml suffix and replace with .brain.json
-	name := strings.TrimSuffix(base, ".pipeline.yaml")
+// sidecarPath returns the path of the .brain.json sidecar for a given workflow file.
+// e.g. /workflows/my.workflow.yaml → /workflows/my.brain.json
+func sidecarPath(workflowPath string) string {
+	base := filepath.Base(workflowPath)
+	name := strings.TrimSuffix(base, ".workflow.yaml")
 	if name == base {
 		name = strings.TrimSuffix(base, ".yaml")
 	}
-	return filepath.Join(filepath.Dir(pipelinePath), name+".brain.json")
+	return filepath.Join(filepath.Dir(workflowPath), name+".brain.json")
 }
 
 // LoadWorkspaceContext reads the brain sidecar file for the given pipeline path.

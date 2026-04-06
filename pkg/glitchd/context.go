@@ -9,15 +9,15 @@ import (
 
 // BuildSystemContext assembles the glitch-aware system prompt that gets
 // injected into every provider call. This teaches the provider about
-// available tools, pipeline format, executors, and workspace context.
-func BuildSystemContext(dirs []string, agents []AgentInfo, pipelines []PipelineInfo) string {
+// available tools, workflow format, executors, and workspace context.
+func BuildSystemContext(dirs []string, agents []AgentInfo, workflows []WorkflowInfo) string {
 	var sb strings.Builder
 
 	sb.WriteString("You are gl1tch, a developer assistant. You have access to the following capabilities.\n\n")
 
 	// Available executors
 	sb.WriteString("## Available Executors\n")
-	sb.WriteString("When building pipelines, these executors are available:\n")
+	sb.WriteString("When building workflows, these executors are available:\n")
 	providers := ListProviders()
 	for _, p := range providers {
 		models := make([]string, 0, len(p.Models))
@@ -28,13 +28,13 @@ func BuildSystemContext(dirs []string, agents []AgentInfo, pipelines []PipelineI
 	}
 	sb.WriteString("- **shell**: execute system commands (git, npm, curl, etc.)\n\n")
 
-	// Pipeline format
-	sb.WriteString("## Pipeline YAML Format\n")
-	sb.WriteString("Pipelines are YAML files with this structure:\n")
+	// Workflow format
+	sb.WriteString("## Workflow YAML Format\n")
+	sb.WriteString("Workflows are YAML files in <workspace>/.glitch/workflows/<name>.workflow.yaml:\n")
 	sb.WriteString("```yaml\n")
-	sb.WriteString("name: my-pipeline\n")
+	sb.WriteString("name: my-workflow\n")
 	sb.WriteString("version: \"1\"\n")
-	sb.WriteString("description: \"What this pipeline does\"\n")
+	sb.WriteString("description: \"What this workflow does\"\n")
 	sb.WriteString("\n")
 	sb.WriteString("steps:\n")
 	sb.WriteString("  - id: gather\n")
@@ -59,11 +59,11 @@ func BuildSystemContext(dirs []string, agents []AgentInfo, pipelines []PipelineI
 
 	// Cron scheduling
 	sb.WriteString("## Cron Scheduling\n")
-	sb.WriteString("Pipelines can be scheduled via cron.yaml:\n")
+	sb.WriteString("Workflows can be scheduled via cron.yaml:\n")
 	sb.WriteString("```yaml\n")
 	sb.WriteString("- name: daily-digest\n")
 	sb.WriteString("  schedule: \"0 9 * * 1-5\"  # weekdays at 9am\n")
-	sb.WriteString("  kind: pipeline\n")
+	sb.WriteString("  kind: workflow\n")
 	sb.WriteString("  target: git-digest\n")
 	sb.WriteString("  timeout: 15m\n")
 	sb.WriteString("```\n\n")
@@ -98,17 +98,17 @@ func BuildSystemContext(dirs []string, agents []AgentInfo, pipelines []PipelineI
 		sb.WriteString("\n")
 	}
 
-	// Existing pipelines
-	if len(pipelines) > 0 {
-		sb.WriteString("## Existing Pipelines\n")
-		for _, p := range pipelines {
-			sb.WriteString(fmt.Sprintf("- **%s** (%s) — %s\n", p.Name, p.Project, p.Description))
+	// Existing workflows
+	if len(workflows) > 0 {
+		sb.WriteString("## Existing Workflows\n")
+		for _, w := range workflows {
+			sb.WriteString(fmt.Sprintf("- **%s** (%s) — %s\n", w.Name, w.Workspace, w.Description))
 		}
 		sb.WriteString("\n")
 	}
 
 	sb.WriteString("## Response Rules\n")
-	sb.WriteString("- When the user asks to build a pipeline, output valid pipeline YAML in a code block\n")
+	sb.WriteString("- When the user asks to build a workflow, output valid workflow YAML in a code block\n")
 	sb.WriteString("- When the user asks about their projects, reference the workspace directories above\n")
 	sb.WriteString("- Be concise and direct\n")
 	sb.WriteString("- If you don't know something, say so — never fabricate\n")

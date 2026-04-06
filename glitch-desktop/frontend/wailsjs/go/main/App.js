@@ -54,8 +54,8 @@ export function ListChatWorkflows(arg1) {
   return window['go']['main']['App']['ListChatWorkflows'](arg1);
 }
 
-export function ListPipelines(arg1) {
-  return window['go']['main']['App']['ListPipelines'](arg1);
+export function ListWorkflows(arg1) {
+  return window['go']['main']['App']['ListWorkflows'](arg1);
 }
 
 export function ListPrompts() {
@@ -86,8 +86,8 @@ export function RunChain(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['RunChain'](arg1, arg2, arg3, arg4, arg5);
 }
 
-export function RunPipeline(arg1, arg2) {
-  return window['go']['main']['App']['RunPipeline'](arg1, arg2);
+export function RunWorkflow(arg1, arg2) {
+  return window['go']['main']['App']['RunWorkflow'](arg1, arg2);
 }
 
 export function SaveChatWorkflow(arg1, arg2, arg3) {
@@ -98,8 +98,8 @@ export function SaveMessage(arg1, arg2) {
   return window['go']['main']['App']['SaveMessage'](arg1, arg2);
 }
 
-export function SavePipeline(arg1, arg2, arg3) {
-  return window['go']['main']['App']['SavePipeline'](arg1, arg2, arg3);
+export function SaveWorkflow(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SaveWorkflow'](arg1, arg2, arg3);
 }
 
 export function UpdateChatWorkflow(arg1, arg2, arg3) {

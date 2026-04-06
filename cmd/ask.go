@@ -89,11 +89,14 @@ var askCmd = &cobra.Command{
 		}
 
 		// ── intent routing ────────────────────────────────────────────────────────
+		// `glitch ask` is scoped to improving glitch itself: it routes against
+		// the workflows in the gl1tch workspace. We find that workspace by
+		// walking up from cwd looking for a .glitch/workflows/ directory.
 		if askRoute {
 			configDir, _ := glitchConfigDir()
-			if configDir != "" {
-				pipelinesDir := filepath.Join(configDir, "pipelines")
-				refs, _ := pipeline.DiscoverPipelines(pipelinesDir)
+			workflowsDir := findAncestorWorkflowsDir()
+			if workflowsDir != "" {
+				refs, _ := pipeline.DiscoverPipelines(workflowsDir)
 
 				// Augment refs with synthetic entries for installed APM executors
 				// that don't already have a materialized pipeline file.
@@ -449,23 +452,17 @@ func buildRunOpts(_ map[string]string) []pipeline.RunOption {
 	return opts
 }
 
-// runAskPipeline handles the --pipeline flag: load and run a named pipeline or file.
+// runAskPipeline handles the --pipeline flag: load and run a named workflow or file.
 func runAskPipeline(cmd *cobra.Command, args []string) error {
 	arg := askPipelineFlag
-	var yamlPath string
-	if strings.Contains(arg, string(filepath.Separator)) || strings.HasSuffix(arg, ".yaml") {
-		yamlPath = arg
-	} else {
-		configDir, err := glitchConfigDir()
-		if err != nil {
-			return err
-		}
-		yamlPath = filepath.Join(configDir, "pipelines", arg+".pipeline.yaml")
+	yamlPath, err := resolveWorkflowArg(arg)
+	if err != nil {
+		return err
 	}
 
 	f, err := os.Open(yamlPath)
 	if err != nil {
-		return fmt.Errorf("pipeline %q not found: %w", arg, err)
+		return fmt.Errorf("workflow %q not found: %w", arg, err)
 	}
 	defer f.Close()
 

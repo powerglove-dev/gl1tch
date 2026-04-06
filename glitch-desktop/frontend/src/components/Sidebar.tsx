@@ -90,7 +90,7 @@ export interface WorkflowFileEntry {
   name: string;
   description: string;
   path: string;
-  project: string;
+  workspace: string;
 }
 
 export interface AgentEntry {
@@ -344,13 +344,13 @@ export function Sidebar({
                     padding: "5px 10px", borderRadius: 6, fontSize: 11,
                     color: "var(--fg)", cursor: "pointer",
                   }}
-                  title={p.description + " · from " + p.project + " (click to add to builder)"}
+                  title={p.description + " · from " + p.workspace + " (click to add to builder)"}
                 >
                   <Workflow size={10} style={{ color: "var(--cyan)", flexShrink: 0 }} />
                   <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {p.name}
                   </span>
-                  <span style={{ fontSize: 9, color: "var(--fg-dim)" }}>{p.project}</span>
+                  <span style={{ fontSize: 9, color: "var(--fg-dim)" }}>{p.workspace}</span>
                 </div>
               ))}
             </>

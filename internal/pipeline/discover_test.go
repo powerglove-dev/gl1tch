@@ -12,7 +12,7 @@ func TestDiscoverPipelines(t *testing.T) {
 	dir := t.TempDir()
 
 	// Pipeline with explicit description field.
-	writeFile(t, filepath.Join(dir, "with-desc.pipeline.yaml"), `
+	writeFile(t, filepath.Join(dir, "with-desc.workflow.yaml"), `
 name: with-desc
 description: "Does the thing with the stuff"
 version: "1"
@@ -20,21 +20,21 @@ steps: []
 `)
 
 	// Pipeline with leading comment, no description field.
-	writeFile(t, filepath.Join(dir, "with-comment.pipeline.yaml"), `# Runs the nightly digest job
+	writeFile(t, filepath.Join(dir, "with-comment.workflow.yaml"), `# Runs the nightly digest job
 name: with-comment
 version: "1"
 steps: []
 `)
 
 	// Pipeline with neither description nor comment — falls back to name.
-	writeFile(t, filepath.Join(dir, "bare.pipeline.yaml"), `
+	writeFile(t, filepath.Join(dir, "bare.workflow.yaml"), `
 name: bare
 version: "1"
 steps: []
 `)
 
 	// Malformed YAML — should be skipped silently.
-	writeFile(t, filepath.Join(dir, "broken.pipeline.yaml"), `{{{not yaml`)
+	writeFile(t, filepath.Join(dir, "broken.workflow.yaml"), `{{{not yaml`)
 
 	// Non-pipeline file — should be ignored.
 	writeFile(t, filepath.Join(dir, "other.yaml"), `name: ignored`)

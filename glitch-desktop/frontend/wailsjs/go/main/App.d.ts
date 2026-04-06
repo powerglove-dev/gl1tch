@@ -27,7 +27,7 @@ export function ListAgents(arg1:string):Promise<string>;
 
 export function ListChatWorkflows(arg1:string):Promise<string>;
 
-export function ListPipelines(arg1:string):Promise<string>;
+export function ListWorkflows(arg1:string):Promise<string>;
 
 export function ListPrompts():Promise<string>;
 
@@ -43,13 +43,13 @@ export function RemoveWorkspaceDirectory(arg1:string,arg2:string):Promise<void>;
 
 export function RunChain(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
-export function RunPipeline(arg1:string,arg2:string):Promise<void>;
+export function RunWorkflow(arg1:string,arg2:string):Promise<void>;
 
 export function SaveChatWorkflow(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function SaveMessage(arg1:string,arg2:string):Promise<void>;
 
-export function SavePipeline(arg1:string,arg2:string,arg3:string):Promise<string>;
+export function SaveWorkflow(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function UpdateChatWorkflow(arg1:number,arg2:string,arg3:string):Promise<void>;
 

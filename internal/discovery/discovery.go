@@ -17,7 +17,7 @@ type ExecutorType int
 const (
 	TypeNative     ExecutorType = iota // implements OrcaiExecutor gRPC service
 	TypeCLIWrapper                     // auto-detected tool in PATH
-	TypePipeline                       // pipeline definition from *.pipeline.yaml
+	TypePipeline                       // deprecated — kept for picker compatibility
 )
 
 // ExecutorInfo describes a discovered executor or CLI wrapper.
@@ -32,9 +32,9 @@ type ExecutorInfo struct {
 	SidecarPath string
 }
 
-// Discover returns all available executors: Tier 1 (native, from configDir/executors/),
-// pipeline definitions (from configDir/pipelines/), and Tier 2 (CLI wrappers from PATH).
-// Native executors and pipelines shadow CLI wrappers of the same name.
+// Discover returns all available executors: Tier 1 (native, from configDir/executors/)
+// and Tier 2 (CLI wrappers from PATH).
+// Native executors shadow CLI wrappers of the same name.
 // CLI wrappers are sourced from the providers.Registry (bundled + user-defined profiles).
 func Discover(configDir string) ([]ExecutorInfo, error) {
 	native, err := scanNative(filepath.Join(configDir, "executors"))
@@ -42,16 +42,8 @@ func Discover(configDir string) ([]ExecutorInfo, error) {
 		return nil, err
 	}
 
-	pipelines, err := scanPipelines(filepath.Join(configDir, "pipelines"))
-	if err != nil {
-		return nil, err
-	}
-
-	knownNames := make(map[string]bool, len(native)+len(pipelines))
+	knownNames := make(map[string]bool, len(native))
 	for _, e := range native {
-		knownNames[e.Name] = true
-	}
-	for _, e := range pipelines {
 		knownNames[e.Name] = true
 	}
 
@@ -70,11 +62,10 @@ func Discover(configDir string) ([]ExecutorInfo, error) {
 		return nil, err
 	}
 
-	executors := append(native, pipelines...)
-	executors = append(executors, wrappers...)
+	executors := append(native, wrappers...)
 	for _, profile := range reg.Available() {
 		if knownNames[profile.Name] {
-			continue // native executor, pipeline, or sidecar wrapper takes priority
+			continue // native executor or sidecar wrapper takes priority
 		}
 		executors = append(executors, ExecutorInfo{
 			Name:    profile.Name,
@@ -160,27 +151,3 @@ func scanNative(dir string) ([]ExecutorInfo, error) {
 	return executors, nil
 }
 
-func scanPipelines(dir string) ([]ExecutorInfo, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, err
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	var executors []ExecutorInfo
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".pipeline.yaml") || strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		name := strings.TrimSuffix(e.Name(), ".pipeline.yaml")
-		fullPath := filepath.Join(dir, e.Name())
-		executors = append(executors, ExecutorInfo{
-			Name:         name,
-			Command:      fullPath,
-			Type:         TypePipeline,
-			PipelineFile: fullPath,
-		})
-	}
-	return executors, nil
-}

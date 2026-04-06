@@ -28,7 +28,7 @@ type pipelineMeta struct {
 	TriggerPhrases []string `yaml:"trigger_phrases"`
 }
 
-// DiscoverPipelines scans dir for *.pipeline.yaml files and returns a PipelineRef
+// DiscoverPipelines scans dir for *.workflow.yaml files and returns a PipelineRef
 // for each. Invalid or unreadable files are silently skipped.
 // Description is extracted using the fallback chain:
 //  1. `description:` YAML field
@@ -48,9 +48,7 @@ func DiscoverPipelines(dir string) ([]PipelineRef, error) {
 		if e.IsDir() {
 			continue
 		}
-		// Accept both legacy .pipeline.yaml and current .workflow.yaml extensions.
-		// They share the same YAML schema; the rename is UI-level only.
-		if !strings.HasSuffix(e.Name(), ".pipeline.yaml") && !strings.HasSuffix(e.Name(), ".workflow.yaml") {
+		if !strings.HasSuffix(e.Name(), ".workflow.yaml") {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())

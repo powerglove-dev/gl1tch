@@ -242,7 +242,7 @@ func (a *App) AskProvider(providerID, model, prompt, workspaceID, agentPath stri
 		// Build context from workspace
 		var dirs []string
 		var agents []glitchd.AgentInfo
-		var pipes []glitchd.PipelineInfo
+		var pipes []glitchd.WorkflowInfo
 
 		if workspaceID != "" {
 			if st, err := glitchd.OpenStore(); err == nil {
@@ -251,7 +251,7 @@ func (a *App) AskProvider(providerID, model, prompt, workspaceID, agentPath stri
 				}
 			}
 			agents = glitchd.ListAgents(dirs)
-			pipes = glitchd.DiscoverWorkspacePipelines(dirs)
+			pipes = glitchd.DiscoverWorkspaceWorkflows(dirs)
 		}
 
 		systemCtx := glitchd.BuildSystemContext(dirs, agents, pipes)
@@ -315,7 +315,7 @@ func (a *App) RunChain(stepsJSON, userText, workspaceID, defaultProvider, defaul
 		// Build system context from workspace.
 		var dirs []string
 		var agents []glitchd.AgentInfo
-		var pipes []glitchd.PipelineInfo
+		var pipes []glitchd.WorkflowInfo
 		if workspaceID != "" {
 			if st, err := glitchd.OpenStore(); err == nil {
 				if ws, err := st.GetWorkspace(a.ctx, workspaceID); err == nil {
@@ -323,7 +323,7 @@ func (a *App) RunChain(stepsJSON, userText, workspaceID, defaultProvider, defaul
 				}
 			}
 			agents = glitchd.ListAgents(dirs)
-			pipes = glitchd.DiscoverWorkspacePipelines(dirs)
+			pipes = glitchd.DiscoverWorkspaceWorkflows(dirs)
 		}
 		systemCtx := glitchd.BuildSystemContext(dirs, agents, pipes)
 
@@ -416,10 +416,10 @@ func (a *App) pollClarifications(ctx context.Context) {
 	}
 }
 
-// ── Pipelines ───────────────────────────────────────────────────────────
+// ── Workflows ───────────────────────────────────────────────────────────
 
-// ListPipelines returns discovered pipelines from the active workspace's directories.
-func (a *App) ListPipelines(workspaceID string) string {
+// ListWorkflows returns discovered workflows from the active workspace's directories.
+func (a *App) ListWorkflows(workspaceID string) string {
 	var dirs []string
 	if workspaceID != "" {
 		if st, err := glitchd.OpenStore(); err == nil {
@@ -428,18 +428,18 @@ func (a *App) ListPipelines(workspaceID string) string {
 			}
 		}
 	}
-	pipes := glitchd.DiscoverWorkspacePipelines(dirs)
-	if pipes == nil {
+	workflows := glitchd.DiscoverWorkspaceWorkflows(dirs)
+	if workflows == nil {
 		return "[]"
 	}
-	b, _ := json.Marshal(pipes)
+	b, _ := json.Marshal(workflows)
 	return string(b)
 }
 
-// RunPipeline executes a pipeline and streams output as chat events.
-func (a *App) RunPipeline(pipelinePath, input string) {
+// RunWorkflow executes a workflow and streams output as chat events.
+func (a *App) RunWorkflow(workflowPath, input string) {
 	go func() {
-		// Start polling for clarification requests during this pipeline run.
+		// Start polling for clarification requests during this workflow run.
 		clarifyCtx, clarifyCancel := context.WithCancel(context.Background())
 		go a.pollClarifications(clarifyCtx)
 
@@ -450,7 +450,7 @@ func (a *App) RunPipeline(pipelinePath, input string) {
 			}
 		}()
 
-		err := glitchd.RunPipeline(a.ctx, pipelinePath, input, tokenCh)
+		err := glitchd.RunWorkflow(a.ctx, workflowPath, input, tokenCh)
 		clarifyCancel()
 
 		if err != nil {
@@ -461,9 +461,9 @@ func (a *App) RunPipeline(pipelinePath, input string) {
 	}()
 }
 
-// SavePipeline saves pipeline YAML to a project directory.
-func (a *App) SavePipeline(projectDir, name, yamlContent string) string {
-	path, err := glitchd.SavePipeline(projectDir, name, yamlContent)
+// SaveWorkflow saves workflow YAML to a workspace directory.
+func (a *App) SaveWorkflow(workspaceDir, name, yamlContent string) string {
+	path, err := glitchd.SaveWorkflow(workspaceDir, name, yamlContent)
 	if err != nil {
 		return ""
 	}

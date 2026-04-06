@@ -22,7 +22,7 @@ import {
   RemoveWorkspaceDirectory,
   ListProviders,
   ListAgents,
-  ListPipelines,
+  ListWorkflows,
   ListPrompts,
   ListChatWorkflows,
   SaveChatWorkflow,
@@ -109,7 +109,7 @@ export function App() {
       ListAgents(state.activeWorkspaceId).then((json) => {
         try { setAgents(JSON.parse(json) ?? []); } catch {}
       });
-      ListPipelines(state.activeWorkspaceId).then((json) => {
+      ListWorkflows(state.activeWorkspaceId).then((json) => {
         try { setWorkflowFiles(JSON.parse(json) ?? []); } catch {}
       });
       ListChatWorkflows(state.activeWorkspaceId).then((json) => {
