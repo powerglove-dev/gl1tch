@@ -1,3 +1,12 @@
+// verify-pipelines is a static checker for workflow YAML files.
+//
+// Usage:
+//
+//	verify-pipelines [dir]
+//
+// If [dir] is omitted, the current directory's .glitch/workflows/ is scanned.
+// All .workflow.yaml files in the directory are loaded and walked for
+// `{{ steps.X.Y }}` refs that point at unknown step IDs or undeclared outputs.
 package main
 
 import (
@@ -13,10 +22,17 @@ import (
 var stepRefPattern = regexp.MustCompile(`\{\{\s*steps\.([^.}\s]+)\.([^}\s]+)\s*\}\}`)
 
 func main() {
-	dir := "/Users/stokes/Projects/observability-robots/.glitch/workflows"
-	a, _ := filepath.Glob(filepath.Join(dir, "*.workflow.yaml"))
-	b, _ := filepath.Glob(filepath.Join(dir, "*.pipeline.yaml"))
-	files := append(a, b...)
+	dir := defaultDir()
+	if len(os.Args) > 1 {
+		dir = os.Args[1]
+	}
+
+	files, _ := filepath.Glob(filepath.Join(dir, "*.workflow.yaml"))
+	if len(files) == 0 {
+		fmt.Fprintf(os.Stderr, "no .workflow.yaml files found in %s\n", dir)
+		os.Exit(1)
+	}
+
 	failed := 0
 	for _, f := range files {
 		fp, err := os.Open(f)
@@ -69,10 +85,18 @@ func main() {
 		}
 	}
 	if failed > 0 {
-		fmt.Printf("\n%d pipelines failed validation\n", failed)
+		fmt.Printf("\n%d workflows failed validation\n", failed)
 		os.Exit(1)
 	}
-	fmt.Println("\nAll pipelines valid")
+	fmt.Println("\nAll workflows valid")
+}
+
+func defaultDir() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ".glitch/workflows"
+	}
+	return filepath.Join(cwd, ".glitch", "workflows")
 }
 
 func mapKeys(m map[string]bool) string {

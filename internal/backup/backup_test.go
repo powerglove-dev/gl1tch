@@ -26,11 +26,11 @@ func openTestStore(t *testing.T) *store.Store {
 func makeConfigDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	pipelines := filepath.Join(dir, "pipelines")
-	if err := os.MkdirAll(pipelines, 0o755); err != nil {
+	prompts := filepath.Join(dir, "prompts")
+	if err := os.MkdirAll(prompts, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(pipelines, "test.pipeline.yaml"), []byte("name: test\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(prompts, "hello.md"), []byte("# hi\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("store:\n"), 0o644); err != nil {
@@ -103,8 +103,8 @@ func TestBackupRun_ArchiveContents(t *testing.T) {
 
 	entries := archiveEntries(t, outPath)
 
-	if _, ok := entries["config/pipelines/test.pipeline.yaml"]; !ok {
-		t.Error("archive missing config/pipelines/test.pipeline.yaml")
+	if _, ok := entries["config/prompts/hello.md"]; !ok {
+		t.Error("archive missing config/prompts/hello.md")
 	}
 	if _, ok := entries["config/config.yaml"]; !ok {
 		t.Error("archive missing config/config.yaml")

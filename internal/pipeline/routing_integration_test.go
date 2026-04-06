@@ -22,13 +22,13 @@ func TestRouteIntent_MatchesSyncDocs(t *testing.T) {
 
 	// Build a temp pipelines dir with a sync-docs pipeline.
 	dir := t.TempDir()
-	writeTestPipeline(t, filepath.Join(dir, "sync-docs.pipeline.yaml"), `
+	writeTestPipeline(t, filepath.Join(dir, "sync-docs.workflow.yaml"), `
 name: sync-docs
 description: "Compare recent code changes against site docs and generate a sync report noting new features"
 version: "1"
 steps: []
 `)
-	writeTestPipeline(t, filepath.Join(dir, "gh-review.pipeline.yaml"), `
+	writeTestPipeline(t, filepath.Join(dir, "gh-review.workflow.yaml"), `
 name: gh-review
 description: "Review open GitHub pull requests and summarise what needs attention"
 version: "1"
@@ -56,7 +56,7 @@ func TestRouteIntent_ReturnsNoneForUnrelated(t *testing.T) {
 	checkModelAvailable(t, smokeModelBase(model))
 
 	dir := t.TempDir()
-	writeTestPipeline(t, filepath.Join(dir, "sync-docs.pipeline.yaml"), `
+	writeTestPipeline(t, filepath.Join(dir, "sync-docs.workflow.yaml"), `
 name: sync-docs
 description: "Compare recent code changes against site docs"
 version: "1"

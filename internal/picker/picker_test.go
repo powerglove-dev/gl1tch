@@ -115,7 +115,7 @@ func TestPickerItem_PipelineJSONRoundTrip(t *testing.T) {
 	original := picker.PickerItem{
 		Kind:         "pipeline",
 		Name:         "my-pipeline",
-		PipelineFile: "/home/user/.config/orcai/pipelines/my-pipeline.pipeline.yaml",
+		PipelineFile: "/home/user/Projects/myrepo/.glitch/workflows/my-workflow.workflow.yaml",
 	}
 	data, err := picker.MarshalPickerItem(original)
 	if err != nil {
@@ -149,7 +149,7 @@ func TestBuildProviders_OllamaSidecarPathSet(t *testing.T) {
 	}
 
 	// Also create the required sub-directories so discovery.Discover doesn't fail.
-	for _, sub := range []string{"plugins", "pipelines"} {
+	for _, sub := range []string{"plugins"} {
 		if err := os.MkdirAll(filepath.Join(tmpDir, ".config", "glitch", sub), 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", sub, err)
 		}

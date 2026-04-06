@@ -18,12 +18,12 @@ var (
 func init() {
 	rootCmd.AddCommand(backupCmd)
 	backupCmd.Flags().StringVar(&backupOutput, "output", "", "output path for the backup archive (default: glitch-backup-<date>.tar.gz)")
-	backupCmd.Flags().BoolVar(&backupExcludeAgents, "no-agents", false, "exclude auto-generated agent pipelines (pipelines/.agents/)")
+	backupCmd.Flags().BoolVar(&backupExcludeAgents, "no-agents", false, "(deprecated, no-op) exclude auto-generated agent files")
 }
 
 var backupCmd = &cobra.Command{
 	Use:   "backup",
-	Short: "Backup config, pipelines, prompts, and brain data",
+	Short: "Backup config, prompts, and brain data",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s, err := store.Open()
 		if err != nil {

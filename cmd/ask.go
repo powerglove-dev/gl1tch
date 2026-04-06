@@ -52,14 +52,14 @@ func init() {
 	askCmd.Flags().BoolVar(&askSynthesize, "synthesize", false, "pass response through claude to clean up without adding new information")
 	askCmd.Flags().StringVar(&askSynthesizeModel, "synthesize-model", "", "model to use for synthesis (defaults to claude provider default)")
 	askCmd.Flags().BoolVar(&askJSON, "json", false, "output response as JSON envelope")
-	askCmd.Flags().BoolVarP(&askAuto, "auto", "y", false, "skip confirmation for generated pipelines")
+	askCmd.Flags().BoolVarP(&askAuto, "auto", "y", false, "skip confirmation for generated workflows")
 	askCmd.Flags().BoolVar(&askDryRun, "dry-run", false, "show what would run without executing")
-	askCmd.Flags().BoolVar(&askRoute, "route", true, "route prompt through intent classifier to find a matching pipeline")
+	askCmd.Flags().BoolVar(&askRoute, "route", true, "route prompt through intent classifier to find a matching workflow")
 }
 
 var askCmd = &cobra.Command{
 	Use:   "ask [prompt]",
-	Short: "Ask glitch a question — routes to matching pipelines automatically",
+	Short: "Ask glitch a question — routes to matching workflows in the gl1tch workspace",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// ── explicit pipeline flag: delegate entirely ─────────────────────────────

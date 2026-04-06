@@ -8,7 +8,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Pipeline is the top-level definition loaded from a .pipeline.yaml file.
+// Pipeline is the top-level definition loaded from a .workflow.yaml file.
+// (The Go type kept its historical name; on disk these files are called
+// workflows. The pipeline package is the schema/runner; "workflow" is the
+// user-facing word.)
 type Pipeline struct {
 	Name        string         `yaml:"name"`
 	Version     string         `yaml:"version"`

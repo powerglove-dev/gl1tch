@@ -22,7 +22,7 @@ type BackupOptions struct {
 	Output        string // output path; empty = auto-generated in cwd
 	ConfigDir     string // override ~/.config/glitch
 	DBPath        string // override ~/.local/share/glitch/glitch.db
-	ExcludeAgents bool   // skip pipelines/.agents/ (auto-generated agent pipelines)
+	ExcludeAgents bool   // historical: previously skipped pipelines/.agents/ (no-op now)
 }
 
 // Manifest describes what was included in the backup.
@@ -34,8 +34,10 @@ type Manifest struct {
 }
 
 // configTargets lists the paths within the config dir to include in the archive.
+// Workflows are no longer stored under the global config dir — they live in
+// each workspace under .glitch/workflows/ and are tracked by the workspace's
+// own VCS, so they're not part of the gl1tch backup.
 var configTargets = []string{
-	"pipelines",
 	"prompts",
 	"wrappers",
 	"themes",
@@ -76,9 +78,7 @@ func Run(ctx context.Context, s *store.Store, opts BackupOptions) (*Manifest, er
 	var fileCount int
 
 	var excludeDirs []string
-	if opts.ExcludeAgents {
-		excludeDirs = append(excludeDirs, filepath.Join(configDir, "pipelines", ".agents"))
-	}
+	_ = opts.ExcludeAgents // historical option; the .agents dir no longer exists.
 
 	for _, target := range configTargets {
 		targetPath := filepath.Join(configDir, target)

@@ -95,7 +95,7 @@ func TestSyntheticAPMRef_DetectedByPath(t *testing.T) {
 	real := pipeline.PipelineRef{
 		Name:        "apm.glab-issue",
 		Description: "...",
-		Path:        "/home/user/.config/glitch/pipelines/apm.glab-issue.pipeline.yaml",
+		Path:        "/home/user/Projects/gl1tch/.glitch/workflows/apm.glab-issue.workflow.yaml",
 	}
 	isRealSyntheticAPM := real.Path == "" && strings.HasPrefix(real.Name, "apm.")
 	if isRealSyntheticAPM {

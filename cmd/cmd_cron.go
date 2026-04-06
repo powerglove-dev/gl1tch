@@ -24,7 +24,7 @@ func init() {
 
 var cronCmd = &cobra.Command{
 	Use:   "cron",
-	Short: "Manage recurring pipeline and agent schedules",
+	Short: "Manage recurring workflow and agent schedules",
 	Long: `The cron scheduler runs automatically as part of the gl1tch supervisor
 when you launch glitch. Use these subcommands to inspect and manage schedules.
 

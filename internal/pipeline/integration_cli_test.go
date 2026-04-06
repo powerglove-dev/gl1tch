@@ -32,7 +32,7 @@ func TestPipelineRunIntegration(t *testing.T) {
 	}
 
 	// Find fixture
-	fixture, err := filepath.Abs(filepath.Join(filepath.Dir(file), "testdata", "simple.pipeline.yaml"))
+	fixture, err := filepath.Abs(filepath.Join(filepath.Dir(file), "testdata", "simple.workflow.yaml"))
 	if err != nil {
 		t.Fatalf("fixture path: %v", err)
 	}
