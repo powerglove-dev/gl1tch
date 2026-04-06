@@ -35,6 +35,13 @@ type Config struct {
 		Interval time.Duration `yaml:"interval"` // poll interval (default 300s)
 	} `yaml:"github"`
 
+	Mattermost struct {
+		URL      string        `yaml:"url"`      // server URL (or GLITCH_MATTERMOST_URL)
+		Token    string        `yaml:"token"`    // bot/PAT (or GLITCH_MATTERMOST_TOKEN)
+		Channels []string      `yaml:"channels"` // channel names to auto-join and monitor (empty = all)
+		Interval time.Duration `yaml:"interval"` // poll interval (default 60s)
+	} `yaml:"mattermost"`
+
 	// Model is the Ollama model used for query generation and synthesis.
 	Model string `yaml:"model"` // default: llama3.2
 }
@@ -63,6 +70,7 @@ func LoadConfig() (*Config, error) {
 	cfg.Copilot.Enabled = true
 	cfg.Copilot.Interval = 120 * time.Second
 	cfg.GitHub.Interval = 300 * time.Second
+	cfg.Mattermost.Interval = 60 * time.Second
 	cfg.Model = "llama3.2"
 
 	data, err := os.ReadFile(path)
@@ -75,6 +83,14 @@ func LoadConfig() (*Config, error) {
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse observer config: %w", err)
+	}
+
+	// Mattermost: fall back to env vars if not set in YAML.
+	if cfg.Mattermost.URL == "" {
+		cfg.Mattermost.URL = os.Getenv("GLITCH_MATTERMOST_URL")
+	}
+	if cfg.Mattermost.Token == "" {
+		cfg.Mattermost.Token = os.Getenv("GLITCH_MATTERMOST_TOKEN")
 	}
 
 	// Expand ~ in repo paths.
@@ -132,6 +148,15 @@ github:
   repos: []
   # - elastic/ensemble
   # - 8op-org/gl1tch
+
+# Mattermost channel monitoring (uses GLITCH_MATTERMOST_URL/TOKEN env vars if set).
+mattermost:
+  interval: 60s
+  # url: "https://mattermost.example.com"
+  # token: "your-bot-token"
+  channels: []
+  # - town-square
+  # - engineering
 `, home, home)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

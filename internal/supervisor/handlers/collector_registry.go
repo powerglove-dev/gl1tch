@@ -45,6 +45,15 @@ func RegisterCollectors(sup *supervisor.Supervisor) {
 		}))
 	}
 
+	if cfg.Mattermost.URL != "" && cfg.Mattermost.Token != "" {
+		sup.RegisterService(NewCollectorService(&collector.MattermostCollector{
+			URL:      cfg.Mattermost.URL,
+			Token:    cfg.Mattermost.Token,
+			Channels: cfg.Mattermost.Channels,
+			Interval: cfg.Mattermost.Interval,
+		}))
+	}
+
 	// PipelineIndexer is registered without a store — it opens its own.
 	sup.RegisterService(NewCollectorService(&collector.PipelineIndexer{}))
 }

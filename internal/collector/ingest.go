@@ -45,6 +45,16 @@ func IngestAll(ctx context.Context, es *esearch.Client, cfg *Config) error {
 		}
 	}
 
+	// Mattermost channels.
+	if cfg.Mattermost.URL != "" && cfg.Mattermost.Token != "" {
+		n, err := IngestMattermost(ctx, es, cfg)
+		if err != nil {
+			slog.Warn("ingest: mattermost", "err", err)
+		} else {
+			totalDocs += n
+		}
+	}
+
 	// Git repos.
 	for _, repo := range cfg.Git.Repos {
 		n, err := ingestGitRepo(ctx, es, repo)
