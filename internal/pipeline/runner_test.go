@@ -613,7 +613,7 @@ func (c *capturingPublisher) countTopic(topic string) int {
 
 // ── Event emission tests ──────────────────────────────────────────────────────
 
-// TestEventEmission_Legacy verifies that a 2-step sequential (legacy) pipeline
+// TestEventEmission_Legacy verifies that a 2-step sequential pipeline
 // emits events in the correct order: run.started, step.started×2, step.done×2, run.completed.
 func TestEventEmission_Legacy(t *testing.T) {
 	p := &pipeline.Pipeline{
@@ -621,7 +621,7 @@ func TestEventEmission_Legacy(t *testing.T) {
 		Steps: []pipeline.Step{
 			{ID: "in", Type: "input"},
 			{ID: "s1", Executor: "echo1"},
-			{ID: "s2", Executor: "echo2"},
+			{ID: "s2", Executor: "echo2", Needs: []string{"s1"}},
 			{ID: "out", Type: "output"},
 		},
 	}

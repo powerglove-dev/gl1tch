@@ -1,6 +1,8 @@
 package picker_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/8op-org/gl1tch/internal/picker"
