@@ -1,0 +1,20 @@
+name: diff-review
+version: "1"
+
+steps:
+  - id: diff
+    executor: shell
+    vars:
+      cmd: "git -C /Users/stokes/Projects/gl1tch diff main --stat && git -C /Users/stokes/Projects/gl1tch diff main"
+
+  - id: review
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    needs: [diff]
+    prompt: |
+      Review this diff. Focus on:
+      - correctness issues
+      - missing error handling
+      - anything that would fail in production
+
+      {{get "step.diff.data.value" .}}

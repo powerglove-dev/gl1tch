@@ -1,0 +1,61 @@
+name: demo-repo-pulse
+version: "1"
+description: "Read-only git activity snapshot for any repo — last 4 weeks of commits, top files churned, top contributors"
+
+steps:
+  - id: commit-volume
+    executor: shell
+    outputs: { value: string }
+    vars:
+      cmd: |
+        echo "=== commits per week (last 4 weeks) ==="
+        git log --since='4 weeks ago' --no-merges --pretty=format:'%ad' --date=format:'%Y-W%V' 2>/dev/null \
+          | sort | uniq -c | sort -k2
+        echo ""
+        echo "=== total in window ==="
+        git log --since='4 weeks ago' --no-merges --oneline 2>/dev/null | wc -l | xargs echo "  commits:"
+
+  - id: hot-files
+    executor: shell
+    outputs: { value: string }
+    vars:
+      cmd: |
+        echo "=== top 10 files churned (last 4 weeks) ==="
+        git log --since='4 weeks ago' --no-merges --pretty=format: --name-only 2>/dev/null \
+          | grep -v '^$' | sort | uniq -c | sort -rn | head -10
+
+  - id: contributors
+    executor: shell
+    outputs: { value: string }
+    vars:
+      cmd: |
+        echo "=== top contributors (last 4 weeks) ==="
+        git shortlog -sn --no-merges --since='4 weeks ago' 2>/dev/null | head -10
+
+  - id: summary
+    executor: ollama
+    model: qwen2.5
+    needs: [commit-volume, hot-files, contributors]
+    no_clarify: true
+    prompt: |
+      READONLY: output text only. Do not emit GLITCH_WRITE or GLITCH_RUN blocks. Do not write files.
+
+      You are summarizing a 4-week git activity snapshot. Be terse.
+      Output exactly three sections, each 1-3 bullets:
+
+      ## Velocity
+      (interpret commit volume — accelerating, steady, quiet)
+
+      ## Hotspots
+      (which files/areas are seeing the most change, and what that suggests)
+
+      ## People
+      (who is active, any single-contributor risk)
+
+      Data:
+
+      {{ steps.commit-volume.value }}
+
+      {{ steps.hot-files.value }}
+
+      {{ steps.contributors.value }}

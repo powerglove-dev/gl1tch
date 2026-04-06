@@ -1,0 +1,92 @@
+name: mud-world-event
+version: "1"
+description: "Generates and injects a random world event (raid, lockdown, signal surge, black market) directly into the gl1tch-mud SQLite database"
+write_brain: false
+game: false
+
+steps:
+
+  # ── 1. Seed event parameters ───────────────────────────────────────────────
+  - id: seed
+    executor: shell
+    vars:
+      cmd: |
+        TYPES=("raid" "lockdown" "signal_surge" "black_market")
+        ROOMS=("net-0" "net-1" "net-2" "net-3" "net-4" "net-5")
+        FACTIONS=("ghost-protocol" "null-collective" "axiom-security" "phantom-collective" "signal-collective")
+        ITEMS=("data-chip" "raw-silicon" "decryption-key" "server-core" "rf-dampener-core" "copper-wire")
+        ITEM_NAMES=("Data Chip" "Raw Silicon" "Decryption Key" "Crystalline Server Core" "RF Dampener Core" "Copper Wire")
+        ITEM_DESCS=("A fragment of stolen data." "Unprocessed chip substrate." "Cryptographic override material." "Dense storage matrix, still warm." "Absorbs EM radiation across frequencies." "High-purity conductor salvage.")
+
+        TS=$(date +%s)
+        TIDX=$(( TS % 4 ))
+        RIDX=$(( (TS / 3) % 6 ))
+        FIDX=$(( (TS / 7) % 5 ))
+        IIDX=$(( (TS / 11) % 6 ))
+        PAYOUT=$(( 500 + (TS % 1501) ))
+
+        ETYPE="${TYPES[$TIDX]}"
+        ROOM="${ROOMS[$RIDX]}"
+        FACTION="${FACTIONS[$FIDX]}"
+        ITEM_ID="${ITEMS[$IIDX]}"
+        ITEM_NAME="${ITEM_NAMES[$IIDX]}"
+        ITEM_DESC="${ITEM_DESCS[$IIDX]}"
+        EVENT_ID="event-${ETYPE//_/-}-${TS}"
+
+        echo "type=${ETYPE} room=${ROOM} faction=${FACTION} payout=${PAYOUT} item_id=${ITEM_ID} item_name=${ITEM_NAME} event_id=${EVENT_ID}"
+
+  # ── 2. Generate event title and description ────────────────────────────────
+  - id: generate
+    executor: shell
+    needs: [seed]
+    vars:
+      cmd: |
+        SEED="{{get "step.seed.data.value" .}}"
+
+        # Parse seed values
+        ETYPE=$(echo "$SEED" | grep -oP 'type=\K[^ ]+')
+        ROOM=$(echo "$SEED" | grep -oP 'room=\K[^ ]+')
+        FACTION=$(echo "$SEED" | grep -oP 'faction=\K[^ ]+')
+        PAYOUT=$(echo "$SEED" | grep -oP 'payout=\K[^ ]+')
+        ITEM_ID=$(echo "$SEED" | grep -oP 'item_id=\K[^ ]+')
+        ITEM_NAME=$(echo "$SEED" | grep -oP 'item_name=\K[^ ]+')
+        EVENT_ID=$(echo "$SEED" | grep -oP 'event_id=\K[^ ]+')
+        TS=$(date +%s)
+        CURRENT_ACTIONS=$(sqlite3 ~/.local/share/gl1tch-mud/world.db "SELECT count FROM player_actions WHERE id=1;" 2>/dev/null || echo "0")
+
+        case "$ETYPE" in
+          raid)
+            TITLE="Raid Alert: ${ROOM}"
+            DESC="A coordinated strike force is moving through ${ROOM}. High-value targets and loot on the floor. Window is short."
+            ;;
+          lockdown)
+            TITLE="Lockdown: ${ROOM}"
+            DESC="Security protocols have sealed ${ROOM}. Axiom grid is hot. Get in, get what you need, get out before the sweep."
+            ;;
+          signal_surge)
+            TITLE="Signal Surge: ${ROOM}"
+            DESC="An anomalous signal burst is overloading receivers in ${ROOM}. Hack windows are wide open — countermeasures are blind."
+            ;;
+          black_market)
+            TITLE="Black Market: ${ROOM}"
+            DESC="A temporary market has materialized in ${ROOM}. Rare goods, no questions, gone before dawn."
+            ;;
+        esac
+
+        # Escape for SQLite single-quote safety
+        TITLE_ESC="${TITLE//\'/\'\'}"
+        DESC_ESC="${DESC//\'/\'\'}"
+        ITEM_NAME_ESC="${ITEM_NAME//\'/\'\'}"
+
+        sqlite3 ~/.local/share/gl1tch-mud/world.db \
+          "INSERT OR REPLACE INTO world_events \
+           (id, type, title, description, target_room, faction, \
+            payout_credits, payout_item_id, payout_item_name, payout_item_desc, \
+            status, expires_actions, created_actions, created_at) \
+           VALUES \
+           ('${EVENT_ID}', '${ETYPE}', '${TITLE_ESC}', '${DESC_ESC}', \
+            '${ROOM}', '${FACTION}', \
+            ${PAYOUT}, '${ITEM_ID}', '${ITEM_NAME_ESC}', 'World event reward item.', \
+            'active', 15, ${CURRENT_ACTIONS}, ${TS});"
+
+        echo "Injected world event: ${EVENT_ID} | ${TITLE} | room=${ROOM} | payout=${PAYOUT} credits + ${ITEM_NAME}"

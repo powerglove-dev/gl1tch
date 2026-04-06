@@ -1,0 +1,49 @@
+name: pr-review
+version: "1"
+description: "Fetch a GitHub PR diff and reviewer comments, produce a fix using Claude Sonnet"
+
+# Usage:
+#   gl1tch ask "review my PR https://github.com/elastic/ensemble/pull/1246"
+#   gl1tch pipeline run pr-review --input https://github.com/elastic/ensemble/pull/1246
+#
+# input: full PR URL or "owner/repo/pull/N" — passed as {{.param.input}}
+# Output appears in the pipeline job window. No PR is opened automatically.
+
+steps:
+
+  # ── 1. Fetch the PR diff ──────────────────────────────────────────────────
+  - id: fetch_diff
+    executor: shell
+    vars:
+      cmd: "gh pr diff '{{.param.input}}' 2>&1"
+
+  # ── 2. Fetch reviewer comments ────────────────────────────────────────────
+  - id: fetch_comments
+    executor: shell
+    needs: [fetch_diff]
+    vars:
+      cmd: "gh pr view '{{.param.input}}' --json comments --jq '[.comments[].body] | join(\"\\n---\\n\")' 2>&1"
+
+  # ── 3. Produce corrected code with GitHub Copilot ────────────────────────
+  - id: fix
+    executor: github-copilot
+    needs: [fetch_diff, fetch_comments]
+    prompt: |
+      You are reviewing a GitHub pull request and producing corrected code based on reviewer feedback.
+
+      Rules:
+      - Do not open a pull request, push any branch, or run any git commands.
+      - Address every point raised in the reviewer comments.
+      - Output the corrected code with minimal surrounding explanation.
+      - Do NOT use ruamel.yaml. Use pyyaml (yaml.safe_load / yaml.dump) or a line-by-line state machine instead.
+      - If the reviewer suggests a library you cannot or should not use, choose the best alternative.
+
+      ## Reviewer comments
+
+      {{.step.fetch_comments.data.value}}
+
+      ## Pull request diff
+
+      ```diff
+      {{.step.fetch_diff.data.value}}
+      ```

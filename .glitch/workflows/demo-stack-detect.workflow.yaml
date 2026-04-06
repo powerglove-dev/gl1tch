@@ -1,0 +1,76 @@
+name: demo-stack-detect
+version: "1"
+description: "Read-only tech-stack detector for any repo — languages, build tools, CI, test frameworks"
+
+steps:
+  - id: build-files
+    executor: shell
+    outputs: { value: string }
+    vars:
+      cmd: |
+        echo "=== build / package manifests ==="
+        for f in pyproject.toml setup.py uv.lock poetry.lock requirements.txt \
+                 package.json package-lock.json pnpm-lock.yaml yarn.lock bun.lockb \
+                 go.mod Cargo.toml Gemfile build.gradle pom.xml Makefile justfile; do
+          [ -f "$f" ] && echo "  $f"
+        done
+        :
+
+  - id: lang-mix
+    executor: shell
+    outputs: { value: string }
+    vars:
+      cmd: |
+        echo "=== tracked source files by extension (top 12) ==="
+        git ls-files 2>/dev/null \
+          | awk -F. 'NF>1 {print $NF}' \
+          | grep -E '^(py|go|rs|ts|tsx|js|jsx|java|kt|rb|sh|yaml|yml|md|sql)$' \
+          | sort | uniq -c | sort -rn | head -12
+
+  - id: ci-and-tests
+    executor: shell
+    outputs: { value: string }
+    vars:
+      cmd: |
+        echo "=== CI ==="
+        [ -d .github/workflows ] && ls .github/workflows | wc -l | xargs echo "  github actions workflows:"
+        [ -f .gitlab-ci.yml ] && echo "  gitlab-ci.yml present"
+        [ -f .circleci/config.yml ] && echo "  circleci present"
+        echo ""
+        echo "=== test directories ==="
+        for d in tests test __tests__ spec; do
+          [ -d "$d" ] && find "$d" -type f \( -name '*.py' -o -name '*.go' -o -name '*.ts' -o -name '*.js' \) 2>/dev/null \
+            | wc -l | xargs -I{} echo "  $d/: {} test files"
+        done
+        :
+
+  - id: report
+    executor: ollama
+    model: qwen2.5
+    needs: [build-files, lang-mix, ci-and-tests]
+    no_clarify: true
+    prompt: |
+      READONLY: output text only. Do not emit GLITCH_WRITE or GLITCH_RUN blocks. Do not write files.
+
+      You are profiling an unfamiliar repo for a new engineer joining the project.
+      From the data below, write a one-page tech profile:
+
+      ## Stack
+      (primary language, build tool, package manager — be definitive, not hedged)
+
+      ## Testing posture
+      (framework hint, test count, gaps)
+
+      ## CI
+      (what's wired up)
+
+      ## Onboarding tip
+      (one sentence: where would a new contributor start reading?)
+
+      Data:
+
+      {{ steps.build-files.value }}
+
+      {{ steps.lang-mix.value }}
+
+      {{ steps.ci-and-tests.value }}

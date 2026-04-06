@@ -1,0 +1,813 @@
+name: docs-improve
+version: "1"
+description: "One targeted documentation improvement per execution. Rotates through all gl1tch topic areas — writing new files or deepening existing ones. Safe to run on a cron schedule; built-in dedup prevents duplicate PRs."
+
+# Each run does one thing well:
+#   1. Inventory what docs exist vs. what topics are required
+#   2. Check which topics already have open PRs in flight
+#   3. Pick the highest-priority gap (missing topics first, thin docs second)
+#   4. Deep-search the relevant source code for that topic
+#   5. Claude Sonnet writes a complete, publication-ready document
+#   6. Write to disk, open a PR, record in brain
+#
+# Topic rotation: covered topics are written to the brain. The pick prompt
+# reads brain context so it naturally avoids recently-covered topics.
+#
+# Usage:
+#   glitch pipeline run docs-improve
+#   glitch pipeline run docs-improve --input "focus on the plugin system"
+#   (add to cron.yaml for continuous background coverage)
+
+vars:
+  model: "llama3.2"
+  repo_dir: "/Users/stokes/Projects/gl1tch"
+  docs_dir: "/Users/stokes/Projects/gl1tch/site/src/content/pipelines"
+  embed_model: "nomic-embed-text"
+
+steps:
+
+  # ── 0. Semantic index (incremental — only re-embeds changed chunks) ───────────
+
+  - id: index_code
+    executor: builtin.index_code
+    args:
+      path: "{{.param.repo_dir}}"
+      extensions: ".go,.md,.yaml"
+      model: "{{.param.embed_model}}"
+      cwd: "{{.param.repo_dir}}"
+
+  # ── 1. Open PRs — hard dedup signal ──────────────────────────────────────────
+
+  - id: open_prs
+    executor: shell
+    vars:
+      cmd: |
+        cd "{{.param.repo_dir}}"
+        RESULT=$(gh pr list --state open --json headRefName,title \
+          --jq '.[] | select(.headRefName | startswith("docs/")) | "- " + .title' 2>/dev/null)
+        if [ -z "$RESULT" ]; then
+          echo "(no open docs PRs)"
+        else
+          echo "$RESULT"
+        fi
+
+  # ── 2. Doc inventory — what exists, what's missing ───────────────────────────
+
+  - id: inventory
+    executor: shell
+    vars:
+      cmd: |
+        DOCS="{{.param.docs_dir}}"
+        echo "=== EXISTING DOC FILES ==="
+        for f in "$DOCS"/*.md "$DOCS"/*.mdx; do
+          [ -f "$f" ] || continue
+          LINES=$(wc -l < "$f")
+          TITLE=$(head -6 "$f" | grep '^title:' | sed 's/title: *//' | tr -d '"')
+          printf "%-30s %4d lines  %s\n" "$(basename $f)" "$LINES" "$TITLE"
+        done
+
+        echo ""
+        echo "=== REQUIRED TOPICS ==="
+        for topic in \
+          "philosophy:philosophy.md" \
+          "architecture:architecture.md" \
+          "technologies:technologies.md" \
+          "quickstart:quickstart.md" \
+          "yaml-reference:yaml-reference.md" \
+          "executors:executors.md" \
+          "brain:brain.md" \
+          "pipelines:pipelines.md" \
+          "workflows:workflows.md" \
+          "plugins:plugins.md" \
+          "themes:themes.md" \
+          "prompts:prompts.md" \
+          "telemetry:telemetry.md" \
+          "cron:cron.md" \
+          "console:console.md" \
+          "cli-reference:cli-reference.md" \
+          "examples:examples.md"; do
+          NAME="${topic%%:*}"
+          FILE="${topic##*:}"
+          if [ -f "$DOCS/$FILE" ]; then
+            LINES=$(wc -l < "$DOCS/$FILE")
+            echo "$NAME ($FILE): EXISTS ($LINES lines)"
+          else
+            echo "$NAME ($FILE): MISSING"
+          fi
+        done
+
+  # ── 3. Source scan — cmd surface + key internals for context ─────────────────
+
+  - id: scan_source
+    executor: shell
+    vars:
+      cmd: |
+        REPO="{{.param.repo_dir}}"
+
+        echo "=== cmd/ — CLI entry points (first 60 lines each) ==="
+        for f in "$REPO"/cmd/*.go; do
+          [ -f "$f" ] || continue
+          case "$f" in *_test.go) continue ;; esac
+          echo "--- $(basename $f) ---"
+          head -60 "$f"
+          echo
+        done
+
+        echo "=== internal/ packages ==="
+        ls "$REPO/internal/"
+
+        echo ""
+        echo "=== internal/pipeline/pipeline.go (Step struct, first 80 lines) ==="
+        head -80 "$REPO/internal/pipeline/pipeline.go"
+
+        echo ""
+        echo "=== internal/executor/executor.go ==="
+        cat "$REPO/internal/executor/executor.go"
+
+        echo ""
+        echo "=== internal/themes/themes.go (first 60 lines) ==="
+        head -60 "$REPO/internal/themes/themes.go" 2>/dev/null || echo "(not found)"
+
+        echo ""
+        echo "=== apm.yml ==="
+        cat "$REPO/apm.yml" 2>/dev/null || echo "(not found)"
+
+        echo ""
+        echo "=== Taskfile.yml (task list) ==="
+        grep -E '^\s+[a-z].*:$|desc:' "$REPO/Taskfile.yml" | head -60
+
+  # ── 4. Pick one topic to document ────────────────────────────────────────────
+
+  - id: pick
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    no_brain: true
+    no_clarify: true
+    needs: [inventory, scan_source, open_prs]
+    prompt: |
+      You are the documentation planner for gl1tch — a personal AI assistant that lives
+      in your terminal. gl1tch runs your automations, learns your context, and adapts to
+      your workflow. The docs have two goals only:
+        1. Get a new user running their first pipeline in under 5 minutes.
+        2. Show an experienced user how to make gl1tch completely their own.
+
+      Everything else is secondary. Internal implementation details (session management,
+      the rendering layer, observability plumbing) are not user goals and should not
+      drive documentation priorities.
+
+      ## Current doc inventory (existing files + required topics):
+      {{get "step.inventory.data.value" .}}
+
+      ## Open docs PRs already in flight — skip these topics entirely:
+      {{get "step.open_prs.data.value" .}}
+
+      ## Source overview:
+      {{get "step.scan_source.data.value" .}}
+
+      {{if .param.input}}
+      ## User-specified focus (prioritise this):
+      {{.param.input}}
+      {{end}}
+
+      ## Selection priority:
+      1. MISSING topics (no file exists) — highest priority
+      2. High user-value topics that are thin (under 120 lines) — get running + customize
+      3. Topics not recently covered (avoid repeating recent work)
+      4. Never pick a topic with an open PR already
+      5. Rotate — do not pick the same topic twice in a row
+      6. Lowest priority: internal plumbing topics (telemetry, architecture internals)
+
+      ## Topic catalogue (name → filename) — ordered by USER VALUE, highest first:
+      - quickstart         → quickstart.md         (install + first pipeline running in 5 min; zero fluff)
+      - console            → console.md             (your AI assistant: talking to it, slash commands, what it can do for you)
+      - pipelines          → pipelines.md           (what a pipeline is, how to write one, how steps chain)
+      - examples           → examples.md            (real-world copy-paste pipelines that solve actual problems)
+      - brain              → brain.md               (gl1tch memory: how it learns your projects and context over time)
+      - cron               → cron.md                (automating pipelines: run on a schedule, wake up to results)
+      - plugins            → plugins.md             (extending gl1tch: install community pipelines, build your own)
+      - themes             → themes.md              (making it yours: color themes, visual customisation)
+      - prompts            → prompts.md             (saved prompts: reusable instructions you can recall instantly)
+      - workflows          → workflows.md           (chaining pipelines together into bigger automations)
+      - yaml-reference     → yaml-reference.md      (complete field reference for pipeline YAML — when you need the details)
+      - executors          → executors.md           (which AI providers you can use and how to configure them)
+      - cli-reference      → cli-reference.md       (full command reference with flags — lookup table)
+      - philosophy         → philosophy.md          (what gl1tch is and is not; why it works this way)
+      - architecture       → architecture.md        (how gl1tch fits into your terminal — for the curious)
+      - technologies       → technologies.md        (what runs under the hood — lowest priority, internal interest only)
+      - telemetry          → telemetry.md           (observability internals — lowest priority, rarely user-relevant)
+
+      Output EXACTLY this format — three lines, nothing else:
+      FILE: <filename.md>
+      TOPIC: <topic name>
+      FOCUS: <one sentence: the specific user capability or outcome this page should make possible>
+
+  # ── 5. Extract filename — parse structured pick output directly ───────────────
+  # Grep the FILE: line from pick output; no LLM needed, no hallucination risk.
+  # Normalises extension: strips whitespace, ensures .md suffix.
+
+  - id: filename
+    executor: shell
+    needs: [pick]
+    vars:
+      cmd: |
+        # Match FILE: anywhere on the line (handles leading spaces from llama)
+        RAW=$(echo "$GLITCH_PICK" | grep -i 'FILE:' | head -1 | sed 's/.*[Ff][Ii][Ll][Ee]:[[:space:]]*//' | tr -d '[:space:]')
+        # Ensure .md extension
+        case "$RAW" in
+          *.md|*.mdx) echo "$RAW" ;;
+          *) echo "${RAW}.md" ;;
+        esac
+        # Abort if we still ended up with just ".md" (empty slug)
+        RESULT="${RAW%.md}"
+        if [ -z "$RESULT" ]; then
+          echo "error: could not extract filename from pick output" >&2
+          echo "Pick output was:" >&2
+          echo "$GLITCH_PICK" >&2
+          exit 1
+        fi
+      pick: '{{get "step.pick.data.value" .}}'
+
+  # ── 6. Read current file if it exists ────────────────────────────────────────
+
+  - id: read_target
+    executor: shell
+    needs: [filename]
+    vars:
+      cmd: |
+        DOCS="{{.param.docs_dir}}"
+        TARGET="$GLITCH_FILENAME"
+        if [ -f "$DOCS/$TARGET" ]; then
+          echo "=== EXISTING FILE: $TARGET ==="
+          cat "$DOCS/$TARGET"
+        else
+          echo "(new file — write from scratch)"
+        fi
+      filename: '{{get "step.filename.data.value" .}}'
+
+  # ── 7. Targeted internal package scan — grounding against real source ────────
+  # Maps the chosen filename slug to internal/<slug>/ and reads non-test Go files.
+  # This prevents hallucination for TUI topics (console, inbox, keybindings, etc.)
+  # where the semantic index alone is not sufficient grounding.
+
+  - id: scan_internal
+    executor: shell
+    needs: [filename]
+    vars:
+      cmd: |
+        REPO="{{.param.repo_dir}}"
+        TARGET=$(echo "$GLITCH_FILENAME" | tr -d '[:space:]')
+        SLUG="${TARGET%.md}"
+
+        # Direct package match — cap at 8 files, 60 lines each to stay within
+        # Haiku's practical context budget for the write_doc step.
+        PKG="$REPO/internal/$SLUG"
+        if [ -d "$PKG" ]; then
+          echo "=== internal/$SLUG/ (non-test Go files, up to 60 lines each, max 8 files) ==="
+          COUNT=0
+          for f in "$PKG"/*.go; do
+            case "$f" in *_test.go) continue ;; esac
+            [ -f "$f" ] || continue
+            [ "$COUNT" -ge 8 ] && break
+            echo "--- $(basename $f) ---"
+            head -60 "$f"
+            echo
+            COUNT=$((COUNT + 1))
+          done
+        else
+          # Fuzzy: check common compound mappings
+          case "$SLUG" in
+            cli-reference)   PKGS="assistant router" ;;
+            yaml-reference)  PKGS="pipeline" ;;
+            pipelines)       PKGS="pipeline" ;;
+            plugins)         PKGS="pluginmanager apmmanager" ;;
+            cron)            PKGS="cron" ;;
+            brain)           PKGS="braincontext brainrag braineditor" ;;
+            workflows)       PKGS="orchestrator" ;;
+            *)               PKGS="" ;;
+          esac
+          if [ -n "$PKGS" ]; then
+            for P in $PKGS; do
+              D="$REPO/internal/$P"
+              [ -d "$D" ] || continue
+              echo "=== internal/$P/ ==="
+              for f in "$D"/*.go; do
+                case "$f" in *_test.go) continue ;; esac
+                [ -f "$f" ] || continue
+                echo "--- $(basename $f) ---"
+                head -80 "$f"
+                echo
+              done
+            done
+          else
+            echo "(no direct internal package for $SLUG)"
+          fi
+        fi
+
+        # For pipeline/yaml-reference topics, include a real pipeline YAML so the
+        # model sees actual template syntax instead of inventing it.
+        case "$SLUG" in
+          pipelines|yaml-reference|executors|brain|cron)
+            PIPEDIR="$HOME/.config/glitch/pipelines"
+            EXAMPLE=$(ls "$PIPEDIR"/*.yaml 2>/dev/null | head -1)
+            if [ -n "$EXAMPLE" ]; then
+              echo ""
+              echo "=== Real pipeline YAML example (actual syntax reference) ==="
+              head -60 "$EXAMPLE"
+            fi
+            ;;
+        esac
+      filename: '{{get "step.filename.data.value" .}}'
+
+  # ── 8. Deep semantic search for implementation details ───────────────────────
+
+  - id: deep_search
+    executor: builtin.search_code
+    needs: [pick, index_code]
+    args:
+      query: '{{get "step.pick.data.value" .}}'
+      top_k: "15"
+      model: "{{.param.embed_model}}"
+      cwd: "{{.param.repo_dir}}"
+
+  # ── 9. Write the document — Haiku does the full pass ────────────────────────
+  # Local model picked the topic and gathered context.
+  # Haiku owns the writing: fast, cheap, high-quality with a tight prompt.
+
+  - id: write_doc
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    no_brain: true
+    no_clarify: true
+    vars:
+      flags: "--no-tools"
+    needs: [pick, read_target, deep_search, scan_internal]
+    prompt: |
+      Write a gl1tch documentation page.
+
+      Assignment: {{get "step.pick.data.value" .}}
+
+      Existing content (keep accurate sections, improve thin ones):
+      {{get "step.read_target.data.value" .}}
+
+      Source code (authoritative — document only what exists here):
+      {{get "step.scan_internal.data.value" .}}
+
+      Semantic search results:
+      {{get "step.deep_search.data.value" .}}
+
+      ---
+
+      ## What gl1tch is
+
+      gl1tch is YOUR personal AI assistant — it lives in your terminal, learns your
+      projects, runs your automations, and adapts to your workflow. It is not a cloud
+      service. It is not a chatbot you open in a browser. It runs where you work.
+
+      The docs exist for two reasons only:
+        1. Get a new user running their first automation in under 5 minutes.
+        2. Show users how to make gl1tch completely theirs.
+
+      ---
+
+      ## What to write — and what NOT to write
+
+      **Write about what the user can DO:**
+      - What they can run, configure, automate, or customize
+      - Commands they can type right now
+      - Examples that solve real problems they might have
+      - How to make gl1tch fit their specific workflow
+
+      **Do NOT write about internals the user never touches:**
+      - Never mention tmux by name unless explaining a command the user literally types
+        (e.g. `tmux attach`). Say "your terminal session" instead.
+      - Never mention BubbleTea, robfig/cron, OpenTelemetry, or Go package names.
+        These are plumbing. Users don't care.
+      - Never lead with how something is built. Lead with what you can do with it.
+      - Never describe "layers" or "components" unless the user must understand them
+        to do something. Architecture diagrams belong in architecture.md only.
+
+      **Voice and framing:**
+      - Use "your" constantly: your assistant, your pipelines, your brain, your themes.
+      - Second person throughout. Direct address. Active voice.
+      - gl1tch learns, remembers, runs, adapts — give it agency.
+      - Don't over-explain. Experienced terminal users will skim to the example.
+        Give them the example first, then explain it.
+
+      ---
+
+      ## Audience
+
+      Two types of readers, both must be served:
+
+      - **Someone new to AI automation** — needs a clear picture of what gl1tch does
+        for them, a working example they can run immediately, and gentle guidance on
+        the concepts. Short definitions. Admonitions for real pitfalls only.
+
+      - **Experienced terminal hackers** — been on BBSes, IRC, Unix since before
+        some of our libraries were born. Hate fluff. Want the YAML, the flags, the
+        example. Structure lets them skip to what they need. Never condescend.
+
+      Write so both readers get what they need from the same page.
+
+      ---
+
+      ## Document structure — follow this order
+
+      1. **Lead** — one paragraph, no heading. What does this feature do FOR the user?
+         What problem does it solve? Frame it in terms of their workflow, not the code.
+
+      2. **Quick start** — `## Quick Start` — the minimal working example. Show it first.
+         A real YAML block or command they can copy and run. Explain after.
+
+      3. **How to use it** — `## Usage` or a feature-specific heading. Step-by-step for
+         the common case. Tables for config options (3+ rows → always a table).
+
+      4. **Customizing** — `## Customizing` — how to make this feature theirs: options,
+         variations, patterns that go beyond the default.
+
+      5. **Examples** — `## Examples` — 2-3 real-world scenarios with complete YAML.
+         Name the scenario (e.g. "Morning standup digest", "Nightly code review").
+
+      6. **Reference** — `## Reference` — complete field/flag table if the topic has one.
+         Purely factual. Every field, its type, default, and one-line description.
+
+      7. **See Also** — links to related pages using `/docs/pipelines/<slug>` format.
+
+      Omit any section that doesn't apply. Never pad with empty sections.
+
+      ---
+
+      ## Formatting rules
+
+      - Two blank lines before `##`; one before `###`
+      - Every code fence has a language tag: `bash`, `yaml`, `go`, `json`, `text`
+      - Tables for 3+ key-value pairs — always
+      - Short sentences. No "it's worth noting that". No "in order to".
+      - Admonitions — sparingly, only for real pain:
+        > **NOTE:** Something non-obvious but not urgent.
+        > **TIP:** A shortcut or trick that saves real time.
+        > **WARNING:** Do this wrong and something breaks.
+        > **DANGER:** Risk of data loss or security issue.
+
+      Template syntax in YAML examples:
+      - Pipeline vars: {{`{{.param.<name>}}`}}
+      - Step output: {{`{{get "step.<id>.data.value" .}}`}}
+      - Shell env injected into shell steps: GLITCH_<VARNAME>
+
+      Do not invent flags or behaviours absent from the source above.
+      Do not change existing frontmatter title or order.
+      Output raw markdown only — no outer fences, no preamble.
+
+      Start with frontmatter:
+      ```
+      ---
+      title: "..."
+      description: "One sentence. Starts with a verb. What does this let the user do?"
+      order: <keep existing or use 99>
+      ---
+      ```
+
+  # ── 10. Principal engineer review — accuracy gate ────────────────────────────
+  # A senior engineer persona checks the draft against source code before it
+  # lands on disk. Outputs the corrected document (or the original if clean).
+
+  - id: verify
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    no_brain: true
+    no_clarify: true
+    vars:
+      flags: "--no-tools"
+    needs: [write_doc, scan_internal, deep_search]
+    prompt: |
+      You are a senior technical writer reviewing a gl1tch documentation draft.
+      Your ONLY output must be the complete corrected markdown document — nothing else.
+      Do not summarise, do not add commentary, do not explain what you changed.
+      Start your response with the opening frontmatter line: ---
+
+      Source of truth — actual source code:
+      {{get "step.scan_internal.data.value" .}}
+
+      Additional implementation details:
+      {{get "step.deep_search.data.value" .}}
+
+      Draft to review:
+      {{get "step.write_doc.data.value" .}}
+
+      ## Accuracy checks
+      - Invented flags, fields, or behaviours not in the source → remove or correct
+      - Wrong template syntax — only `{{`{{.param.x}}`}}` and `{{`{{get "step.x.data.value" .}}`}}` are valid
+      - Incorrect file paths or command syntax → fix
+      - Claims that contradict the source → correct
+
+      ## Voice and framing checks (fix any of these)
+      - Does the page mention tmux by name without it being a command the user types?
+        If so: replace with "your terminal session", "your workspace", or just omit.
+      - Does the page mention BubbleTea, OpenTelemetry, robfig/cron, or Go package names?
+        These are internal. Remove them. Users never see this layer.
+      - Does the page lead with how something is built instead of what the user can do?
+        Restructure: user outcome first, implementation detail never (or last).
+      - Does the page use "your" to make the user feel ownership? It should.
+        gl1tch is YOUR assistant. YOUR pipelines. YOUR brain. YOUR themes.
+      - Are there filler phrases ("It's worth noting", "In order to", "As mentioned")?
+        Delete them. Every sentence must earn its place.
+
+      ## Structure checks
+      - Is there a working copy-paste example in the first two sections? If not, add one.
+      - Are tables used for any config/flag list with 3+ entries? Convert lists to tables.
+      - Do section headings describe what the USER does, not what the system does?
+        ("Run your first pipeline" not "Pipeline execution flow")
+
+      ## Formatting checks
+      - Every code fence has a language tag (`bash`, `yaml`, `go`, `json`, `text`) → add if missing
+      - Admonition labels must be exactly: NOTE, TIP, WARNING, or DANGER (bold)
+
+      Correct every issue found. If the draft is clean, output it unchanged.
+      Output raw markdown only — begin with ---, end with the last content line.
+      No outer fences, no preamble, no summary.
+
+  # ── 11. Write file to disk ────────────────────────────────────────────────────
+
+  - id: write_file
+    executor: shell
+    needs: [verify, filename]
+    input: |
+      {{get "step.verify.data.value" .}}
+    vars:
+      cmd: |
+        DOCS="{{.param.docs_dir}}"
+        TARGET=$(echo "$GLITCH_FILENAME" | tr -d '[:space:]')
+        SLUG="${TARGET%.md}"
+        if [ -z "$TARGET" ] || [ -z "$SLUG" ] || [ "$TARGET" = ".md" ]; then
+          echo "error: empty or invalid target filename: '$TARGET'" >&2
+          exit 1
+        fi
+        # Strip brain preamble if present. Two patterns:
+        #   1. Model wraps doc in ```markdown fence — extract inner content.
+        #   2. Preamble precedes real frontmatter: find first --- whose next line
+        #      starts with title:, description:, or order: (YAML frontmatter markers).
+        TMP=$(mktemp)
+        cat > "$TMP"
+        RAW_LINES=$(wc -l < "$TMP")
+        if [ "$RAW_LINES" -lt 5 ]; then
+          echo "error: $TARGET — verify step returned only $RAW_LINES raw lines (empty/garbage from upstream LLM)" >&2
+          echo "=== raw output ===" >&2
+          cat "$TMP" >&2
+          rm -f "$TMP"
+          exit 1
+        fi
+        if grep -qF '```markdown' "$TMP"; then
+          awk '/^```markdown$/{p=1;next} p && /^```$/{exit} p{print}' "$TMP" > "$DOCS/$TARGET"
+        else
+          # Find the first --- whose immediate next line is a YAML frontmatter key.
+          # Use grep -n to locate the exact line number, then tail from there.
+          FM_LINE=$(grep -n '^---$' "$TMP" | while IFS=: read linenum rest; do
+            NEXTLINE=$(sed -n "$((linenum+1))p" "$TMP")
+            if echo "$NEXTLINE" | grep -qE '^(title|description|order):'; then
+              echo "$linenum"
+              break
+            fi
+          done)
+          if [ -n "$FM_LINE" ]; then
+            tail -n "+${FM_LINE}" "$TMP" > "$DOCS/$TARGET"
+          else
+            # No frontmatter found — the verify step produced meta-commentary instead
+            # of the document. Do not write garbage; fail cleanly.
+            echo "error: $TARGET — verify step did not produce a markdown document (no frontmatter found in ${RAW_LINES}-line output)" >&2
+            rm -f "$TMP"
+            exit 1
+          fi
+        fi
+        rm -f "$TMP"
+        LINES=$(wc -l < "$DOCS/$TARGET" 2>/dev/null || echo 0)
+        if [ "$LINES" -lt 10 ]; then
+          echo "error: $TARGET has only $LINES lines after stripping" >&2
+          rm -f "$DOCS/$TARGET"
+          exit 1
+        fi
+        echo "wrote $DOCS/$TARGET ($LINES lines)"
+      filename: '{{get "step.filename.data.value" .}}'
+
+  # ── 11. Verify the diff ───────────────────────────────────────────────────────
+
+  - id: diff
+    executor: shell
+    needs: [write_file, filename]
+    vars:
+      cmd: |
+        cd "{{.param.repo_dir}}"
+        FILE=$(echo "$GLITCH_FILENAME" | tr -d '[:space:]')
+        git diff --stat "site/src/content/pipelines/$FILE"
+        echo "---"
+        git diff "site/src/content/pipelines/$FILE" | head -80
+      filename: '{{get "step.filename.data.value" .}}'
+
+  # ── 12b. Test-coverage gate — every documented TUI action needs a test ───────
+  # Parses slash commands from backtick spans in the written doc and checks
+  # internal/console/*_integration_test.go for matching sendSlashCmd calls.
+  # Outputs COVERAGE_OK or MISSING_TESTS:<comma-list> so downstream steps can
+  # include gaps in the PR body and the skill can write the missing tests.
+
+  - id: check_test_coverage
+    executor: shell
+    needs: [write_file, filename]
+    vars:
+      cmd: |
+        DOCS="{{.param.docs_dir}}"
+        REPO="{{.param.repo_dir}}"
+        TARGET=$(echo "$GLITCH_FILENAME" | tr -d '[:space:]')
+        DOC_FILE="$DOCS/$TARGET"
+        TEST_DIR="$REPO/internal/console"
+
+        if [ ! -f "$DOC_FILE" ]; then
+          echo "COVERAGE_SKIP: doc not on disk"
+          exit 0
+        fi
+
+        # Extract slash commands that appear inside backtick code spans — those
+        # are the ones we're telling users to actually type.
+        SLASH_CMDS=$(grep -oE '`/[a-z][a-z0-9-]*[^`]*`' "$DOC_FILE" \
+          | grep -oE '/[a-z][a-z0-9-]*' \
+          | sort -u)
+
+        if [ -z "$SLASH_CMDS" ]; then
+          echo "COVERAGE_OK: no slash commands documented"
+          exit 0
+        fi
+
+        MISSING=""
+        COVERED_LIST=""
+
+        for cmd in $SLASH_CMDS; do
+          # A test covers a command if any integration test file passes the
+          # command string as a string literal (e.g. sendSlashCmd or send-keys).
+          if grep -qr "\"${cmd}\"" "$TEST_DIR/"*_integration_test.go 2>/dev/null; then
+            COVERED_LIST="$COVERED_LIST $cmd"
+          else
+            MISSING="$MISSING $cmd"
+          fi
+        done
+
+        [ -n "$COVERED_LIST" ] && echo "COVERED:$(echo $COVERED_LIST | xargs | tr ' ' ',')"
+        if [ -n "$MISSING" ]; then
+          echo "MISSING_TESTS:$(echo $MISSING | xargs | tr ' ' ',')"
+        else
+          echo "COVERAGE_OK"
+        fi
+      filename: '{{get "step.filename.data.value" .}}'
+
+  # ── 13. Commit message — assembled from structured pick output ───────────────
+  # Parse TOPIC: and FOCUS: lines directly; never trust LLM for commit format.
+
+  - id: commit_msg
+    executor: shell
+    needs: [pick, filename]
+    vars:
+      cmd: |
+        FILE=$(echo "$GLITCH_FILENAME" | tr -d '[:space:]')
+        SLUG="${FILE%.md}"
+        FOCUS=$(echo "$GLITCH_PICK" | grep -i 'FOCUS:' | head -1 | sed 's/.*[Ff][Oo][Cc][Uu][Ss]:[[:space:]]*//' | cut -c1-60)
+        if [ -z "$FOCUS" ]; then
+          FOCUS="write and improve documentation"
+        fi
+        echo "docs(${SLUG}): ${FOCUS}"
+      filename: '{{get "step.filename.data.value" .}}'
+      pick:     '{{get "step.pick.data.value" .}}'
+
+  # ── 14. PR title and description ─────────────────────────────────────────────
+  # Haiku writes a human-quality title and body covering what changed, why it
+  # matters, and how it improves the experience for gl1tch users.
+
+  - id: pr_content
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    no_brain: true
+    no_clarify: true
+    needs: [pick, diff, filename, check_test_coverage]
+    prompt: |
+      Write a GitHub PR title and description for a gl1tch documentation improvement.
+
+      gl1tch is a pipeline-driven AI terminal assistant built in Go. It runs inside tmux with a BubbleTea TUI and uses Ollama for local AI inference. Without good docs, new users can't discover or use its features.
+
+      What was picked and why:
+      {{get "step.pick.data.value" .}}
+
+      File changed:
+      {{get "step.filename.data.value" .}}
+
+      Diff:
+      {{get "step.diff.data.value" .}}
+
+      Test coverage report:
+      {{get "step.check_test_coverage.data.value" .}}
+
+      Output exactly this format — nothing else:
+      TITLE: <title, max 72 chars, written for a human reviewer not a bot>
+      ---
+      ## What changed
+      <1–3 sentences: which file, what content was added or improved>
+
+      ## Why
+      <1–3 sentences: what gap or weakness in the docs this addresses — be specific>
+
+      ## User experience
+      <1–3 sentences: how this makes gl1tch easier to understand or use for someone reading the docs>
+
+      {{if contains "MISSING_TESTS:" (get "step.check_test_coverage.data.value" .) }}
+      ## ⚠ Missing tmux integration tests
+      The following commands are documented but have no integration test in `internal/console/`:
+      {{get "step.check_test_coverage.data.value" .}}
+      Add tests before merging.
+      {{end}}
+
+      ---
+      *Automated by [gl1tch](https://github.com/8op-org/gl1tch) docs-improve pipeline*
+
+      Be direct and specific. No filler phrases. Active voice.
+
+  # ── 15. Branch, commit, open PR ───────────────────────────────────────────────
+
+  - id: open_pr
+    executor: shell
+    needs: [diff, commit_msg, filename, pick, pr_content, check_test_coverage]
+    vars:
+      cmd: |
+        cd "{{.param.repo_dir}}"
+        trap 'git checkout main 2>/dev/null || true' EXIT
+
+        # Check only the specific doc file — ignore unrelated working tree changes
+        if [ -z "$(git status --short "site/src/content/pipelines/$FILE")" ]; then
+          echo "no changes — skipping PR"
+          exit 0
+        fi
+
+        MSG=$(echo "$GLITCH_MSG" | head -1 | tr -d '"')
+        FILE=$(echo "$GLITCH_FILENAME" | tr -d '[:space:]')
+        SLUG="${FILE%.md}"
+
+        # Hard dedup — abort if an open PR already targets this file
+        EXISTING=$(gh pr list --state open --json headRefName \
+          --jq ".[].headRefName" 2>/dev/null \
+          | grep "docs/improve-${SLUG}-" | head -1)
+        if [ -n "$EXISTING" ]; then
+          echo "dedup: PR already open for $FILE on $EXISTING — skipping"
+          git checkout -- "site/src/content/pipelines/$FILE" 2>/dev/null || true
+          exit 0
+        fi
+
+        BRANCH="docs/improve-${SLUG}-$(date +%s)"
+        git checkout -b "$BRANCH"
+        git add "site/src/content/pipelines/$FILE"
+        git commit -m "$MSG" -m "Co-Authored-By: gl1tch <nomoresecrets+noreply@8op.org>"
+
+        git push -u origin "$BRANCH"
+
+        # Parse TITLE: line from pr_content; fall back to commit msg
+        PR_TITLE=$(echo "$GLITCH_PR_CONTENT" | grep '^TITLE:' | head -1 | sed 's/^TITLE:[[:space:]]*//')
+        if [ -z "$PR_TITLE" ]; then
+          PR_TITLE="$MSG"
+        fi
+
+        # Body is everything after the first --- separator
+        echo "$GLITCH_PR_CONTENT" | awk '/^---$/{found=1; next} found{print}' > /tmp/glitch_pr_body.txt
+
+        PR_URL=$(gh pr create --title "$PR_TITLE" --body-file /tmp/glitch_pr_body.txt --base main)
+        echo "PR opened for $FILE: $PR_URL"
+
+        COVERAGE="$GLITCH_COVERAGE"
+        if echo "$COVERAGE" | grep -q "^MISSING_TESTS:"; then
+          # Test gaps — leave PR open for review; echo gaps for the skill.
+          echo "$COVERAGE" | grep "^MISSING_TESTS:"
+        else
+          # Full coverage — auto-merge and delete the branch immediately.
+          gh pr merge "$PR_URL" --squash --delete-branch --yes 2>/dev/null \
+            && echo "AUTO_MERGED: $FILE" \
+            || echo "AUTO_MERGE_FAILED: $FILE (check branch protection rules)"
+        fi
+
+        git checkout main
+      msg:        '{{get "step.commit_msg.data.value" .}}'
+      filename:   '{{get "step.filename.data.value" .}}'
+      pick:       '{{get "step.pick.data.value" .}}'
+      pr_content: '{{get "step.pr_content.data.value" .}}'
+      coverage:   '{{get "step.check_test_coverage.data.value" .}}'
+
+  # ── 16. Record in brain — prevents re-running the same topic ─────────────────
+
+  - id: record
+    executor: ollama
+    model: "{{.param.model}}"
+    needs: [open_pr, pick]
+    write_brain: true
+    prompt: |
+      PR step result: {{get "step.open_pr.data.value" .}}
+
+      If the above does NOT contain "PR opened", output only: (skipped)
+      Do not include a <brain> block.
+
+      If it does contain "PR opened", write one sentence summarising what was
+      documented (exact filename + topic) and wrap it in a brain block:
+      <brain type="finding" title="docs topic covered">...</brain>
+
+      Pick output for context:
+      {{get "step.pick.data.value" .}}

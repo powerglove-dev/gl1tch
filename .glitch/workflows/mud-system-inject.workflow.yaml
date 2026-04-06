@@ -1,0 +1,165 @@
+name: mud-system-inject
+version: "1"
+description: "Generates 1-2 hackable systems for an existing room — terminals, data vaults, security nodes"
+write_brain: false
+game: false
+
+steps:
+
+  # ── 1. Pick target room and system type ───────────────────────────────────
+  - id: seed
+    executor: shell
+    vars:
+      cmd: |
+        ROOMS=("net-0" "net-1" "net-2" "net-3" "net-4" "net-5")
+        SYSTEM_TYPES=(
+          "surveillance node: feeds real-time tracking data to an unknown broker"
+          "corporate payroll server: salary records, shell companies, offshore routing"
+          "dead drop terminal: encrypted cache of faction intelligence, key unknown"
+          "ICE management console: controls patrol routes of autonomous defense programs"
+          "black site comms relay: encrypted uplink to a clandestine operation"
+          "biometric registry: harvested identity data, employee files, access credentials"
+          "contraband manifest: shipment logs for a black market supply chain"
+          "propaganda engine: automated disinformation pump, corporate narrative control"
+        )
+        RIDX=$(( $(date +%s) % 6 ))
+        SIDX=$(( ($(date +%s) / 7) % 8 ))
+        echo "room: ${ROOMS[$RIDX]}, system: ${SYSTEM_TYPES[$SIDX]}"
+
+  # ── 2a. Try codex (free tier) ─────────────────────────────────────────────
+  - id: codex_try
+    executor: shell
+    needs: [seed]
+    vars:
+      cmd: |
+        SEED="{{get "step.seed.data.value" .}}"
+        TMPF=$(mktemp /tmp/mud_codex_XXXXXX.txt)
+        TMPOUT=$(mktemp /tmp/mud_codex_out_XXXXXX.txt)
+        cat > "$TMPF" << 'PROMPT_END'
+        Do not ask clarifying questions. Generate immediately.
+
+        You are a world builder for a cyberpunk text MUD.
+        Gritty near-future, corporate dystopia, hacker underground. PG-13.
+
+        Seed: SEED_PLACEHOLDER
+
+        The seed gives a TARGET ROOM ID and a SYSTEM TYPE.
+        Generate a rooms fragment containing ONLY the target room with 1-2 new hackable systems.
+        Return ONLY raw YAML. No markdown fences. No commentary.
+
+        CRITICAL YAML RULES:
+        - All text values must be plain text — no asterisks, no markdown
+        - Every id must be globally unique kebab-case
+        - security_level must be integer 1-5
+        - reward_item must reference an EXISTING item id or be omitted
+
+        EXISTING item IDs (safe as reward_item):
+          data-chip, decryption-key, server-core, packet-sniffer, ice-fragment,
+          response-dampener, keycard, maintenance-log, cascade-resonator
+
+        rooms:
+          - id: <ROOM_ID from seed>
+            name: placeholder
+            desc: placeholder
+            exits: {}
+            npcs: []
+            items: []
+            systems:
+              - id: <unique-kebab-id>
+                name: <system name, 2-4 words>
+                desc: <1-2 sentences — what it does, who it serves, why it matters>
+                security_level: <1-5>
+                reward_item: <existing item id OR omit>
+                reward_text: <1 sentence describing what the player learns or gains on success>
+              - id: <second unique-kebab-id>
+                name: <second system name>
+                desc: <1-2 sentences>
+                security_level: <1-5>
+                reward_item: <existing item id OR omit>
+                reward_text: <1 sentence>
+            locks: []
+        PROMPT_END
+        sed -i "s/SEED_PLACEHOLDER/$SEED/" "$TMPF"
+        codex exec --full-auto -m codex-mini-latest - -o "$TMPOUT" < "$TMPF" 2>/dev/null
+        EXIT=$?
+        rm -f "$TMPF"
+        if [ $EXIT -eq 0 ] && [ -s "$TMPOUT" ]; then
+            cat "$TMPOUT"
+        fi
+        rm -f "$TMPOUT"
+
+  # ── 2b. Fallback: Haiku ────────────────────────────────────────────────────
+  - id: generate
+    executor: claude
+    no_clarify: true
+    model: claude-haiku-4-5-20251001
+    needs: [seed, codex_try]
+    prompt: |
+      Do not ask clarifying questions. Generate immediately.
+      {{- $codex := get "step.codex_try.data.value" . }}
+      {{- if $codex }}
+
+      Codex already generated the following YAML. Output it VERBATIM — do not change a character.
+
+      {{ $codex }}
+      {{- else }}
+
+      You are a world builder for a cyberpunk text MUD.
+      Gritty near-future, corporate dystopia, hacker underground. PG-13.
+
+      Seed: {{get "step.seed.data.value" .}}
+
+      The seed gives a TARGET ROOM ID and a SYSTEM TYPE.
+      Generate a rooms fragment containing ONLY the target room with 1-2 new hackable systems.
+      Return ONLY raw YAML. No markdown fences. No commentary.
+
+      CRITICAL YAML RULES:
+      - All text values must be plain text — no asterisks, no markdown
+      - Every id must be globally unique kebab-case
+      - security_level must be integer 1-5
+      - reward_item must reference an EXISTING item id or be omitted
+
+      EXISTING item IDs (safe as reward_item):
+        data-chip, decryption-key, server-core, packet-sniffer, ice-fragment,
+        response-dampener, keycard, maintenance-log, cascade-resonator
+
+      rooms:
+        - id: <ROOM_ID from seed>
+          name: placeholder
+          desc: placeholder
+          exits: {}
+          npcs: []
+          items: []
+          systems:
+            - id: <unique-kebab-id>
+              name: <system name, 2-4 words>
+              desc: <1-2 sentences — what it does, who it serves, why it matters>
+              security_level: <1-5>
+              reward_item: <existing item id OR omit>
+              reward_text: <1 sentence describing what the player learns or gains>
+            - id: <second unique-kebab-id>
+              name: <second system name>
+              desc: <1-2 sentences>
+              security_level: <1-5>
+              reward_item: <existing item id OR omit>
+              reward_text: <1 sentence>
+          locks: []
+      {{- end }}
+
+  # ── 3. Inject ──────────────────────────────────────────────────────────────
+  - id: inject
+    executor: mud-worldgen-inject
+    needs: [generate]
+    prompt: "{{get \"step.generate.data.value\" .}}"
+
+  # ── 4. Commit ──────────────────────────────────────────────────────────────
+  - id: commit
+    executor: shell
+    needs: [inject]
+    vars:
+      cmd: |
+        cd ~/Projects/gl1tch-mud
+        git add worlds/cyberspace/world.yaml
+        git diff --cached --quiet && echo "nothing to commit" && exit 0
+        git commit -m "chore(world): system-inject — $(date +%Y-%m-%d)"
+        git push origin main

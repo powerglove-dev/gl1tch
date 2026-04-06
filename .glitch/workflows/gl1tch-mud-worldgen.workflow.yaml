@@ -1,0 +1,176 @@
+name: gl1tch-mud-worldgen
+version: "1"
+description: "Expand the gl1tch-mud cyberspace world with faction intel, readable lore items, and Haiku-generated rooms"
+write_brain: false
+game: false
+
+steps:
+
+  # ── 1. Pick content type + cyberpunk theme seed ────────────────────────────
+  - id: seed
+    executor: shell
+    vars:
+      cmd: |
+        TYPES=("room_with_npc" "room_with_system" "faction_hub" "data_vault" "black_market" "abandoned_lab" "safe_house" "corporate_office")
+        THEMES=(
+          "abandoned corporate server farm, flickering fluorescents, stale recycled air"
+          "underground hacker collective hideout, mismatched hardware, encrypted comms"
+          "black ice testing chamber, hostile autonomous defense programs"
+          "corporate surveillance node, panopticon grid, data harvesting arrays"
+          "mercenary data broker den, shifting alliances, gray market intel"
+          "corrupted memory archive, fragmented data ghosts, recursive loops"
+          "paranoid safe house, signal-jammed, pre-paid burners and dead drops"
+          "corporate black site, deniable assets, illegal interrogation tech"
+        )
+        IDX=$(( $(date +%s) % 8 ))
+        echo "content_type=${TYPES[$IDX]}, theme: ${THEMES[$IDX]}"
+
+  # ── 2. Research: faction intelligence briefing (Claude Haiku) ──────────────
+  - id: research
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    needs: [seed]
+    prompt: |
+      You are a burned intelligence operative surviving in the Cyberspace underground.
+      Seed context: {{get "step.seed.data.value" .}}
+
+      Generate a raw intelligence briefing — terse, paranoid, operational.
+      Inspired by: William Gibson, Pat Cadigan, Tom Clancy (dark ops), Melissa Scott,
+      Neal Stephenson's Cryptonomicon tradecraft sections. PG-13.
+
+      Cover ALL of the following in 6-8 total bullet points:
+      - 2 active hacker factions (faction name in ALL-CAPS, their current operation, signature technique)
+      - 1 corporate security division (division name, parent corp, current threat response — hunting who and why)
+      - 1 rogue operative (codename only, specialty, who they are currently working for)
+      - 1 exploit or zero-day vulnerability being traded on the underground market right now
+
+      Format: plain text bullet list only. No headers. No prose. No YAML.
+      Each bullet is one dense sentence of field-operative shorthand.
+
+  # ── 3. Generate world fragment (Claude Haiku) ──────────────────────────────
+  - id: generate
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    needs: [seed, research]
+    prompt: |
+      FACTION INTELLIGENCE BRIEF:
+      {{get "step.research.data.value" .}}
+
+      CONTENT SEED: {{get "step.seed.data.value" .}}
+
+      You are a world builder for a cyberpunk text MUD in the tradition of William Gibson
+      (Neuromancer, Count Zero, Mona Lisa Overdrive), Pat Cadigan (Synners, Mindplayers),
+      Neal Stephenson (Snow Crash, Cryptonomicon), Melissa Scott (Trouble and Her Friends),
+      Daryl Gregory (Afterparty). Gritty near-future, corporate dystopia, underground hacker
+      culture, digital noir. PG-13 — violence implied not graphic, no explicit content.
+
+      Using the faction intel as world-state context, generate ONE YAML fragment.
+      The room, NPC, and lore items should reference or connect to the factions in the brief.
+
+      Return ONLY the raw YAML block. No prose. No markdown fences. No commentary.
+
+      CRITICAL YAML RULES:
+      - All text values must be plain text — no asterisks (*), no markdown emphasis
+      - All multi-line content fields must use the YAML block scalar (|) format
+      - Never place text outside a closing quote on the same line
+      - Dialogue text must be pure prose — no stage directions, no action text
+
+      rooms:
+        - id: gen-<8 lowercase hex chars>
+          name: <evocative 3-5 word name, not: The Grid, The Net, Data Core, Node 0-9>
+          desc: <2-3 vivid sentences — sensory detail, cyberpunk texture>
+          exits: {}
+          npcs:
+            - id: <unique-kebab-id>
+              name: <NPC name, possibly a codename or handle>
+              desc: <1 sentence physical description, cyberpunk aesthetic>
+              hostile: false
+              loot_table_id: <npc-id>-loot
+              trades:
+                - id: trade-<npc-id>-1
+                  offer_item_id: data-chip
+                  offer_item_name: Data Chip
+                  receive_item_id: <item from this fragment>
+                  receive_item_name: <name>
+                  rep_required: 0
+                  faction: none
+              dialogue:
+                - trigger: always
+                  text: <plain prose, 1-2 sentences, in-character, world-weary>
+                - trigger: skill_gte:hacking:2
+                  text: <plain prose revealing faction connection for skilled hackers>
+          items:
+            - id: <item-id>
+              name: <item name>
+              desc: <1 sentence>
+            - id: <item-id>-intercept
+              name: <Intercepted Memo OR Encrypted Transmission OR Field Report OR Faction Communique>
+              desc: <1 sentence physical description of the document/device>
+              readable: true
+              content: |
+                <4-6 lines of in-world text that a player would read.
+                Write as internal corporate memo, encrypted field report, or faction communique.
+                Reference specific faction names and operative codenames from the intel brief.
+                Reveal plot hooks — a job, a betrayal, a vulnerability, a location.
+                Use realistic operational shorthand. Dates as YYYY-MM-DD format.>
+          systems: []
+          locks: []
+
+      loot_tables:
+        - id: <npc-id>-loot
+          entries:
+            - item_id: data-chip
+              name: Data Chip
+              desc: A fragment of stolen data, worth something to the right buyer.
+              probability: 0.65
+              count_min: 1
+              count_max: 2
+            - item_id: raw-silicon
+              name: Raw Silicon
+              desc: Unprocessed chip substrate, useful for crafting.
+              probability: 0.4
+              count_min: 1
+              count_max: 2
+
+      crafting_recipes:
+        - id: recipe-<unique-kebab>
+          name: <recipe name>
+          ingredients:
+            - {id: <existing-item-id>, count: 1}
+            - {id: <item from this fragment or existing>, count: 1}
+          output:
+            id: <output-id>
+            name: <output name>
+            desc: <1 sentence, what it does>
+          skill_req: 1
+
+      factions:
+        - id: <faction-id, kebab-case version of name from intel brief>
+          name: <faction name as given in intel brief>
+          desc: <2-3 sentences on who they are, their history, how they operate>
+          agenda: <1 sentence on what they ultimately want>
+          territory: []
+          allies: []
+          enemies: []
+
+      EXISTING ITEM IDs you may reference as ingredients or loot:
+        data-chip, raw-silicon, copper-wire, carbon-blade, ice-pick,
+        packet-sniffer, keycard, hazmat-suit, decryption-key, server-core,
+        coolant-cartridge, maintenance-log
+
+      EXISTING FACTION IDs (do NOT regenerate these, pick a different one from the brief):
+        ghost-protocol, null-collective, axiom-security
+
+      RULES:
+        - Every id must be globally unique kebab-case
+        - Room exits must be {} (empty)
+        - NPC must have exactly 2 dialogue entries with different triggers
+        - The readable item content must be 4-6 lines and reference the intel brief
+        - The faction entry must be one NOT already in the existing list above
+        - Keep everything PG-13
+
+  # ── 4. Inject fragment into world.yaml ────────────────────────────────────
+  - id: inject
+    executor: mud-worldgen-inject
+    needs: [generate]
+    prompt: "{{get \"step.generate.data.value\" .}}"

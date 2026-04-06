@@ -1,0 +1,249 @@
+name: mud-item-rarity
+version: "1"
+description: "Opus designs signal_tier item significance; Sonnet generates tiered item batches; Haiku formats YAML; inject adds to world.yaml loot tables and rooms"
+write_brain: false
+game: false
+
+steps:
+
+  # ── 1. Seed: pick tier + theme + inject targets ────────────────────────────
+  - id: seed
+    executor: shell
+    vars:
+      cmd: |
+        TIERS=("ghost" "ghost" "zero-day" "ghost" "zero-day" "flatline")
+        THEMES=("hacking" "espionage" "combat" "augment" "exploit" "counter-ice" "fabrication" "intelligence")
+        ROOMS=("net-0" "net-1" "net-2" "net-3" "net-4" "net-5")
+        TABLES=("ice-daemon-loot" "trace-program-loot" "shepherd-loot" "keeper-vault-loot" "keeper-moth-loot")
+        FACTIONS=("ghost-protocol" "null-collective" "axiom-security" "phantom-collective" "eclipse-runners")
+
+        TS=$(date +%s)
+        TIDX=$(( TS % 6 ))
+        THMIDX=$(( (TS / 3) % 8 ))
+        RIDX=$(( (TS / 7) % 6 ))
+        TBIDX=$(( (TS / 11) % 5 ))
+        FIDX=$(( (TS / 13) % 5 ))
+
+        echo "target_tier=${TIERS[$TIDX]} theme=${THEMES[$THMIDX]} inject_room=${ROOMS[$RIDX]} inject_table=${TABLES[$TBIDX]} associated_faction=${FACTIONS[$FIDX]}"
+
+  # ── 2. Opus: design the item's world significance ─────────────────────────
+  - id: design
+    executor: claude
+    model: claude-opus-4-6
+    no_clarify: true
+    needs: [seed]
+    prompt: |
+      You are the lore architect of The Gibson — a cyberpunk text MUD.
+      The signal tier system describes item rarity in cyberspace underground lingo:
+
+        NOISE     — junk, scrapmetal, barely functional. Found everywhere.
+        SIGNAL    — standard underground gear. Reliable, tradeable.
+        GHOST     — clean, rare, off-grid provenance. Someone paid dearly to keep it quiet.
+        ZERO-DAY  — exploit-grade, one-of-a-kind. Changes what's possible.
+        FLATLINE  — legendary. World-altering. Most runners will never hold one.
+
+      ITEM SEED:
+      {{get "step.seed.data.value" .}}
+
+      Design a TIERED ITEM ECOSYSTEM centered on the target tier from the seed.
+      Think about: who made this? Why is it rare? What does it enable that standard
+      gear doesn't? Which faction would kill to have it? What's the underground
+      mythology around it?
+
+      Design the following:
+
+      ANCHOR ITEM (<target_tier> tier):
+      concept: <what is this item? what does it do that makes it this rare?>
+      origin: <who created it, how, under what circumstances>
+      faction_significance: <which faction in the seed wants this and why>
+      gameplay_use: <what MUD verb/mechanic does this empower: hack/hide/disguise/craft/attack>
+      id_concept: <kebab-case id concept — will be made unique by generator>
+      name: <evocative 3-5 word name in cyberspace underground slang>
+      desc_concept: <what the description should convey in 1-2 sentences>
+
+      SUPPORTING ITEMS (build a drop ecosystem — 2 ghost-tier + 3 signal-tier items that could lead to the anchor):
+      These should feel like they belong in the same family — components, precursors,
+      or tools that work alongside the anchor item.
+
+      Item 2 (ghost):
+      concept: <what is it>
+      gameplay_use: <verb it supports>
+      name: <name>
+
+      Item 3 (ghost):
+      concept: <what is it>
+      gameplay_use: <verb it supports>
+      name: <name>
+
+      Item 4 (signal):
+      concept: <what is it>
+      name: <name>
+
+      Item 5 (signal):
+      concept: <what is it>
+      name: <name>
+
+      Item 6 (signal):
+      concept: <what is it>
+      name: <name>
+
+      LORE FRAGMENT (1 readable item that reveals this item ecosystem's backstory):
+      A readable intel document — who is trading these, what happened to the last person
+      who held the anchor item, what the stakes are.
+
+  # ── 3. Sonnet: generate full YAML item batch ──────────────────────────────
+  - id: generate
+    executor: claude
+    model: claude-sonnet-4-6
+    no_clarify: true
+    needs: [seed, design]
+    prompt: |
+      Do not ask clarifying questions. Generate immediately.
+
+      You are generating YAML for a cyberpunk text MUD item batch.
+
+      SEED:
+      {{get "step.seed.data.value" .}}
+
+      ITEM DESIGN:
+      {{get "step.design.data.value" .}}
+
+      EXISTING ITEM IDs (do NOT reuse as new ids — safe to reference in recipes):
+        data-chip, raw-silicon, copper-wire, carbon-blade, ice-pick, packet-sniffer,
+        keycard, hazmat-suit, decryption-key, server-core, coolant-cartridge,
+        maintenance-log, cascade-resonator, ice-fragment, response-dampener,
+        neural-jack-mk1, deck-patch, ancient-firmware, exploit-axiom-auth,
+        root-key, master-key, hexagon-audit-log, phantom-raid-intercept
+
+      SIGNAL TIER VALUES: noise | signal | ghost | zero-day | flatline
+
+      Return ONLY raw YAML. No markdown fences. No commentary.
+
+      CRITICAL YAML RULES:
+      - All text must be plain text — no asterisks, no markdown emphasis
+      - Multi-line content fields use YAML block scalar (|)
+      - Every id must be globally unique kebab-case
+      - is_exploit: true for exploit-grade items that target systems
+      - is_augment: true for augment items with augment_skill and augment_bonus
+      - is_blueprint: true if the item unlocks a crafting recipe
+
+      rooms:
+        - id: <inject_room from seed>
+          name: placeholder
+          desc: placeholder
+          exits: {}
+          npcs: []
+          items:
+            - id: <anchor-item-id — globally unique kebab>
+              name: <anchor item name from design>
+              desc: <anchor item desc from design>
+              signal_tier: <target_tier from seed>
+              is_exploit: <true if gameplay_use is hack, false otherwise>
+              is_augment: <true if gameplay_use is augment>
+              augment_skill: <hacking|hide|combat — only if is_augment: true>
+              augment_bonus: <integer 2-5 — only if is_augment: true>
+            - id: <ghost-item-2-id>
+              name: <ghost item 2 name>
+              desc: <1 sentence>
+              signal_tier: ghost
+            - id: <ghost-item-3-id>
+              name: <ghost item 3 name>
+              desc: <1 sentence>
+              signal_tier: ghost
+            - id: <signal-item-4-id>
+              name: <signal item 4 name>
+              desc: <1 sentence>
+              signal_tier: signal
+            - id: <signal-item-5-id>
+              name: <signal item 5 name>
+              desc: <1 sentence>
+              signal_tier: signal
+            - id: <lore-item-id>-dossier
+              name: <lore item name — Dossier OR Technical Brief OR Recovered Notes>
+              desc: <1 sentence physical description>
+              readable: true
+              signal_tier: ghost
+              content: |
+                <6-8 lines of in-world text revealing item ecosystem backstory.
+                Who is trading this tier of gear, what happened to the last holder,
+                what the stakes are, faction involvement.
+                YYYY-MM-DD dates. One actionable plot hook at the end.>
+          systems: []
+          locks: []
+
+      loot_tables:
+        - id: <inject_table from seed>
+          entries:
+            - item_id: <signal-item-4-id>
+              name: <signal item 4 name>
+              desc: <1 sentence>
+              signal_tier: signal
+              probability: 0.45
+              count_min: 1
+              count_max: 2
+            - item_id: <signal-item-5-id>
+              name: <signal item 5 name>
+              desc: <1 sentence>
+              signal_tier: signal
+              probability: 0.3
+              count_min: 1
+              count_max: 1
+            - item_id: <ghost-item-2-id>
+              name: <ghost item 2 name>
+              desc: <1 sentence>
+              signal_tier: ghost
+              probability: 0.1
+              count_min: 1
+              count_max: 1
+            - item_id: <anchor-item-id>
+              name: <anchor item name>
+              desc: <anchor item desc>
+              signal_tier: <target_tier>
+              probability: 0.04
+              count_min: 1
+              count_max: 1
+
+      crafting_recipes:
+        - id: recipe-<anchor-item-id>
+          name: <recipe name — how to assemble the anchor item>
+          ingredients:
+            - {id: <ghost-item-2-id>, count: 1}
+            - {id: <existing item id from safe list>, count: 1}
+          output:
+            id: <anchor-item-id>-crafted
+            name: <anchor item name> (Assembled)
+            desc: <1 sentence — same as anchor but hand-built>
+            signal_tier: ghost
+          skill_req: 3
+
+  # ── 4. Haiku: validate YAML ────────────────────────────────────────────────
+  - id: validate
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    no_clarify: true
+    needs: [generate]
+    prompt: |
+      Do not ask clarifying questions. Do not add commentary.
+      Output the following YAML verbatim. Correct ONLY clear YAML syntax errors.
+      Do NOT change any IDs, names, descriptions, or signal_tier values.
+      Do NOT add markdown fences. Raw YAML only.
+
+      {{get "step.generate.data.value" .}}
+
+  # ── 5. Inject into world.yaml ──────────────────────────────────────────────
+  - id: inject
+    executor: mud-worldgen-inject
+    needs: [validate]
+    prompt: "{{get \"step.validate.data.value\" .}}"
+
+  # ── 6. Commit ──────────────────────────────────────────────────────────────
+  - id: commit
+    executor: shell
+    needs: [inject]
+    vars:
+      cmd: |
+        cd ~/Projects/gl1tch-mud
+        git add worlds/cyberspace/world.yaml
+        git diff --cached --quiet && echo "nothing to commit" && exit 0
+        git commit -m "chore(world): item-rarity — $(date +%Y-%m-%d)"
+        git push origin main

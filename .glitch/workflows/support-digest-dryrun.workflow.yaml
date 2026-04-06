@@ -1,0 +1,127 @@
+name: support-digest-dryrun
+version: "1"
+
+# Dry-run: fetches ONE support email, runs full analysis, creates a Google Doc,
+# but does NOT create a Gmail draft.
+# Usage: cd ~/Projects/farm && orcai pipeline run support-digest-dryrun
+
+steps:
+
+  # ── 0. Get today's date ───────────────────────────────────────────────────
+  - id: today
+    plugin: shell
+    vars:
+      cmd: "date +%Y-%m-%d"
+
+  # ── 1. Fetch ONE support email ID ─────────────────────────────────────────
+  - id: fetch_email_ids
+    plugin: gws-gmail
+    vars:
+      args: "users messages list --params '{\"userId\":\"me\",\"q\":\"(from:support@marketspread.com OR to:support@marketspread.com) newer_than:1d\",\"maxResults\":1}' --format json"
+
+  # ── 2. Fetch full email content ───────────────────────────────────────────
+  - id: fetch_email_details
+    plugin: gws-gmail-fetch-all
+    needs: [fetch_email_ids]
+    prompt: "{{step.fetch_email_ids.data.value}}"
+
+  # ── 3. Research the issue ─────────────────────────────────────────────────
+  - id: research_issues
+    plugin: claude
+    model: claude-sonnet-4-6
+    needs: [fetch_email_details]
+    prompt: |
+      You are a senior engineer at MarketSpread investigating support issues.
+      Working directory: {{cwd}} (the farm Django codebase).
+
+      Support emails:
+      {{step.fetch_email_details.data.value}}
+
+      If no messages, output {"issues":[]} and stop.
+
+      For each issue:
+      1. CODEBASE — grep/read farmsupport/, farmserver/, farmreport/ for relevant code.
+      2. DATABASE — use the db-query skill to run targeted queries:
+         - Affected user: SELECT id,email FROM auth_user WHERE email='...'
+         - Market/vendor: ILIKE search on farmserver_market / farmserver_vendor
+         - Recent invoices/orders for the affected entity
+      3. ROOT CAUSE — code bug vs data issue?
+      4. RESOLUTION — provide specific step-by-step resolution instructions (SQL fixes,
+         config changes, code pointers) so support staff can act immediately.
+
+      Output JSON only:
+      {"issues":[{
+        "email_id":"...","subject":"...","from":"...","date":"...","summary":"...",
+        "relevant_files":["..."],"db_findings":"...","likely_cause":"...",
+        "recommended_action":"...","resolution_steps":"..."
+      }]}
+
+  # ── 4. Compile digest (DRY RUN) ───────────────────────────────────────────
+  - id: compile_report
+    plugin: claude
+    model: claude-sonnet-4-6
+    needs: [today, research_issues]
+    prompt: |
+      Today's date is {{step.today.data.value}}.
+      *** DRY RUN — single email only ***
+
+      Compile a MarketSpread support digest from the research findings below.
+      Focus entirely on the customer support issues and their resolutions.
+
+      Research findings:
+      {{step.research_issues.data.value}}
+
+      Write exactly two XML-tagged sections and nothing else outside them:
+
+      <doc>
+      # [DRY RUN] MarketSpread Support Digest — {{step.today.data.value}}
+
+      ## Summary
+      [1-3 sentence executive summary]
+
+      ## Issues
+      ### [subject / ticket number]
+      **From:** ... **Date:** ...
+      **Summary:** ...
+      **Technical findings:** [relevant code files and DB query results]
+      **Root cause:** ...
+      **Resolution:** [specific step-by-step — SQL, config, code fix]
+      **Action:** [what support staff should do right now]
+      ---
+
+      ## Overall Recommendations
+      [patterns or systemic fixes]
+      </doc>
+
+      <email>
+      Hi team,
+
+      Support digest for the last 24 hours (DRY RUN — 1 email):
+
+      [one line per issue: ticket# — subject — one-sentence summary]
+
+      Full report: GOOGLE_DOC_URL
+
+      Thanks
+      </email>
+
+  # ── 5. Create Google Doc ──────────────────────────────────────────────────
+  - id: create_doc
+    plugin: gws-docs-upsert
+    needs: [compile_report]
+    vars:
+      title: "[DRY RUN] MarketSpread Support Digest — {{step.today.data.value}}"
+
+  - id: insert_doc_content
+    plugin: gws-docs-insert
+    needs: [compile_report, create_doc]
+    prompt: |
+      {{step.create_doc.data.value}}
+      {{step.compile_report.data.value}}
+
+  # ── NOTE: No create_draft step — dry run does not send email ─────────────
+  - id: log_result
+    plugin: shell
+    needs: [insert_doc_content]
+    vars:
+      cmd: "echo 'Dry run complete. Doc: {{step.insert_doc_content.data.value}}'"

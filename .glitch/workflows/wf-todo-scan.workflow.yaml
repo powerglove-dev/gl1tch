@@ -1,0 +1,30 @@
+name: wf-todo-scan
+version: "1"
+description: "Scan Go source for TODO, FIXME, HACK, and XXX annotations"
+
+steps:
+  - id: scan
+    executor: shell
+    vars:
+      cmd: |
+        echo "=== TODO / FIXME / HACK / XXX in Go source ==="
+        grep -rn --include="*.go" -E "(TODO|FIXME|HACK|XXX)\b" . \
+          --exclude-dir=vendor \
+          --exclude-dir=.git \
+          --exclude-dir=.worktrees \
+          --exclude-dir=.claude \
+          --exclude-dir=apm_modules \
+          2>/dev/null \
+          | grep -v "_test.go" \
+          | head -40 \
+          || echo "(none found)"
+        echo ""
+        echo "=== count by type ==="
+        for tag in TODO FIXME HACK XXX; do
+          count=$(grep -rn --include="*.go" "\b${tag}\b" . \
+            --exclude-dir=vendor --exclude-dir=.git \
+            --exclude-dir=.worktrees --exclude-dir=.claude \
+            --exclude-dir=apm_modules 2>/dev/null \
+            | grep -v "_test.go" | wc -l | tr -d ' ')
+          echo "  $tag: $count"
+        done

@@ -1,0 +1,275 @@
+name: mud-opus-worldbuild
+version: "1"
+description: "Opus reads world state and plans arcs; Sonnet generates rooms/NPCs/quests/lore; Haiku validates YAML before inject"
+write_brain: false
+game: false
+
+steps:
+
+  # ── 1. Extract world state brief for Opus ─────────────────────────────────
+  - id: worldstate
+    executor: shell
+    vars:
+      cmd: |
+        WORLD=~/Projects/gl1tch-mud/worlds/cyberspace/world.yaml
+        YQ=/opt/homebrew/bin/yq
+
+        FACTIONS=$($YQ '.factions[] | .id + "|" + .name + "|" + .agenda' "$WORLD" 2>/dev/null)
+        ROOMS=$($YQ '.rooms[] | .id + "|" + .name' "$WORLD" 2>/dev/null)
+        QUESTS=$($YQ '.quests[] | .id + "|" + .title + "|" + .obj_type + ":" + .obj_target' "$WORLD" 2>/dev/null)
+        ROOM_COUNT=$($YQ '.rooms | length' "$WORLD" 2>/dev/null)
+        FACTION_COUNT=$($YQ '.factions | length' "$WORLD" 2>/dev/null)
+        QUEST_COUNT=$($YQ '.quests | length' "$WORLD" 2>/dev/null)
+
+        printf "WORLD STATE BRIEF\n"
+        printf "rooms: %s  factions: %s  quests: %s\n\n" "$ROOM_COUNT" "$FACTION_COUNT" "$QUEST_COUNT"
+        printf "FACTIONS:\n%s\n\nROOMS:\n%s\n\nQUESTS:\n%s\n" "$FACTIONS" "$ROOMS" "$QUESTS"
+
+  # ── 2. Opus: analyze world state, identify gaps, generate 3 arc briefs ────
+  - id: arcs
+    executor: claude
+    model: claude-opus-4-6
+    no_clarify: true
+    needs: [worldstate]
+    prompt: |
+      You are the world architect of a cyberpunk text MUD called The Gibson — a near-future
+      cyberspace where hackers fight corporate total control. Inspired by: William Gibson
+      (Neuromancer trilogy), Pat Cadigan (Synners, Mindplayers), Neal Stephenson
+      (Snow Crash, Cryptonomicon), Melissa Scott (Trouble and Her Friends).
+
+      Tone: gritty digital noir. Corporate dystopia. Underground hacker solidarity.
+      The fundamental conflict: freedom of information vs. corporate panopticon control.
+      PG-13.
+
+      CURRENT WORLD STATE:
+      {{get "step.worldstate.data.value" .}}
+
+      EXISTING FACTION IDs (do NOT create these — reference them):
+        ghost-protocol, null-collective, axiom-security, phantom-collective,
+        signal-collective, phantom-syndicate, echo-syndicate, blackwire-collective,
+        helix-division, vex-collective, eclipse-runners, silent-collective,
+        signal-runners, signal-dead
+
+      TASK: Analyze the world state above. Identify:
+      1. Which factions are underserved (no active quests referencing them)
+      2. Which rooms feel narratively isolated (no faction presence, no quests)
+      3. What thematic gaps exist (power dynamics not explored, lore not written)
+
+      Then generate exactly 3 WORLD ARCS. Each arc is an ongoing storyline that spans
+      2+ rooms and connects at least 2 factions. Format:
+
+      ARC 1: <title>
+      factions: <faction-id-1> vs <faction-id-2>
+      rooms_to_add: <2 room archetypes that advance this arc>
+      quest_hooks: <2 quest ideas — include obj_type: kill/hack/retrieve>
+      lore_thread: <the central secret or revelation this arc builds toward>
+      narrative_tone: <e.g. "paranoid thriller", "cold war espionage", "heist gone wrong">
+
+      ARC 2: <title>
+      [same format]
+
+      ARC 3: <title>
+      [same format]
+
+      Be specific. Reference existing faction IDs and room IDs from the world state.
+      These arcs will be handed to a content generator — they must be actionable, not vague.
+
+  # ── 3. Sonnet: generate full world fragment from arc briefs ───────────────
+  - id: generate
+    executor: claude
+    model: claude-sonnet-4-6
+    no_clarify: true
+    needs: [worldstate, arcs]
+    prompt: |
+      Do not ask clarifying questions. Generate immediately.
+
+      You are a content generator for a cyberpunk text MUD. You receive arc briefs
+      from the world architect and generate the actual YAML world fragment.
+
+      WORLD STATE CONTEXT:
+      {{get "step.worldstate.data.value" .}}
+
+      ARC BRIEFS FROM ARCHITECT:
+      {{get "step.arcs.data.value" .}}
+
+      EXISTING FACTION IDs (do NOT add entries for these):
+        ghost-protocol, null-collective, axiom-security, phantom-collective,
+        signal-collective, phantom-syndicate, echo-syndicate, blackwire-collective,
+        helix-division, vex-collective, eclipse-runners, silent-collective,
+        signal-runners, signal-dead
+
+      EXISTING ITEM IDs (safe to reference as loot/trade/ingredients — do NOT reuse as new ids):
+        data-chip, raw-silicon, copper-wire, carbon-blade, ice-pick, packet-sniffer,
+        keycard, hazmat-suit, decryption-key, server-core, coolant-cartridge,
+        maintenance-log, cascade-resonator, ice-fragment, response-dampener,
+        neural-jack-mk1, deck-patch, ancient-firmware, exploit-axiom-auth,
+        root-key, master-key, hexagon-audit-log, phantom-raid-intercept
+
+      SIGNAL TIER SYSTEM (use signal_tier field on items):
+        noise     — junk, barely functional
+        signal    — standard underground gear (most items)
+        ghost     — rare, clean provenance, hard to find
+        zero-day  — exploit-grade, one-of-a-kind
+        flatline  — legendary (use sparingly — 1 per pipeline run max)
+
+      Generate a YAML fragment that advances ALL THREE arcs. Return ONLY raw YAML.
+      No markdown fences. No commentary. No prose before or after.
+
+      CRITICAL YAML RULES:
+      - All text values must be plain text — no asterisks, no markdown emphasis
+      - Multi-line content fields must use YAML block scalar (|)
+      - Every id must be globally unique kebab-case
+      - Room exits must be {} (arcs are linked by the room-link pipeline separately)
+      - Each NPC must have exactly 2 dialogue entries (trigger: always + one conditional)
+      - Conditional triggers: skill_gte:hacking:2 | has_item:data-chip | rep_gte:netrunners:5 | skill_gte:hacking:4
+
+      rooms:
+        - id: gen-<8 lowercase hex chars>
+          name: <evocative 3-5 word name — NOT: The Grid, The Net, Data Core, Node 0-9>
+          desc: <2-3 vivid sentences — sensory detail, atmospheric, cyberpunk>
+          exits: {}
+          npcs:
+            - id: <unique-kebab>
+              name: <handle or codename>
+              desc: <1 sentence physical description, cyberpunk aesthetic>
+              hostile: false
+              loot_table_id: <npc-id>-loot
+              trades:
+                - id: trade-<npc-id>-1
+                  offer_item_id: data-chip
+                  offer_item_name: Data Chip
+                  receive_item_id: <any existing item id>
+                  receive_item_name: <matching name>
+                  rep_required: 0
+                  faction: none
+              dialogue:
+                - trigger: always
+                  text: <plain prose, 1-2 sentences, world-weary, in-character>
+                - trigger: <conditional trigger from allowed list>
+                  text: <reveals arc-relevant intel — faction names, locations, plot hooks>
+          items:
+            - id: <new unique kebab>
+              name: <item name>
+              desc: <1 sentence>
+              signal_tier: signal
+            - id: <new unique kebab>-intercept
+              name: <Intercepted Memo OR Encrypted Transmission OR Field Report>
+              desc: <1 sentence physical description>
+              readable: true
+              signal_tier: ghost
+              content: |
+                <5-7 lines of in-world operational text advancing the arc.
+                Write as internal memo, field report, or faction communique.
+                Reference specific faction IDs and arc lore threads.
+                Use YYYY-MM-DD dates. End with a clear plot hook.>
+          systems: []
+          locks: []
+        - id: gen-<different 8 hex chars>
+          name: <different evocative name>
+          desc: <2-3 sentences, different sensory register>
+          exits: {}
+          npcs: []
+          items:
+            - id: <new unique kebab>
+              name: <item name>
+              desc: <1 sentence>
+              signal_tier: signal
+          systems: []
+          locks: []
+
+      loot_tables:
+        - id: <npc-id>-loot
+          entries:
+            - item_id: data-chip
+              name: Data Chip
+              desc: A fragment of stolen data, worth something to the right buyer.
+              probability: 0.65
+              count_min: 1
+              count_max: 2
+            - item_id: <any existing item id>
+              name: <matching name>
+              desc: <1 sentence>
+              probability: 0.35
+              count_min: 1
+              count_max: 1
+            - item_id: <new unique kebab for rare drop>
+              name: <arc-relevant rare item name>
+              desc: <1 sentence>
+              signal_tier: ghost
+              probability: 0.12
+              count_min: 1
+              count_max: 1
+
+      crafting_recipes:
+        - id: recipe-<unique-kebab>
+          name: <recipe name tied to arc theme>
+          ingredients:
+            - {id: <existing item id>, count: 1}
+            - {id: <existing item id>, count: 1}
+          output:
+            id: <new unique output id>
+            name: <output name>
+            desc: <1-2 sentences — what it does, arc-relevant>
+            signal_tier: ghost
+          skill_req: 2
+
+      quests:
+        - id: q-<unique-kebab>
+          title: <quest title — tense, operational>
+          description: <2-3 sentences — what the job is, why it matters, what's at stake>
+          giver_npc_id: <npc id from the rooms above>
+          obj_type: <kill|hack|retrieve>
+          obj_target: <npc-id, system-id, or item-id>
+          obj_room: <room-id where objective lives>
+          obj_count: 1
+          reward_credits: <integer 800-2000>
+          reward_xp_skill: hacking
+          reward_xp_amount: <integer 50-150>
+          reward_item_id: <new unique item id — signal_tier: ghost or zero-day>
+          reward_item_name: <item name>
+          reward_item_desc: <1 sentence — what makes this worth the risk>
+        - id: q-<different unique-kebab>
+          title: <different quest title>
+          description: <2-3 sentences>
+          giver_npc_id: <npc id>
+          obj_type: <kill|hack|retrieve>
+          obj_target: <target id>
+          obj_count: 1
+          reward_credits: <integer 500-1500>
+          reward_xp_skill: hacking
+          reward_xp_amount: <integer 30-100>
+
+  # ── 4. Haiku: validate YAML — output verbatim unless broken syntax ─────────
+  - id: validate
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    no_clarify: true
+    needs: [generate]
+    prompt: |
+      Do not ask clarifying questions. Do not add commentary.
+
+      The following is a YAML world fragment for a cyberpunk MUD.
+      Output it VERBATIM. Correct ONLY clear YAML syntax errors (unclosed quotes,
+      bad indentation that would cause parse failure, bare colons in unquoted strings).
+      Do NOT change any IDs, names, descriptions, or content. Do NOT add or remove fields.
+      Do NOT add markdown fences. Output raw YAML only.
+
+      {{get "step.generate.data.value" .}}
+
+  # ── 5. Inject into world.yaml ──────────────────────────────────────────────
+  - id: inject
+    executor: mud-worldgen-inject
+    needs: [validate]
+    prompt: "{{get \"step.validate.data.value\" .}}"
+
+  # ── 6. Commit ──────────────────────────────────────────────────────────────
+  - id: commit
+    executor: shell
+    needs: [inject]
+    vars:
+      cmd: |
+        cd ~/Projects/gl1tch-mud
+        git add worlds/cyberspace/world.yaml
+        git diff --cached --quiet && echo "nothing to commit" && exit 0
+        git commit -m "chore(world): opus-worldbuild — $(date +%Y-%m-%d)"
+        git push origin main

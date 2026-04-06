@@ -1,0 +1,88 @@
+name: sync-docs
+version: "1"
+description: "Compare recent code changes against site docs and generate a sync report noting new features and outdated sections"
+
+# Compares recent code changes against the site docs and outputs a sync report
+# noting new features, changed behavior, and sections that are out of date.
+#
+# Usage:
+#   glitch ask --pipeline sync-docs
+#   glitch ask --pipeline sync-docs "focus on the pipeline executor changes"
+#
+# Optional input vars:
+#   since    — git ref to diff from (default: HEAD~10)
+#   docs_dir — path to docs directory (default: site/src/content/pipelines)
+
+vars:
+  since: "HEAD~10"
+  docs_dir: "site/src/content/pipelines"
+
+steps:
+  # ── 1. What changed in the code ──────────────────────────────────────────────
+  - id: git_diff
+    executor: shell
+    vars:
+      cmd: "git diff {{.param.since}} --unified=3 -- '*.go' ':!*_test.go' ':!vendor'"
+
+  - id: git_log
+    executor: shell
+    vars:
+      cmd: "git log {{.param.since}}..HEAD --oneline"
+
+  # ── 2. Read current docs ──────────────────────────────────────────────────────
+  - id: read_docs
+    executor: shell
+    vars:
+      cmd: >
+        for f in {{.param.docs_dir}}/*.md {{.param.docs_dir}}/*.mdx; do
+          [ -f "$f" ] || continue;
+          echo "=== FILE: $f ===";
+          cat "$f";
+          echo;
+        done
+
+  # ── 3. Local model: analyze and propose sync ─────────────────────────────────
+  - id: analyze
+    executor: ollama
+    model: "{{.param.model | default \"llama3.2\"}}"
+    needs: [git_diff, git_log, read_docs]
+    write_brain: true
+    prompt: |
+      You are a technical writer reviewing documentation for a CLI tool called glitch.
+
+      ## Recent commits
+      {{step.git_log.data.value}}
+
+      ## Code changes (git diff)
+      {{step.git_diff.data.value}}
+
+      ## Current documentation
+      {{step.read_docs.data.value}}
+
+      ## Task
+      Compare the code changes against the current docs. Produce a sync report with these sections:
+
+      ### New Features
+      List features visible in the diff that are not documented yet.
+
+      ### Changed Behavior
+      List documented behaviors that the diff shows have changed.
+
+      ### Outdated Sections
+      List doc sections that reference code, flags, or APIs that no longer exist.
+
+      ### Suggested Additions
+      For each new feature, write a short doc paragraph (2-4 sentences) that could be added to the relevant doc file. Note which file it belongs in.
+
+      Be specific and cite the actual code symbols, flag names, or YAML fields you found. Do not invent features not present in the diff.
+
+  # ── 4. Synthesize: haiku cleans the output without adding new information ─────
+  - id: synthesize
+    executor: claude
+    model: "claude-haiku-4-5-20251001"
+    needs: [analyze]
+    prompt: |
+      You are an editor. Do not add information not present in the input.
+      Fix grammar, improve clarity, and format as clean markdown only.
+
+      {{step.analyze.data.value}}

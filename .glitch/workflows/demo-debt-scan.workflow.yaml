@@ -1,0 +1,64 @@
+name: demo-debt-scan
+version: "1"
+description: "Read-only tech-debt scan for any repo — TODO/FIXME/XXX/HACK markers grouped by file and author"
+
+steps:
+  - id: counts
+    executor: shell
+    outputs: { value: string }
+    vars:
+      cmd: |
+        echo "=== marker counts (tracked files only) ==="
+        for marker in TODO FIXME XXX HACK; do
+          n=$(git grep -I -n -E "\\b${marker}\\b" -- ':(exclude)*.lock' ':(exclude)vendor/*' ':(exclude)node_modules/*' 2>/dev/null | wc -l)
+          printf "  %-6s %s\n" "$marker" "$n"
+        done
+
+  - id: hotspots
+    executor: shell
+    outputs: { value: string }
+    vars:
+      cmd: |
+        echo "=== top 10 files by marker density ==="
+        git grep -I -l -E "\\b(TODO|FIXME|XXX|HACK)\\b" -- ':(exclude)*.lock' ':(exclude)vendor/*' ':(exclude)node_modules/*' 2>/dev/null \
+          | while read f; do
+              c=$(git grep -I -c -E "\\b(TODO|FIXME|XXX|HACK)\\b" "$f" 2>/dev/null | cut -d: -f2)
+              echo "$c $f"
+            done \
+          | sort -rn | head -10
+
+  - id: samples
+    executor: shell
+    outputs: { value: string }
+    vars:
+      cmd: |
+        echo "=== first 15 marker lines ==="
+        git grep -I -n -E "\\b(TODO|FIXME|XXX|HACK)\\b" -- ':(exclude)*.lock' ':(exclude)vendor/*' ':(exclude)node_modules/*' 2>/dev/null \
+          | head -15
+
+  - id: report
+    executor: ollama
+    model: qwen2.5
+    needs: [counts, hotspots, samples]
+    no_clarify: true
+    prompt: |
+      READONLY: output text only. Do not emit GLITCH_WRITE or GLITCH_RUN blocks. Do not write files.
+
+      You are reviewing a tech-debt scan. Be concrete.
+
+      ## Debt at a glance
+      (one line: total markers, dominant marker type)
+
+      ## Where it lives
+      (which files/areas concentrate the debt)
+
+      ## Most worth addressing
+      (pick 1-2 sample lines that look like real bugs vs. low-priority notes)
+
+      Data:
+
+      {{ steps.counts.value }}
+
+      {{ steps.hotspots.value }}
+
+      {{ steps.samples.value }}

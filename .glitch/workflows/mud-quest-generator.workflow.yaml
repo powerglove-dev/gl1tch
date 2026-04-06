@@ -1,0 +1,245 @@
+name: mud-quest-generator
+version: "1"
+description: "Opus plans quest arcs from world state; Sonnet writes WorldQuest YAML + NPC dialogue patches; Haiku validates; inject wires quests into world.yaml"
+write_brain: false
+game: false
+
+steps:
+
+  # ── 1. Extract world state + NPC inventory for Opus ───────────────────────
+  - id: worldstate
+    executor: shell
+    vars:
+      cmd: |
+        WORLD=~/Projects/gl1tch-mud/worlds/cyberspace/world.yaml
+        YQ=/opt/homebrew/bin/yq
+
+        # Factions with agenda
+        FACTIONS=$($YQ '.factions[] | "  " + .id + ": " + .agenda' "$WORLD" 2>/dev/null | head -20)
+
+        # All NPC IDs and names (for quest givers)
+        NPCS=$($YQ '.rooms[].npcs[] | .id + "|" + .name' "$WORLD" 2>/dev/null | head -30)
+
+        # All room IDs (for obj_room)
+        ROOMS=$($YQ '.rooms[] | .id + "|" + .name' "$WORLD" 2>/dev/null)
+
+        # Existing quest IDs (so we don't duplicate)
+        QUEST_IDS=$($YQ '.quests[].id' "$WORLD" 2>/dev/null)
+
+        # Hackable systems
+        SYSTEMS=$($YQ '.rooms[].systems[] | .id' "$WORLD" 2>/dev/null | head -20)
+
+        # Hostile NPCs (kill targets)
+        HOSTILE=$($YQ '.rooms[].npcs[] | select(.hostile == true) | .id + "|" + .name' "$WORLD" 2>/dev/null | head -20)
+
+        printf "FACTIONS:\n%s\n\n" "$FACTIONS"
+        printf "NPC ROSTER (id|name):\n%s\n\n" "$NPCS"
+        printf "ROOMS (id|name):\n%s\n\n" "$ROOMS"
+        printf "EXISTING QUEST IDs (do not duplicate):\n%s\n\n" "$QUEST_IDS"
+        printf "HACKABLE SYSTEMS:\n%s\n\n" "$SYSTEMS"
+        printf "HOSTILE NPCs (kill targets):\n%s\n" "$HOSTILE"
+
+  # ── 2. Opus: plan 3 quest arcs coherent with world state ──────────────────
+  - id: plan
+    executor: claude
+    model: claude-opus-4-6
+    no_clarify: true
+    needs: [worldstate]
+    prompt: |
+      You are the quest director of The Gibson — a cyberpunk text MUD where hackers
+      fight corporate total control. Tone: William Gibson noir. Paranoid. Operational.
+      Stakes are real: people disappear, data gets weaponized, factions betray each other.
+      PG-13.
+
+      WORLD STATE:
+      {{get "step.worldstate.data.value" .}}
+
+      TASK: Plan exactly 3 quest arcs that fit the current world state.
+
+      Each quest must:
+      - Use a real NPC from the NPC ROSTER as the giver (giver_npc_id)
+      - Have a real room from the ROOM list as obj_room
+      - Use a real system ID (for hack) or hostile NPC ID (for kill) or specific item concept (for retrieve)
+      - NOT duplicate any existing quest ID
+      - Feel connected to active faction tensions in the world
+
+      Quest types:
+      - kill: player must defeat an NPC (obj_target = hostile npc id)
+      - hack: player must breach a system (obj_target = system id)
+      - retrieve: player must obtain an item and return it (obj_target = item id they must find)
+
+      For each quest, specify:
+
+      QUEST 1:
+      id: q-<unique-kebab — NOT matching any existing quest ID>
+      title: <terse operational title>
+      type: <kill|hack|retrieve>
+      giver: <npc id from roster>
+      target: <npc id OR system id OR item-concept-kebab>
+      room: <room id where objective lives>
+      count: <1 or 2>
+      reward_credits: <600-2000>
+      reward_item: <brief concept for reward item — will be generated>
+      reward_tier: <signal|ghost|zero-day>
+      narrative: <2-3 sentences — what this job is, why the giver needs it done, what's really going on underneath>
+      faction_tension: <which two factions does this quest's outcome affect and how>
+
+      QUEST 2:
+      [same format]
+
+      QUEST 3:
+      [same format]
+
+      Ensure the three quests together tell a coherent story — they should feel like
+      they exist in the same world at the same moment. Cross-reference them.
+
+  # ── 3. Sonnet: generate WorldQuest YAML + NPC dialogue patches ────────────
+  - id: generate
+    executor: claude
+    model: claude-sonnet-4-6
+    no_clarify: true
+    needs: [worldstate, plan]
+    prompt: |
+      Do not ask clarifying questions. Generate immediately.
+
+      You are a content generator for a cyberpunk text MUD.
+      Generate the actual YAML for quests planned by the quest director.
+
+      QUEST PLANS:
+      {{get "step.plan.data.value" .}}
+
+      WORLD STATE CONTEXT:
+      {{get "step.worldstate.data.value" .}}
+
+      EXISTING ITEM IDs (safe to reference as retrieve targets):
+        data-chip, raw-silicon, copper-wire, carbon-blade, ice-pick, packet-sniffer,
+        keycard, hazmat-suit, decryption-key, server-core, coolant-cartridge,
+        maintenance-log, cascade-resonator, ice-fragment, response-dampener,
+        neural-jack-mk1, deck-patch, ancient-firmware, exploit-axiom-auth,
+        root-key, master-key, hexagon-audit-log, phantom-raid-intercept
+
+      SIGNAL TIER SYSTEM: noise | signal | ghost | zero-day | flatline
+
+      Return ONLY raw YAML. No markdown fences. No commentary. No prose.
+
+      CRITICAL YAML RULES:
+      - All text must be plain text — no asterisks, no markdown emphasis
+      - Multi-line description fields use YAML block scalar (|)
+      - Every id must be globally unique kebab-case
+      - obj_type must be exactly: kill, hack, or retrieve
+      - giver_npc_id must be an NPC id from the world state context
+      - obj_room must be a room id from the world state context
+
+      quests:
+        - id: <quest id from plan>
+          title: <quest title from plan>
+          description: |
+            <3-4 sentences. Write as if the NPC giver is briefing you directly.
+            Operational tone — what the job is, what you'll face, what the payment is.
+            Include one detail that hints at the faction tension from the plan.>
+          giver_npc_id: <giver npc id from plan>
+          obj_type: <kill|hack|retrieve>
+          obj_target: <target id from plan>
+          obj_room: <room id from plan>
+          obj_count: <count from plan>
+          reward_credits: <credits from plan>
+          reward_xp_skill: hacking
+          reward_xp_amount: <integer 50-200>
+          reward_item_id: <new unique kebab id matching reward concept>
+          reward_item_name: <reward item name>
+          reward_item_desc: <1 sentence — what this item does, why it's valuable>
+        - id: <quest 2 id>
+          title: <quest 2 title>
+          description: |
+            <3-4 sentences>
+          giver_npc_id: <giver 2>
+          obj_type: <kill|hack|retrieve>
+          obj_target: <target 2>
+          obj_room: <room 2>
+          obj_count: <count>
+          reward_credits: <credits>
+          reward_xp_skill: hacking
+          reward_xp_amount: <integer>
+          reward_item_id: <new unique kebab>
+          reward_item_name: <name>
+          reward_item_desc: <1 sentence>
+        - id: <quest 3 id>
+          title: <quest 3 title>
+          description: |
+            <3-4 sentences>
+          giver_npc_id: <giver 3>
+          obj_type: <kill|hack|retrieve>
+          obj_target: <target 3>
+          obj_room: <room 3>
+          obj_count: <count>
+          reward_credits: <credits>
+          reward_xp_skill: hacking
+          reward_xp_amount: <integer>
+
+      rooms:
+        - id: <giver_npc_id's room — patch in quest_id on their dialogue>
+          name: placeholder
+          desc: placeholder
+          exits: {}
+          npcs:
+            - id: <giver npc 1 id>
+              name: placeholder
+              desc: placeholder
+              hostile: false
+              loot_table_id: <npc-id>-loot
+              trades: []
+              dialogue:
+                - trigger: always
+                  text: <updated always text that hints at the available job — brief, in-character>
+                - trigger: always
+                  text: <second dialogue line offering the quest>
+                  quest_id: <quest 1 id>
+        - id: <giver_npc_2's room>
+          name: placeholder
+          desc: placeholder
+          exits: {}
+          npcs:
+            - id: <giver npc 2 id>
+              name: placeholder
+              desc: placeholder
+              hostile: false
+              loot_table_id: <npc-id>-loot
+              trades: []
+              dialogue:
+                - trigger: always
+                  text: <hints at job>
+                - trigger: always
+                  text: <offers quest>
+                  quest_id: <quest 2 id>
+
+  # ── 4. Haiku: validate YAML ────────────────────────────────────────────────
+  - id: validate
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    no_clarify: true
+    needs: [generate]
+    prompt: |
+      Do not ask clarifying questions. Do not add commentary.
+      Output the following YAML verbatim. Correct ONLY clear YAML syntax errors.
+      Do NOT change IDs, names, descriptions, or content.
+      Do NOT add markdown fences. Raw YAML only.
+
+      {{get "step.generate.data.value" .}}
+
+  # ── 5. Inject into world.yaml ──────────────────────────────────────────────
+  - id: inject
+    executor: mud-worldgen-inject
+    needs: [validate]
+    prompt: "{{get \"step.validate.data.value\" .}}"
+
+  # ── 6. Commit ──────────────────────────────────────────────────────────────
+  - id: commit
+    executor: shell
+    needs: [inject]
+    vars:
+      cmd: |
+        cd ~/Projects/gl1tch-mud
+        git add worlds/cyberspace/world.yaml
+        git diff --cached --quiet && echo "nothing to commit" && exit 0
+        git commit -m "chore(world): quest-generator — $(date +%Y-%m-%d)"
+        git push origin main

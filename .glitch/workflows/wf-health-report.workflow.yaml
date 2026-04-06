@@ -1,0 +1,22 @@
+name: wf-health-report
+version: "1"
+description: "Synthesize git activity and TODO scan into a concise codebase health note"
+
+steps:
+  - id: report
+    executor: ollama
+    model: llama3.2
+    write_brain: true
+    prompt: |
+      You are a senior engineer reviewing a codebase health snapshot.
+
+      The following context was gathered by automated tooling:
+
+      {{.param.input}}
+
+      Write a concise health note (3-5 bullet points) covering:
+      - Velocity: what does recent commit activity suggest?
+      - Debt signals: are there concerning TODO/FIXME/HACK counts?
+      - One concrete next action worth taking
+
+      Be direct. No fluff. Use bullet points only.

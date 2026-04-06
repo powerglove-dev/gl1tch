@@ -1,0 +1,283 @@
+name: mud-faction-raid
+version: "1"
+description: "Opus designs a faction raid narrative; Sonnet generates enemy waves, objectives, aftermath loot; Haiku formats SQL + YAML and injects both"
+write_brain: false
+game: false
+
+steps:
+
+  # ── 1. Seed raid parameters ────────────────────────────────────────────────
+  - id: seed
+    executor: shell
+    vars:
+      cmd: |
+        ATTACKERS=("ghost-protocol" "null-collective" "phantom-collective" "signal-collective" "eclipse-runners" "blackwire-collective")
+        DEFENDERS=("axiom-security" "helix-division" "vex-collective" "phantom-syndicate")
+        ROOMS=("net-0" "net-1" "net-2" "net-3" "net-4" "net-5")
+        SCALES=("skirmish" "assault" "siege")
+        MOTIVES=(
+          "seize a corporate zero-day vulnerability before it gets patched"
+          "extract a burned operative before Axiom rendition team arrives"
+          "destroy a panopticon relay node to blind corporate surveillance grid"
+          "plant false data in a corporate archive to exonerate a framed netrunner"
+          "steal faction ledger proving corporate collusion with a black ICE deployment"
+          "deny rival faction access to a high-value data broker contact"
+        )
+
+        TS=$(date +%s)
+        AIDX=$(( TS % 6 ))
+        DIDX=$(( (TS / 3) % 4 ))
+        RIDX=$(( (TS / 7) % 6 ))
+        SIDX=$(( (TS / 11) % 3 ))
+        MIDX=$(( (TS / 13) % 6 ))
+
+        echo "attacker=${ATTACKERS[$AIDX]} defender=${DEFENDERS[$DIDX]} room=${ROOMS[$RIDX]} scale=${SCALES[$SIDX]} motive=${MOTIVES[$MIDX]}"
+
+  # ── 2. Opus: design the raid narrative ────────────────────────────────────
+  - id: design
+    executor: claude
+    model: claude-opus-4-6
+    no_clarify: true
+    needs: [seed]
+    prompt: |
+      You are the narrative director of The Gibson — a cyberpunk text MUD where hackers
+      fight corporate total control. William Gibson, Pat Cadigan, Neal Stephenson register.
+      Gritty. Paranoid. Stakes are real. PG-13.
+
+      RAID SEED:
+      {{get "step.seed.data.value" .}}
+
+      Design a complete FACTION RAID narrative brief. This will be used to generate
+      the actual game content. Be specific, operational, and dramatically interesting.
+
+      Structure your response exactly as follows:
+
+      RAID TITLE: <terse operational name, e.g. "Operation BLACKOUT", "The Meridian Strike">
+
+      BACKSTORY (3-4 sentences):
+      Why is the attacker faction doing this NOW? What is the historical tension? What
+      tipped the balance from cold war to hot action? Reference the motive from the seed.
+
+      ATTACKER OBJECTIVE: <exactly what they are trying to accomplish in the room>
+
+      DEFENDER RESPONSE: <how the defender faction is reacting — are they dug in? Evacuating? Triggering ICE?>
+
+      PLAYER OPPORTUNITIES (3-4 bullet points):
+      What can the player DO during this raid? Options should include:
+      - assist attacker path (reward: attacker faction standing)
+      - assist defender path (reward: defender faction standing + credits)
+      - neutral opportunist path (loot aftermath, steal from both sides while chaos reigns)
+      - intelligence path (observe and sell info to a third party)
+
+      AFTERMATH (2-3 sentences):
+      What does the room look like after the raid settles? What's left behind?
+      What's the world-state change? Who controls what now?
+
+      WAVE 1 NPC (skirmisher):
+      name: <handle or unit designation>
+      role: <e.g. "point operative, fast and lethal", "ICE guardian program, automated">
+      hp: <integer 40-80>
+      attack: <integer 8-18>
+      loot: <1-2 item IDs from existing list or new signal-tier item>
+
+      WAVE 2 NPC (heavy — only for assault or siege scale):
+      name: <handle>
+      role: <e.g. "heavy breacher with hardened ICE countermeasures">
+      hp: <integer 80-140>
+      attack: <integer 15-30>
+      loot: <1-2 items, at least one ghost-tier>
+
+      PLOT HOOK:
+      One sentence revealing what this raid means for the larger world arc.
+      Who does this action destabilize? What comes next?
+
+  # ── 3. Sonnet: generate raid mechanics — NPCs, items, lore, SQL ────────────
+  - id: generate
+    executor: claude
+    model: claude-sonnet-4-6
+    no_clarify: true
+    needs: [seed, design]
+    prompt: |
+      Do not ask clarifying questions. Generate immediately.
+
+      You are a content generator for a cyberpunk text MUD. You receive a narrative
+      raid design and generate the actual YAML and SQL content.
+
+      RAID SEED:
+      {{get "step.seed.data.value" .}}
+
+      RAID DESIGN:
+      {{get "step.design.data.value" .}}
+
+      EXISTING ITEM IDs (do NOT reuse as new ids):
+        data-chip, raw-silicon, copper-wire, carbon-blade, ice-pick, packet-sniffer,
+        keycard, hazmat-suit, decryption-key, server-core, coolant-cartridge,
+        maintenance-log, cascade-resonator, ice-fragment, response-dampener,
+        neural-jack-mk1, deck-patch, ancient-firmware, exploit-axiom-auth,
+        root-key, master-key, hexagon-audit-log, phantom-raid-intercept
+
+      SIGNAL TIER SYSTEM (use signal_tier field):
+        noise | signal | ghost | zero-day | flatline
+
+      Generate TWO sections separated by the exact marker "---SQL---":
+
+      SECTION 1 — YAML fragment (rooms + loot_tables):
+      Return raw YAML. No markdown fences. No commentary.
+
+      CRITICAL YAML RULES:
+      - All text must be plain text — no asterisks, no markdown
+      - Multi-line content fields use YAML block scalar (|)
+      - Every id must be globally unique kebab-case
+      - rooms: contains ONLY the target room ID from seed (existing room — inject items/npcs into it)
+
+      rooms:
+        - id: <room id from seed — exact>
+          name: placeholder
+          desc: placeholder
+          exits: {}
+          npcs:
+            - id: <wave-1-npc-id from design>
+              name: <wave 1 name from design>
+              desc: <1 sentence physical description — hostile, armed, dangerous>
+              hostile: true
+              hp: <hp from design>
+              attack: <attack from design>
+              loot_table_id: <npc-id>-raid-loot
+              trades: []
+              dialogue:
+                - trigger: always
+                  text: <1 sentence — hostile operational chatter, no mercy>
+                - trigger: always
+                  text: <1 sentence — threat or declaration>
+            - id: <wave-2-npc-id if scale is assault or siege>
+              name: <wave 2 name>
+              desc: <1 sentence>
+              hostile: true
+              hp: <hp from design>
+              attack: <attack from design>
+              loot_table_id: <npc-id>-raid-loot
+              trades: []
+              dialogue:
+                - trigger: always
+                  text: <1 sentence hostile>
+                - trigger: always
+                  text: <1 sentence>
+          items:
+            - id: <new unique kebab>-raid-intel
+              name: Raid Operations Brief
+              desc: <1 sentence — physical description of the document or device>
+              readable: true
+              signal_tier: ghost
+              content: |
+                <5-6 lines of in-world text — written as attacker faction's operational order.
+                Reference attacker faction name, target, objective, timeline.
+                Use YYYY-MM-DD dates. Include one detail the player can exploit.>
+            - id: <new unique kebab>-aftermath
+              name: <aftermath item name — debris, evidence, equipment>
+              desc: <1 sentence>
+              signal_tier: signal
+          systems: []
+          locks: []
+
+      loot_tables:
+        - id: <wave1-npc-id>-raid-loot
+          entries:
+            - item_id: data-chip
+              name: Data Chip
+              desc: Stolen during the raid. Hot.
+              probability: 0.7
+              count_min: 1
+              count_max: 3
+            - item_id: <new unique kebab ghost item>
+              name: <ghost-tier item name from design wave 1 loot>
+              desc: <1 sentence>
+              signal_tier: ghost
+              probability: 0.25
+              count_min: 1
+              count_max: 1
+        - id: <wave2-npc-id>-raid-loot
+          entries:
+            - item_id: data-chip
+              name: Data Chip
+              desc: Encrypted payload from the heavy's deck.
+              probability: 0.8
+              count_min: 2
+              count_max: 4
+            - item_id: <new unique kebab zero-day item>
+              name: <zero-day tier item from design wave 2 loot>
+              desc: <1 sentence — what makes this extraordinary>
+              signal_tier: zero-day
+              probability: 0.15
+              count_min: 1
+              count_max: 1
+
+      ---SQL---
+
+      SECTION 2 — SQL to inject the raid as a world event:
+      Return only the SQLite INSERT statement. No commentary. No markdown.
+
+      Parse the seed to get: attacker faction (attacker=VALUE), room (room=VALUE), scale (scale=VALUE).
+      Use current Unix timestamp as created_at. Use 20 as expires_actions.
+      Event id must be unique: raid-<attacker-faction>-<unix-timestamp-last-5-digits>.
+
+      INSERT OR REPLACE INTO world_events
+        (id, type, title, description, target_room, faction,
+         payout_credits, payout_item_id, payout_item_name, payout_item_desc,
+         status, expires_actions, created_actions, created_at)
+      VALUES
+        ('<event-id>', 'raid', '<RAID TITLE from design>', '<2-sentence description of what is happening — operational, urgent>',
+         '<room id from seed>', '<attacker faction from seed>',
+         <integer 1200-2500>, '<zero-day item id from loot above>', '<zero-day item name>', '<item desc>',
+         'active', 20, 0, <unix timestamp>);
+
+  # ── 4. Haiku: split output, validate YAML, format SQL ─────────────────────
+  - id: format
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    no_clarify: true
+    needs: [generate]
+    prompt: |
+      Do not ask clarifying questions. Do not add commentary.
+
+      The following is generated content split by the marker ---SQL---
+      The part before the marker is a YAML fragment. The part after is a SQL statement.
+
+      Output ONLY the YAML part. Output it verbatim. Correct ONLY clear YAML syntax
+      errors (unclosed quotes, bad indentation that would break parsing).
+      Do NOT add markdown fences. Do NOT include the SQL. Raw YAML only.
+
+      {{get "step.generate.data.value" .}}
+
+  # ── 5. Inject YAML into world.yaml ────────────────────────────────────────
+  - id: inject
+    executor: mud-worldgen-inject
+    needs: [format]
+    prompt: "{{get \"step.format.data.value\" .}}"
+
+  # ── 6. Extract and execute SQL ────────────────────────────────────────────
+  - id: inject_sql
+    executor: shell
+    needs: [generate]
+    vars:
+      cmd: |
+        FULL="{{get "step.generate.data.value" .}}"
+        # Extract everything after ---SQL---
+        SQL=$(echo "$FULL" | awk '/^---SQL---/{found=1; next} found{print}' | grep -E "^(INSERT|insert)" | head -5 | tr '\n' ' ')
+        if [ -z "$SQL" ]; then
+          echo "no SQL found in generate output"
+          exit 0
+        fi
+        echo "Executing: $SQL"
+        sqlite3 ~/.local/share/gl1tch-mud/world.db "$SQL" && echo "raid event injected" || echo "sql inject failed (non-fatal)"
+
+  # ── 7. Commit ──────────────────────────────────────────────────────────────
+  - id: commit
+    executor: shell
+    needs: [inject, inject_sql]
+    vars:
+      cmd: |
+        cd ~/Projects/gl1tch-mud
+        git add worlds/cyberspace/world.yaml
+        git diff --cached --quiet && echo "nothing to commit" && exit 0
+        git commit -m "chore(world): faction-raid — $(date +%Y-%m-%d)"
+        git push origin main

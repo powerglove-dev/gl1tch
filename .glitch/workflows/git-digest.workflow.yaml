@@ -1,0 +1,26 @@
+name: git-digest
+version: "1"
+
+steps:
+  - id: log
+    executor: shell
+    vars:
+      cmd: "git -C /Users/stokes/Projects/gl1tch log --oneline -20"
+
+  - id: diffstat
+    executor: shell
+    vars:
+      cmd: "git -C /Users/stokes/Projects/gl1tch diff HEAD~10 --stat"
+
+  - id: summarize
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    needs: [log, diffstat]
+    prompt: |
+      Summarize recent git activity. Flag anything that looks risky (large deletions, core files, no tests nearby).
+
+      commits:
+      {{get "step.log.data.value" .}}
+
+      diffstat:
+      {{get "step.diffstat.data.value" .}}

@@ -1,0 +1,167 @@
+name: mud-lock-inject
+version: "1"
+description: "Adds locked containers and restricted access points to existing rooms — rewards skill and key ownership"
+write_brain: false
+game: false
+
+steps:
+
+  # ── 1. Pick target room and lock type ─────────────────────────────────────
+  - id: seed
+    executor: shell
+    vars:
+      cmd: |
+        ROOMS=("net-0" "net-1" "net-2" "net-3" "net-4" "net-5")
+        LOCK_TYPES=(
+          "vault panel: a flush-mounted armored door hiding cold-storage data"
+          "biometric cage: neuro-encrypted container, opens only with a live scan"
+          "dead drop cache: physically locked case bolted under a maintenance panel"
+          "signal-isolated compartment: Faraday-shielded box, contents off the grid"
+          "corporate evidence locker: seized tech, probably still transmitting"
+          "emergency access hatch: leads somewhere that isn't on any official map"
+        )
+        RIDX=$(( $(date +%s) % 6 ))
+        LIDX=$(( ($(date +%s) / 11) % 6 ))
+        echo "room: ${ROOMS[$RIDX]}, lock: ${LOCK_TYPES[$LIDX]}"
+
+  # ── 2a. Try codex (free tier) ─────────────────────────────────────────────
+  - id: codex_try
+    executor: shell
+    needs: [seed]
+    vars:
+      cmd: |
+        SEED="{{get "step.seed.data.value" .}}"
+        TMPF=$(mktemp /tmp/mud_codex_XXXXXX.txt)
+        TMPOUT=$(mktemp /tmp/mud_codex_out_XXXXXX.txt)
+        cat > "$TMPF" << 'PROMPT_END'
+        Do not ask clarifying questions. Generate immediately.
+
+        You are a world builder for a cyberpunk text MUD.
+        Gritty near-future, corporate dystopia, hacker underground. PG-13.
+
+        Seed: SEED_PLACEHOLDER
+
+        The seed gives a TARGET ROOM ID and a LOCK TYPE.
+        Generate a rooms fragment containing ONLY the target room with 1-2 new locks.
+        Also include any reward items the lock contains as readable items in the room's items list.
+        Return ONLY raw YAML. No markdown fences. No commentary.
+
+        CRITICAL YAML RULES:
+        - All text values must be plain text — no asterisks, no markdown
+        - Every id must be globally unique kebab-case
+        - difficulty must be integer 1-5 (1 = trivial, 5 = elite)
+        - keys is a list of item ids that can bypass the lock; use existing keycard id or a new unique id
+        - exit must be a direction string (north/south/east/west) if the lock blocks a passage,
+          OR omit exit and set it as a container lock
+
+        EXISTING key/item IDs (safe to reference):
+          keycard, decryption-key, ice-pick, packet-sniffer
+
+        rooms:
+          - id: <ROOM_ID from seed>
+            name: placeholder
+            desc: placeholder
+            exits: {}
+            npcs: []
+            items:
+              - id: <reward-item-unique-id>
+                name: <reward item name>
+                desc: <1 sentence>
+                readable: true
+                content: |
+                  <3-5 lines of in-world text: a memo, access log, or data fragment.
+                  Reference factions, codenames, or vulnerabilities. Reveal a plot hook.>
+            systems: []
+            locks:
+              - id: <unique-kebab-id>
+                exit: <direction OR omit>
+                difficulty: <1-5>
+                keys:
+                  - <existing or new key item id>
+                trigger: <one sentence describing what unlocking this reveals>
+        PROMPT_END
+        sed -i "s/SEED_PLACEHOLDER/$SEED/" "$TMPF"
+        codex exec --full-auto -m codex-mini-latest - -o "$TMPOUT" < "$TMPF" 2>/dev/null
+        EXIT=$?
+        rm -f "$TMPF"
+        if [ $EXIT -eq 0 ] && [ -s "$TMPOUT" ]; then
+            cat "$TMPOUT"
+        fi
+        rm -f "$TMPOUT"
+
+  # ── 2b. Fallback: Haiku ────────────────────────────────────────────────────
+  - id: generate
+    executor: claude
+    no_clarify: true
+    model: claude-haiku-4-5-20251001
+    needs: [seed, codex_try]
+    prompt: |
+      Do not ask clarifying questions. Generate immediately.
+      {{- $codex := get "step.codex_try.data.value" . }}
+      {{- if $codex }}
+
+      Codex already generated the following YAML. Output it VERBATIM — do not change a character.
+
+      {{ $codex }}
+      {{- else }}
+
+      You are a world builder for a cyberpunk text MUD.
+      Gritty near-future, corporate dystopia, hacker underground. PG-13.
+
+      Seed: {{get "step.seed.data.value" .}}
+
+      The seed gives a TARGET ROOM ID and a LOCK TYPE.
+      Generate a rooms fragment containing ONLY the target room with 1-2 new locks.
+      Also include any reward items the lock contains as readable items in the room's items list.
+      Return ONLY raw YAML. No markdown fences. No commentary.
+
+      CRITICAL YAML RULES:
+      - All text values must be plain text — no asterisks, no markdown
+      - Every id must be globally unique kebab-case
+      - difficulty must be integer 1-5
+      - keys is a list of item ids that can bypass the lock
+
+      EXISTING key/item IDs (safe to reference):
+        keycard, decryption-key, ice-pick, packet-sniffer
+
+      rooms:
+        - id: <ROOM_ID from seed>
+          name: placeholder
+          desc: placeholder
+          exits: {}
+          npcs: []
+          items:
+            - id: <reward-item-unique-id>
+              name: <reward item name>
+              desc: <1 sentence>
+              readable: true
+              content: |
+                <3-5 lines of in-world text: memo, access log, or data fragment.
+                Reference factions, codenames, or vulnerabilities. Reveal a plot hook.>
+          systems: []
+          locks:
+            - id: <unique-kebab-id>
+              exit: <direction OR omit>
+              difficulty: <1-5>
+              keys:
+                - <existing or new key item id>
+              trigger: <one sentence describing what unlocking this reveals>
+      {{- end }}
+
+  # ── 3. Inject ──────────────────────────────────────────────────────────────
+  - id: inject
+    executor: mud-worldgen-inject
+    needs: [generate]
+    prompt: "{{get \"step.generate.data.value\" .}}"
+
+  # ── 4. Commit ──────────────────────────────────────────────────────────────
+  - id: commit
+    executor: shell
+    needs: [inject]
+    vars:
+      cmd: |
+        cd ~/Projects/gl1tch-mud
+        git add worlds/cyberspace/world.yaml
+        git diff --cached --quiet && echo "nothing to commit" && exit 0
+        git commit -m "chore(world): lock-inject — $(date +%Y-%m-%d)"
+        git push origin main

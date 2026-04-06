@@ -1,0 +1,209 @@
+name: rag-bugfix
+version: "1"
+
+# End-to-end RAG verification pipeline:
+#   1. Index cwd into brain vector store (Ollama embeddings)
+#   2. Local LLM finds a high-confidence bug (RAG context auto-injected)
+#   3. Confidence gate — stops if < 90%
+#   4. Validate BUG_FILE exists + extract bug region from real source
+#   5. Local LLM outputs replacement code (not a diff)
+#   6. Python builds a proper patch via difflib + dry-run validates it
+#   7. Patch applied with patch -p1
+#
+# Prerequisites:
+#   ollama pull nomic-embed-text
+#   ollama pull qwen3:8b
+#   Run from project root: orcai pipeline run rag-bugfix
+
+steps:
+
+  # ── 1. Index codebase into RAG vector store ────────────────────────────────
+  - id: index_codebase
+    executor: builtin.index_code
+    args:
+      path: "./internal/pipeline"
+      extensions: ".go"
+      model: "nomic-embed-text"
+      base_url: "http://localhost:11434"
+
+  # ── 2. Local LLM: find a high-confidence bug (RAG auto-injected) ───────────
+  - id: find_bug
+    executor: ollama
+    model: qwen3:8b
+    needs: [index_codebase]
+    write_brain: true
+    outputs:
+      analysis: "Bug analysis with confidence score"
+    prompt: |
+      DO NOT ASK FOR CLARIFICATION. You have everything you need. Proceed immediately.
+
+      Go source code from the orcai internal/pipeline package has been injected
+      into your context above as ## Relevant Brain Notes. Each chunk is labelled
+      with its source file path (e.g. "file:internal/pipeline/runner.go:L1-L50").
+
+      CRITICAL: You MUST only reference file names that appear verbatim in those
+      chunk labels. Do NOT invent, guess, or abbreviate file names. Every file
+      name you output must be copied exactly from a "file:..." label above.
+
+      Find ONE real bug visible in the injected code: a nil dereference, missing
+      error check, data race, incorrect lock usage, off-by-one, or logic error on
+      a reachable code path. Do not report style issues or hypothetical risks.
+
+      Output EXACTLY this block and nothing else — fill in the actual values:
+
+      <brain_notes>
+      BUG_FILE: internal/pipeline/<copy exact filename from a chunk label above>.go
+      BUG_LINES: <exact line numbers from the chunk label where the bug appears>
+      BUG_SUMMARY: <one-sentence description of the actual defect>
+      CONFIDENCE: <0-100>
+      REASONING: <2-3 sentences quoting the exact Go code from the chunk above that contains the bug>
+      </brain_notes>
+
+      If no concrete bug is found in the injected code, output:
+
+      <brain_notes>
+      BUG_FILE: none
+      BUG_LINES: 0-0
+      BUG_SUMMARY: no bug found
+      CONFIDENCE: 0
+      REASONING: no concrete defect identified in the injected code
+      </brain_notes>
+
+  # ── 3. Confidence gate ─────────────────────────────────────────────────────
+  - id: assert_confidence
+    executor: builtin.assert
+    needs: [find_bug]
+    args:
+      condition: "matches:CONFIDENCE: ([89][0-9]|100)"
+      value: "{{step.find_bug.data.value}}"
+      message: "Bug confidence below 80% — pipeline stopped. No patch applied."
+
+  # ── 4. Validate BUG_FILE exists and extract bug region ────────────────────
+  - id: extract_file
+    executor: shell
+    needs: [assert_confidence]
+    vars:
+      cmd: |
+        python3 << 'PYEOF'
+        import os, re, sys
+        output = os.environ.get('GLITCH_FIND_BUG_OUTPUT', '')
+        mf = re.search(r'BUG_FILE:\s*(.+)', output)
+        ml = re.search(r'BUG_LINES:\s*(\d+)-(\d+)', output)
+        if not mf:
+            print("ERROR: No BUG_FILE in find_bug output")
+            sys.exit(1)
+        bug_file = mf.group(1).strip()
+        if bug_file == 'none':
+            print("BUG_FILE is 'none' — no bug found")
+            sys.exit(0)
+        if not os.path.exists(bug_file):
+            print(f"ERROR: BUG_FILE '{bug_file}' does not exist. Model hallucinated the filename.")
+            sys.exit(1)
+        with open(bug_file) as f:
+            all_lines = f.readlines()
+        start = max(0, (int(ml.group(1)) if ml else 1) - 10)
+        end = min(len(all_lines), (int(ml.group(2)) if ml else len(all_lines)) + 10)
+        snippet = f"// FILE: {bug_file} (lines {start+1}-{end})\n"
+        for i, line in enumerate(all_lines[start:end], start + 1):
+            snippet += f"{i:4d}\t{line}"
+        print(snippet)
+        PYEOF
+      find_bug_output: "{{step.find_bug.data.value}}"
+
+  # ── 5. Local LLM: output fixed replacement code (not a diff) ──────────────
+  - id: generate_patch
+    executor: ollama
+    model: qwen3:8b
+    needs: [extract_file]
+    outputs:
+      fix: "Fixed replacement lines"
+    prompt: |
+      DO NOT ASK FOR CLARIFICATION. You have everything you need. Proceed immediately.
+
+      The brain notes above identify a specific bug: BUG_FILE contains the file path,
+      BUG_LINES the affected line range, BUG_SUMMARY the defect description.
+      The source code around those lines is in the ## Relevant Brain Notes above.
+
+      Output ONLY the corrected replacement Go code for the buggy lines.
+      Do NOT output a diff, line numbers, or any explanation.
+      Use tab indentation (not spaces).
+
+      <fix>
+      [the corrected Go code lines]
+      </fix>
+
+  # ── 6. Build patch via difflib + dry-run validate ─────────────────────────
+  - id: write_patch
+    executor: shell
+    needs: [generate_patch]
+    vars:
+      cmd: |
+        python3 << 'PYEOF'
+        import os, re, sys, difflib, subprocess
+
+        find_bug_out = os.environ.get('GLITCH_FIND_BUG_OUTPUT', '')
+        fix_raw = os.environ.get('GLITCH_FIX_RAW', '')
+
+        # Parse BUG_FILE and BUG_LINES
+        mf = re.search(r'BUG_FILE:\s*(.+)', find_bug_out)
+        ml = re.search(r'BUG_LINES:\s*(\d+)-(\d+)', find_bug_out)
+        if not mf or not ml:
+            print("ERROR: could not parse BUG_FILE or BUG_LINES")
+            sys.exit(1)
+        bug_file  = mf.group(1).strip()
+        line_start = int(ml.group(1)) - 1  # 0-indexed
+        line_end   = int(ml.group(2))      # exclusive
+
+        # Extract fixed code from <fix>...</fix>
+        mfix = re.search(r'<fix>(.*?)</fix>', fix_raw, re.DOTALL)
+        if not mfix:
+            print("ERROR: no <fix>...</fix> block in model output")
+            print("Model output:", fix_raw[:300])
+            sys.exit(1)
+        fixed = mfix.group(1).lstrip('\n').rstrip('\n').splitlines(keepends=True)
+        fixed = [l if l.endswith('\n') else l + '\n' for l in fixed]
+
+        # Read original and build patched version
+        with open(bug_file) as f:
+            orig = f.readlines()
+        patched = orig[:line_start] + fixed + orig[line_end:]
+
+        # Generate unified diff via difflib
+        # lineterm='' preserves the \n from readlines(); headers get \n added below
+        diff = list(difflib.unified_diff(
+            orig, patched,
+            fromfile=f'a/{bug_file}',
+            tofile=f'b/{bug_file}',
+            lineterm=''
+        ))
+        if not diff:
+            print("ERROR: fix lines are identical to original — no change produced")
+            sys.exit(1)
+
+        patch_text = ''.join(l if l.endswith('\n') else l + '\n' for l in diff)
+        with open('/tmp/orcai-autofix.patch', 'w') as f:
+            f.write(patch_text)
+        print(f"Patch written: /tmp/orcai-autofix.patch ({len(diff)} lines)")
+
+        # Dry-run
+        result = subprocess.run(
+            ['patch', '-p1', '--dry-run', '--forward'],
+            input=patch_text, capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            print(f"PATCH DRY-RUN FAILED:\n{result.stdout}\n{result.stderr}")
+            sys.exit(1)
+        print("Dry-run OK — patch applies cleanly")
+        PYEOF
+      find_bug_output: "{{step.find_bug.data.value}}"
+      fix_raw: "{{step.generate_patch.data.value}}"
+
+  # ── 7. Apply patch ─────────────────────────────────────────────────────────
+  - id: apply_patch
+    executor: shell
+    needs: [write_patch]
+    vars:
+      cmd: >-
+        patch -p1 --forward < /tmp/orcai-autofix.patch &&
+        echo "PATCH APPLIED SUCCESSFULLY" ||
+        { echo "PATCH FAILED — review /tmp/orcai-autofix.patch"; exit 1; }

@@ -1,0 +1,14 @@
+```
+name: docs-improve/pipeline
+version: "1"
+steps:
+  - id: generate-git-digest
+    executor: github-copilot
+    prompt: |
+      GitHub actions: Generate GitDigest for repository {repo-owner}/{repo-name}
+  - id: update-documentation
+    executor: codex
+    model: {model-id}
+    prompt: |
+      Update documentation using {{.steps.generate-git-digest.output}}
+```

@@ -1,0 +1,18 @@
+name: standup
+version: "1"
+
+steps:
+  - id: commits
+    executor: shell
+    vars:
+      cmd: "git -C /Users/stokes/Projects/gl1tch log --since='24 hours ago' --oneline --no-merges"
+
+  - id: draft
+    executor: claude
+    model: claude-haiku-4-5-20251001
+    needs: [commits]
+    prompt: |
+      Write a standup update from these commits.
+      Format: Yesterday / Today / Blockers. Keep it under 8 lines.
+
+      {{get "step.commits.data.value" .}}

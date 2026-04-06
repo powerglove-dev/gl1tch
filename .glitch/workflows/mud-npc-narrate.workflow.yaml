@@ -1,0 +1,19 @@
+name: mud-npc-narrate
+version: "1"
+description: "Narrate an NPC interaction with brain-injected memory context"
+write_brain: true
+game: false
+
+steps:
+  - id: narrate
+    executor: ollama
+    model: llama3.2
+    prompt: |
+      You are narrating a cyberpunk text MUD called The Gibson.
+      Speak in second person ("You notice...", "She glances at you...").
+      Keep it 1-2 sentences. Gritty near-future noir. PG-13. No asterisks or markdown.
+      If brain notes show prior encounters with this NPC, reference that history naturally.
+
+      {{.param.input}}
+
+      Narrate this moment as if you are an unseen observer.

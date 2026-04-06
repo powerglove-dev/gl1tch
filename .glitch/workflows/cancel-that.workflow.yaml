@@ -1,0 +1,9 @@
+No `.pipeline.yaml` files found in the current directory (`internal/console`). There may be pipelines elsewhere in the project, but I don't have access to search outside this directory.
+
+To list pipelines, try running from the project root:
+```bash
+find . -name "*.pipeline.yaml"
+```
+
+Would you like me to generate a new pipeline instead? Just describe what you want it to do.
+

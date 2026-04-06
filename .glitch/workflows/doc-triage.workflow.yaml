@@ -1,0 +1,38 @@
+---
+name: doc-triage
+description: find unassigned doc issues in observability-robots and recommend the next one to work on
+
+steps:
+  - name: fetch_issues
+    provider: shell
+    command: >
+      gh issue list
+        --repo elastic/observability-robots
+        --state open
+        --label documentation
+        --search "no:assignee"
+        --json number,title,createdAt,updatedAt,labels,body
+        --limit 30
+
+  - name: triage
+    provider: claude/claude-sonnet-4-6
+    brain_tags:
+      - observability-robots
+      - docs
+    prompt: |
+      here are unassigned documentation issues from elastic/observability-robots:
+
+      {{fetch_issues.output}}
+
+      review them and recommend the single best one to work on next.
+      consider: user impact, how concrete the ask is, whether it's actionable without deep context, and whether it builds on prior work.
+      skip anything that looks like bot-generated noise.
+
+      output:
+      - the issue number and title
+      - one or two sentences on why it's the right one to pick up
+      - what the first concrete step would be
+
+      <brain>
+      recommended issue: summarize your pick and reasoning here for future reference
+      </brain>

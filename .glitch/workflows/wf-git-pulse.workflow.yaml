@@ -1,0 +1,17 @@
+name: wf-git-pulse
+version: "1"
+description: "Emit a quick snapshot of recent git activity — last 10 commits + diff stat"
+
+steps:
+  - id: pulse
+    executor: shell
+    vars:
+      cmd: |
+        echo "=== recent commits ==="
+        git log --oneline -10
+        echo ""
+        echo "=== diff stat since last commit ==="
+        git diff --stat HEAD~1 HEAD 2>/dev/null || echo "(nothing staged)"
+        echo ""
+        echo "=== untracked / modified ==="
+        git status --short | head -20
