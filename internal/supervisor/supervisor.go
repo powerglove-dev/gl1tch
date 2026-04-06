@@ -16,16 +16,19 @@ import (
 )
 
 // Supervisor subscribes to busd and dispatches registered handlers.
+// It also manages long-running background services.
 type Supervisor struct {
 	cfgDir   string
 	cfgPath  string
 	handlers []Handler
+	services []Service
 	busPath  string
 	execMgr  *executor.Manager
 	mu       sync.RWMutex
 	cfg      *SupervisorConfig
 	cfgMtime time.Time
 	cancel   context.CancelFunc
+	svcWg    sync.WaitGroup
 }
 
 // New creates a new Supervisor. Call Start to begin event dispatch.
@@ -47,6 +50,13 @@ func (s *Supervisor) RegisterHandler(h Handler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.handlers = append(s.handlers, h)
+}
+
+// RegisterService adds a long-running service. Must be called before Start.
+func (s *Supervisor) RegisterService(svc Service) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.services = append(s.services, svc)
 }
 
 // Start dials busd, registers all topic subscriptions, and begins the dispatch
@@ -94,13 +104,28 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
 	s.cancel = cancel
+	svcs := append([]Service{}, s.services...)
 	s.mu.Unlock()
 
 	go s.readLoop(ctx, conn)
+
+	// Launch all registered services.
+	for _, svc := range svcs {
+		s.svcWg.Add(1)
+		go func(svc Service) {
+			defer s.svcWg.Done()
+			slog.Info("supervisor: service started", "name", svc.Name())
+			if err := svc.Start(ctx); err != nil && ctx.Err() == nil {
+				slog.Warn("supervisor: service exited", "name", svc.Name(), "err", err)
+			}
+		}(svc)
+	}
+
 	return nil
 }
 
-// Stop cancels the supervisor's context, closing the bus connection.
+// Stop cancels the supervisor's context, closing the bus connection and
+// stopping all managed services.
 func (s *Supervisor) Stop() {
 	s.mu.RLock()
 	cancel := s.cancel
@@ -108,6 +133,7 @@ func (s *Supervisor) Stop() {
 	if cancel != nil {
 		cancel()
 	}
+	s.svcWg.Wait()
 }
 
 // readLoop reads events from the busd connection and dispatches handlers.

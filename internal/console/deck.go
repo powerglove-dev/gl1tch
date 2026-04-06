@@ -23,6 +23,7 @@ import (
 
 	"github.com/8op-org/gl1tch/internal/activity"
 	"github.com/8op-org/gl1tch/internal/npcname"
+	"github.com/8op-org/gl1tch/internal/observer"
 	"github.com/8op-org/gl1tch/internal/tdf"
 	orcaicron "github.com/8op-org/gl1tch/internal/cron"
 	"github.com/8op-org/gl1tch/internal/busd"
@@ -4413,8 +4414,16 @@ func glitchOpenStore() *store.Store {
 }
 
 func Run() {
+	RunWithObserver(nil)
+}
+
+// RunWithObserver starts the TUI with an optional observer query engine.
+// If engine is non-nil, the main session routes free-text through ES-backed
+// observation queries instead of the regular LLM backend.
+func RunWithObserver(engine *observer.QueryEngine) {
 	s := glitchOpenStore()
 	m := NewWithStore(s)
+	m.glitchChat.observer = engine
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("deck error: %v\n", err)

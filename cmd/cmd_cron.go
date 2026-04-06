@@ -17,84 +17,22 @@ import (
 
 func init() {
 	rootCmd.AddCommand(cronCmd)
-	cronCmd.AddCommand(cronStartCmd)
-	cronCmd.AddCommand(cronStopCmd)
 	cronCmd.AddCommand(cronListCmd)
 	cronCmd.AddCommand(cronLogsCmd)
 	cronCmd.AddCommand(cronRunCmd)
-
-	cronStartCmd.Flags().Bool("force", false, "kill an existing cron session before starting")
 }
 
-// cronCmd is the top-level cron command group.
 var cronCmd = &cobra.Command{
 	Use:   "cron",
 	Short: "Manage recurring pipeline and agent schedules",
+	Long: `The cron scheduler runs automatically as part of the gl1tch supervisor
+when you launch glitch. Use these subcommands to inspect and manage schedules.
+
+  glitch cron list    — show all entries and next fire times
+  glitch cron logs    — tail the cron log file
+  glitch cron run     — run the scheduler standalone (for headless servers)`,
 }
 
-// cronStartCmd starts the cron daemon in a detached tmux session named
-// "glitch-cron". Use --force to replace an existing session.
-var cronStartCmd = &cobra.Command{
-	Use:   "start",
-	Short: "Start the cron daemon in a background tmux session",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		force, _ := cmd.Flags().GetBool("force")
-
-		// Check whether the session already exists.
-		checkCmd := exec.Command("tmux", "has-session", "-t", "glitch-cron")
-		sessionExists := checkCmd.Run() == nil
-
-		if sessionExists {
-			if !force {
-				fmt.Fprintln(os.Stderr, "cron: session 'glitch-cron' is already running. Use --force to restart.")
-				os.Exit(1)
-			}
-			// Kill the existing session.
-			if err := exec.Command("tmux", "kill-session", "-t", "glitch-cron").Run(); err != nil {
-				return fmt.Errorf("cron: kill existing session: %w", err)
-			}
-		}
-
-		// Resolve absolute path of the running binary so the tmux session
-		// can invoke it even when glitch is not in PATH.
-		self, err := os.Executable()
-		if err != nil {
-			return fmt.Errorf("cron: resolve executable: %w", err)
-		}
-		self = filepath.Clean(self)
-
-		// Create the new session running the TUI (falls back to bare daemon
-		// if invoked in a non-interactive/CI context via "cron run").
-		newArgs := []string{
-			"new-session", "-d", "-s", "glitch-cron",
-			"-x", "220", "-y", "50",
-			self + " cron tui",
-		}
-		if err := exec.Command("tmux", newArgs...).Run(); err != nil {
-			return fmt.Errorf("cron: start session: %w", err)
-		}
-		// Label the window so the jump window popup shows "glitch-cron".
-		exec.Command("tmux", "set-window-option", "-t", "glitch-cron:0", "@glitch-label", "glitch-cron").Run() //nolint:errcheck
-		fmt.Println("cron: daemon started in tmux session 'glitch-cron'")
-		return nil
-	},
-}
-
-// cronStopCmd kills the glitch-cron tmux session.
-var cronStopCmd = &cobra.Command{
-	Use:   "stop",
-	Short: "Stop the cron daemon",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := exec.Command("tmux", "kill-session", "-t", "glitch-cron").Run(); err != nil {
-			fmt.Fprintln(os.Stderr, "cron: daemon is not running (no 'glitch-cron' session found)")
-			return nil
-		}
-		fmt.Println("cron: daemon stopped")
-		return nil
-	},
-}
-
-// cronListCmd prints all configured schedule entries with their next fire time.
 var cronListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all configured cron entries with next-fire times",
@@ -127,7 +65,6 @@ var cronListCmd = &cobra.Command{
 	},
 }
 
-// cronLogsCmd tails the cron daemon log file.
 var cronLogsCmd = &cobra.Command{
 	Use:   "logs",
 	Short: "Tail the cron daemon log file",
@@ -148,8 +85,7 @@ var cronLogsCmd = &cobra.Command{
 	},
 }
 
-// humanDuration formats a duration as a short human-readable string like
-// "in 5m", "in 2h 30m", or "in 3d 4h".
+// humanDuration formats a duration as a short human-readable string.
 func humanDuration(d time.Duration) string {
 	if d < 0 {
 		return "overdue"
@@ -175,13 +111,10 @@ func humanDuration(d time.Duration) string {
 	}
 }
 
-// cronRunCmd is the internal daemon entry point. It is invoked by
-// cronStartCmd inside the tmux session and should not normally be called
-// directly by users.
+// cronRunCmd is the standalone daemon for headless servers.
 var cronRunCmd = &cobra.Command{
-	Use:    "run",
-	Short:  "Run the cron daemon (internal — use 'cron start' instead)",
-	Hidden: true,
+	Use:   "run",
+	Short: "Run the cron scheduler standalone (for headless servers without the TUI)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, err := cron.NewLogger()
 		if err != nil {
@@ -197,7 +130,6 @@ var cronRunCmd = &cobra.Command{
 			return fmt.Errorf("cron: start scheduler: %w", err)
 		}
 
-		// Block until SIGINT or SIGTERM.
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh

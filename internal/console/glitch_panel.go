@@ -28,6 +28,7 @@ import (
 	"github.com/8op-org/gl1tch/internal/cron"
 	"github.com/8op-org/gl1tch/internal/executor"
 	"github.com/8op-org/gl1tch/internal/modal"
+	"github.com/8op-org/gl1tch/internal/observer"
 	"github.com/8op-org/gl1tch/internal/orchestrator"
 	"github.com/8op-org/gl1tch/internal/npcname"
 	"github.com/8op-org/gl1tch/internal/panelrender"
@@ -1288,6 +1289,10 @@ type glitchChatPanel struct {
 
 	// sessions manages named conversation contexts.
 	sessions *SessionRegistry
+
+	// observer is the ES-backed query engine for the observer AI assistant.
+	// nil if ES is not available.
+	observer *observer.QueryEngine
 }
 
 // widgetExecCmd runs a widget's binary with input on stdin and returns the
@@ -1785,7 +1790,30 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 				return glitchRerunMsg{name: name, input: input, kind: kind}
 			}
 		}
-		// No pipeline match — fall through to LLM chat stream.
+		// No pipeline match — try observer if available on main session.
+		if p.observer != nil && p.sessions.active == "main" && !msg.passthrough {
+			p.streaming = true
+			obs := p.observer
+			obsCtx := p.ctx
+			obsPrompt := msg.prompt
+			return p, tea.Batch(glitchTick(), func() tea.Msg {
+				tokenCh := make(chan string, 64)
+				doneCh := make(chan string, 1)
+				go func() {
+					defer close(doneCh)
+					if err := obs.Stream(obsCtx, obsPrompt, tokenCh); err != nil {
+						// Observer failed — send error as single token.
+						ch := make(chan string, 1)
+						ch <- "observer error: " + err.Error()
+						close(ch)
+						// Can't use tokenCh since Stream closes it.
+					}
+					doneCh <- ""
+				}()
+				return glitchStreamMsg{ch: tokenCh, doneCh: doneCh}
+			})
+		}
+		// Fall through to LLM chat stream.
 		if p.backend == nil {
 			p.messages = append(p.messages, glitchEntry{
 				who:  glitchSpeakerBot,
@@ -2852,11 +2880,25 @@ func (p glitchChatPanel) update(msg tea.Msg) (glitchChatPanel, tea.Cmd) {
 						text: output,
 					})
 					return p, nil
+				case "/observe":
+					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
+					if p.observer == nil {
+						p.messages = append(p.messages, glitchEntry{
+							who:  glitchSpeakerBot,
+							text: "observer not available. make sure elasticsearch is running:\n\n  docker compose up -d\n\nconfigure repos in ~/.config/glitch/observer.yaml",
+						})
+					} else {
+						p.messages = append(p.messages, glitchEntry{
+							who:  glitchSpeakerBot,
+							text: "observer is online. ask me anything about your repos, pipelines, and activity.\n\nexamples:\n  what happened today?\n  summarize recent commits on gl1tch\n  what pipelines ran this week?",
+						})
+					}
+					return p, nil
 				case "/help":
 					p.messages = append(p.messages, glitchEntry{who: glitchSpeakerUser, text: userText})
 					p.messages = append(p.messages, glitchEntry{
 						who: glitchSpeakerBot,
-						text: "slash commands:\n\n  getting started\n  /init             — first-run wizard\n  /models           — pick a provider and model\n\n  build things\n  /prompt [name]    — load or build a system prompt with AI\n  /pipeline [name]  — run a pipeline, or build one from scratch\n  /brain [query]    — search notes; /brain summary — what gl1tch knows about you\n  /briefing         — daily morning briefing: enable, disable, or run now\n\n  run things\n  /rerun [name]     — rerun a pipeline by name\n  /shell [cmd]      — run a shell command and show output\n  /weather [city]   — current weather and forecast\n  /terminal [cmd]   — open split (-v bottom, -left, -p N%); or: list kill equalize focus\n  /cron             — get help scheduling recurring jobs\n  /trace            — show OTel trace for the selected feed entry\n\n  modes\n  /mud              — jack into The Gibson — takes over chat as MUD terminal\n\n  workspace\n  /session [name]   — switch or create a named session\n  /cwd [path]       — set working directory\n  /model [name]     — switch provider/model inline\n  /themes           — open theme picker\n  /clear            — clear chat history\n  /quit             — exit glitch\n  /help             — this list\n\nscroll: j/k or [/] when scroll-focused (tab to switch)",
+						text: "slash commands:\n\n  getting started\n  /init             — first-run wizard\n  /models           — pick a provider and model\n\n  build things\n  /prompt [name]    — load or build a system prompt with AI\n  /pipeline [name]  — run a pipeline, or build one from scratch\n  /brain [query]    — search notes; /brain summary — what gl1tch knows about you\n  /briefing         — daily morning briefing: enable, disable, or run now\n\n  run things\n  /rerun [name]     — rerun a pipeline by name\n  /shell [cmd]      — run a shell command and show output\n  /weather [city]   — current weather and forecast\n  /terminal [cmd]   — open split (-v bottom, -left, -p N%); or: list kill equalize focus\n  /cron             — get help scheduling recurring jobs\n  /trace            — show OTel trace for the selected feed entry\n\n  observer\n  /observe          — check observer status (ES + collectors)\n\n  modes\n  /mud              — jack into The Gibson — takes over chat as MUD terminal\n\n  workspace\n  /session [name]   — switch or create a named session\n  /cwd [path]       — set working directory\n  /model [name]     — switch provider/model inline\n  /themes           — open theme picker\n  /clear            — clear chat history\n  /quit             — exit glitch\n  /help             — this list\n\nscroll: j/k or [/] when scroll-focused (tab to switch)",
 					})
 					return p, nil
 				case "/trace":

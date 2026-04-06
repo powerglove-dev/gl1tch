@@ -35,7 +35,7 @@ func main() {
 		case "_reload":
 			bootstrap.WriteReloadMarker() //nolint:errcheck
 			return
-		case "ask", "busd", "help", "model", "pipeline", "workflow", "completion", "config", "cron", "widget", "backup", "restore", "game", "plugin":
+		case "ask", "busd", "help", "model", "observe", "pipeline", "workflow", "completion", "config", "cron", "widget", "backup", "restore", "game", "plugin":
 			cmd.Execute()
 			return
 		default:

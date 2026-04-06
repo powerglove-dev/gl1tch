@@ -1,0 +1,9 @@
+name: observer-digest
+version: "1"
+description: "Daily activity digest — summarizes all observed dev activity from the last 24 hours."
+
+steps:
+  - id: digest
+    executor: shell
+    vars:
+      cmd: "glitch observe digest"
