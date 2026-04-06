@@ -60,11 +60,11 @@ mode: dark
 palette:
   bg: "#0a0a0a"
   fg: "#e8e8e8"
-  accent: "#00d7ff"
-  dim: "#626262"
-  border: "#3a3a3a"
-  error: "#ff5555"
-  success: "#55ff55"
+  accent: "#00d9ff"
+  dim: "#555555"
+  border: "#333333"
+  error: "#ff4444"
+  success: "#44ff88"
 
 borders:
   style: light
@@ -73,95 +73,30 @@ statusbar:
   format: " {session} "
   bg: "palette.bg"
   fg: "palette.accent"
-```
-
-Restart gl1tch once, then pick it with `glitch theme set my-theme`.
-
-> **TIP:** Use `"palette.accent"` in status bar and modal fields instead of repeating hex values. Change the accent once and everything updates.
-
-
-## Customizing
-
-
-### Border styles
-
-```yaml
-borders:
-  style: light    # thin unicode box-drawing characters
-  style: heavy    # thick unicode box-drawing characters
-  style: ascii    # + - | only, for minimal environments
-```
-
-
-### Status bar
-
-```yaml
-statusbar:
-  format: " {session} · {model} "   # tokens: {session}, {model}
-  bg: "palette.bg"
-  fg: "palette.accent"
-```
-
-
-### Modal colors
-
-```yaml
-modal:
-  bg: "palette.bg"
-  border: "palette.accent"
-  title_bg: "palette.accent"
-  title_fg: "palette.bg"
-```
-
-
-### Overriding a built-in theme
-
-Name your theme the same as a built-in. Your version takes precedence.
-
-```yaml
-name: nord          # overrides the built-in nord theme
-display_name: "Nord (my fork)"
-mode: dark
-# ... your palette
-```
-
-
-## Examples
-
-
-### Nord-inspired theme
-
-```yaml
-name: nord-custom
-display_name: "Nord Custom"
-mode: dark
-
-palette:
-  bg: "#2e3440"
-  fg: "#eceff4"
-  accent: "#88c0d0"
-  dim: "#4c566a"
-  border: "#3b4252"
-  error: "#bf616a"
-  success: "#a3be8c"
-
-borders:
-  style: light
-
-statusbar:
-  format: " {session} · {model} "
-  bg: "palette.bg"
-  fg: "palette.accent"
 
 modal:
   bg: "palette.bg"
   border: "palette.accent"
   title_bg: "palette.accent"
   title_fg: "palette.bg"
+
+header_style:
+  panels:
+    pipelines:
+      accent: "palette.accent"
+      text: "palette.fg"
+    agent_runner:
+      accent: "palette.accent"
+      text: "palette.fg"
+    signal_board:
+      accent: "palette.accent"
+      text: "palette.fg"
+    activity_feed:
+      accent: "palette.accent"
+      text: "palette.fg"
 ```
 
-
-### Solarized light theme
+### Light theme
 
 ```yaml
 name: solarized-light
@@ -190,49 +125,154 @@ modal:
   border: "palette.accent"
   title_bg: "palette.accent"
   title_fg: "palette.bg"
+
+header_style:
+  panels:
+    pipelines:
+      accent: "palette.accent"
+      text: "palette.fg"
+    agent_runner:
+      accent: "palette.accent"
+      text: "palette.fg"
+    signal_board:
+      accent: "palette.accent"
+      text: "palette.fg"
+    activity_feed:
+      accent: "palette.accent"
+      text: "palette.fg"
 ```
 
+### Using your custom theme
 
-## Reference
+After saving a `theme.yaml` in `~/.config/glitch/themes/<name>/`:
 
-### `theme.yaml` fields
+1. Reload gl1tch — the system loads all user themes at startup
+2. Open the theme picker (usually keybind `T` in the main view)
+3. Navigate to your theme and press `enter` to activate it
+4. Your choice is immediately applied and persisted for future sessions
 
-| Field | Required | Type | Notes |
-|-------|----------|------|-------|
-| `name` | yes | string | Kebab-case, unique in your registry |
-| `display_name` | yes | string | Shown in the theme picker |
-| `mode` | yes | string | `dark` or `light` |
-| `palette.bg` | yes | hex | Background |
-| `palette.fg` | yes | hex | Primary text |
-| `palette.accent` | yes | hex | Highlights and interactive elements |
-| `palette.dim` | yes | hex | Secondary/muted text |
-| `palette.border` | yes | hex | Panel borders |
-| `palette.error` | yes | hex | Error messages |
-| `palette.success` | yes | hex | Success messages |
-| `borders.style` | yes | string | `light`, `heavy`, or `ascii` |
-| `statusbar.format` | yes | string | Template string; supports `{session}` and `{model}` |
-| `statusbar.bg` | yes | string | Hex or `palette.<key>` reference |
-| `statusbar.fg` | yes | string | Hex or `palette.<key>` reference |
-| `splash` | no | string | Relative path to an `.ans` ANSI art file |
-| `strings` | no | map | UI text overrides — panel titles, modal messages, etc. See [Customization](/docs/pipelines/customization) |
-| `modal.bg` | no | string | Hex or palette reference |
-| `modal.border` | no | string | Hex or palette reference |
-| `modal.title_bg` | no | string | Hex or palette reference |
-| `modal.title_fg` | no | string | Hex or palette reference |
+To override a bundled theme, name your user theme identically (e.g. `name: nord`). Your version takes precedence.
 
-### Bundle directory layout
 
-```text
-~/.config/glitch/themes/
-└── my-theme/
-    ├── theme.yaml
-    ├── splash.ans          (optional)
-    ├── header-wide.ans     (optional)
-    └── header-narrow.ans   (optional)
+## Concepts
+
+**Theme bundle** — a directory containing `theme.yaml` (metadata and color definitions) and optional `.ans` ANSI art files for panel headers or splash screens.
+
+**Palette** — seven semantic color slots your theme must define:
+- `bg` — background color
+- `fg` — foreground/primary text
+- `accent` — highlights and interactive elements
+- `dim` — secondary text and less important UI
+- `border` — panel dividers and edges
+- `error` — error messages
+- `success` — success messages
+
+Colors are hex strings like `#1a1b26`.
+
+**Palette reference** — a string like `palette.accent` in your YAML that points to a palette color. The system resolves these to actual colors at runtime, letting your modal and status bar colors derive from the palette without duplication.
+
+**Mode** — theme classification as `dark` or `light`. Used by the picker to group themes and by your UI to query bundles by appearance preference.
+
+**Headers** — optional per-panel ANSI art sprites (`.ans` files) that replace plain-text panel titles. Stored as a map from panel name to file paths, ordered from widest to narrowest, so the system picks the first sprite that fits your current panel width.
+
+**Modal config** — colors for popup overlays (quit confirmation, agent launch, theme switcher). Fields:
+- `bg` — overlay background
+- `border` — border color
+- `title_bg` — title bar background
+- `title_fg` — title bar text color
+
+**Header style** — dynamic header generation when no fixed-width `.ans` sprite fits your panel. Includes top/bottom/border characters and per-panel accent/text color pairs, allowing headers to render at any width.
+
+
+## Configuration / YAML Reference
+
+A theme bundle is a directory containing `theme.yaml`. Place it at `~/.config/glitch/themes/<name>/` to load at startup.
+
+### `theme.yaml` schema
+
+```yaml
+name: example-theme                    # required: kebab-case identifier
+display_name: "Example Theme"          # required: human-readable label
+mode: dark                             # required: "dark" or "light"
+
+palette:
+  bg: "#1a1a2e"                        # required: background hex color
+  fg: "#e0e0ff"                        # required: foreground hex color
+  accent: "#7b68ee"                    # required: accent hex color
+  dim: "#555577"                       # required: dimmed text hex color
+  border: "#333355"                    # required: border hex color
+  error: "#ff4444"                     # required: error message hex color
+  success: "#44ff88"                   # required: success message hex color
+
+borders:
+  style: light                         # required: "light", "heavy", or "ascii"
+
+statusbar:
+  format: " {session} "                # status bar format string
+  bg: "palette.bg"                     # may reference a palette key
+  fg: "palette.accent"                 # or use literal hex color like "#ffffff"
+
+modal:
+  bg: "palette.bg"
+  border: "palette.accent"
+  title_bg: "palette.accent"
+  title_fg: "palette.bg"
+
+header_style:
+  top_char: "▄"                        # optional: character for header top (default "▄")
+  bot_char: "▀"                        # optional: character for header bottom (default "▀")
+  border_char: "█"                     # optional: character for borders (default "█")
+  panels:
+    pipelines:
+      accent: "palette.accent"
+      text: "palette.fg"
+    agent_runner:
+      accent: "palette.accent"
+      text: "palette.fg"
+    signal_board:
+      accent: "palette.accent"
+      text: "palette.fg"
+    activity_feed:
+      accent: "palette.accent"
+      text: "palette.fg"
+
+headers:                               # optional: per-panel ANSI art file paths
+  pipelines: ["splash.ans"]
+  agent_runner: ["wide.ans", "narrow.ans"]
 ```
+
+### Field reference
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | yes | Kebab-case unique identifier |
+| `display_name` | yes | Human-readable label in the theme picker |
+| `mode` | yes | "dark" or "light" |
+| `palette.bg` | yes | Background color (hex) |
+| `palette.fg` | yes | Foreground text color (hex) |
+| `palette.accent` | yes | Accent/highlight color (hex) |
+| `palette.dim` | yes | Dimmed/secondary text color (hex) |
+| `palette.border` | yes | Panel border color (hex) |
+| `palette.error` | yes | Error message color (hex) |
+| `palette.success` | yes | Success message color (hex) |
+| `borders.style` | yes | "light", "heavy", or "ascii" |
+| `statusbar` | no | Status bar configuration |
+| `modal` | no | Modal overlay colors |
+| `header_style` | no | Dynamic header generation settings |
+| `headers` | no | Per-panel ANSI art file paths |
+
+
+## Tips
+
+**Reusing built-in palettes** — Start by copying a bundled theme's YAML and editing the colors. To override a bundled theme, name your user theme identically (e.g. `name: nord`). Your version takes precedence.
+
+**Using ANSI art for headers** — Place `.ans` files in your theme directory (e.g. `~/.config/glitch/themes/my-theme/splash.ans`), then reference them in the `headers` map with relative paths. List paths from widest to narrowest so the picker selects the best fit for your current panel width.
+
+**Testing palette changes** — Open the theme picker to preview your colors instantly. No reload needed.
 
 
 ## See Also
 
-- [Plugins](/docs/pipelines/plugins) — extend what your assistant can do
-- [Prompts](/docs/pipelines/prompts) — pair a sharp theme with a sharp prompt library
+- [Dracula palette reference](https://draculatheme.com/contribute) — official color specs for extending Dracula-based themes
+- [terminalcolors.com](https://terminalcolors.com) — curated repository of terminal themes with YAML exports
+
