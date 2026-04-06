@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/8op-org/gl1tch/internal/pipeline"
@@ -161,24 +162,21 @@ func buildPipelineFromChain(steps []ChainStep, opts RunChainOpts) (*pipeline.Pip
 			stepIndex++
 
 		case "pipeline":
-			// Inline an external pipeline file as a sub-step. Loading the file
-			// gives us its real steps, but we'd need to merge IDs to avoid
-			// collisions. For MVP, we run the file in-place via a builtin shim:
-			// we treat it as a single opaque step that, when run, invokes the
-			// inner pipeline. To keep this simple, we don't currently feed
-			// previous output into the pipeline (it can have its own input).
-			//
-			// To execute it, we need a step type the runner understands. The
-			// simplest path: load the file's steps and append them with prefixed
-			// IDs so refs stay consistent.
-			subFile, err := os.Open(s.Path)
+			// Inline an external workflow file as a sub-step. Saved chains may
+			// embed legacy paths from before the workflow rename, so we resolve
+			// the literal path first and fall back to the new layout.
+			resolvedPath, err := resolveLegacyWorkflowPath(s.Path)
 			if err != nil {
-				return nil, fmt.Errorf("chain: open pipeline %q: %w", s.Path, err)
+				return nil, fmt.Errorf("chain: open workflow %q: %w", s.Path, err)
+			}
+			subFile, err := os.Open(resolvedPath)
+			if err != nil {
+				return nil, fmt.Errorf("chain: open workflow %q: %w", resolvedPath, err)
 			}
 			sub, err := pipeline.Load(subFile)
 			subFile.Close()
 			if err != nil {
-				return nil, fmt.Errorf("chain: load pipeline %q: %w", s.Path, err)
+				return nil, fmt.Errorf("chain: load workflow %q: %w", resolvedPath, err)
 			}
 
 			prefix := fmt.Sprintf("sub%d-", stepIndex)
@@ -290,3 +288,33 @@ func (w *chainStreamWriter) Write(p []byte) (int, error) {
 }
 
 var _ io.Writer = (*chainStreamWriter)(nil)
+
+// resolveLegacyWorkflowPath returns p unchanged if it exists, otherwise it
+// rewrites the legacy ".glitch/pipelines/<name>.pipeline.yaml" layout to the
+// current ".glitch/workflows/<name>.workflow.yaml" layout and returns that if
+// it exists. Saved chains predating the workflow refactor embed the old paths.
+func resolveLegacyWorkflowPath(p string) (string, error) {
+	if _, err := os.Stat(p); err == nil {
+		return p, nil
+	}
+
+	dir := filepath.Dir(p)
+	base := filepath.Base(p)
+
+	// Path component rewrite: .../.glitch/pipelines/X → .../.glitch/workflows/X
+	if filepath.Base(dir) == "pipelines" && filepath.Base(filepath.Dir(dir)) == ".glitch" {
+		dir = filepath.Join(filepath.Dir(filepath.Dir(dir)), ".glitch", "workflows")
+	}
+
+	// Filename rewrite: X.pipeline.yaml → X.workflow.yaml
+	if strings.HasSuffix(base, ".pipeline.yaml") {
+		base = strings.TrimSuffix(base, ".pipeline.yaml") + ".workflow.yaml"
+	}
+
+	candidate := filepath.Join(dir, base)
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate, nil
+	}
+
+	return "", fmt.Errorf("not found: %s (also tried %s)", p, candidate)
+}

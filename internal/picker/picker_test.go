@@ -132,7 +132,7 @@ func TestPickerItem_PipelineJSONRoundTrip(t *testing.T) {
 
 // TestBuildProviders_OllamaSidecarPathSet verifies that after BuildProviders(),
 // the ollama ProviderDef has a non-empty SidecarPath when a wrappers YAML is
-// present — ensuring the pipelineRunCmd skip guard fires correctly.
+// present — ensuring the workflow runner's sidecar-skip guard fires correctly.
 func TestBuildProviders_OllamaSidecarPathSet(t *testing.T) {
 	tmpDir := t.TempDir()
 

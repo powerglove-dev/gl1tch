@@ -177,9 +177,6 @@ func buildProviders() []ProviderDef {
 	if configDir != "" {
 		if plugins, err := discovery.Discover(configDir); err == nil {
 			for _, p := range plugins {
-				if p.Type == discovery.TypePipeline {
-					continue
-				}
 				discovered[p.Name] = true
 				if p.Type == discovery.TypeNative || p.Type == discovery.TypeCLIWrapper {
 					extras = append(extras, extraEntry{name: p.Name, sidecarPath: p.SidecarPath, command: p.Command})
@@ -221,7 +218,7 @@ func buildProviders() []ProviderDef {
 			}
 		}
 		// Propagate SidecarPath from the discovery layer so that the
-		// pipelineRunCmd sidecar-skip guard fires correctly and avoids
+		// workflow runner's sidecar-skip guard fires correctly and avoids
 		// "already registered" warnings.
 		if e, ok := extrasByName[p.ID]; ok && p.SidecarPath == "" {
 			p.SidecarPath = e.sidecarPath

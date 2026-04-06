@@ -27,11 +27,11 @@ export function ListAgents(arg1:string):Promise<string>;
 
 export function ListChatWorkflows(arg1:string):Promise<string>;
 
-export function ListWorkflows(arg1:string):Promise<string>;
-
 export function ListPrompts():Promise<string>;
 
 export function ListProviders():Promise<string>;
+
+export function ListWorkflows(arg1:string):Promise<string>;
 
 export function ListWorkspaces():Promise<string>;
 

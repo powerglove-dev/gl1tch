@@ -17,16 +17,14 @@ type ExecutorType int
 const (
 	TypeNative     ExecutorType = iota // implements OrcaiExecutor gRPC service
 	TypeCLIWrapper                     // auto-detected tool in PATH
-	TypePipeline                       // deprecated — kept for picker compatibility
 )
 
 // ExecutorInfo describes a discovered executor or CLI wrapper.
 type ExecutorInfo struct {
-	Name         string
-	Command      string
-	Args         []string
-	Type         ExecutorType
-	PipelineFile string
+	Name    string
+	Command string
+	Args    []string
+	Type    ExecutorType
 	// SidecarPath is the path to the sidecar YAML for TypeCLIWrapper executors
 	// discovered from the wrappers directory. Empty for other types.
 	SidecarPath string

@@ -1,8 +1,8 @@
-// verify-pipelines is a static checker for workflow YAML files.
+// verify-workflows is a static checker for workflow YAML files.
 //
 // Usage:
 //
-//	verify-pipelines [dir]
+//	verify-workflows [dir]
 //
 // If [dir] is omitted, the current directory's .glitch/workflows/ is scanned.
 // All .workflow.yaml files in the directory are loaded and walked for

@@ -2,6 +2,8 @@ package glitchd
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -197,6 +199,96 @@ func TestBuildPipelineFromChain_EmptyChainErrors(t *testing.T) {
 	_, err := buildPipelineFromChain(nil, RunChainOpts{DefaultProvider: "ollama"})
 	if err == nil {
 		t.Fatal("expected error for empty chain, got nil")
+	}
+}
+
+// TestResolveLegacyWorkflowPath verifies that saved chain steps with the
+// pre-refactor .glitch/pipelines/X.pipeline.yaml layout transparently fall
+// back to the current .glitch/workflows/X.workflow.yaml layout.
+func TestResolveLegacyWorkflowPath(t *testing.T) {
+	repo := t.TempDir()
+	workflowsDir := filepath.Join(repo, ".glitch", "workflows")
+	if err := os.MkdirAll(workflowsDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	currentPath := filepath.Join(workflowsDir, "audit.workflow.yaml")
+	if err := os.WriteFile(currentPath, []byte("name: audit\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Legacy path the saved chain JSON would carry.
+	legacyPath := filepath.Join(repo, ".glitch", "pipelines", "audit.pipeline.yaml")
+
+	got, err := resolveLegacyWorkflowPath(legacyPath)
+	if err != nil {
+		t.Fatalf("resolveLegacyWorkflowPath: %v", err)
+	}
+	if got != currentPath {
+		t.Errorf("resolved %q, want %q", got, currentPath)
+	}
+
+	// Current path passes through unchanged.
+	got, err = resolveLegacyWorkflowPath(currentPath)
+	if err != nil {
+		t.Fatalf("current path: %v", err)
+	}
+	if got != currentPath {
+		t.Errorf("passthrough returned %q, want %q", got, currentPath)
+	}
+
+	// Truly missing path errors.
+	if _, err := resolveLegacyWorkflowPath(filepath.Join(repo, "nope.workflow.yaml")); err == nil {
+		t.Error("expected error for missing file, got nil")
+	}
+}
+
+// TestBuildPipelineFromChain_LegacyPipelinePathFallback verifies that a chain
+// step embedding a pre-refactor .glitch/pipelines/X.pipeline.yaml path is
+// transparently resolved to the new .glitch/workflows/X.workflow.yaml layout
+// when buildPipelineFromChain loads the sub-workflow.
+func TestBuildPipelineFromChain_LegacyPipelinePathFallback(t *testing.T) {
+	repo := t.TempDir()
+	workflowsDir := filepath.Join(repo, ".glitch", "workflows")
+	if err := os.MkdirAll(workflowsDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	currentPath := filepath.Join(workflowsDir, "audit.workflow.yaml")
+	yaml := `name: audit
+version: "1"
+steps:
+  - id: scan
+    executor: shell
+    outputs: { value: string }
+    vars:
+      cmd: "echo hello"
+`
+	if err := os.WriteFile(currentPath, []byte(yaml), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Mimic a saved chain JSON from before the refactor — embeds the legacy
+	// path that no longer exists on disk.
+	legacyPath := filepath.Join(repo, ".glitch", "pipelines", "audit.pipeline.yaml")
+	steps := []ChainStep{
+		{Type: "pipeline", Label: "audit", Path: legacyPath},
+	}
+
+	p, err := buildPipelineFromChain(steps, RunChainOpts{DefaultProvider: "ollama"})
+	if err != nil {
+		t.Fatalf("buildPipelineFromChain: %v", err)
+	}
+	if len(p.Steps) == 0 {
+		t.Fatal("expected at least one step from the resolved sub-workflow")
+	}
+	// Sub-workflow steps are prefixed; verify the inner "scan" step made it through.
+	found := false
+	for _, s := range p.Steps {
+		if strings.HasSuffix(s.ID, "scan") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected merged sub-workflow to include a 'scan' step, got %d steps", len(p.Steps))
 	}
 }
 

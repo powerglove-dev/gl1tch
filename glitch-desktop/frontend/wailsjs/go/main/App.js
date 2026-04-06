@@ -54,16 +54,16 @@ export function ListChatWorkflows(arg1) {
   return window['go']['main']['App']['ListChatWorkflows'](arg1);
 }
 
-export function ListWorkflows(arg1) {
-  return window['go']['main']['App']['ListWorkflows'](arg1);
-}
-
 export function ListPrompts() {
   return window['go']['main']['App']['ListPrompts']();
 }
 
 export function ListProviders() {
   return window['go']['main']['App']['ListProviders']();
+}
+
+export function ListWorkflows(arg1) {
+  return window['go']['main']['App']['ListWorkflows'](arg1);
 }
 
 export function ListWorkspaces() {
