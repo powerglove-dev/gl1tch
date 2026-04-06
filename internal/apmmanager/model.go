@@ -761,22 +761,14 @@ func installAndWrap(
 		}
 	}
 
-	// Materialize pipeline template if a stanza was declared.
-	if pipelineStanza != "" && configDir != "" {
-		pipelinesDir := filepath.Join(configDir, "pipelines")
-		if err := os.MkdirAll(pipelinesDir, 0o755); err != nil {
-			fmt.Fprintf(os.Stderr, "apm: create pipelines dir: %v\n", err)
-		} else {
-			destPath := filepath.Join(pipelinesDir, "apm."+a.Name+".pipeline.yaml")
-			if _, statErr := os.Stat(destPath); os.IsNotExist(statErr) {
-				if err := os.WriteFile(destPath, []byte(pipelineStanza), 0o644); err != nil {
-					fmt.Fprintf(os.Stderr, "apm: write pipeline template %s: %v\n", destPath, err)
-				}
-			} else {
-				fmt.Fprintf(os.Stderr, "apm: pipeline template %s already exists, skipping\n", destPath)
-			}
-		}
+	// TODO(workflow-refactor): pipeline-template materialization is disabled
+	// while workflows live exclusively under <workspace>/.glitch/workflows/.
+	// When APM is re-enabled it should write workflow stanzas into the active
+	// workspace directory rather than ~/.config/glitch/pipelines/.
+	if pipelineStanza != "" {
+		fmt.Fprintf(os.Stderr, "apm: pipeline template materialization is disabled (workflow refactor); ignoring stanza for %s\n", a.Name)
 	}
+	_ = configDir
 
 	return agentMDPath, adapter, nil
 }
