@@ -87,6 +87,65 @@ func (q *QueryEngine) Stream(ctx context.Context, question string, tokenCh chan<
 	return q.streamSynthesize(ctx, question, results, tokenCh)
 }
 
+// StreamScoped processes a question scoped to specific repos (directory basenames).
+// Only ES documents matching the given repo names are included in the search.
+// If repos is empty, behaves like Stream (no filtering).
+func (q *QueryEngine) StreamScoped(ctx context.Context, question string, repos []string, tokenCh chan<- string) error {
+	defer close(tokenCh)
+
+	results, err := q.searchScopedWithFallback(ctx, question, repos)
+	if err != nil {
+		return fmt.Errorf("search: %w", err)
+	}
+
+	// Anti-hallucination: if zero results, don't call the LLM at all.
+	if results == nil || results.Total == 0 {
+		tokenCh <- "I don't have any indexed data matching your workspace directories yet. " +
+			"Make sure directories are added to this workspace and give the collectors a moment to index."
+		return nil
+	}
+
+	return q.streamSynthesize(ctx, question, results, tokenCh)
+}
+
+// searchScopedWithFallback searches with a repo filter applied.
+func (q *QueryEngine) searchScopedWithFallback(ctx context.Context, question string, repos []string) (*esearch.SearchResponse, error) {
+	if len(repos) == 0 {
+		return q.searchWithFallback(ctx, question)
+	}
+
+	// Use the default query with repo filter injected.
+	query := defaultQuery(question)
+	injectRepoFilter(query, repos)
+
+	results, err := q.es.Search(ctx, allIndices(), query)
+	if err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+// injectRepoFilter wraps the existing query in a bool filter that restricts
+// results to documents matching the given repo names.
+func injectRepoFilter(query map[string]any, repos []string) {
+	if len(repos) == 0 {
+		return
+	}
+
+	originalQuery := query["query"]
+
+	query["query"] = map[string]any{
+		"bool": map[string]any{
+			"must": []any{originalQuery},
+			"filter": []any{
+				map[string]any{
+					"terms": map[string]any{"repo": repos},
+				},
+			},
+		},
+	}
+}
+
 // defaultQuery builds a safe fallback ES query for the given question.
 func defaultQuery(question string) map[string]any {
 	return map[string]any{
@@ -208,7 +267,8 @@ Observed data (%d results):
 
 Rules:
 - Be direct and specific — cite repos, commits, timestamps when relevant
-- If the data doesn't contain enough information, say so honestly
+- If the observed data does not contain information relevant to the question, say "I don't have data on that" — NEVER guess or fabricate
+- Only reference information that actually appears in the observed data above
 - Format with markdown for readability
 - Keep answers concise but complete`, question, results.Total, context)
 
@@ -229,7 +289,8 @@ Observed data (%d results):
 
 Rules:
 - Be direct and specific — cite repos, commits, timestamps when relevant
-- If the data doesn't contain enough information, say so honestly
+- If the observed data does not contain information relevant to the question, say "I don't have data on that" — NEVER guess or fabricate
+- Only reference information that actually appears in the observed data above
 - Format with markdown for readability
 - Keep answers concise but complete`, question, results.Total, context)
 

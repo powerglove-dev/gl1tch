@@ -42,6 +42,14 @@ type Config struct {
 		Interval time.Duration `yaml:"interval"` // poll interval (default 60s)
 	} `yaml:"mattermost"`
 
+	// Directories are project directories to scan for agents, skills,
+	// provider configs, and project structure. Added via the desktop GUI
+	// or manually in this config.
+	Directories struct {
+		Paths    []string      `yaml:"paths"`    // absolute paths to scan
+		Interval time.Duration `yaml:"interval"` // re-scan interval (default 120s)
+	} `yaml:"directories"`
+
 	// Model is the Ollama model used for query generation and synthesis.
 	Model string `yaml:"model"` // default: llama3.2
 }
@@ -71,6 +79,7 @@ func LoadConfig() (*Config, error) {
 	cfg.Copilot.Interval = 120 * time.Second
 	cfg.GitHub.Interval = 300 * time.Second
 	cfg.Mattermost.Interval = 60 * time.Second
+	cfg.Directories.Interval = 120 * time.Second
 	cfg.Model = "llama3.2"
 
 	data, err := os.ReadFile(path)
@@ -157,7 +166,15 @@ mattermost:
   channels: []
   # - town-square
   # - engineering
-`, home, home)
+
+# Directories to scan for agents, skills, provider configs, and project structure.
+# Added via the desktop GUI or manually here.
+directories:
+  interval: 120s
+  paths: []
+  # - %s/Projects/gl1tch
+  # - %s/Projects/my-other-project
+`, home, home, home, home)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err

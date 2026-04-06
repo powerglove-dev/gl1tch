@@ -1,0 +1,139 @@
+@import "tailwindcss";
+
+/* Dracula palette as CSS custom properties */
+:root {
+  --bg: #1a1b26;
+  --bg-dark: #13141c;
+  --bg-surface: #24263a;
+  --bg-surface-hover: #2e3150;
+  --bg-elevated: #2a2c42;
+  --fg: #c0caf5;
+  --fg-dim: #565f89;
+  --fg-bright: #e0e6ff;
+  --cyan: #7dcfff;
+  --green: #9ece6a;
+  --purple: #bb9af7;
+  --pink: #f7768e;
+  --orange: #ff9e64;
+  --yellow: #e0af68;
+  --blue: #7aa2f7;
+  --red: #f7768e;
+  --border: #292d42;
+  --border-bright: #3b4064;
+}
+
+@theme {
+  --color-bg: var(--bg);
+  --color-bg-dark: var(--bg-dark);
+  --color-surface: var(--bg-surface);
+  --color-surface-hover: var(--bg-surface-hover);
+  --color-elevated: var(--bg-elevated);
+  --color-fg: var(--fg);
+  --color-fg-dim: var(--fg-dim);
+  --color-fg-bright: var(--fg-bright);
+  --color-accent: var(--cyan);
+  --color-green: var(--green);
+  --color-purple: var(--purple);
+  --color-pink: var(--pink);
+  --color-orange: var(--orange);
+  --color-yellow: var(--yellow);
+  --color-blue: var(--blue);
+  --color-red: var(--red);
+  --color-border: var(--border);
+  --color-border-bright: var(--border-bright);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, "SF Pro Text", system-ui, sans-serif;
+  font-size: 13px;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--fg-dim); }
+
+/* Streaming cursor */
+@keyframes blink { 50% { opacity: 0; } }
+@keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+.streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 15px;
+  background: var(--cyan);
+  vertical-align: text-bottom;
+  margin-left: 1px;
+  animation: blink 0.8s ease-in-out infinite;
+}
+
+.fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* Markdown prose */
+.prose { line-height: 1.7; color: var(--fg); }
+.prose p { margin-bottom: 0.6em; }
+.prose p:last-child { margin-bottom: 0; }
+.prose pre {
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 8px 0;
+  font-size: 12px;
+  font-family: "Berkeley Mono", "JetBrains Mono", "Fira Code", "SF Mono", monospace;
+}
+.prose code {
+  font-family: "Berkeley Mono", "JetBrains Mono", "Fira Code", "SF Mono", monospace;
+  font-size: 0.9em;
+  color: var(--cyan);
+  background: var(--bg-surface);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.prose pre code { color: var(--fg); background: none; padding: 0; }
+.prose ul, .prose ol { padding-left: 1.25em; margin: 0.4em 0; }
+.prose li { margin: 0.15em 0; }
+.prose strong { color: var(--fg-bright); font-weight: 600; }
+.prose h1, .prose h2, .prose h3 { color: var(--fg-bright); font-weight: 600; margin: 0.8em 0 0.4em; }
+.prose h1 { font-size: 1.15em; }
+.prose h2 { font-size: 1.05em; }
+.prose a { color: var(--purple); text-decoration: none; }
+.prose a:hover { text-decoration: underline; }
+.prose blockquote {
+  border-left: 2px solid var(--purple);
+  padding-left: 0.8em;
+  color: var(--fg-dim);
+  margin: 0.5em 0;
+}
+.prose table { width: 100%; border-collapse: collapse; margin: 0.5em 0; font-size: 12px; }
+.prose th { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border-bright); color: var(--fg-dim); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+.prose td { padding: 5px 10px; border-bottom: 1px solid var(--border); }
+
+/* highlight.js */
+.hljs { background: transparent !important; color: var(--fg) !important; }
+.hljs-keyword { color: var(--purple) !important; }
+.hljs-string { color: var(--green) !important; }
+.hljs-number { color: var(--orange) !important; }
+.hljs-comment { color: var(--fg-dim) !important; }
+.hljs-function, .hljs-title { color: var(--blue) !important; }
+.hljs-built_in, .hljs-type { color: var(--cyan) !important; }
+.hljs-attr { color: var(--green) !important; }
+.hljs-params { color: var(--orange) !important; }
+.hljs-literal { color: var(--orange) !important; }

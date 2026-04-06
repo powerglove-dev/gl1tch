@@ -150,6 +150,30 @@ const createICEEncountersSchema = `CREATE TABLE IF NOT EXISTS ice_encounters (
   outcome    TEXT
 )`
 
+// createWorkspacesSchema is the DDL for workspace tables.
+const createWorkspacesSchema = `
+CREATE TABLE IF NOT EXISTS workspaces (
+  id          TEXT PRIMARY KEY,
+  title       TEXT NOT NULL DEFAULT 'New Chat',
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS workspace_directories (
+  workspace_id TEXT NOT NULL,
+  path         TEXT NOT NULL,
+  repo_name    TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, path)
+);
+CREATE TABLE IF NOT EXISTS workspace_messages (
+  id            TEXT PRIMARY KEY,
+  workspace_id  TEXT NOT NULL,
+  role          TEXT NOT NULL,
+  blocks_json   TEXT NOT NULL,
+  timestamp     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ws_messages_ws ON workspace_messages(workspace_id, timestamp);
+`
+
 // createPersonalBestsSchema is the DDL for the game_personal_bests table.
 const createPersonalBestsSchema = `CREATE TABLE IF NOT EXISTS game_personal_bests (
   metric      TEXT PRIMARY KEY,
@@ -241,7 +265,10 @@ func applySchema(db *sql.DB) error {
 	if err := applyICEEncountersTableMigration(db); err != nil {
 		return err
 	}
-	return applyPersonalBestsTableMigration(db)
+	if err := applyPersonalBestsTableMigration(db); err != nil {
+		return err
+	}
+	return applyWorkspacesTableMigration(db)
 }
 
 // applyStepCheckpointsTableMigration creates the step_checkpoints table if it
@@ -378,6 +405,12 @@ func applyICEEncountersTableMigration(db *sql.DB) error {
 // does not already exist. CREATE TABLE IF NOT EXISTS is idempotent.
 func applyPersonalBestsTableMigration(db *sql.DB) error {
 	_, err := db.Exec(createPersonalBestsSchema)
+	return err
+}
+
+// applyWorkspacesTableMigration creates workspace tables if they don't exist.
+func applyWorkspacesTableMigration(db *sql.DB) error {
+	_, err := db.Exec(createWorkspacesSchema)
 	return err
 }
 

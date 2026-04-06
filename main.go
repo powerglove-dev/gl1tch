@@ -41,7 +41,7 @@ func main() {
 		case "_reload":
 			bootstrap.WriteReloadMarker() //nolint:errcheck
 			return
-		case "ask", "busd", "help", "model", "observe", "pipeline", "workflow", "completion", "config", "cron", "widget", "backup", "restore", "game", "plugin":
+		case "ask", "busd", "help", "model", "observe", "pipeline", "workflow", "completion", "config", "cron", "widget", "backup", "restore", "game", "plugin", "serve", "tui", "desktop":
 			cmd.Execute()
 			return
 		default:
@@ -52,12 +52,10 @@ func main() {
 		}
 	}
 
-	// Run bootstrap, which sets up background services and starts the TUI.
+	// Default: run the TUI with all services.
+	// For the desktop GUI, run `glitch-desktop` (built via `task desktop`).
 	err = bootstrap.Run()
 	if errors.Is(err, bootstrap.ErrReload) {
-		// Replace this process with the binary on disk — picks up a newly
-		// built binary without going back through the session-already-exists
-		// fast path in the same process image.
 		self, _ := os.Executable()
 		if resolved, err := filepath.EvalSymlinks(self); err == nil {
 			self = resolved
@@ -72,3 +70,4 @@ func main() {
 		os.Exit(1)
 	}
 }
+

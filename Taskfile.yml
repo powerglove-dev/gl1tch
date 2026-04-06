@@ -40,8 +40,10 @@ tasks:
 
   build:
     desc: "Compile the glitch binary to bin/glitch and tuishot renderer"
+    env:
+      CGO_LDFLAGS: "-framework UniformTypeIdentifiers"
     cmds:
-      - go build -o bin/{{.BINARY}} .
+      - go build -tags production -o bin/{{.BINARY}} .
       - go build -o ~/.local/bin/tuishot ./cmd/tuishot/
 
   install:
@@ -72,22 +74,15 @@ tasks:
       - "{{.BINARY}}"
 
   desktop:
-    desc: "Build CLI + notify, start glitch TUI (supervisor/collectors/systray), launch Wails GUI"
+    desc: "Build and run gl1tch desktop (single process — GUI + all backend services)"
     cmds:
-      - go build -o bin/{{.BINARY}} .
-      - cp bin/{{.BINARY}} $(go env GOPATH)/bin/{{.BINARY}}
-      - ln -sf $(go env GOPATH)/bin/{{.BINARY}} ~/.local/bin/{{.BINARY}}
-      - |
-        if [ -d plugins/notify ]; then
-          echo "Building glitch-notify..."
-          make -C plugins/notify install 2>/dev/null || echo "notify build skipped (requires Xcode)"
-        fi
-      - |
-        # Kill old glitch session if running, start fresh with new build.
-        tmux kill-session -t glitch 2>/dev/null || true
-        tmux new-session -d -s glitch -n GL1TCH ~/.local/bin/{{.BINARY}}
-        echo "glitch session started — supervisor + collectors + notify launching"
-        sleep 3
+      - cd glitch-desktop && ~/go/bin/wails build
+      - cp glitch-desktop/build/bin/glitch-desktop ~/.local/bin/glitch-desktop
+      - ~/.local/bin/glitch-desktop
+
+  desktop:dev:
+    desc: "Desktop dev mode — Wails hot-reload with React dev server"
+    cmds:
       - cd glitch-desktop && ~/go/bin/wails dev
 
   run:pipeline-builder:

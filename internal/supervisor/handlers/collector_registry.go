@@ -54,6 +54,13 @@ func RegisterCollectors(sup *supervisor.Supervisor) {
 		}))
 	}
 
+	if len(cfg.Directories.Paths) > 0 {
+		sup.RegisterService(NewCollectorService(&collector.DirectoryCollector{
+			Dirs:     cfg.Directories.Paths,
+			Interval: cfg.Directories.Interval,
+		}))
+	}
+
 	// PipelineIndexer is registered without a store — it opens its own.
 	sup.RegisterService(NewCollectorService(&collector.PipelineIndexer{}))
 }
