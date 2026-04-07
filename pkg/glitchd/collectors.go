@@ -111,12 +111,11 @@ func ListCollectorsForWorkspace(ctx context.Context, workspaceID string) ([]Coll
 		dirs = append(dirs, cfg.Directories.Paths...)
 	}
 
-	// Apply the same do-what-I-mean overlay the pod manager uses
-	// when actually running collectors. This guarantees the brain
-	// popover and the running pod show the same state — without it
-	// the popover could promise "git: 2 repos" while the pod was
-	// actually running zero git collectors because the workspace
-	// config didn't list them.
+	// Apply the do-what-I-mean overlay so the popover claude/copilot
+	// rows match what the pod manager would actually run. The git /
+	// github branches of the overlay are still used here as a derived
+	// view ONLY — for the unified workspace collector summary line —
+	// since the runtime no longer cares about Git.Repos / GitHub.Repos.
 	collector.AutoDetectFromWorkspace(cfg, dirs)
 
 	gitRepos := append([]string{}, cfg.Git.Repos...)
@@ -124,31 +123,28 @@ func ListCollectorsForWorkspace(ctx context.Context, workspaceID string) ([]Coll
 
 	var out []CollectorInfo
 
-	// Directories — the workspace's filesystem scanner. The
-	// directories collector picks up these paths from observer.yaml
-	// on its next tick (see internal/collector/directory.go).
+	// Single workspace row replaces the old directories / git /
+	// github trio. The runtime is one collector now (see
+	// internal/collector/workspace_collector.go); the popover shows
+	// one row that summarizes everything being watched for this
+	// workspace. The detail line still calls out git/github sub-counts
+	// so a user landing on the popover still understands what the
+	// "workspace" row is actually polling — without that breakdown
+	// the row would just read "2 dir(s)" with no hint that two of
+	// those dirs are also git checkouts with github origins.
+	wsDetail := fmt.Sprintf("%d dir(s)", len(dirs))
+	if len(gitRepos) > 0 {
+		wsDetail += fmt.Sprintf(" · %d git", len(gitRepos))
+	}
+	if len(githubRepos) > 0 {
+		wsDetail += fmt.Sprintf(" · %d github", len(githubRepos))
+	}
 	out = append(out, CollectorInfo{
-		Name:       "directories",
+		Name:       "workspace",
 		Enabled:    len(dirs) > 0,
 		IntervalMs: cfg.Directories.Interval.Milliseconds(),
-		Detail:     fmt.Sprintf("%d path(s)", len(dirs)),
+		Detail:     wsDetail,
 		Source:     joinShort(dirs),
-	})
-
-	out = append(out, CollectorInfo{
-		Name:       "git",
-		Enabled:    len(gitRepos) > 0,
-		IntervalMs: cfg.Git.Interval.Milliseconds(),
-		Detail:     fmt.Sprintf("%d repo(s)", len(gitRepos)),
-		Source:     joinShort(gitRepos),
-	})
-
-	out = append(out, CollectorInfo{
-		Name:       "github",
-		Enabled:    len(githubRepos) > 0,
-		IntervalMs: cfg.GitHub.Interval.Milliseconds(),
-		Detail:     fmt.Sprintf("%d repo(s)", len(githubRepos)),
-		Source:     joinShort(githubRepos),
 	})
 
 	// Chat sources — claude / copilot. These are tied to the user's

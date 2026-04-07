@@ -419,6 +419,65 @@ func (a *App) RemoveWorkspaceDirectory(workspaceID, dir string) {
 	runtime.EventsEmit(a.ctx, "workspace:updated", string(b))
 }
 
+// ListWorkspaceDirectoriesDetailed returns the workspace's full
+// directory list including the per-directory enabled flag, as JSON
+// for the desktop sidebar / brain popover. Unlike Workspace.Directories
+// (which is filtered to enabled-only so collector code never has to
+// know about the toggle column), this returns every row so the UI can
+// render disabled entries with an off-state checkbox.
+//
+// JSON shape: [{"path": "/abs", "repo_name": "name", "enabled": true}, ...]
+func (a *App) ListWorkspaceDirectoriesDetailed(workspaceID string) string {
+	if workspaceID == "" {
+		return "[]"
+	}
+	st, err := glitchd.OpenStore()
+	if err != nil {
+		return "[]"
+	}
+	rows, err := st.ListWorkspaceDirectories(a.ctx, workspaceID)
+	if err != nil || rows == nil {
+		return "[]"
+	}
+	b, _ := json.Marshal(rows)
+	return string(b)
+}
+
+// SetWorkspaceDirectoryEnabled flips one directory's enable flag and
+// restarts the pod so the unified workspace collector picks up the
+// change immediately. Disabled directories are filtered out at the
+// store layer (see Store.getWorkspaceDirectories), so the collector
+// goroutine simply stops seeing them after the restart.
+func (a *App) SetWorkspaceDirectoryEnabled(workspaceID, dir string, enabled bool) {
+	if workspaceID == "" || dir == "" {
+		return
+	}
+	st, err := glitchd.OpenStore()
+	if err != nil {
+		return
+	}
+	if err := st.SetWorkspaceDirectoryEnabled(a.ctx, workspaceID, dir, enabled); err != nil {
+		slog.Error("set dir enabled", "err", err)
+		return
+	}
+	if err := glitchd.RestartWorkspacePod(workspaceID); err != nil {
+		slog.Error("restart pod after toggle dir", "err", err)
+	}
+	state := "enabled"
+	if !enabled {
+		state = "paused"
+	}
+	a.emitBrainActivity("checkin", "info",
+		state+" directory",
+		filepath.Base(dir),
+		dir)
+	go a.refreshCollectorActivity(false)
+
+	ws, _ := st.GetWorkspace(a.ctx, workspaceID)
+	b, _ := json.Marshal(ws)
+	runtime.EventsEmit(a.ctx, "workspace:updated", string(b))
+}
+
 // ── Chat ────────────────────────────────────────────────────────────────────
 
 // AskScoped queries the observer scoped to the workspace's directories.
@@ -1404,6 +1463,31 @@ func (a *App) ListCollectors(workspaceID string) string {
 		if act, ok := snapshot[c.Name]; ok {
 			row.TotalDocs = act.TotalDocs
 			row.LastSeenMs = act.LastSeenMs
+		}
+		// The "workspace" row is the unified collector that replaced
+		// the old directories/git/github trio. Indexed events still
+		// land in ES with their original source field values
+		// ("directory", "git", "github") so the existing data is
+		// preserved across the merge — but the activity aggregation
+		// keys by source, so the workspace row would otherwise read
+		// zero. Sum the three legacy buckets into the workspace row
+		// here so the popover shows the real total for everything
+		// the unified collector has indexed.
+		if c.Name == "workspace" {
+			var total int64
+			var lastSeen int64
+			for _, src := range []string{"directory", "git", "github"} {
+				if act, ok := snapshot[src]; ok {
+					total += act.TotalDocs
+					if act.LastSeenMs > lastSeen {
+						lastSeen = act.LastSeenMs
+					}
+				}
+			}
+			row.TotalDocs = total
+			if lastSeen > 0 {
+				row.LastSeenMs = lastSeen
+			}
 		}
 		if r, ok := runs[c.Name]; ok {
 			row.LastRunMs = r.AtMs

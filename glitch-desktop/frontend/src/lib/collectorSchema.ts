@@ -148,28 +148,28 @@ export function formatDuration(ns: number | null | undefined): string {
 
 export const COLLECTOR_SCHEMA: CollectorSpec[] = [
   {
-    id: "git",
-    name: "Git",
-    icon: "GitBranch",
+    id: "workspace",
+    name: "Workspace",
+    icon: "Folder",
     description:
-      "Watches local repositories and indexes new commits as they land.",
+      "The single per-workspace collector. Watches every directory you add: scans for skills/agents/provider configs, indexes new git commits, and pulls PR/issue activity from any GitHub remote — all on one shared interval. Toggle individual directories on or off in the sidebar to pause them without removing them.",
     isEnabled: (v) => {
-      const repos = getField(v, "git.repos");
-      return Array.isArray(repos) && repos.length > 0;
+      const paths = getField(v, "directories.paths");
+      return Array.isArray(paths) && paths.length > 0;
     },
     fields: [
       {
-        key: "git.repos",
-        label: "Repositories",
+        key: "directories.paths",
+        label: "Directories",
         description:
-          "Auto-detected from your workspace directories — any directory containing a .git checkout is added here. To change the list, edit the Directories collector instead.",
+          "Every directory added to this workspace. Git repositories and GitHub remotes are detected from .git/config on each tick — there's nothing else to configure. Per-directory pause is on the sidebar list.",
         type: "path-list",
-        readOnly: true,
       },
       {
-        key: "git.interval",
+        key: "directories.interval",
         label: "Poll interval",
-        description: "How often to check for new commits.",
+        description:
+          "How often the unified workspace collector ticks. One tick scans every enabled directory, polls git for new commits, and queries the GitHub API for PR/issue activity. Default is 60s — fast enough that new commits show up promptly, slow enough that github polling doesn't run hot.",
         type: "duration",
         placeholder: "60s",
       },
@@ -206,59 +206,6 @@ export const COLLECTOR_SCHEMA: CollectorSpec[] = [
         label: "Poll interval",
         type: "duration",
         placeholder: "120s",
-      },
-    ],
-  },
-  {
-    id: "github",
-    name: "GitHub",
-    icon: "Github",
-    description:
-      "Pulls PRs and issues from configured repos via the gh CLI (must be authenticated).",
-    isEnabled: (v) => {
-      const repos = getField(v, "github.repos");
-      return Array.isArray(repos) && repos.length > 0;
-    },
-    fields: [
-      {
-        key: "github.repos",
-        label: "Repositories",
-        description:
-          "Auto-detected from your workspace directories — any git checkout with a github.com origin is added here. To change the list, edit the Directories collector instead.",
-        type: "string-list",
-        readOnly: true,
-      },
-      {
-        key: "github.interval",
-        label: "Poll interval",
-        type: "duration",
-        placeholder: "5m",
-      },
-    ],
-  },
-  {
-    id: "directories",
-    name: "Directories",
-    icon: "Folder",
-    description:
-      "Scans project directories for agents, skills, and provider configs.",
-    isEnabled: (v) => {
-      const paths = getField(v, "directories.paths");
-      return Array.isArray(paths) && paths.length > 0;
-    },
-    fields: [
-      {
-        key: "directories.paths",
-        label: "Paths",
-        description:
-          "Directories you want gl1tch to watch. Git repos and GitHub remotes are auto-detected from these. Adds and removes here are synced into the workspace's directory list immediately on save.",
-        type: "path-list",
-      },
-      {
-        key: "directories.interval",
-        label: "Re-scan interval",
-        type: "duration",
-        placeholder: "2m",
       },
     ],
   },

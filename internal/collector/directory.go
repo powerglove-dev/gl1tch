@@ -1,9 +1,13 @@
+// directory.go holds the filesystem-artifact scan helpers used by the
+// unified WorkspaceCollector. The standalone DirectoryCollector type
+// was retired when the unified workspace collector replaced the split
+// directories/git/github trio — these helpers live on as package-level
+// functions because the scanning logic itself is still useful, just
+// not as its own goroutine + ticker.
 package collector
 
 import (
-	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,188 +16,36 @@ import (
 	"github.com/8op-org/gl1tch/internal/esearch"
 )
 
-// DirectoryCollector scans configured directories for agents, skills, slash
-// commands, provider metadata (CLAUDE.md, .claude/ sessions), and project
-// structure. All discovered artifacts are indexed into Elasticsearch so
-// gl1tch can reference them when answering questions.
+// scanWorkspaceDirArtifacts walks one workspace directory and returns
+// every artifact event the scanner can extract from it: skills,
+// agents, provider config (CLAUDE.md / .claude / .copilot), Claude
+// session memory, project structure files, and the git remote URL.
 //
-// Runs non-blocking: initial scan is immediate, then re-scans periodically
-// to pick up changes.
-type DirectoryCollector struct {
-	// Dirs is the list of absolute directory paths to scan.
-	Dirs []string
-	// Interval between re-scans. Defaults to 120s.
-	Interval time.Duration
-	// WorkspaceID is stamped on every indexed event so brain queries
-	// can scope to one workspace's discovered skills/agents/etc.
-	WorkspaceID string
-}
-
-func (d *DirectoryCollector) Name() string { return "directory" }
-
-func (d *DirectoryCollector) Start(ctx context.Context, es *esearch.Client) error {
-	if d.Interval == 0 {
-		d.Interval = 120 * time.Second
-	}
-
-	slog.Info("directory collector: started",
-		"workspace", d.WorkspaceID,
-		"dirs", len(d.Dirs),
-		"interval", d.Interval)
-	for _, dir := range d.Dirs {
-		slog.Debug("directory collector: watching dir",
-			"workspace", d.WorkspaceID,
-			"dir", dir)
-	}
-
-	if es == nil {
-		err := fmt.Errorf("directory collector: elasticsearch client is nil — check ES connectivity")
-		RecordRun("directories", time.Now(), 0, err)
-		return err
-	}
-
-	// Track which directories we've already scanned in this run so we
-	// can spot newly-added paths and pick them up without a restart.
-	// The desktop's "Add directory" button writes the workspace
-	// config and triggers a pod restart, so in practice known is
-	// seeded fresh on every pod start; the runtime-discovery path is
-	// defensive for the case where a workspace's collectors.yaml is
-	// edited in place.
-	known := make(map[string]bool, len(d.Dirs))
-
-	// scanAll runs scanDirectory across the current workspace dirs.
-	// Returns the total directories scanned and the last error seen.
-	scanAll := func() (int, error) {
-		dirs := d.currentDirs()
-		var lastErr error
-		newOnes := 0
-		for _, dir := range dirs {
-			if !known[dir] {
-				known[dir] = true
-				newOnes++
-				slog.Info("directory collector: new directory picked up",
-					"workspace", d.WorkspaceID, "dir", dir)
-			}
-			slog.Debug("directory collector: scanning",
-				"workspace", d.WorkspaceID, "dir", dir)
-			if err := d.scanDirectory(ctx, es, dir); err != nil {
-				lastErr = err
-				slog.Warn("directory collector: scan error",
-					"workspace", d.WorkspaceID, "dir", dir, "err", err)
-			}
-		}
-		if newOnes > 0 {
-			slog.Info("directory collector: discovered new dirs",
-				"workspace", d.WorkspaceID, "count", newOnes)
-		}
-		return len(dirs), lastErr
-	}
-
-	// Initial scan on startup so we don't wait for the first tick.
-	slog.Debug("directory collector: initial scan", "workspace", d.WorkspaceID)
-	if _, err := scanAll(); err != nil {
-		slog.Warn("directory collector: initial scan error",
-			"workspace", d.WorkspaceID, "err", err)
-	}
-
-	ticker := time.NewTicker(d.Interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			slog.Debug("directory collector: tick", "workspace", d.WorkspaceID)
-			_, tickDone := startTickSpan(ctx, "directory", d.WorkspaceID)
-			start := time.Now()
-			n, lastErr := scanAll()
-			slog.Debug("directory collector: tick done",
-				"workspace", d.WorkspaceID,
-				"dirs_scanned", n,
-				"dur", time.Since(start))
-			// Use n as the "indexed" count for the span attribute —
-			// it's the number of directories scanned, which is the
-			// closest per-tick volume metric the directory
-			// collector produces. Real doc counts go through the
-			// brain UI's ES aggregation.
-			tickDone(n, lastErr)
-			// Heartbeat: indexed count is 0 here because scanDirectory
-			// doesn't return one. The brain UI uses ES doc counts for
-			// totals; this entry just proves the collector ran.
-			RecordRun("directories", start, 0, lastErr)
-		}
-	}
-}
-
-// currentDirs returns the directories the collector was constructed
-// with. Workspace directories are now the source of truth and are
-// passed in via d.Dirs at pod start time; the desktop's
-// AddWorkspaceDirectory / WriteWorkspaceCollectorConfigJSON paths
-// restart the pod so a fresh d.Dirs reflects any changes immediately.
+// Returns (nil, error) if the directory itself isn't accessible.
+// Returns (events, nil) — possibly empty — when the dir is fine but
+// has nothing scan-worthy under it.
 //
-// Historically this method also merged the global observer.yaml
-// directories.paths list, which leaked dirs from one workspace into
-// every other workspace's collector. That fallback was dropped along
-// with the workspace-scoped collector split.
-func (d *DirectoryCollector) currentDirs() []string {
-	seen := make(map[string]bool, len(d.Dirs))
-	out := make([]string, 0, len(d.Dirs))
-	for _, p := range d.Dirs {
-		if p == "" || seen[p] {
-			continue
-		}
-		seen[p] = true
-		out = append(out, p)
-	}
-	return out
-}
-
-func (d *DirectoryCollector) scanDirectory(ctx context.Context, es *esearch.Client, dir string) error {
+// The caller (WorkspaceCollector.scanDirectory) is responsible for
+// stamping events with workspace_id and bulk-indexing.
+func scanWorkspaceDirArtifacts(dir string) ([]any, error) {
 	if _, err := os.Stat(dir); err != nil {
-		return fmt.Errorf("directory not accessible: %w", err)
+		return nil, fmt.Errorf("directory not accessible: %w", err)
 	}
 
 	repoName := filepath.Base(dir)
 
 	var docs []any
-
-	// 1. Scan for skills
-	docs = append(docs, d.scanSkills(dir, repoName)...)
-
-	// 2. Scan for agents (commands)
-	docs = append(docs, d.scanAgents(dir, repoName)...)
-
-	// 3. Scan for CLAUDE.md / project instructions
-	docs = append(docs, d.scanProviderMeta(dir, repoName)...)
-
-	// 4. Scan for Claude Code project sessions
-	docs = append(docs, d.scanClaudeSessions(dir, repoName)...)
-
-	// 5. Scan project structure
-	docs = append(docs, d.scanProjectStructure(dir, repoName)...)
-
-	// 6. Detect GitHub remote and scan for repo metadata
-	docs = append(docs, d.scanGitRemote(dir, repoName)...)
-
-	if len(docs) > 0 {
-		slog.Info("directory collector: indexed artifacts",
-			"workspace", d.WorkspaceID,
-			"dir", repoName,
-			"count", len(docs))
-		if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(d.WorkspaceID, docs)); err != nil {
-			return fmt.Errorf("bulk index: %w", err)
-		}
-	} else {
-		slog.Debug("directory collector: no artifacts",
-			"workspace", d.WorkspaceID, "dir", repoName)
-	}
-
-	return nil
+	docs = append(docs, scanDirSkills(dir, repoName)...)
+	docs = append(docs, scanDirAgents(dir, repoName)...)
+	docs = append(docs, scanDirProviderMeta(dir, repoName)...)
+	docs = append(docs, scanDirClaudeSessions(dir, repoName)...)
+	docs = append(docs, scanDirProjectStructure(dir, repoName)...)
+	docs = append(docs, scanDirGitRemote(dir, repoName)...)
+	return docs, nil
 }
 
-// scanSkills finds SKILL.md files in well-known skill directories.
-func (d *DirectoryCollector) scanSkills(dir, repoName string) []any {
+// scanDirSkills finds SKILL.md files in well-known skill directories.
+func scanDirSkills(dir, repoName string) []any {
 	var docs []any
 
 	skillDirs := []string{
@@ -237,8 +89,8 @@ func (d *DirectoryCollector) scanSkills(dir, repoName string) []any {
 	return docs
 }
 
-// scanAgents finds .md command files and AGENTS.md.
-func (d *DirectoryCollector) scanAgents(dir, repoName string) []any {
+// scanDirAgents finds .md command files and AGENTS.md.
+func scanDirAgents(dir, repoName string) []any {
 	var docs []any
 
 	agentDirs := []string{
@@ -307,12 +159,11 @@ func (d *DirectoryCollector) scanAgents(dir, repoName string) []any {
 	return docs
 }
 
-// scanProviderMeta reads CLAUDE.md, .claude/settings.json, and other
-// provider-specific project configuration.
-func (d *DirectoryCollector) scanProviderMeta(dir, repoName string) []any {
+// scanDirProviderMeta reads CLAUDE.md, .claude/settings.json, and
+// other provider-specific project configuration.
+func scanDirProviderMeta(dir, repoName string) []any {
 	var docs []any
 
-	// CLAUDE.md — project instructions for Claude Code
 	claudeMDPaths := []string{
 		filepath.Join(dir, "CLAUDE.md"),
 		filepath.Join(dir, ".claude", "CLAUDE.md"),
@@ -330,15 +181,14 @@ func (d *DirectoryCollector) scanProviderMeta(dir, repoName string) []any {
 			Message: fmt.Sprintf("CLAUDE.md project instructions for %s", repoName),
 			Body:    truncateStr(string(content), 8000),
 			Metadata: map[string]any{
-				"provider":  "claude",
-				"file_path": p,
+				"provider":    "claude",
+				"file_path":   p,
 				"config_type": "instructions",
 			},
 			Timestamp: time.Now(),
 		})
 	}
 
-	// .claude/settings.json — Claude Code project settings
 	settingsPath := filepath.Join(dir, ".claude", "settings.json")
 	if content, err := os.ReadFile(settingsPath); err == nil {
 		docs = append(docs, esearch.Event{
@@ -357,7 +207,6 @@ func (d *DirectoryCollector) scanProviderMeta(dir, repoName string) []any {
 		})
 	}
 
-	// .copilot/config.yml
 	copilotPaths := []string{
 		filepath.Join(dir, ".github", "copilot-instructions.md"),
 		filepath.Join(dir, ".copilot", "config.yml"),
@@ -386,29 +235,25 @@ func (d *DirectoryCollector) scanProviderMeta(dir, repoName string) []any {
 	return docs
 }
 
-// scanClaudeSessions reads Claude Code project session data from ~/.claude/projects/.
-func (d *DirectoryCollector) scanClaudeSessions(dir, repoName string) []any {
+// scanDirClaudeSessions reads Claude Code project session memory data
+// from ~/.claude/projects/.
+func scanDirClaudeSessions(dir, repoName string) []any {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
 	}
 
-	// Claude encodes project paths as hyphen-separated: /Users/stokes/Projects/gl1tch → -Users-stokes-Projects-gl1tch
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		return nil
 	}
 	encoded := strings.ReplaceAll(absDir, "/", "-")
-	if strings.HasPrefix(encoded, "-") {
-		encoded = encoded[0:] // keep leading dash
-	}
 
 	sessDir := filepath.Join(home, ".claude", "projects", encoded)
 	if _, err := os.Stat(sessDir); err != nil {
 		return nil
 	}
 
-	// Read the CLAUDE.md memory file if it exists in the project dir
 	var docs []any
 	memoryPath := filepath.Join(sessDir, "CLAUDE.md")
 	if content, err := os.ReadFile(memoryPath); err == nil {
@@ -431,12 +276,12 @@ func (d *DirectoryCollector) scanClaudeSessions(dir, repoName string) []any {
 	return docs
 }
 
-// scanProjectStructure indexes high-level project structure (package files,
-// README, Makefile, etc.) so glitch knows what the project is.
-func (d *DirectoryCollector) scanProjectStructure(dir, repoName string) []any {
+// scanDirProjectStructure indexes high-level project structure
+// (package files, README, Makefile, etc.) so glitch knows what the
+// project is.
+func scanDirProjectStructure(dir, repoName string) []any {
 	var docs []any
 
-	// Key project files that describe what the project is
 	structureFiles := []string{
 		"README.md",
 		"go.mod",
@@ -476,18 +321,16 @@ func (d *DirectoryCollector) scanProjectStructure(dir, repoName string) []any {
 	return docs
 }
 
-// scanGitRemote detects the GitHub remote URL and indexes it.
-func (d *DirectoryCollector) scanGitRemote(dir, repoName string) []any {
+// scanDirGitRemote detects the GitHub remote URL and indexes it.
+func scanDirGitRemote(dir, repoName string) []any {
 	var docs []any
 
-	// Read .git/config for remote URL
 	gitConfig := filepath.Join(dir, ".git", "config")
 	content, err := os.ReadFile(gitConfig)
 	if err != nil {
 		return nil
 	}
 
-	// Parse remote origin URL
 	lines := strings.Split(string(content), "\n")
 	inRemoteOrigin := false
 	for _, line := range lines {
@@ -502,8 +345,6 @@ func (d *DirectoryCollector) scanGitRemote(dir, repoName string) []any {
 		}
 		if inRemoteOrigin && strings.HasPrefix(trimmed, "url = ") {
 			url := strings.TrimPrefix(trimmed, "url = ")
-
-			// Extract owner/repo from GitHub URL
 			ownerRepo := extractGitHubRepo(url)
 			if ownerRepo != "" {
 				docs = append(docs, esearch.Event{
@@ -529,13 +370,11 @@ func (d *DirectoryCollector) scanGitRemote(dir, repoName string) []any {
 
 // extractGitHubRepo parses owner/repo from various GitHub URL formats.
 func extractGitHubRepo(url string) string {
-	// git@github.com:owner/repo.git
 	if strings.HasPrefix(url, "git@github.com:") {
 		repo := strings.TrimPrefix(url, "git@github.com:")
 		repo = strings.TrimSuffix(repo, ".git")
 		return repo
 	}
-	// https://github.com/owner/repo.git
 	if strings.Contains(url, "github.com/") {
 		idx := strings.Index(url, "github.com/")
 		repo := url[idx+len("github.com/"):]
@@ -577,7 +416,6 @@ func extractFirstDescription(content string) string {
 		}
 	}
 
-	// Fallback: first non-empty, non-heading line
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") || trimmed == "---" {

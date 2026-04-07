@@ -13,9 +13,23 @@ import {
   Workflow,
   Pencil,
 } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import type { Workspace, BrainActivity } from "@/lib/types";
 import { formatTime12 } from "@/lib/time";
+import {
+  ListWorkspaceDirectoriesDetailed,
+  SetWorkspaceDirectoryEnabled,
+} from "../../wailsjs/go/main/App";
+
+// DirectoryRow mirrors the JSON shape returned by
+// ListWorkspaceDirectoriesDetailed: every directory associated with a
+// workspace, including disabled ones, with the per-row enable flag the
+// unified workspace collector consults to decide what to scan.
+interface DirectoryRow {
+  path: string;
+  repo_name: string;
+  enabled: boolean;
+}
 
 interface SidebarSectionProps {
   title: string;
@@ -320,6 +334,46 @@ export function Sidebar({
   const [promptScope, setPromptScope] = useState<ScopeFilterValue>("workspace");
   const [agentScope, setAgentScope] = useState<ScopeFilterValue>("workspace");
 
+  // Detailed directory rows including disabled entries. The parent's
+  // `directories` prop only contains enabled paths (filtered at the
+  // store layer so collector code never has to know about the toggle
+  // column), so we fetch the full list separately to render the
+  // per-directory pause/resume checkboxes. Refreshed on workspace
+  // change and on the workspace:updated event the App emits after
+  // every dir mutation.
+  const [dirRows, setDirRows] = useState<DirectoryRow[]>([]);
+  const refreshDirRows = useCallback(async () => {
+    if (!activeWorkspaceId) {
+      setDirRows([]);
+      return;
+    }
+    try {
+      const json = await ListWorkspaceDirectoriesDetailed(activeWorkspaceId);
+      const parsed = JSON.parse(json);
+      setDirRows(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      setDirRows([]);
+    }
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    void refreshDirRows();
+  }, [refreshDirRows, directories.length]);
+
+  const handleToggleDir = useCallback(async (path: string, enabled: boolean) => {
+    if (!activeWorkspaceId) return;
+    // Optimistic update so the checkbox flips instantly; the pod
+    // restart triggered by the backend will refresh the rest of the
+    // sidebar via the workspace:updated event.
+    setDirRows((rows) => rows.map((r) => (r.path === path ? { ...r, enabled } : r)));
+    try {
+      await SetWorkspaceDirectoryEnabled(activeWorkspaceId, path, enabled);
+    } catch {
+      // Revert on failure.
+      void refreshDirRows();
+    }
+  }, [activeWorkspaceId, refreshDirRows]);
+
   // Bucket prompts by scope. A prompt is "workspace" when its CWD
   // matches one of the active workspace's directories. CWD = "" is
   // always global. Computing this once per render keeps the filter
@@ -455,27 +509,40 @@ export function Sidebar({
             transition: "opacity 0.15s",
           }}
         >
-        {/* Per-workspace directories */}
-        <SidebarSection title="Directories" icon={<FolderOpen size={12} />} count={directories.length}>
-          {directories.length === 0 ? (
+        {/* Per-workspace directories. Each row has a checkbox that
+            toggles the per-directory enable flag — when unchecked,
+            the unified workspace collector skips it on the next
+            tick (the change persists in SQLite and is applied via a
+            pod restart in the SetWorkspaceDirectoryEnabled handler). */}
+        <SidebarSection title="Directories" icon={<FolderOpen size={12} />} count={dirRows.length}>
+          {dirRows.length === 0 ? (
             <EmptyState text={activeWorkspaceId ? `No directories in ${contextLabel}` : "Create a workspace first"} />
           ) : (
-            directories.map((dir) => (
+            dirRows.map((row) => (
               <div
-                key={dir}
+                key={row.path}
                 style={{
                   display: "flex", alignItems: "center", gap: 8,
-                  padding: "5px 10px", borderRadius: 6, fontSize: 11, color: "var(--fg)",
+                  padding: "5px 10px", borderRadius: 6, fontSize: 11,
+                  color: row.enabled ? "var(--fg)" : "var(--fg-dim)",
+                  opacity: row.enabled ? 1 : 0.55,
                 }}
               >
+                <input
+                  type="checkbox"
+                  checked={row.enabled}
+                  onChange={(e) => handleToggleDir(row.path, e.target.checked)}
+                  style={{ flexShrink: 0, cursor: "pointer", margin: 0 }}
+                  title={row.enabled ? `Pause ${row.path}` : `Resume ${row.path}`}
+                />
                 <Folder size={11} style={{ color: "var(--yellow)", flexShrink: 0 }} />
-                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={dir}>
-                  {dir.split("/").pop()}
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={row.path}>
+                  {row.path.split("/").pop()}
                 </span>
                 <button
-                  onClick={() => onRemoveDirectory(dir)}
+                  onClick={() => onRemoveDirectory(row.path)}
                   style={{ background: "none", border: "none", color: "var(--fg-dim)", cursor: "pointer", padding: 2, borderRadius: 4, display: "flex", opacity: 0.3 }}
-                  title={`Remove ${dir}`}
+                  title={`Remove ${row.path}`}
                 >
                   <X size={10} />
                 </button>

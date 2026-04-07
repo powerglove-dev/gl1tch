@@ -9,13 +9,31 @@ import (
 )
 
 // Workspace represents a chat workspace with its own set of monitored directories.
+//
+// Directories / RepoNames only contain the *enabled* directory paths so
+// existing collector code that consumes Workspace.Directories without
+// caring about the toggle state automatically respects the user's
+// per-directory enable/disable choices. Code that needs the full set
+// (including disabled rows for the UI toggle list) calls
+// ListWorkspaceDirectories instead.
 type Workspace struct {
 	ID          string   `json:"id"`
 	Title       string   `json:"title"`
-	Directories []string `json:"directories"` // absolute paths
-	RepoNames   []string `json:"repo_names"`  // filepath.Base of each dir
+	Directories []string `json:"directories"` // absolute paths (enabled only)
+	RepoNames   []string `json:"repo_names"`  // filepath.Base of each dir (enabled only)
 	CreatedAt   int64    `json:"created_at"`
 	UpdatedAt   int64    `json:"updated_at"`
+}
+
+// WorkspaceDirectory is one row from workspace_directories with its
+// enable flag. Used by the desktop UI to render per-directory toggles
+// alongside the directory list — the legacy Workspace.Directories
+// field hides disabled rows so collectors don't have to know about the
+// flag, but the UI does.
+type WorkspaceDirectory struct {
+	Path     string `json:"path"`
+	RepoName string `json:"repo_name"`
+	Enabled  bool   `json:"enabled"`
 }
 
 // WorkspaceMessage is a persisted chat message within a workspace.
@@ -118,9 +136,12 @@ func (s *Store) RemoveWorkspaceDirectory(ctx context.Context, workspaceID, path 
 	return err
 }
 
+// getWorkspaceDirectories returns only the *enabled* directories for a
+// workspace. This is what Workspace.Directories surfaces — collector
+// code doesn't need to know that disabled rows even exist.
 func (s *Store) getWorkspaceDirectories(ctx context.Context, workspaceID string) ([]string, []string, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT path, repo_name FROM workspace_directories WHERE workspace_id = ?`, workspaceID)
+		`SELECT path, repo_name FROM workspace_directories WHERE workspace_id = ? AND enabled = 1`, workspaceID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -136,6 +157,46 @@ func (s *Store) getWorkspaceDirectories(ctx context.Context, workspaceID string)
 		repos = append(repos, repo)
 	}
 	return dirs, repos, rows.Err()
+}
+
+// ListWorkspaceDirectories returns every directory associated with a
+// workspace, including disabled ones, with their enable flags. The
+// desktop UI uses this to render the per-directory toggle list in the
+// workspace settings popover.
+func (s *Store) ListWorkspaceDirectories(ctx context.Context, workspaceID string) ([]WorkspaceDirectory, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT path, repo_name, enabled FROM workspace_directories WHERE workspace_id = ? ORDER BY path`,
+		workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []WorkspaceDirectory
+	for rows.Next() {
+		var d WorkspaceDirectory
+		var enabled int
+		if err := rows.Scan(&d.Path, &d.RepoName, &enabled); err != nil {
+			return nil, err
+		}
+		d.Enabled = enabled != 0
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// SetWorkspaceDirectoryEnabled flips the enable flag on one directory.
+// The collector pod must be restarted by the caller for the change to
+// take effect — toggling here only updates the persisted state.
+func (s *Store) SetWorkspaceDirectoryEnabled(ctx context.Context, workspaceID, path string, enabled bool) error {
+	v := 0
+	if enabled {
+		v = 1
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE workspace_directories SET enabled = ? WHERE workspace_id = ? AND path = ?`,
+		v, workspaceID, path)
+	return err
 }
 
 // SaveWorkspaceMessage persists a chat message.
