@@ -123,6 +123,15 @@ func PodManager() *collector.PodManager {
 	return podManager
 }
 
+// EsClient returns the shared Elasticsearch client, or nil if the pod
+// manager hasn't been initialized or ES was unreachable at startup.
+// Used by QueryRecentLogs so the logs panel reuses the same connection
+// pool as the rest of the desktop instead of building a new client on
+// every poll.
+func EsClient() *esearch.Client {
+	return podManagerEs
+}
+
 // StartWorkspacePod starts the collector pod for the given workspace
 // id. No-op (with a warning) when the pod manager hasn't been
 // initialized so headless test paths don't crash.
@@ -317,6 +326,39 @@ func ReadWorkspaceCollectorConfigJSON(workspaceID string) (string, error) {
 	b, err := json.Marshal(cfg)
 	if err != nil {
 		return "", err
+	}
+	return string(b), nil
+}
+
+// ReadWorkspaceCollectorConfigYAML returns the same merged config view
+// that ReadWorkspaceCollectorConfigJSON uses (YAML file + SQLite
+// directories + AutoDetectFromWorkspace), but serialized back to YAML.
+// Used by the raw-YAML EditorPopup so it shows the same effective
+// config as the structured GUI instead of the sparse on-disk file.
+func ReadWorkspaceCollectorConfigYAML(workspaceID string) (string, error) {
+	if err := collector.EnsureWorkspaceConfig(workspaceID); err != nil {
+		return "", err
+	}
+	cfg, err := collector.LoadWorkspaceConfig(workspaceID)
+	if err != nil {
+		return "", err
+	}
+
+	var dirs []string
+	if st, sErr := OpenStore(); sErr == nil {
+		if ws, wErr := st.GetWorkspace(context.Background(), workspaceID); wErr == nil {
+			dirs = append(dirs, ws.Directories...)
+		}
+	}
+	if len(dirs) > 0 {
+		cfg.Directories.Paths = dirs
+	}
+
+	collector.AutoDetectFromWorkspace(cfg, dirs)
+
+	b, err := yaml.Marshal(cfg)
+	if err != nil {
+		return "", fmt.Errorf("marshal yaml: %w", err)
 	}
 	return string(b), nil
 }

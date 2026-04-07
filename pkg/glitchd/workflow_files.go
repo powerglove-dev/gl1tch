@@ -254,18 +254,20 @@ func CreateDraftFromTarget(ctx context.Context, workspaceID, kind string, target
 		// rather than trusting whatever the caller passed, so a
 		// malformed Wails call can't redirect the write somewhere
 		// else. The starter file is created on demand.
-		if err := collector.EnsureWorkspaceConfig(workspaceID); err != nil {
-			return errorJSON(fmt.Errorf("ensure collectors config: %w", err))
-		}
+		//
+		// We seed the draft body from the same merged view the
+		// structured GUI uses (YAML + SQLite directories +
+		// AutoDetectFromWorkspace) so the raw editor and the GUI
+		// always show the same effective configuration.
 		path, perr := collector.WorkspaceConfigPath(workspaceID)
 		if perr != nil {
 			return errorJSON(perr)
 		}
-		raw, rerr := os.ReadFile(path)
-		if rerr != nil {
-			return errorJSON(fmt.Errorf("read collectors config: %w", rerr))
+		merged, merr := ReadWorkspaceCollectorConfigYAML(workspaceID)
+		if merr != nil {
+			return errorJSON(fmt.Errorf("read collectors config: %w", merr))
 		}
-		body = string(raw)
+		body = merged
 		title = "collectors"
 		resolvedPath = path
 
