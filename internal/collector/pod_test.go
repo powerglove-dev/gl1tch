@@ -297,37 +297,34 @@ func TestPodManager_ParentContextCancel(t *testing.T) {
 }
 
 func TestBuildCollectorsFromConfig(t *testing.T) {
-	t.Run("empty config returns just the always-on collectors", func(t *testing.T) {
+	t.Run("empty config + no dirs returns just pipeline", func(t *testing.T) {
 		out := BuildCollectorsFromConfig("ws", &Config{}, nil)
-		// directories + pipeline always run, plus claude+copilot
-		// because their default Enabled is true (mirrors the global
-		// behaviour). The Config{} literal here doesn't go through
-		// defaultConfig() so claude/copilot will be false in this
-		// path — we expect just directories + pipeline.
-		if len(out) != 2 {
-			t.Errorf("collectors = %d, want 2 (directories + pipeline)", len(out))
+		// With no dirs the unified WorkspaceCollector is not spawned
+		// (no work to do), claude/copilot are off by default in a
+		// bare Config literal, so the only thing left is the
+		// always-on PipelineIndexer.
+		if len(out) != 1 {
+			t.Errorf("collectors = %d, want 1 (pipeline only): names=%v", len(out), names(out))
 		}
 	})
 
-	t.Run("populated config returns expected collectors", func(t *testing.T) {
+	t.Run("populated config + dirs returns workspace + claude + pipeline", func(t *testing.T) {
 		cfg := defaultConfig()
-		cfg.Git.Repos = []string{"/tmp/repo"}
-		cfg.GitHub.Repos = []string{"org/repo"}
-		// Per the opt-in default rule, claude/copilot are off in
-		// defaultConfig — flip them on here so this test exercises
-		// the full set of collectors.
+		// Per the opt-in default rule, claude is off in
+		// defaultConfig — flip it on here so the test exercises the
+		// full per-workspace set.
 		cfg.Claude.Enabled = true
 		cfg.Copilot.Enabled = true
 
-		out := BuildCollectorsFromConfig("ws-x", cfg, nil)
+		out := BuildCollectorsFromConfig("ws-x", cfg, []string{"/tmp/repo"})
 
-		// Expected: git, claude, claude-projects, github,
-		// directories, pipeline = 6. Copilot is intentionally
-		// excluded from per-workspace pods because its data source
-		// is global / shared across workspaces; it lives in the
-		// tool pod path (BuildToolCollectorsFromConfig).
-		if len(out) != 6 {
-			t.Errorf("collectors = %d, want 6: names=%v", len(out), names(out))
+		// Expected: workspace (unified directories+git+github),
+		// claude, claude-projects, pipeline = 4. Copilot is
+		// intentionally excluded from per-workspace pods because its
+		// data source is global / shared across workspaces; it lives
+		// in the tool pod path (BuildToolCollectorsFromConfig).
+		if len(out) != 4 {
+			t.Errorf("collectors = %d, want 4: names=%v", len(out), names(out))
 		}
 
 		// Every collector with a WorkspaceID field must hold "ws-x".
@@ -385,17 +382,13 @@ func names(cs []Collector) []string {
 // collector type. Each one has it as a public string field.
 func workspaceIDOf(c Collector) string {
 	switch v := c.(type) {
-	case *GitCollector:
-		return v.WorkspaceID
-	case *GitHubCollector:
+	case *WorkspaceCollector:
 		return v.WorkspaceID
 	case *ClaudeCollector:
 		return v.WorkspaceID
 	case *ClaudeProjectCollector:
 		return v.WorkspaceID
 	case *CopilotCollector:
-		return v.WorkspaceID
-	case *DirectoryCollector:
 		return v.WorkspaceID
 	case *PipelineIndexer:
 		return v.WorkspaceID

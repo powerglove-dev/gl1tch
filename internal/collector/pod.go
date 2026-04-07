@@ -512,10 +512,25 @@ func BuildCollectorsFromConfig(workspaceID string, cfg *Config, dirs []string) [
 		return out
 	}
 
-	if len(cfg.Git.Repos) > 0 {
-		out = append(out, &GitCollector{
-			Repos:       cfg.Git.Repos,
-			Interval:    cfg.Git.Interval,
+	// Unified workspace collector replaces the old split where
+	// directories, git, and github were three separate goroutines
+	// the user had to wire up independently. One collector per
+	// workspace, taking the workspace's enabled directory list
+	// directly — git/github support is auto-detected per dir from
+	// .git/config so there's no separate Git.Repos / GitHub.Repos
+	// to keep in sync. The old config sections are still parsed for
+	// backward compat (LoadWorkspaceConfig still hydrates them) but
+	// the workspace collector ignores them in favor of dirs.
+	//
+	// We only spawn the workspace collector when there's at least
+	// one enabled directory; otherwise the workspace has nothing to
+	// collect and we'd just be running an empty tick loop. Adding a
+	// directory triggers a pod restart (see desktop AddDirectory
+	// path) which re-enters this builder with a populated dirs slice.
+	if len(dirs) > 0 {
+		out = append(out, &WorkspaceCollector{
+			Dirs:        dirs,
+			Interval:    cfg.Directories.Interval,
 			WorkspaceID: workspaceID,
 		})
 	}
@@ -550,24 +565,6 @@ func BuildCollectorsFromConfig(workspaceID string, cfg *Config, dirs []string) [
 	// supervisor's RegisterCollectors call, so users without the
 	// desktop app keep getting their copilot history indexed.
 	_ = cfg.Copilot.Enabled // see comment above
-
-	if len(cfg.GitHub.Repos) > 0 {
-		out = append(out, &GitHubCollector{
-			Repos:       cfg.GitHub.Repos,
-			Interval:    cfg.GitHub.Interval,
-			WorkspaceID: workspaceID,
-		})
-	}
-
-	// Directory collector always runs (even with empty paths) so the
-	// user can add directories at runtime via the desktop's "add
-	// directory" button. The collector re-reads its config on each
-	// tick so new paths get picked up without a pod restart.
-	out = append(out, &DirectoryCollector{
-		Dirs:        cfg.Directories.Paths,
-		Interval:    cfg.Directories.Interval,
-		WorkspaceID: workspaceID,
-	})
 
 	// Code-index is opt-in: only spawn when the user has enabled it
 	// AND given at least one path. Embedding a large tree on first

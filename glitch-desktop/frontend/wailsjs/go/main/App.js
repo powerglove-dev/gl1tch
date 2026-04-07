@@ -142,8 +142,16 @@ export function RefineDraft(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['RefineDraft'](arg1, arg2, arg3, arg4);
 }
 
+export function ListWorkspaceDirectoriesDetailed(arg1) {
+  return window['go']['main']['App']['ListWorkspaceDirectoriesDetailed'](arg1);
+}
+
 export function RemoveWorkspaceDirectory(arg1, arg2) {
   return window['go']['main']['App']['RemoveWorkspaceDirectory'](arg1, arg2);
+}
+
+export function SetWorkspaceDirectoryEnabled(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SetWorkspaceDirectoryEnabled'](arg1, arg2, arg3);
 }
 
 export function RunChain(arg1, arg2, arg3, arg4, arg5) {

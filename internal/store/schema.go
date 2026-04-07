@@ -206,6 +206,7 @@ CREATE TABLE IF NOT EXISTS workspace_directories (
   workspace_id TEXT NOT NULL,
   path         TEXT NOT NULL,
   repo_name    TEXT NOT NULL,
+  enabled      INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (workspace_id, path)
 );
 CREATE TABLE IF NOT EXISTS workspace_messages (

@@ -71,7 +71,11 @@ export function RecentCollectorLogs(arg1:number):Promise<string>;
 
 export function RefineDraft(arg1:number,arg2:string,arg3:string,arg4:string):Promise<void>;
 
+export function ListWorkspaceDirectoriesDetailed(arg1:string):Promise<string>;
+
 export function RemoveWorkspaceDirectory(arg1:string,arg2:string):Promise<void>;
+
+export function SetWorkspaceDirectoryEnabled(arg1:string,arg2:string,arg3:boolean):Promise<void>;
 
 export function RunChain(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
