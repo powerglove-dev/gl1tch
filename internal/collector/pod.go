@@ -77,11 +77,34 @@ type pod struct {
 	wg          sync.WaitGroup
 }
 
-// PodCollectorBuilder maps a workspace's loaded Config into a slice
-// of collectors ready to run. Pulled out as a function value so the
-// pod manager is testable without depending on every concrete
-// collector type.
-type PodCollectorBuilder func(workspaceID string, cfg *Config) []Collector
+// WorkspaceIDTools is the sentinel workspace_id stamped on every doc
+// produced by collectors that read global per-tool data — copilot's
+// flat command history, mattermost's shared channels, etc. These
+// collectors run inside a single "tool pod" rather than per-workspace
+// so the same source data isn't re-indexed once per workspace and
+// the brain popover can OR-include this bucket alongside the active
+// workspace's bucket via QueryCollectorActivityScoped.
+//
+// Pre-1.0 we accept that __tools__ surfaces in every workspace's
+// popover with identical numbers — that's a true reflection of the
+// underlying data, which genuinely IS shared. The alternative was
+// either silently re-indexing per workspace (the bug we're fixing)
+// or hiding the rows entirely (a regression in visibility).
+const WorkspaceIDTools = "__tools__"
+
+// PodCollectorBuilder maps a workspace's loaded Config + directory
+// list into a slice of collectors ready to run. Pulled out as a
+// function value so the pod manager is testable without depending
+// on every concrete collector type.
+//
+// dirs is the workspace's directory list (from the SQLite store via
+// the WorkspaceDirsResolver). Used by collectors that read global
+// per-tool files (Claude history, copilot logs, etc.) to filter
+// entries down to just those that belong to the active workspace —
+// without it, every workspace pod re-indexes the same global data
+// with its own workspace_id, and the brain popover shows identical
+// counts for every workspace.
+type PodCollectorBuilder func(workspaceID string, cfg *Config, dirs []string) []Collector
 
 // NewPodManager constructs a manager bound to a parent context. All
 // pods run as children of parentCtx — when the parent is cancelled
@@ -195,7 +218,7 @@ func (m *PodManager) startPodLocked(workspaceID string) error {
 	dirs := m.workspaceDirs(workspaceID)
 	AutoDetectFromWorkspace(cfg, dirs)
 
-	collectors := m.builder(workspaceID, cfg)
+	collectors := m.builder(workspaceID, cfg, dirs)
 
 	m.mu.Lock()
 	if _, exists := m.pods[workspaceID]; exists {
@@ -318,7 +341,14 @@ func (m *PodManager) StopAll() {
 // indexed events carry the right workspace_id field. Empty sections
 // (no repos, no channels, etc.) are skipped to avoid spawning idle
 // goroutines.
-func BuildCollectorsFromConfig(workspaceID string, cfg *Config) []Collector {
+//
+// dirs is the workspace's directory list (from SQLite via the
+// dirsResolver), passed through to Claude collectors so they can
+// filter the global ~/.claude history down to just those entries
+// whose project path belongs to this workspace. An empty dirs slice
+// disables filtering — used by tests and the headless `glitch serve`
+// path.
+func BuildCollectorsFromConfig(workspaceID string, cfg *Config, dirs []string) []Collector {
 	var out []Collector
 	if cfg == nil {
 		return out
@@ -334,17 +364,34 @@ func BuildCollectorsFromConfig(workspaceID string, cfg *Config) []Collector {
 
 	if cfg.Claude.Enabled {
 		out = append(out,
-			&ClaudeCollector{Interval: cfg.Claude.Interval, WorkspaceID: workspaceID},
-			&ClaudeProjectCollector{Interval: cfg.Claude.Interval, WorkspaceID: workspaceID},
+			&ClaudeCollector{
+				Interval:    cfg.Claude.Interval,
+				WorkspaceID: workspaceID,
+				Dirs:        dirs,
+			},
+			&ClaudeProjectCollector{
+				Interval:    cfg.Claude.Interval,
+				WorkspaceID: workspaceID,
+				Dirs:        dirs,
+			},
 		)
 	}
 
-	if cfg.Copilot.Enabled {
-		out = append(out, &CopilotCollector{
-			Interval:    cfg.Copilot.Interval,
-			WorkspaceID: workspaceID,
-		})
-	}
+	// Copilot is intentionally NOT registered as a per-workspace
+	// collector. The data source (~/.copilot/command-history-state.json)
+	// is a flat array of command strings with no project / cwd
+	// metadata, so the same commands would be re-indexed under every
+	// workspace_id and the brain popover would show identical copilot
+	// counts in every workspace — which is what the screenshot bug
+	// looked like before we started tracking this down. Until copilot
+	// surfaces a per-project signal (or we add a separate "global
+	// tool" collector path that runs once with workspace_id=""), this
+	// collector is dropped from the per-workspace builder entirely.
+	//
+	// The headless `glitch serve` path still runs copilot via the
+	// supervisor's RegisterCollectors call, so users without the
+	// desktop app keep getting their copilot history indexed.
+	_ = cfg.Copilot.Enabled // see comment above
 
 	if len(cfg.GitHub.Repos) > 0 {
 		out = append(out, &GitHubCollector{
@@ -354,15 +401,16 @@ func BuildCollectorsFromConfig(workspaceID string, cfg *Config) []Collector {
 		})
 	}
 
-	if cfg.Mattermost.URL != "" && cfg.Mattermost.Token != "" {
-		out = append(out, &MattermostCollector{
-			URL:         cfg.Mattermost.URL,
-			Token:       cfg.Mattermost.Token,
-			Channels:    cfg.Mattermost.Channels,
-			Interval:    cfg.Mattermost.Interval,
-			WorkspaceID: workspaceID,
-		})
-	}
+	// Mattermost is intentionally NOT registered as a per-workspace
+	// collector. The data source is a single Mattermost server
+	// shared across every workspace; running one client per pod
+	// re-indexes the same channels under each workspace_id and the
+	// brain popover ends up showing identical mattermost counts
+	// everywhere. The tool-pod path (BuildToolCollectorsFromConfig)
+	// runs a single instance with workspace_id=WorkspaceIDTools, and
+	// the popover query OR-includes that bucket alongside the active
+	// workspace.
+	_ = cfg.Mattermost.URL // see comment above
 
 	// Directory collector always runs (even with empty paths) so the
 	// user can add directories at runtime via the desktop's "add
@@ -374,9 +422,136 @@ func BuildCollectorsFromConfig(workspaceID string, cfg *Config) []Collector {
 		WorkspaceID: workspaceID,
 	})
 
+	// Code-index is opt-in: only spawn when the user has enabled it
+	// AND given at least one path. Embedding a large tree on first
+	// run can take minutes, so we never auto-start it.
+	if cfg.CodeIndex.Enabled && len(cfg.CodeIndex.Paths) > 0 {
+		out = append(out, &CodeIndexCollector{
+			Paths:         cfg.CodeIndex.Paths,
+			Extensions:    cfg.CodeIndex.Extensions,
+			ChunkSize:     cfg.CodeIndex.ChunkSize,
+			Interval:      cfg.CodeIndex.Interval,
+			EmbedProvider: cfg.CodeIndex.EmbedProvider,
+			EmbedModel:    cfg.CodeIndex.EmbedModel,
+			EmbedBaseURL:  cfg.CodeIndex.EmbedBaseURL,
+			EmbedAPIKey:   cfg.CodeIndex.EmbedAPIKey,
+			WorkspaceID:   workspaceID,
+		})
+	}
+
 	// PipelineIndexer is workspace-scoped too so each workspace's
 	// pipeline runs land in its own slice of glitch-pipelines.
 	out = append(out, &PipelineIndexer{WorkspaceID: workspaceID})
 
 	return out
+}
+
+// BuildToolCollectorsFromConfig instantiates the "global tool"
+// collector set: copilot + mattermost. These read shared, machine-
+// global data sources and run inside a single dedicated pod with
+// workspace_id=WorkspaceIDTools so the same source data isn't
+// re-indexed once per workspace.
+//
+// The corresponding popover/query path OR-includes the tools bucket
+// alongside the active workspace's bucket so users still see these
+// rows in the brain popover with real (one-and-only) counts.
+//
+// cfg here is the GLOBAL observer.yaml (collector.LoadConfig), not a
+// per-workspace collectors.yaml. Tool collectors aren't editable
+// per-workspace because their data isn't workspace-scoped to begin
+// with.
+func BuildToolCollectorsFromConfig(cfg *Config) []Collector {
+	var out []Collector
+	if cfg == nil {
+		return out
+	}
+
+	if cfg.Copilot.Enabled {
+		out = append(out, &CopilotCollector{
+			Interval:    cfg.Copilot.Interval,
+			WorkspaceID: WorkspaceIDTools,
+		})
+	}
+
+	if cfg.Mattermost.URL != "" && cfg.Mattermost.Token != "" {
+		out = append(out, &MattermostCollector{
+			URL:         cfg.Mattermost.URL,
+			Token:       cfg.Mattermost.Token,
+			Channels:    cfg.Mattermost.Channels,
+			Interval:    cfg.Mattermost.Interval,
+			WorkspaceID: WorkspaceIDTools,
+		})
+	}
+
+	return out
+}
+
+// StartToolPod starts the dedicated tool collectors pod under the
+// reserved WorkspaceIDTools key. The tool pod loads the GLOBAL
+// observer.yaml (not a per-workspace file) and runs the collector
+// set returned by BuildToolCollectorsFromConfig.
+//
+// Idempotent at the same level as StartPod: a duplicate StartToolPod
+// while one is already running returns the same "already running"
+// error. Use RestartToolPod to cycle.
+func (m *PodManager) StartToolPod() error {
+	lk := m.lockFor(WorkspaceIDTools)
+	lk.Lock()
+	defer lk.Unlock()
+	return m.startToolPodLocked()
+}
+
+// startToolPodLocked is the unlocked body of StartToolPod. Mirrors
+// startPodLocked but uses the global observer.yaml and the tool
+// collector builder.
+func (m *PodManager) startToolPodLocked() error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return fmt.Errorf("pod manager: load global config for tool pod: %w", err)
+	}
+
+	collectors := BuildToolCollectorsFromConfig(cfg)
+	if len(collectors) == 0 {
+		// Nothing enabled — silently no-op so a user with no copilot
+		// or mattermost configured doesn't see scary errors.
+		slog.Info("pod manager: tool pod has no enabled collectors, skipping")
+		return nil
+	}
+
+	m.mu.Lock()
+	if _, exists := m.pods[WorkspaceIDTools]; exists {
+		m.mu.Unlock()
+		return fmt.Errorf("pod manager: tool pod already running")
+	}
+	ctx, cancel := context.WithCancel(m.parentCtx)
+	p := &pod{
+		workspaceID: WorkspaceIDTools,
+		cancel:      cancel,
+	}
+	m.pods[WorkspaceIDTools] = p
+	m.mu.Unlock()
+
+	slog.Info("pod manager: starting tool pod", "collectors", len(collectors))
+
+	for _, c := range collectors {
+		p.wg.Add(1)
+		go func(c Collector) {
+			defer p.wg.Done()
+			slog.Info("pod manager: tool collector started", "collector", c.Name())
+			if err := c.Start(ctx, m.es); err != nil && ctx.Err() == nil {
+				slog.Warn("pod manager: tool collector exited", "collector", c.Name(), "err", err)
+			}
+		}(c)
+	}
+
+	return nil
+}
+
+// StopToolPod cancels the tool pod's context and waits for every
+// collector goroutine to return. Idempotent.
+func (m *PodManager) StopToolPod() error {
+	lk := m.lockFor(WorkspaceIDTools)
+	lk.Lock()
+	defer lk.Unlock()
+	return m.stopPodLocked(WorkspaceIDTools)
 }

@@ -14,14 +14,18 @@ package glitchd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/8op-org/gl1tch/internal/collector"
 	"github.com/8op-org/gl1tch/internal/esearch"
 	"github.com/8op-org/gl1tch/internal/store"
+	"gopkg.in/yaml.v3"
 )
 
 // errPodManagerNotInitialized is returned by the package-level
@@ -46,6 +50,17 @@ var (
 // hook. When it cancels (app shutdown) every active pod tears down
 // automatically.
 //
+// EnsureIndices is called synchronously here BEFORE returning. This
+// is load-bearing: if a pod starts collectors that index into
+// glitch-events before the index has been created with the strict
+// mapping from internal/esearch/mappings.go, ES auto-creates the
+// index with default dynamic mappings (workspace_id: text instead
+// of keyword), which silently breaks every subsequent workspace-
+// scoped aggregation. We deliberately do NOT add migration code to
+// repair a mis-mapped index — pre-1.0, the contract is "wipe and
+// restart" and we keep the startup path simple by guaranteeing the
+// fresh-index case is the only one we ever hit.
+//
 // Returns the manager so the caller can immediately drive it
 // (e.g. StartAllWorkspacePods). On repeat calls the existing
 // manager is returned unchanged.
@@ -67,6 +82,18 @@ func InitPodManager(ctx context.Context) *collector.PodManager {
 			slog.Warn("pod manager: esearch.New failed", "err", err, "addr", cfg.Elasticsearch.Address)
 			// es will be nil; collectors that require it will log on
 			// their first poll. The pod manager itself doesn't care.
+		}
+		// Synchronous EnsureIndices: see the doc comment on this
+		// function for why this MUST happen before any pod starts.
+		// Best-effort on failure — a missing ES is reported via the
+		// doctor screen, and collectors will surface their own
+		// "ES unavailable" log lines on first tick.
+		if es != nil {
+			ensureCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			if err := es.EnsureIndices(ensureCtx); err != nil {
+				slog.Warn("pod manager: ensure indices failed", "err", err)
+			}
+			cancel()
 		}
 		podManagerEs = es
 		podManager = collector.NewPodManager(ctx, es, nil)
@@ -131,6 +158,41 @@ func RestartWorkspacePod(workspaceID string) error {
 	}
 	return podManager.RestartPod(workspaceID)
 }
+
+// StartToolPod starts the global "tool collectors" pod that owns
+// copilot + mattermost. These collectors read shared per-machine
+// data sources and run once with workspace_id=collector.WorkspaceIDTools
+// so the same source isn't re-indexed under every workspace.
+//
+// The brain popover OR-includes the tools bucket alongside the active
+// workspace's bucket via QueryCollectorActivityScoped, so users still
+// see copilot/mattermost rows in the popover with their real (single)
+// counts.
+//
+// Best-effort: returns the pod manager error so the desktop can log
+// it, but never propagates a startup failure that would block the rest
+// of the app.
+func StartToolPod() error {
+	if podManager == nil {
+		slog.Warn("pod manager: skip start tool pod", "err", errPodManagerNotInitialized)
+		return errPodManagerNotInitialized
+	}
+	return podManager.StartToolPod()
+}
+
+// StopToolPod stops the global tool collectors pod. Idempotent.
+func StopToolPod() error {
+	if podManager == nil {
+		return nil
+	}
+	return podManager.StopToolPod()
+}
+
+// WorkspaceIDTools re-exports the sentinel workspace_id for the
+// global tool pod so the desktop and query helpers don't have to
+// reach into internal/collector. Keep in sync with the underlying
+// constant.
+const WorkspaceIDTools = collector.WorkspaceIDTools
 
 // StartAllWorkspacePods enumerates every workspace in the store and
 // starts a pod for each. Called once at app startup so existing
@@ -206,6 +268,136 @@ func ReadWorkspaceCollectorConfig(workspaceID string) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// ReadWorkspaceCollectorConfigJSON returns the workspace's collectors
+// config parsed into a JSON object whose shape mirrors the typed
+// collector.Config struct. The schema-driven config modal uses this
+// instead of the raw YAML so it never has to ship a YAML parser.
+//
+// The returned config is the SAME merged view that the brain popover
+// uses (ListCollectorsForWorkspace): per-workspace collectors.yaml
+// PLUS workspace SQLite directories PLUS AutoDetectFromWorkspace's
+// derived git+github+claude+copilot. Without this merge the modal
+// would show empty fields for collectors the brain reports as live,
+// because the bulk of workspace state lives in SQLite + autodetect
+// rather than in the per-workspace YAML file.
+//
+// Comments in the YAML are NOT preserved across the round trip — that
+// is the explicit trade-off for structured editing. Power users who
+// need comments should keep using the raw YAML EditorPopup path.
+func ReadWorkspaceCollectorConfigJSON(workspaceID string) (string, error) {
+	if err := collector.EnsureWorkspaceConfig(workspaceID); err != nil {
+		return "", err
+	}
+	cfg, err := collector.LoadWorkspaceConfig(workspaceID)
+	if err != nil {
+		return "", err
+	}
+
+	// Pull workspace directories from SQLite and overlay them on the
+	// YAML's directories.paths so the modal shows the live list the
+	// brain shows. SQLite is authoritative; YAML directories are
+	// effectively legacy / power-user fallback.
+	var dirs []string
+	if st, sErr := OpenStore(); sErr == nil {
+		if ws, wErr := st.GetWorkspace(context.Background(), workspaceID); wErr == nil {
+			dirs = append(dirs, ws.Directories...)
+		}
+	}
+	if len(dirs) > 0 {
+		cfg.Directories.Paths = dirs
+	}
+
+	// Apply the same auto-detection overlay the pod manager and brain
+	// popover use, so git/github/claude/copilot enablement reflect
+	// what's actually running rather than the bare YAML state.
+	collector.AutoDetectFromWorkspace(cfg, dirs)
+
+	b, err := json.Marshal(cfg)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// WriteWorkspaceCollectorConfigJSON parses jsonBody into the typed
+// collector.Config and persists it across two stores so the read-side
+// merge stays consistent:
+//
+//  1. cfg.Directories.Paths is diffed against the workspace's SQLite
+//     directory list and the differences are applied via the store's
+//     AddWorkspaceDirectory / RemoveWorkspaceDirectory primitives.
+//     Directories live in SQLite, not YAML.
+//  2. cfg.Directories.Paths / cfg.Git.Repos / cfg.GitHub.Repos are
+//     cleared from the YAML we re-marshal because those fields are
+//     derived at read time from the SQLite list via AutoDetect.
+//     Persisting them would freeze auto-detected entries into the
+//     YAML and break the dynamic behavior.
+//  3. Everything else (claude/copilot/mattermost/code_index/intervals
+//     /enabled flags) round-trips through the YAML normally.
+//
+// Triggers the same pod restart on success.
+//
+// Returns nil on success, or the parse/validation/IO error so the
+// modal can render it inline.
+func WriteWorkspaceCollectorConfigJSON(workspaceID, jsonBody string) error {
+	var cfg collector.Config
+	if err := json.Unmarshal([]byte(jsonBody), &cfg); err != nil {
+		return fmt.Errorf("invalid json: %w", err)
+	}
+
+	// ── Directories: diff against SQLite ─────────────────────────────
+	incomingDirs := append([]string{}, cfg.Directories.Paths...)
+	if st, err := OpenStore(); err == nil {
+		ctx := context.Background()
+		current, gErr := st.GetWorkspace(ctx, workspaceID)
+		var existing []string
+		if gErr == nil {
+			existing = current.Directories
+		}
+		existingSet := make(map[string]bool, len(existing))
+		for _, d := range existing {
+			existingSet[d] = true
+		}
+		incomingSet := make(map[string]bool, len(incomingDirs))
+		for _, d := range incomingDirs {
+			incomingSet[d] = true
+		}
+		// Add new entries.
+		for _, d := range incomingDirs {
+			if d == "" || existingSet[d] {
+				continue
+			}
+			if err := st.AddWorkspaceDirectory(ctx, workspaceID, d); err != nil {
+				slog.Warn("write workspace config: add dir", "workspace", workspaceID, "dir", d, "err", err)
+			}
+		}
+		// Remove deleted entries.
+		for _, d := range existing {
+			if incomingSet[d] {
+				continue
+			}
+			if err := st.RemoveWorkspaceDirectory(ctx, workspaceID, d); err != nil {
+				slog.Warn("write workspace config: remove dir", "workspace", workspaceID, "dir", d, "err", err)
+			}
+		}
+	}
+
+	// ── Strip derived fields before marshaling YAML ──────────────────
+	// directories.paths lives in SQLite. git.repos / github.repos are
+	// auto-detected from those directories at read time. Persisting
+	// any of these would override the live SQLite state on the next
+	// read and freeze the autodetect result.
+	cfg.Directories.Paths = nil
+	cfg.Git.Repos = nil
+	cfg.GitHub.Repos = nil
+
+	yamlBytes, err := yaml.Marshal(&cfg)
+	if err != nil {
+		return fmt.Errorf("re-marshal yaml: %w", err)
+	}
+	return WriteWorkspaceCollectorConfig(workspaceID, string(yamlBytes))
 }
 
 // WriteWorkspaceCollectorConfig validates and writes new content to

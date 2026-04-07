@@ -15,6 +15,9 @@ interface Props {
    *  Plumbed through from App.tsx so the popup lives at the root and
    *  the brain indicator just emits the request. */
   onEditCollectors: () => void;
+  /** Open the structured collector-config modal. Optional collector
+   *  id pre-selects an entry; undefined lands on the first one. */
+  onConfigureCollector: (collectorId?: string) => void;
 }
 
 const LOGO_LINES = [
@@ -36,6 +39,7 @@ export function Titlebar({
   activeWorkspaceId,
   activeWorkspaceTitle,
   onEditCollectors,
+  onConfigureCollector,
 }: Props) {
   return (
     <div
@@ -93,6 +97,7 @@ export function Titlebar({
         activeWorkspaceId={activeWorkspaceId}
         activeWorkspaceTitle={activeWorkspaceTitle}
         onEditCollectors={onEditCollectors}
+        onConfigureCollector={onConfigureCollector}
       />
     </div>
   );

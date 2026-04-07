@@ -272,10 +272,25 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, get
 	// Both protocols: input lets the model write files / run shell, output
 	// makes its reply land in the chat as structured blocks. Order matters:
 	// instructions first, then shell snapshot, then user request.
-	fullPrompt := glitchctx.ProtocolInstructions +
-		glitchctx.OutputProtocolInstructions +
-		glitchctx.BuildShellContext() +
-		"\n## User Request\n" + prompt
+	//
+	// When the harness sets GLITCH_READONLY=1 we strip the side-effect
+	// protocol entirely. Belt-and-braces with the ProcessBlocks refusal:
+	// the runner-side enforcement is the hard backstop, but not telling
+	// the model the protocol exists makes it far less likely to emit a
+	// block in the first place. Small Ollama models will happily write
+	// to disk if the protocol is documented in the prompt regardless of
+	// any "READONLY:" disclaimer.
+	var fullPrompt string
+	if glitchctx.IsReadonly() {
+		fullPrompt = glitchctx.OutputProtocolInstructions +
+			glitchctx.BuildShellContext() +
+			"\n## User Request\n" + prompt
+	} else {
+		fullPrompt = glitchctx.ProtocolInstructions +
+			glitchctx.OutputProtocolInstructions +
+			glitchctx.BuildShellContext() +
+			"\n## User Request\n" + prompt
+	}
 	result, err := callOllama(baseURL, model, fullPrompt, options)
 	if err != nil {
 		// Reactive fallback: model may have become unavailable between the check and inference.

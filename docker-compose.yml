@@ -17,5 +17,45 @@ services:
       timeout: 5s
       retries: 10
 
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.17.0
+    container_name: glitch-kibana
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      # Point Kibana at the in-network ES container. Using the docker
+      # service DNS name (`elasticsearch`) instead of localhost so this
+      # works the same on macOS, Linux, and any future remote-host
+      # compose runs.
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_NAME=glitch-kibana
+      - SERVER_HOST=0.0.0.0
+      # No security on the local dev cluster — matches the ES service
+      # above. The Kibana UI is reachable at http://localhost:5601 with
+      # zero auth, which is what gl1tch's bootstrap code assumes.
+      - XPACK_SECURITY_ENABLED=false
+      - XPACK_REPORTING_ENABLED=false
+      # Quiet the "encryption keys not set" warnings on every restart.
+      # These are local-dev throwaway values; the real cluster (if you
+      # ever stand one up) should set them via secrets.
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=glitch_local_dev_encryption_key_32b
+      - XPACK_REPORTING_ENCRYPTIONKEY=glitch_local_dev_reporting_key_32bytes_x
+      - XPACK_SECURITY_ENCRYPTIONKEY=glitch_local_dev_security_key_32bytes_xx
+    ports:
+      - "5601:5601"
+    volumes:
+      - glitch-kibana-data:/usr/share/kibana/data
+    healthcheck:
+      # /api/status returns 200 once Kibana has finished its plugin
+      # initialization and is actually serving the UI — anything earlier
+      # races against EnsureKibanaDataViews from glitchd startup.
+      test: ["CMD-SHELL", "curl -sf http://localhost:5601/api/status || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
 volumes:
   glitch-es-data:
+  glitch-kibana-data:

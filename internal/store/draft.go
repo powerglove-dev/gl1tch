@@ -33,17 +33,25 @@ type DraftTurn struct {
 // Draft is a single in-progress prompt/workflow/skill/agent the user is
 // iterating on. The body is the latest version; turns is the full
 // refinement history.
+//
+// InputFormat / OutputFormat are optional shape hints carried alongside
+// the body. They only apply to kind=prompt today (the editor popup
+// hides them for other kinds), but living on the draft means a brand
+// new prompt can capture format intent before it's ever promoted into
+// the prompts table. Empty string = "free-form text".
 type Draft struct {
-	ID          int64
-	WorkspaceID string
-	Kind        string
-	Title       string
-	Body        string
-	Turns       []DraftTurn
-	TargetID    int64  // 0 when unset
-	TargetPath  string // "" when unset
-	CreatedAt   int64
-	UpdatedAt   int64
+	ID           int64
+	WorkspaceID  string
+	Kind         string
+	Title        string
+	Body         string
+	InputFormat  string
+	OutputFormat string
+	Turns        []DraftTurn
+	TargetID     int64  // 0 when unset
+	TargetPath   string // "" when unset
+	CreatedAt    int64
+	UpdatedAt    int64
 }
 
 // CreateDraft inserts a new draft and returns the generated ID.
@@ -57,9 +65,9 @@ func (s *Store) CreateDraft(_ context.Context, d Draft) (int64, error) {
 	var id int64
 	err = s.writer.send(func(db *sql.DB) error {
 		res, err := db.Exec(
-			`INSERT INTO drafts (workspace_id, kind, title, body, turns_json, target_id, target_path, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			d.WorkspaceID, d.Kind, d.Title, d.Body, turnsJSON,
+			`INSERT INTO drafts (workspace_id, kind, title, body, input_format, output_format, turns_json, target_id, target_path, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			d.WorkspaceID, d.Kind, d.Title, d.Body, d.InputFormat, d.OutputFormat, turnsJSON,
 			nullableInt(d.TargetID), d.TargetPath, now, now,
 		)
 		if err != nil {
@@ -81,8 +89,12 @@ func (s *Store) UpdateDraft(_ context.Context, d Draft) error {
 	now := time.Now().Unix()
 	return s.writer.send(func(db *sql.DB) error {
 		res, err := db.Exec(
-			`UPDATE drafts SET title = ?, body = ?, target_id = ?, target_path = ?, updated_at = ? WHERE id = ?`,
-			d.Title, d.Body, nullableInt(d.TargetID), d.TargetPath, now, d.ID,
+			`UPDATE drafts
+			    SET title = ?, body = ?, input_format = ?, output_format = ?,
+			        target_id = ?, target_path = ?, updated_at = ?
+			  WHERE id = ?`,
+			d.Title, d.Body, d.InputFormat, d.OutputFormat,
+			nullableInt(d.TargetID), d.TargetPath, now, d.ID,
 		)
 		if err != nil {
 			return fmt.Errorf("store: update draft: %w", err)
@@ -143,11 +155,11 @@ func (s *Store) GetDraft(ctx context.Context, id int64) (Draft, error) {
 	var targetID sql.NullInt64
 	var turnsRaw string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, workspace_id, kind, title, body, turns_json, target_id, target_path, created_at, updated_at
+		`SELECT id, workspace_id, kind, title, body, input_format, output_format, turns_json, target_id, target_path, created_at, updated_at
 		   FROM drafts
 		  WHERE id = ?`,
 		id,
-	).Scan(&d.ID, &d.WorkspaceID, &d.Kind, &d.Title, &d.Body, &turnsRaw, &targetID, &d.TargetPath, &d.CreatedAt, &d.UpdatedAt)
+	).Scan(&d.ID, &d.WorkspaceID, &d.Kind, &d.Title, &d.Body, &d.InputFormat, &d.OutputFormat, &turnsRaw, &targetID, &d.TargetPath, &d.CreatedAt, &d.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return Draft{}, sql.ErrNoRows
 	}
@@ -165,7 +177,7 @@ func (s *Store) GetDraft(ctx context.Context, id int64) (Draft, error) {
 // ordered by updated_at DESC. If kind is non-empty, results are filtered
 // to that kind. Returns a non-nil empty slice when there are no rows.
 func (s *Store) ListDraftsByWorkspace(ctx context.Context, workspaceID, kind string) ([]Draft, error) {
-	query := `SELECT id, workspace_id, kind, title, body, turns_json, target_id, target_path, created_at, updated_at
+	query := `SELECT id, workspace_id, kind, title, body, input_format, output_format, turns_json, target_id, target_path, created_at, updated_at
 	            FROM drafts
 	           WHERE workspace_id = ?`
 	args := []any{workspaceID}
@@ -186,7 +198,7 @@ func (s *Store) ListDraftsByWorkspace(ctx context.Context, workspaceID, kind str
 		var d Draft
 		var targetID sql.NullInt64
 		var turnsRaw string
-		if err := rows.Scan(&d.ID, &d.WorkspaceID, &d.Kind, &d.Title, &d.Body, &turnsRaw, &targetID, &d.TargetPath, &d.CreatedAt, &d.UpdatedAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.WorkspaceID, &d.Kind, &d.Title, &d.Body, &d.InputFormat, &d.OutputFormat, &turnsRaw, &targetID, &d.TargetPath, &d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("store: list drafts scan: %w", err)
 		}
 		if targetID.Valid {

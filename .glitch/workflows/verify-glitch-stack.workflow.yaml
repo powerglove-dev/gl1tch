@@ -1,0 +1,272 @@
+name: verify-glitch-stack
+version: "1"
+description: "Verify the glitch stack is healthy: Elasticsearch, Kibana, the brain-decisions index, and the data view bootstrap. Run via `glitch ask verify the glitch stack`."
+
+steps:
+  - id: probe-elasticsearch
+    executor: shell
+    outputs: { value: string }
+    vars:
+      cmd: |
+        echo "=== elasticsearch ==="
+        if curl -sf -o /dev/null -w "  status: %{http_code}\n" http://localhost:9200/_cluster/health; then
+          curl -s http://localhost:9200/_cluster/health | tr ',' '\n' | sed 's/^/  /'
+        else
+          echo "  UNREACHABLE — try: docker compose up -d elasticsearch"
+          exit 0
+        fi
+
+  - id: probe-kibana
+    executor: shell
+    outputs: { value: string }
+    vars:
+      cmd: |
+        echo "=== kibana ==="
+        if curl -sf -o /dev/null -w "  status: %{http_code}\n" http://localhost:5601/api/status; then
+          curl -s http://localhost:5601/api/status \
+            | grep -o '"overall":{[^}]*}' \
+            | sed 's/^/  /'
+        else
+          echo "  UNREACHABLE — try: docker compose up -d kibana"
+          exit 0
+        fi
+
+  - id: probe-brain-decisions-index
+    executor: shell
+    needs: [probe-elasticsearch]
+    outputs: { value: string }
+    vars:
+      cmd: |
+        echo "=== glitch-brain-decisions index ==="
+        code=$(curl -s -o /tmp/glitch-bd.json -w "%{http_code}" http://localhost:9200/glitch-brain-decisions)
+        if [ "$code" = "200" ]; then
+          echo "  exists: yes"
+          # Field count gives us a quick smell test that the mapping
+          # we shipped actually got applied. The expected fields are
+          # listed in internal/esearch/mappings.go::brainDecisionsMapping.
+          fields=$(grep -o '"properties":{[^}]*}' /tmp/glitch-bd.json | tr ',' '\n' | grep -c '"type"')
+          echo "  mapped fields: $fields"
+          for f in chosen_provider all_providers escalated confidence cost_usd workspace_id timestamp; do
+            if grep -q "\"$f\":" /tmp/glitch-bd.json; then
+              echo "  ✓ $f"
+            else
+              echo "  ✗ $f MISSING"
+            fi
+          done
+        else
+          echo "  exists: NO (status $code) — start glitchd once to trigger EnsureIndices"
+        fi
+
+  - id: probe-collector-activity
+    executor: shell
+    needs: [probe-elasticsearch]
+    outputs: { value: string }
+    vars:
+      cmd: |
+        echo "=== collector activity (per source) ==="
+        # Aggregate glitch-events by source. This is the same query
+        # the brain popover uses (pkg/glitchd/brain.go::QueryCollectorActivity),
+        # so if a source shows up here it's also showing up in the GUI.
+        # Total docs + last_seen lets the user immediately see "git is
+        # working but github hasn't run yet" without leaving the terminal.
+        body='{"size":0,"aggs":{"by_source":{"terms":{"field":"source","size":50},"aggs":{"last_seen":{"max":{"field":"timestamp"}}}}}}'
+        resp=$(curl -s -H 'Content-Type: application/json' \
+          -X POST "http://localhost:9200/glitch-events/_search" -d "$body")
+        if echo "$resp" | grep -q '"error"'; then
+          echo "  glitch-events index not present yet — run any collector once"
+        else
+          # Pull each (key, doc_count, last_seen) triple. We use python
+          # for the JSON walk because grep+sed on nested aggs is the
+          # path to madness.
+          echo "$resp" | python3 -c '
+        import json,sys,datetime
+        d=json.load(sys.stdin)
+        buckets=d.get("aggregations",{}).get("by_source",{}).get("buckets",[])
+        if not buckets:
+            print("  (no events indexed yet)")
+        else:
+            for b in buckets:
+                key=b["key"]
+                n=b["doc_count"]
+                ts=b.get("last_seen",{}).get("value")
+                when="never"
+                if ts:
+                    when=datetime.datetime.fromtimestamp(ts/1000).strftime("%H:%M:%S")
+                mark="ok " if n>0 else "-- "
+                print("  %s %-20s %6d docs   last seen: %s" % (mark, key, n, when))
+        '
+        fi
+
+  - id: probe-workspace-events
+    executor: shell
+    needs: [probe-elasticsearch]
+    outputs: { value: string }
+    vars:
+      cmd: |
+        echo "=== events per workspace ==="
+        body='{"size":0,"aggs":{"by_ws":{"terms":{"field":"workspace_id","size":20,"missing":"(global)"},"aggs":{"by_source":{"terms":{"field":"source","size":10}}}}}}'
+        resp=$(curl -s -H 'Content-Type: application/json' \
+          -X POST "http://localhost:9200/glitch-events/_search" -d "$body")
+        if echo "$resp" | grep -q '"error"'; then
+          echo "  no events to bucket yet"
+        else
+          echo "$resp" | python3 -c '
+        import json,sys
+        d=json.load(sys.stdin)
+        buckets=d.get("aggregations",{}).get("by_ws",{}).get("buckets",[])
+        if not buckets:
+            print("  (no workspace-attributed events yet)")
+        else:
+            for b in buckets:
+                ws=b["key"]
+                n=b["doc_count"]
+                print("  workspace: %s  (%d events)" % (ws, n))
+                for s in b.get("by_source",{}).get("buckets",[]):
+                    print("    - %s: %d" % (s["key"], s["doc_count"]))
+        '
+        fi
+
+  - id: probe-vector-index
+    executor: shell
+    needs: [probe-elasticsearch]
+    outputs: { value: string }
+    vars:
+      cmd: |
+        echo "=== code/note vector index ==="
+        # Total vectors and per-scope distribution. This is what brainrag
+        # writes to (internal/brainrag/store.go::IndexNote).
+        body='{"size":0,"aggs":{"by_scope":{"terms":{"field":"scope","size":20}}}}'
+        resp=$(curl -s -H 'Content-Type: application/json' \
+          -X POST "http://localhost:9200/glitch-vectors/_search" -d "$body")
+        if echo "$resp" | grep -q '"error"'; then
+          echo "  glitch-vectors index not present yet"
+        else
+          echo "$resp" | python3 -c '
+        import json,sys
+        d=json.load(sys.stdin)
+        total=d.get("hits",{}).get("total",{}).get("value",0)
+        print("  total vectors: %d" % total)
+        for b in d.get("aggregations",{}).get("by_scope",{}).get("buckets",[]):
+            print("    %s: %d chunks" % (b["key"], b["doc_count"]))
+        '
+        fi
+
+  - id: probe-decisions-doc-count
+    executor: shell
+    needs: [probe-brain-decisions-index]
+    outputs: { value: string }
+    vars:
+      cmd: |
+        echo "=== brain-decisions activity ==="
+        count=$(curl -s "http://localhost:9200/glitch-brain-decisions/_count" | grep -o '"count":[0-9]*' | cut -d: -f2)
+        count=${count:-0}
+        echo "  total decisions logged: $count"
+        if [ "$count" -gt 0 ]; then
+          echo ""
+          echo "  most recent (top 3):"
+          curl -s -H 'Content-Type: application/json' \
+            -X POST "http://localhost:9200/glitch-brain-decisions/_search" \
+            -d '{"size":3,"sort":[{"timestamp":"desc"}],"_source":["chosen_provider","escalated","status","duration_ms","question"]}' \
+            | tr '{' '\n' | grep -E 'chosen_provider|escalated|question' | sed 's/^/    /' | head -20
+        else
+          echo "  (run any chain in the desktop app to seed this)"
+        fi
+
+  - id: probe-kibana-data-views
+    executor: shell
+    needs: [probe-kibana]
+    outputs: { value: string }
+    vars:
+      cmd: |
+        echo "=== kibana data views ==="
+        code=$(curl -s -o /tmp/glitch-dv.json -w "%{http_code}" \
+          "http://localhost:5601/api/data_views")
+        if [ "$code" != "200" ]; then
+          echo "  Kibana API not reachable (status $code) — skipping"
+          exit 0
+        fi
+        for dv in glitch-brain-decisions glitch-pipelines glitch-events glitch-summaries glitch-insights; do
+          if grep -q "\"$dv\"" /tmp/glitch-dv.json; then
+            echo "  ✓ $dv"
+          else
+            echo "  ✗ $dv MISSING — restart glitchd to re-run EnsureDataViews"
+          fi
+        done
+
+  # Hermetic, no-LLM final report. We deliberately don't pipe the
+  # probe outputs through Ollama here: this workflow is the gl1tch
+  # stack's smoke test, and a smoke test must not depend on the very
+  # local model the rest of the stack is built around. A pure shell
+  # report also means `glitch ask "verify the glitch stack"` produces
+  # the same output every time, with no token spend.
+  #
+  # readonly: true is set defensively even though this is a shell
+  # step — it documents intent and protects against future edits that
+  # might add an LLM tail step without thinking through the blast radius.
+  - id: report
+    executor: shell
+    readonly: true
+    needs:
+      - probe-elasticsearch
+      - probe-kibana
+      - probe-brain-decisions-index
+      - probe-decisions-doc-count
+      - probe-kibana-data-views
+      - probe-collector-activity
+      - probe-workspace-events
+      - probe-vector-index
+    outputs: { value: string }
+    vars:
+      cmd: |
+        echo ""
+        echo "═══════════════════════════════════════════════════════"
+        echo "  glitch stack health"
+        echo "═══════════════════════════════════════════════════════"
+        es_ok=$(curl -sf -o /dev/null http://localhost:9200/_cluster/health && echo yes || echo no)
+        kb_ok=$(curl -sf -o /dev/null http://localhost:5601/api/status && echo yes || echo no)
+        bd_ok=$(curl -sf -o /dev/null http://localhost:9200/glitch-brain-decisions && echo yes || echo no)
+        bd_count=$(curl -s "http://localhost:9200/glitch-brain-decisions/_count" 2>/dev/null | grep -o '"count":[0-9]*' | cut -d: -f2)
+        bd_count=${bd_count:-0}
+        ev_count=$(curl -s "http://localhost:9200/glitch-events/_count" 2>/dev/null | grep -o '"count":[0-9]*' | cut -d: -f2)
+        ev_count=${ev_count:-0}
+        vec_count=$(curl -s "http://localhost:9200/glitch-vectors/_count" 2>/dev/null | grep -o '"count":[0-9]*' | cut -d: -f2)
+        vec_count=${vec_count:-0}
+        active_sources=0
+        if [ "$ev_count" -gt 0 ]; then
+          # Count distinct sources with at least one doc.
+          body='{"size":0,"aggs":{"by_source":{"terms":{"field":"source","size":50}}}}'
+          src_resp=$(curl -s -H 'Content-Type: application/json' -X POST "http://localhost:9200/glitch-events/_search" -d "$body")
+          active_sources=$(echo "$src_resp" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(len(d.get("aggregations",{}).get("by_source",{}).get("buckets",[])))' 2>/dev/null)
+          active_sources=${active_sources:-0}
+        fi
+        dv_present=0
+        if [ "$kb_ok" = "yes" ]; then
+          dv_json=$(curl -s "http://localhost:5601/api/data_views" 2>/dev/null)
+          for dv in glitch-brain-decisions glitch-pipelines glitch-events glitch-summaries glitch-insights; do
+            echo "$dv_json" | grep -q "\"$dv\"" && dv_present=$((dv_present+1))
+          done
+        fi
+        printf "  elasticsearch         : %s\n" "$es_ok"
+        printf "  kibana                : %s\n" "$kb_ok"
+        printf "  brain-decisions index : %s\n" "$bd_ok"
+        printf "  decisions logged      : %s\n" "$bd_count"
+        printf "  events indexed        : %s (across %s sources)\n" "$ev_count" "$active_sources"
+        printf "  code/note vectors     : %s\n" "$vec_count"
+        printf "  kibana data views     : %d of 5\n" "$dv_present"
+        echo ""
+        if [ "$es_ok" = "yes" ] && [ "$kb_ok" = "yes" ] && [ "$bd_ok" = "yes" ] && [ "$dv_present" = "5" ]; then
+          echo "  ✓ stack ok — open http://localhost:5601 to chart your decisions"
+          if [ "$ev_count" = "0" ]; then
+            echo "    ⚠ no collector activity yet — open the desktop app and"
+            echo "      give the collectors a moment, or check the brain popover"
+          fi
+          if [ "$bd_count" = "0" ]; then
+            echo "    ⚠ no brain decisions yet — run a chain in any workspace to seed"
+          fi
+        else
+          echo "  ✗ one or more components missing — see probes above"
+          [ "$es_ok"  = "no" ] && echo "    → docker compose up -d elasticsearch"
+          [ "$kb_ok"  = "no" ] && echo "    → docker compose up -d kibana"
+          [ "$bd_ok"  = "no" ] && echo "    → start glitchd once to trigger EnsureIndices"
+        fi
+        echo "═══════════════════════════════════════════════════════"

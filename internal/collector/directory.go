@@ -90,28 +90,25 @@ func (d *DirectoryCollector) Start(ctx context.Context, es *esearch.Client) erro
 	}
 }
 
-// currentDirs returns the union of the directories the collector was
-// constructed with (d.Dirs, from the initial config snapshot) and the
-// directories currently listed in observer.yaml. Re-reads the file
-// every call so changes the desktop makes via the in-app editor (or
-// AddWorkspaceDirectory) take effect on the next tick.
+// currentDirs returns the directories the collector was constructed
+// with. Workspace directories are now the source of truth and are
+// passed in via d.Dirs at pod start time; the desktop's
+// AddWorkspaceDirectory / WriteWorkspaceCollectorConfigJSON paths
+// restart the pod so a fresh d.Dirs reflects any changes immediately.
+//
+// Historically this method also merged the global observer.yaml
+// directories.paths list, which leaked dirs from one workspace into
+// every other workspace's collector. That fallback was dropped along
+// with the workspace-scoped collector split.
 func (d *DirectoryCollector) currentDirs() []string {
 	seen := make(map[string]bool, len(d.Dirs))
 	out := make([]string, 0, len(d.Dirs))
-	add := func(p string) {
+	for _, p := range d.Dirs {
 		if p == "" || seen[p] {
-			return
+			continue
 		}
 		seen[p] = true
 		out = append(out, p)
-	}
-	for _, p := range d.Dirs {
-		add(p)
-	}
-	if cfg, err := LoadConfig(); err == nil && cfg != nil {
-		for _, p := range cfg.Directories.Paths {
-			add(p)
-		}
 	}
 	return out
 }

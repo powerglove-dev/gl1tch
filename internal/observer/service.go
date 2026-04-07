@@ -38,6 +38,23 @@ func Start(ctx context.Context) (*Service, error) {
 		return nil, err
 	}
 
+	// Best-effort Kibana bootstrap. We POST our canonical Data Views
+	// (one per glitch-* index) so the user can open Kibana on first
+	// run and immediately see Lens / Discover working without manually
+	// clicking through "Create data view" five times.
+	//
+	// Failures here are intentionally not propagated: Kibana is
+	// optional infrastructure, and a missing/dead Kibana must never
+	// keep the observer service from starting. We log at info level
+	// (not warn) when Kibana isn't reachable so a user who hasn't run
+	// `docker compose up kibana` doesn't see scary log lines.
+	kb := esearch.NewKibana("")
+	if err := kb.EnsureDataViews(ctx); err != nil {
+		slog.Info("observer: kibana bootstrap skipped", "err", err)
+	} else {
+		slog.Info("observer: kibana data views ensured")
+	}
+
 	model := cfg.Model
 	if model == "" {
 		model = "llama3.2"

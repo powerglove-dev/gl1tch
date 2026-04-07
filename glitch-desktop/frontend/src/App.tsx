@@ -6,6 +6,7 @@ import { MessageList } from "./components/MessageList";
 import { ChatInput } from "./components/ChatInput";
 import type { ProviderOption, ChainStep } from "./components/ChatInput";
 import { EditorPopup } from "./components/EditorPopup";
+import { CollectorConfigModal } from "./components/collectors/CollectorConfigModal";
 import { useToast } from "./components/Toast";
 
 import { useChatStore } from "./lib/store";
@@ -64,6 +65,13 @@ export function App() {
   // the popup loads its own state from GetDraft so the parent doesn't
   // have to mirror the draft body, turn history, etc.
   const [openDraftId, setOpenDraftId] = useState<number | null>(null);
+  // Structured collectors-config modal. The string is the optional
+  // initial collector id to pre-select; null means "modal closed".
+  // Lives at the App root for the same reason openDraftId does:
+  // BrainIndicator emits the request, App owns the modal lifecycle.
+  const [collectorConfig, setCollectorConfig] = useState<
+    { initialCollectorId?: string } | null
+  >(null);
 
   // Observer default model — what "observer" mode delegates to when a chain
   // step needs an actual executor. Persisted to localStorage so the user's
@@ -547,6 +555,21 @@ export function App() {
     setOpenDraftId(null);
   }, []);
 
+  // Open the structured collector-config modal. The pencil per-row in
+  // the brain popover passes a collector id; the section-level "+ add"
+  // button passes undefined and the modal lands on the first entry.
+  const handleConfigureCollector = useCallback(
+    (collectorId?: string) => {
+      if (!state.activeWorkspaceId) return;
+      setCollectorConfig({ initialCollectorId: collectorId });
+    },
+    [state.activeWorkspaceId],
+  );
+
+  const closeCollectorConfig = useCallback(() => {
+    setCollectorConfig(null);
+  }, []);
+
   // ── Send ──────────────────────────────────────────────────────────────
 
   // runChainNow is the canonical execution path for a chain + optional text.
@@ -691,6 +714,7 @@ export function App() {
         activeWorkspaceId={state.activeWorkspaceId}
         activeWorkspaceTitle={activeWs?.title ?? ""}
         onEditCollectors={handleEditCollectors}
+        onConfigureCollector={handleConfigureCollector}
       />
 
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
@@ -765,6 +789,19 @@ export function App() {
           onSetObserverDefault={handleSetObserverDefault}
           onClose={closeEditor}
           onSaved={refreshSidebarData}
+        />
+      )}
+
+      {/* Structured collector config modal — schema-driven editor
+          for collectors.yaml. Lives at the root alongside EditorPopup
+          so the brain popover can fire-and-forget. */}
+      {collectorConfig && state.activeWorkspaceId && (
+        <CollectorConfigModal
+          workspaceId={state.activeWorkspaceId}
+          initialCollectorId={collectorConfig.initialCollectorId}
+          onClose={closeCollectorConfig}
+          onSaved={refreshSidebarData}
+          onEditRawYAML={handleEditCollectors}
         />
       )}
     </div>

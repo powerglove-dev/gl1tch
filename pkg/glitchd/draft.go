@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,22 +30,25 @@ import (
 	"github.com/8op-org/gl1tch/internal/collector"
 	"github.com/8op-org/gl1tch/internal/esearch"
 	"github.com/8op-org/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/pkg/glitchproto"
 )
 
 // DraftInfo is the wire shape exported to the desktop frontend. We
 // re-export it here (instead of returning store.Draft directly) so the
 // internal repository type can evolve without breaking the JS layer.
 type DraftInfo struct {
-	ID          int64             `json:"id"`
-	WorkspaceID string            `json:"workspace_id"`
-	Kind        string            `json:"kind"`
-	Title       string            `json:"title"`
-	Body        string            `json:"body"`
-	Turns       []store.DraftTurn `json:"turns"`
-	TargetID    int64             `json:"target_id,omitempty"`
-	TargetPath  string            `json:"target_path,omitempty"`
-	CreatedAt   int64             `json:"created_at"`
-	UpdatedAt   int64             `json:"updated_at"`
+	ID           int64             `json:"id"`
+	WorkspaceID  string            `json:"workspace_id"`
+	Kind         string            `json:"kind"`
+	Title        string            `json:"title"`
+	Body         string            `json:"body"`
+	InputFormat  string            `json:"input_format"`
+	OutputFormat string            `json:"output_format"`
+	Turns        []store.DraftTurn `json:"turns"`
+	TargetID     int64             `json:"target_id,omitempty"`
+	TargetPath   string            `json:"target_path,omitempty"`
+	CreatedAt    int64             `json:"created_at"`
+	UpdatedAt    int64             `json:"updated_at"`
 }
 
 // CreateDraft inserts a new empty (or seeded) draft and returns it as
@@ -179,6 +183,36 @@ func RefineDraft(ctx context.Context, opts RefineDraftOpts, tokenCh chan<- strin
 
 	// Stream into a buffer that we *also* tee to the caller's channel.
 	// We need the full text on completion to persist the new body.
+	//
+	// Output cleanup — why we filter:
+	//   Provider plugins layer several sidecar protocols into their
+	//   stdout: the `<<GLITCH_*>>` output-formatting markers, brain
+	//   capture blocks (`<brain …>…</brain>`), end-of-run stats
+	//   telemetry JSON (`{"type":"gl1tch-stats", …}`), GLITCH_WRITE
+	//   acknowledgements (`[wrote: path]`), and leading `<>` arrow
+	//   markers. The desktop chat strips all of these in its TS
+	//   render path (see frontend/src/lib/parseAgentOutput.ts), but
+	//   the draft editor streams tokens straight into CodeMirror,
+	//   so without a filter the user sees every layer of
+	//   scaffolding in the editor and gets it pasted into their
+	//   saved prompt.
+	//
+	//   glitchproto.NewContentOnlyWriter is the "I just want the
+	//   model's actual content, nothing else" primitive — it
+	//   composes the GLITCH marker splitter with a line-buffered
+	//   scrubber for the other four protocols. Any surface that
+	//   wants clean provider output (workflow step capture, copy
+	//   targets, future refinement surfaces) should use it so we
+	//   don't end up with five copies of this stripping logic
+	//   drifting out of sync.
+	//
+	// TODO(plain-output): the real fix is producer-side — plumb an
+	// output-mode flag through StreamPromptOpts and the plugin
+	// invocation boundary so plain-text callers can tell the
+	// plugin NOT to inject OutputProtocolInstructions at all (and
+	// to suppress stats/brain capture for that call). Until then
+	// we strip on receive, which works but wastes tokens and
+	// nudges the model toward an unnatural reply shape.
 	var buf strings.Builder
 	tee := make(chan string, 16)
 	doneCh := make(chan error, 1)
@@ -193,16 +227,23 @@ func RefineDraft(ctx context.Context, opts RefineDraftOpts, tokenCh chan<- strin
 		doneCh <- err
 	}()
 
+	// tokenChWriter adapts the caller's token channel to an
+	// io.Writer so the cleaner's downstream sink can be an
+	// io.MultiWriter that tees into both buf and the live channel.
+	// Declared inline because it's tightly coupled to this
+	// function's ctx + tokenCh — lifting it out would just add an
+	// indirection for no gain.
+	liveWriter := &tokenChWriter{ch: tokenCh, ctx: ctx}
+	cleaner := glitchproto.NewContentOnlyWriter(io.MultiWriter(&buf, liveWriter))
 	for chunk := range tee {
-		buf.WriteString(chunk)
-		// Forward to caller. If the caller has gone away (ctx cancel),
-		// drop the chunk and keep draining tee so the producer goroutine
-		// doesn't block forever.
-		select {
-		case tokenCh <- chunk:
-		case <-ctx.Done():
-		}
+		// Write into the cleaner. If the caller has gone away
+		// (ctx cancel), liveWriter drops silently and we keep
+		// draining tee so the producer goroutine doesn't block
+		// forever — buf still accumulates a persistable copy of
+		// whatever content the stream produced before the cancel.
+		_, _ = cleaner.Write([]byte(chunk))
 	}
+	_ = cleaner.Close()
 	streamErr := <-doneCh
 	close(tokenCh)
 
@@ -228,16 +269,22 @@ func RefineDraft(ctx context.Context, opts RefineDraftOpts, tokenCh chan<- strin
 	return streamErr
 }
 
-// UpdateDraftBody persists local edits to a draft's title and body
-// without running a refinement turn. This is what the editor popup
-// calls when the user types directly into the CodeMirror surface
-// rather than asking gl1tch to refine — manual edits need a path
-// that doesn't go through the model.
+// UpdateDraftBody persists local edits to a draft's title, body, and
+// optional input/output format hints — all without running a refinement
+// turn. This is what the editor popup calls when the user types
+// directly into the CodeMirror surface rather than asking gl1tch to
+// refine; manual edits need a path that doesn't go through the model.
+//
+// inputFormat and outputFormat are optional. Empty string means
+// "free-form text" — the default for any prompt that hasn't opted into
+// a structured shape. They're persisted to the draft row so the
+// builder can carry the user's intent through to PromoteDraft, which
+// in turn writes them onto the prompts table.
 //
 // Returns "" on success or an error message. The desktop popup uses
 // this right before PromoteDraft so the freshly-typed text is what
 // gets written to the target.
-func UpdateDraftBody(ctx context.Context, draftID int64, title, body string) string {
+func UpdateDraftBody(ctx context.Context, draftID int64, title, body, inputFormat, outputFormat string) string {
 	st, err := OpenStore()
 	if err != nil {
 		return err.Error()
@@ -248,6 +295,8 @@ func UpdateDraftBody(ctx context.Context, draftID int64, title, body string) str
 	}
 	d.Title = title
 	d.Body = body
+	d.InputFormat = inputFormat
+	d.OutputFormat = outputFormat
 	if err := st.UpdateDraft(ctx, d); err != nil {
 		return err.Error()
 	}
@@ -431,19 +480,23 @@ func promotePromptDraft(ctx context.Context, st *store.Store, d store.Draft, mak
 
 	if d.TargetID > 0 {
 		if err := st.UpdatePrompt(ctx, store.Prompt{
-			ID:    d.TargetID,
-			Title: d.Title,
-			Body:  d.Body,
-			CWD:   cwd,
+			ID:           d.TargetID,
+			Title:        d.Title,
+			Body:         d.Body,
+			CWD:          cwd,
+			InputFormat:  d.InputFormat,
+			OutputFormat: d.OutputFormat,
 		}); err != nil {
 			return errorJSON(err)
 		}
 		return promotedJSON(d.TargetID, "")
 	}
 	id, err := st.InsertPrompt(ctx, store.Prompt{
-		Title: d.Title,
-		Body:  d.Body,
-		CWD:   cwd,
+		Title:        d.Title,
+		Body:         d.Body,
+		CWD:          cwd,
+		InputFormat:  d.InputFormat,
+		OutputFormat: d.OutputFormat,
 	})
 	if err != nil {
 		return errorJSON(err)
@@ -644,6 +697,37 @@ func workspaceCWD(ctx context.Context, st *store.Store, workspaceID string) stri
 	return ws.Directories[0]
 }
 
+// tokenChWriter adapts a chan<-string (the refinement popup's live
+// stream sink) to io.Writer so we can compose it behind an
+// io.MultiWriter alongside the buffer that accumulates bytes for
+// persistence. On ctx cancel it drops the chunk rather than
+// blocking, so the producer goroutine can finish draining the
+// upstream tee without deadlocking.
+//
+// We intentionally report len(p) back even when the send is
+// dropped — the contract for NewTextOnlyWriter is that every byte
+// is "consumed" once the splitter has accepted it, and surfacing a
+// short-write here would confuse io.MultiWriter's bookkeeping with
+// no upside (the caller has already canceled, the bytes aren't
+// going anywhere useful anyway).
+type tokenChWriter struct {
+	ch  chan<- string
+	ctx context.Context
+}
+
+func (w *tokenChWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	select {
+	case w.ch <- string(p):
+	case <-w.ctx.Done():
+	}
+	return len(p), nil
+}
+
+var _ io.Writer = (*tokenChWriter)(nil)
+
 // toDraftInfo copies a store.Draft into the wire-friendly DraftInfo.
 func toDraftInfo(d store.Draft) DraftInfo {
 	turns := d.Turns
@@ -651,16 +735,18 @@ func toDraftInfo(d store.Draft) DraftInfo {
 		turns = []store.DraftTurn{}
 	}
 	return DraftInfo{
-		ID:          d.ID,
-		WorkspaceID: d.WorkspaceID,
-		Kind:        d.Kind,
-		Title:       d.Title,
-		Body:        d.Body,
-		Turns:       turns,
-		TargetID:    d.TargetID,
-		TargetPath:  d.TargetPath,
-		CreatedAt:   d.CreatedAt,
-		UpdatedAt:   d.UpdatedAt,
+		ID:           d.ID,
+		WorkspaceID:  d.WorkspaceID,
+		Kind:         d.Kind,
+		Title:        d.Title,
+		Body:         d.Body,
+		InputFormat:  d.InputFormat,
+		OutputFormat: d.OutputFormat,
+		Turns:        turns,
+		TargetID:     d.TargetID,
+		TargetPath:   d.TargetPath,
+		CreatedAt:    d.CreatedAt,
+		UpdatedAt:    d.UpdatedAt,
 	}
 }
 

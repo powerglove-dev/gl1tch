@@ -11,6 +11,8 @@ export function AskProvider(arg1:string,arg2:string,arg3:string,arg4:string,arg5
 
 export function AskScoped(arg1:string,arg2:string):Promise<void>;
 
+export function BrainDecisions(arg1:string):Promise<string>;
+
 export function CollectorsConfigPath(arg1:string):Promise<string>;
 
 export function CreateDraft(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
@@ -30,6 +32,8 @@ export function DeleteWorkflowFile(arg1:string):Promise<string>;
 export function DeleteWorkspace(arg1:string):Promise<void>;
 
 export function Doctor(arg1:string):Promise<void>;
+
+export function GetCollectorsConfigJSON(arg1:string):Promise<string>;
 
 export function GetDraft(arg1:number):Promise<string>;
 
@@ -85,12 +89,14 @@ export function StopDraftRefine(arg1:number):Promise<void>;
 
 export function StopRun(arg1:string):Promise<void>;
 
-export function UpdateDraftBody(arg1:number,arg2:string,arg3:string):Promise<string>;
+export function UpdateDraftBody(arg1:number,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
 
 export function UpdateWorkspaceTitle(arg1:string,arg2:string):Promise<void>;
 
 export function WorkflowPathForName(arg1:string,arg2:string):Promise<string>;
 
 export function WriteCollectorsConfig(arg1:string,arg2:string):Promise<string>;
+
+export function WriteCollectorsConfigJSON(arg1:string,arg2:string):Promise<string>;
 
 export function WriteWorkflowFile(arg1:string,arg2:string):Promise<string>;

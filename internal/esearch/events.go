@@ -1,6 +1,26 @@
 package esearch
 
-import "time"
+import (
+	"strings"
+	"time"
+)
+
+// IsLocalProvider reports whether a provider name refers to a fully-local
+// (no paid API call) executor. Used by BrainDecision to derive the
+// `escalated` flag without each call site re-encoding the policy.
+//
+// Local right now means Ollama. Everything else (claude, openai, voyage,
+// codex, gemini, opencode, …) counts as escalation. Kept narrow on
+// purpose: the gl1tch hard requirement is that internal intelligence
+// runs on local Ollama, so anything outside that is by definition a
+// fallback worth tracking.
+func IsLocalProvider(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "ollama":
+		return true
+	}
+	return false
+}
 
 // Event is the universal observation document indexed into glitch-events.
 //
@@ -54,6 +74,38 @@ type Summary struct {
 	Repos        []string  `json:"repos,omitempty"`
 	GeneratedBy  string    `json:"generated_by"`
 	Timestamp    time.Time `json:"timestamp"`
+}
+
+// BrainDecision is one "the brain picked a chain to answer question Q"
+// record indexed into glitch-brain-decisions. Kibana consumes this to
+// chart confidence and escalation rate over time — see the mapping
+// comment in mappings.go for the full field story.
+//
+// ChosenProvider / ChosenModel are the root step's executor. AllProviders
+// captures every distinct executor the chain actually ran on, so a query
+// like `escalated:true AND all_providers:claude` can show "runs where
+// the brain fell back to Claude for at least one step."
+//
+// Escalated is true iff any step used a non-local provider. Confidence
+// and Resolved are placeholders for the brain self-rating path that
+// will land with the triage rewrite — they're written now so dashboards
+// built today don't need to be re-pointed.
+type BrainDecision struct {
+	IssueID        string    `json:"issue_id,omitempty"`
+	WorkspaceID    string    `json:"workspace_id,omitempty"`
+	Question       string    `json:"question,omitempty"`
+	ChosenProvider string    `json:"chosen_provider,omitempty"`
+	ChosenModel    string    `json:"chosen_model,omitempty"`
+	AllProviders   []string  `json:"all_providers,omitempty"`
+	AllModels      []string  `json:"all_models,omitempty"`
+	Escalated      bool      `json:"escalated"`
+	Confidence     float64   `json:"confidence"`
+	Resolved       bool      `json:"resolved"`
+	Status         string    `json:"status"` // "success" | "failure"
+	StepCount      int       `json:"step_count"`
+	DurationMs     int64     `json:"duration_ms"`
+	CostUSD        float64   `json:"cost_usd"`
+	Timestamp      time.Time `json:"timestamp"`
 }
 
 // Insight is a pattern or anomaly detected by the reasoning engine.

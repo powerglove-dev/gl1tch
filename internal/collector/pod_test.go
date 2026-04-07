@@ -45,7 +45,7 @@ func TestPodManager_StartStop(t *testing.T) {
 
 		fc1 := newFakeCollector("c1")
 		fc2 := newFakeCollector("c2")
-		builder := func(workspaceID string, _ *Config) []Collector {
+		builder := func(workspaceID string, _ *Config, _ []string) []Collector {
 			if workspaceID != "ws-1" {
 				t.Errorf("builder got %q, want ws-1", workspaceID)
 			}
@@ -82,7 +82,7 @@ func TestPodManager_StartStop(t *testing.T) {
 
 	t.Run("rejects empty workspace id", func(t *testing.T) {
 		mgr := NewPodManager(context.Background(), nil,
-			func(string, *Config) []Collector { return nil })
+			func(string, *Config, []string) []Collector { return nil })
 		if err := mgr.StartPod(""); err == nil {
 			t.Error("want error for empty workspace id")
 		}
@@ -93,7 +93,7 @@ func TestPodManager_StartStop(t *testing.T) {
 		_ = WriteWorkspaceConfig("ws-dup", "git:\n  repos: []\n")
 		fc := newFakeCollector("c")
 		mgr := NewPodManager(context.Background(), nil,
-			func(string, *Config) []Collector { return []Collector{fc} })
+			func(string, *Config, []string) []Collector { return []Collector{fc} })
 		if err := mgr.StartPod("ws-dup"); err != nil {
 			t.Fatalf("first start: %v", err)
 		}
@@ -106,7 +106,7 @@ func TestPodManager_StartStop(t *testing.T) {
 
 	t.Run("stopping a missing pod is a no-op", func(t *testing.T) {
 		mgr := NewPodManager(context.Background(), nil,
-			func(string, *Config) []Collector { return nil })
+			func(string, *Config, []string) []Collector { return nil })
 		if err := mgr.StopPod("never-started"); err != nil {
 			t.Errorf("stop missing should be no-op, got: %v", err)
 		}
@@ -120,7 +120,7 @@ func TestPodManager_StartStop(t *testing.T) {
 		var mu sync.Mutex
 		var fakes []*fakeCollector
 		mgr := NewPodManager(context.Background(), nil,
-			func(string, *Config) []Collector {
+			func(string, *Config, []string) []Collector {
 				builds.Add(1)
 				f := newFakeCollector("restartable")
 				mu.Lock()
@@ -162,7 +162,7 @@ func TestPodManager_StartStop(t *testing.T) {
 		var fakes []*fakeCollector
 		var mu sync.Mutex
 		mgr := NewPodManager(context.Background(), nil,
-			func(workspaceID string, _ *Config) []Collector {
+			func(workspaceID string, _ *Config, _ []string) []Collector {
 				f := newFakeCollector(workspaceID + "-c")
 				mu.Lock()
 				fakes = append(fakes, f)
@@ -209,7 +209,7 @@ func TestPodManager_ConcurrentRestart(t *testing.T) {
 	var mu sync.Mutex
 	var fakes []*fakeCollector
 
-	mgr := NewPodManager(context.Background(), nil, func(string, *Config) []Collector {
+	mgr := NewPodManager(context.Background(), nil, func(string, *Config, []string) []Collector {
 		totalBuilds.Add(1)
 		f := newFakeCollector("racer")
 		mu.Lock()
@@ -275,7 +275,7 @@ func TestPodManager_ParentContextCancel(t *testing.T) {
 
 	fc := newFakeCollector("cancellable")
 	mgr := NewPodManager(parent, nil,
-		func(string, *Config) []Collector { return []Collector{fc} })
+		func(string, *Config, []string) []Collector { return []Collector{fc} })
 
 	if err := mgr.StartPod("ws-cancel"); err != nil {
 		t.Fatalf("StartPod: %v", err)
@@ -298,7 +298,7 @@ func TestPodManager_ParentContextCancel(t *testing.T) {
 
 func TestBuildCollectorsFromConfig(t *testing.T) {
 	t.Run("empty config returns just the always-on collectors", func(t *testing.T) {
-		out := BuildCollectorsFromConfig("ws", &Config{})
+		out := BuildCollectorsFromConfig("ws", &Config{}, nil)
 		// directories + pipeline always run, plus claude+copilot
 		// because their default Enabled is true (mirrors the global
 		// behaviour). The Config{} literal here doesn't go through
@@ -321,18 +321,94 @@ func TestBuildCollectorsFromConfig(t *testing.T) {
 		cfg.Claude.Enabled = true
 		cfg.Copilot.Enabled = true
 
-		out := BuildCollectorsFromConfig("ws-x", cfg)
+		out := BuildCollectorsFromConfig("ws-x", cfg, nil)
 
-		// Expected: git, claude, claude-projects, copilot, github,
-		// mattermost, directories, pipeline = 8.
-		if len(out) != 8 {
-			t.Errorf("collectors = %d, want 8: names=%v", len(out), names(out))
+		// Expected: git, claude, claude-projects, github,
+		// directories, pipeline = 6. Copilot AND mattermost are
+		// intentionally excluded from per-workspace pods because
+		// their data sources are global / shared across workspaces;
+		// they live in the tool pod path (BuildToolCollectorsFromConfig).
+		if len(out) != 6 {
+			t.Errorf("collectors = %d, want 6: names=%v", len(out), names(out))
 		}
 
 		// Every collector with a WorkspaceID field must hold "ws-x".
 		for _, c := range out {
 			if got := workspaceIDOf(c); got != "ws-x" {
 				t.Errorf("collector %q WorkspaceID = %q, want ws-x", c.Name(), got)
+			}
+		}
+	})
+}
+
+// TestBuildToolCollectorsFromConfig locks down the tool-pod
+// builder: copilot is included when enabled, mattermost is included
+// when both URL and token are set, and every collector returned must
+// be stamped with WorkspaceIDTools (not the empty string and not
+// any per-workspace id) so the OR-include query in
+// QueryCollectorActivityScoped can find them.
+func TestBuildToolCollectorsFromConfig(t *testing.T) {
+	t.Run("nil config returns empty slice", func(t *testing.T) {
+		out := BuildToolCollectorsFromConfig(nil)
+		if len(out) != 0 {
+			t.Errorf("collectors = %d, want 0", len(out))
+		}
+	})
+
+	t.Run("empty config skips both", func(t *testing.T) {
+		out := BuildToolCollectorsFromConfig(&Config{})
+		if len(out) != 0 {
+			t.Errorf("collectors = %d, want 0: names=%v", len(out), names(out))
+		}
+	})
+
+	t.Run("copilot enabled, mattermost off", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.Copilot.Enabled = true
+		out := BuildToolCollectorsFromConfig(cfg)
+		if len(out) != 1 {
+			t.Fatalf("collectors = %d, want 1: names=%v", len(out), names(out))
+		}
+		if got := workspaceIDOf(out[0]); got != WorkspaceIDTools {
+			t.Errorf("copilot WorkspaceID = %q, want %q",
+				got, WorkspaceIDTools)
+		}
+	})
+
+	t.Run("mattermost enabled needs both URL and token", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.Mattermost.URL = "https://mm.example.com"
+		// Token missing → mattermost should be skipped.
+		out := BuildToolCollectorsFromConfig(cfg)
+		if len(out) != 0 {
+			t.Errorf("collectors = %d, want 0 (no token): names=%v",
+				len(out), names(out))
+		}
+
+		cfg.Mattermost.Token = "tok"
+		out = BuildToolCollectorsFromConfig(cfg)
+		if len(out) != 1 {
+			t.Fatalf("collectors = %d, want 1: names=%v", len(out), names(out))
+		}
+		if got := workspaceIDOf(out[0]); got != WorkspaceIDTools {
+			t.Errorf("mattermost WorkspaceID = %q, want %q",
+				got, WorkspaceIDTools)
+		}
+	})
+
+	t.Run("both enabled returns both", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.Copilot.Enabled = true
+		cfg.Mattermost.URL = "https://mm.example.com"
+		cfg.Mattermost.Token = "tok"
+		out := BuildToolCollectorsFromConfig(cfg)
+		if len(out) != 2 {
+			t.Fatalf("collectors = %d, want 2: names=%v", len(out), names(out))
+		}
+		for _, c := range out {
+			if got := workspaceIDOf(c); got != WorkspaceIDTools {
+				t.Errorf("collector %q WorkspaceID = %q, want %q",
+					c.Name(), got, WorkspaceIDTools)
 			}
 		}
 	})

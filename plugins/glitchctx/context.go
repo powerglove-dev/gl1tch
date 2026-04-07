@@ -110,9 +110,55 @@ func BuildShellContext() string {
 	return b.String()
 }
 
+// ReadonlyEnv is the environment variable the harness sets to forbid
+// side-effecting blocks. Set on the executor subprocess by the pipeline
+// runner when a step has readonly:true. Plugins should treat any value
+// other than empty string as "yes, refuse writes".
+//
+// Centralised here so the plugin code, the runner, and any future
+// integration tests all agree on the wire name.
+const ReadonlyEnv = "GLITCH_READONLY"
+
+// IsReadonly reports whether the current process is running under a
+// readonly harness. Cheap; safe to call multiple times.
+func IsReadonly() bool {
+	return os.Getenv(ReadonlyEnv) != ""
+}
+
 // ProcessBlocks scans output for GLITCH_WRITE and GLITCH_RUN blocks, executes
 // them in order of appearance, and replaces each block with a status line.
+//
+// When the harness sets GLITCH_READONLY=1, every block is replaced with
+// a `[refused: readonly]` marker instead of being executed. This is the
+// hard backstop that protects files like README.md from a small local
+// model that decided to ignore a "READONLY:" prompt directive — which,
+// in practice, is most of them.
 func ProcessBlocks(output string, stdout, stderr io.Writer) string {
+	if IsReadonly() {
+		output = writeBlockRe.ReplaceAllStringFunc(output, func(match string) string {
+			sub := writeBlockRe.FindStringSubmatch(match)
+			path := ""
+			if len(sub) >= 2 {
+				path = strings.TrimSpace(sub[1])
+			}
+			fmt.Fprintf(stderr, "glitchctx: refused readonly write to %s\n", path)
+			return fmt.Sprintf("[refused: readonly write to %s]", path)
+		})
+		output = runBlockRe.ReplaceAllStringFunc(output, func(match string) string {
+			sub := runBlockRe.FindStringSubmatch(match)
+			cmd := ""
+			if len(sub) >= 2 {
+				cmd = strings.TrimSpace(sub[1])
+				if len(cmd) > 80 {
+					cmd = cmd[:80] + "…"
+				}
+			}
+			fmt.Fprintf(stderr, "glitchctx: refused readonly run: %s\n", cmd)
+			return fmt.Sprintf("[refused: readonly run: %s]", cmd)
+		})
+		return output
+	}
+
 	output = writeBlockRe.ReplaceAllStringFunc(output, func(match string) string {
 		sub := writeBlockRe.FindStringSubmatch(match)
 		if len(sub) < 3 {

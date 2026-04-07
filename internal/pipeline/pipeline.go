@@ -67,6 +67,18 @@ type Step struct {
 	// NoClarify suppresses the GLITCH_CLARIFY instruction for this step.
 	// Use for automated steps that must produce output without asking the user.
 	NoClarify bool `yaml:"no_clarify"`
+	// Readonly forbids any side-effecting blocks in the model's output —
+	// GLITCH_WRITE, GLITCH_RUN, etc. The harness sets GLITCH_READONLY=1
+	// on the executor subprocess, and glitchctx.ProcessBlocks refuses to
+	// execute the blocks (replacing each with a `[refused: readonly]`
+	// marker). The protocol instructions are also stripped from the
+	// prompt so a small local model isn't tempted to emit them.
+	//
+	// Use for verification, smoke-test, and reporting steps that must
+	// never touch the filesystem regardless of what the model decides
+	// to emit. The READONLY: convention in prompts is *not* enforceable
+	// — small Ollama models ignore it. This field is.
+	Readonly bool `yaml:"readonly"`
 	// PromptID is the title of a saved prompt in the store. When set, the prompt
 	// body is prepended (with a blank line separator) to the step's input before
 	// execution. Uses case-insensitive title matching.

@@ -47,6 +47,12 @@ interface DraftJSON {
   kind: string;
   title: string;
   body: string;
+  /** Optional shape hints — only meaningful for kind=prompt today.
+   *  Empty string = "free-form text", which is the default the popup
+   *  ships with so authors aren't forced to declare a schema before
+   *  they've even run the prompt once. */
+  input_format?: string;
+  output_format?: string;
   turns: Array<{
     role: string;
     text: string;
@@ -64,6 +70,17 @@ interface DraftJSON {
   created_at: number;
   updated_at: number;
 }
+
+/** The format choices the popup offers in the prompt format selectors.
+ *  "" is "free-form text" — the default. Anything else is a soft
+ *  declaration of intent that downstream plane wiring can lint
+ *  against; the prompt itself isn't validated against the choice. */
+const FORMAT_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "", label: "text" },
+  { value: "markdown", label: "markdown" },
+  { value: "json", label: "json" },
+  { value: "yaml", label: "yaml" },
+];
 
 interface Props {
   /** Draft id to edit. The popup loads via GetDraft on mount. */
@@ -100,6 +117,12 @@ export function EditorPopup({
   const [draft, setDraft] = useState<DraftJSON | null>(null);
   const [liveBody, setLiveBody] = useState("");
   const [title, setTitle] = useState("");
+  // Optional shape hints — only surfaced in the UI for kind=prompt.
+  // Empty string = "free-form text", the deliberate default. We track
+  // them separately from `draft` so the user can edit them in place
+  // and revert/save flows behave consistently with title/body.
+  const [inputFormat, setInputFormat] = useState("");
+  const [outputFormat, setOutputFormat] = useState("");
   const [loading, setLoading] = useState(true);
 
   // Per-turn provider override. Empty string = use the observer
@@ -128,6 +151,15 @@ export function EditorPopup({
   const readOnly = !!draft?.read_only;
   const dirty = !!draft && liveBody !== draft.body;
   const titleDirty = !!draft && title !== draft.title;
+  const formatsDirty =
+    !!draft &&
+    (inputFormat !== (draft.input_format ?? "") ||
+      outputFormat !== (draft.output_format ?? ""));
+  // Format selectors are only meaningful for prompts today. Workflows,
+  // skills, agents, and collectors all have their own structure rules
+  // baked into their file format, so the UI just hides the strip
+  // rather than showing a no-op control.
+  const showFormats = kind === "prompt";
 
   // ── Initial load ────────────────────────────────────────────────────
   useEffect(() => {
@@ -144,6 +176,8 @@ export function EditorPopup({
         setDraft(d);
         setLiveBody(d.body ?? "");
         setTitle(d.title ?? "");
+        setInputFormat(d.input_format ?? "");
+        setOutputFormat(d.output_format ?? "");
       } catch (e) {
         toast.error("Couldn't load draft", { detail: String(e) });
         onClose();
@@ -186,6 +220,12 @@ export function EditorPopup({
         const next = JSON.parse(json) as DraftJSON;
         setDraft(next);
         setLiveBody(next.body ?? "");
+        // Refines never touch input/output_format on the backend, but
+        // re-syncing here keeps the state consistent with whatever the
+        // canonical row says — including any formats the user picked
+        // mid-stream that survived the round trip.
+        setInputFormat(next.input_format ?? "");
+        setOutputFormat(next.output_format ?? "");
       } catch {}
     });
     // Snap the per-turn provider override back to observer mode so
@@ -256,6 +296,8 @@ export function EditorPopup({
     if (!draft) return;
     setLiveBody(draft.body ?? "");
     setTitle(draft.title ?? "");
+    setInputFormat(draft.input_format ?? "");
+    setOutputFormat(draft.output_format ?? "");
   }
 
   async function save(): Promise<boolean> {
@@ -281,7 +323,12 @@ export function EditorPopup({
       // PromoteDraft sees the current title/body — without this,
       // manual edits would be silently dropped because PromoteDraft
       // reads from SQLite, not from popup state.
-      const updateErr = await UpdateDraftBody(draftId, title, liveBody);
+      // Hidden format selectors stay empty for non-prompt kinds so we
+      // never silently stamp a format choice onto a workflow/skill
+      // draft just because the popup carried local state.
+      const inFmt = showFormats ? inputFormat : "";
+      const outFmt = showFormats ? outputFormat : "";
+      const updateErr = await UpdateDraftBody(draftId, title, liveBody, inFmt, outFmt);
       if (updateErr) {
         toast.error("Couldn't save", {
           detail: updateErr,
@@ -311,6 +358,8 @@ export function EditorPopup({
         setDraft(next);
         setLiveBody(next.body ?? "");
         setTitle(next.title ?? "");
+        setInputFormat(next.input_format ?? "");
+        setOutputFormat(next.output_format ?? "");
       } catch {}
       onSaved();
       return true;
@@ -342,8 +391,11 @@ export function EditorPopup({
     if (!draft || saving) return;
     // Persist any in-flight CodeMirror edits before forking so the
     // new copy reflects the current editor state, not the stale
-    // SQLite snapshot.
-    const updateErr = await UpdateDraftBody(draftId, title, liveBody);
+    // SQLite snapshot. Format hints come along for the ride on the
+    // same flush.
+    const inFmt = showFormats ? inputFormat : "";
+    const outFmt = showFormats ? outputFormat : "";
+    const updateErr = await UpdateDraftBody(draftId, title, liveBody, inFmt, outFmt);
     if (updateErr) {
       toast.error("Couldn't fork draft", { detail: updateErr });
       return;
@@ -378,6 +430,8 @@ export function EditorPopup({
         setDraft(d);
         setLiveBody(d.body ?? "");
         setTitle(d.title ?? "");
+        setInputFormat(d.input_format ?? "");
+        setOutputFormat(d.output_format ?? "");
       } catch {}
       onSaved();
     } finally {
@@ -585,6 +639,95 @@ export function EditorPopup({
           )}
         </div>
 
+        {/* ── Format strip (prompts only) ────────────────────────
+            Optional shape hints. The user can leave both at "text"
+            and the prompt behaves exactly as before — no schema, no
+            validation. Picking a non-text option records intent on
+            the draft so future plane-wiring code can lint the edge
+            between this prompt and downstream steps without
+            blocking the author here. */}
+        {showFormats && !loading && (
+          <div
+            style={{
+              padding: "8px 18px",
+              background: "var(--bg-dark)",
+              borderTop: "1px solid var(--border)",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              fontSize: 10,
+              color: "var(--fg-dim)",
+            }}
+          >
+            <span style={{ textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              shape
+            </span>
+            <label
+              style={{ display: "flex", alignItems: "center", gap: 6 }}
+              title="Optional input format. Leave as text unless this prompt expects structured input from a previous step."
+            >
+              <span>in</span>
+              <select
+                value={inputFormat}
+                onChange={(e) => setInputFormat(e.target.value)}
+                disabled={readOnly}
+                style={{
+                  background: "var(--bg)",
+                  color: "var(--fg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 4,
+                  padding: "2px 6px",
+                  fontSize: 10,
+                  fontFamily: "inherit",
+                  cursor: readOnly ? "default" : "pointer",
+                }}
+              >
+                {FORMAT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label
+              style={{ display: "flex", alignItems: "center", gap: 6 }}
+              title="Optional output format. Leave as text unless you want downstream steps to lint against a structured shape."
+            >
+              <span>out</span>
+              <select
+                value={outputFormat}
+                onChange={(e) => setOutputFormat(e.target.value)}
+                disabled={readOnly}
+                style={{
+                  background: "var(--bg)",
+                  color: "var(--fg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 4,
+                  padding: "2px 6px",
+                  fontSize: 10,
+                  fontFamily: "inherit",
+                  cursor: readOnly ? "default" : "pointer",
+                }}
+              >
+                {FORMAT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span style={{ flex: 1 }} />
+            <span
+              style={{
+                opacity: 0.6,
+                fontStyle: "italic",
+              }}
+            >
+              text is fine — pick a shape only if downstream steps need it
+            </span>
+          </div>
+        )}
+
         {/* ── Chat strip ─────────────────────────────────────────── */}
         <div
           style={{
@@ -696,13 +839,13 @@ export function EditorPopup({
           }}
         >
           <div style={{ flex: 1, fontSize: 10, color: "var(--fg-dim)" }}>
-            {dirty || titleDirty
+            {dirty || titleDirty || formatsDirty
               ? "unsaved changes · ⌘S to save · esc to close"
               : draft?.updated_at
               ? "saved"
               : ""}
           </div>
-          {(dirty || titleDirty) && !readOnly && (
+          {(dirty || titleDirty || formatsDirty) && !readOnly && (
             <button
               onClick={revert}
               style={{

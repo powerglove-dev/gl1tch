@@ -259,8 +259,9 @@ func (s *Store) UpsertBrainNote(ctx context.Context, note BrainNote) error {
 func (s *Store) UpsertPrompt(ctx context.Context, p Prompt) error {
 	return s.writer.send(func(db *sql.DB) error {
 		_, err := db.ExecContext(ctx,
-			`INSERT OR IGNORE INTO prompts (id, title, body, model_slug, last_response, cwd, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			p.ID, p.Title, p.Body, p.ModelSlug, p.LastResponse, p.CWD, p.CreatedAt, p.UpdatedAt,
+			`INSERT OR IGNORE INTO prompts (id, title, body, model_slug, last_response, cwd, input_format, output_format, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			p.ID, p.Title, p.Body, p.ModelSlug, p.LastResponse, p.CWD, p.InputFormat, p.OutputFormat, p.CreatedAt, p.UpdatedAt,
 		)
 		if err != nil {
 			return fmt.Errorf("store: upsert prompt: %w", err)

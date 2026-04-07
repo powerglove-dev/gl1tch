@@ -119,25 +119,33 @@ func (m *MattermostCollector) Start(ctx context.Context, es *esearch.Client) err
 						Timestamp: time.UnixMilli(post.CreateAt),
 					})
 
-					// Emit a chat-style log line so the user can tail
-					// real conversations from the brain popover's
-					// logs panel. Format: "#channel <author> HH:MM
-					// said <message>". Multi-line messages collapse
-					// to a single line with " / " as a soft break
-					// so the log row stays scan-readable.
-					ts := time.UnixMilli(post.CreateAt).Format("15:04")
-					body := strings.ReplaceAll(strings.TrimSpace(post.Message), "\n", " / ")
-					if len(body) > 400 {
-						body = body[:397] + "…"
+					// Emit a chat-style line at DEBUG level so the
+					// raw message body never lands in the brain
+					// popover's slog ring buffer or the desktop logs
+					// panel by default. Channel content is sensitive
+					// (real names, internal discussion) and slog
+					// captures everything at INFO+ — we previously
+					// leaked entire conversations into the desktop's
+					// log surface every time the popover opened.
+					//
+					// Operators who do want a per-message tail can flip
+					// the slog level to DEBUG via env / settings; the
+					// payload is unchanged, only the visibility is.
+					if slog.Default().Enabled(ctx, slog.LevelDebug) {
+						ts := time.UnixMilli(post.CreateAt).Format("15:04")
+						body := strings.ReplaceAll(strings.TrimSpace(post.Message), "\n", " / ")
+						if len(body) > 400 {
+							body = body[:397] + "…"
+						}
+						channelLabel := ch.DisplayName
+						if channelLabel == "" {
+							channelLabel = ch.ID
+						}
+						slog.Debug(
+							fmt.Sprintf("mattermost: #%s <%s> %s said %s",
+								channelLabel, sender, ts, body),
+						)
 					}
-					channelLabel := ch.DisplayName
-					if channelLabel == "" {
-						channelLabel = ch.ID
-					}
-					slog.Info(
-						fmt.Sprintf("mattermost: #%s <%s> %s said %s",
-							channelLabel, sender, ts, body),
-					)
 				}
 
 				lastPoll[ch.ID] = time.Now().UnixMilli()

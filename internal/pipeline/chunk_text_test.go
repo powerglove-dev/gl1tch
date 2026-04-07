@@ -3,6 +3,8 @@ package pipeline
 import (
 	"strings"
 	"testing"
+
+	"github.com/8op-org/gl1tch/internal/brainrag"
 )
 
 // TestChunkText is a pure unit test for the chunking helper. It lives
@@ -26,7 +28,7 @@ func TestChunkText(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			chunks := chunkText(tt.text, tt.chunkSize)
+			chunks := brainrag.ChunkText(tt.text, tt.chunkSize)
 			n := len(chunks)
 			if n < tt.wantMin || n > tt.wantMax {
 				t.Errorf("chunkText(%d chars, size=%d): want %d-%d chunks, got %d",

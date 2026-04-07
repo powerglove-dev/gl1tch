@@ -120,6 +120,13 @@ func defaultConfig() *Config {
 	cfg.GitHub.Interval = defaultGitHubInterval
 	cfg.Mattermost.Interval = defaultMattermostInterval
 	cfg.Directories.Interval = defaultDirectoriesInterval
+	cfg.CodeIndex.Enabled = false
+	cfg.CodeIndex.Interval = defaultCodeIndexInterval
+	cfg.CodeIndex.ChunkSize = 1500
+	cfg.CodeIndex.EmbedProvider = "ollama"
+	cfg.CodeIndex.EmbedModel = "nomic-embed-text"
+	cfg.CodeIndex.EmbedBaseURL = "http://localhost:11434"
+	cfg.CodeIndex.Extensions = []string{".go", ".ts", ".py", ".md"}
 	cfg.Model = defaultModel
 	return cfg
 }
@@ -182,6 +189,16 @@ mattermost:
 directories:
   interval: 120s
   paths: []
+
+code_index:
+  enabled: false
+  interval: 30m
+  paths: []
+  extensions: [.go, .ts, .py, .md]
+  chunk_size: 1500
+  embed_provider: ollama
+  embed_model: nomic-embed-text
+  embed_base_url: http://localhost:11434
 `, defaultModel)
 	return os.WriteFile(path, []byte(starter), 0o644)
 }

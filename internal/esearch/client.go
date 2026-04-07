@@ -28,6 +28,11 @@ const (
 	// chunks. Replaces the SQLite-backed brainrag store. Uses a
 	// dense_vector mapping with kNN search enabled.
 	IndexVectors = "glitch-vectors"
+	// IndexBrainDecisions is the per-decision audit log the brain
+	// emits every time it routes a chain to a provider. Powers Kibana
+	// dashboards for "confidence over time" and "local vs paid escalation
+	// rate". Written to from pkg/glitchd/chain.go after each chain run.
+	IndexBrainDecisions = "glitch-brain-decisions"
 )
 
 // Client wraps the Elasticsearch client with gl1tch-specific operations.
@@ -74,7 +79,8 @@ func (c *Client) EnsureIndices(ctx context.Context) error {
 		IndexSummaries: summariesMapping,
 		IndexPipelines: pipelinesMapping,
 		IndexInsights:  insightsMapping,
-		IndexVectors:   vectorsMapping,
+		IndexVectors:        vectorsMapping,
+		IndexBrainDecisions: brainDecisionsMapping,
 	}
 	for name, mapping := range indices {
 		// Check if index exists.

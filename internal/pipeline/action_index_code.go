@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/8op-org/gl1tch/internal/brainrag"
@@ -16,9 +14,6 @@ import (
 func init() {
 	builtinRegistry["builtin.index_code"] = builtinIndexCode
 }
-
-// defaultCodeExtensions is the list of file extensions indexed by default.
-var defaultCodeExtensions = []string{".go", ".ts", ".py", ".md"}
 
 // recommendEmbedModel returns the recommended Ollama embedding model and a
 // human-readable rationale based on the number of source files to be indexed.
@@ -41,130 +36,8 @@ func recommendEmbedModel(fileCount int) (model, rationale string) {
 	}
 }
 
-// skipDirs are directory names skipped during code indexing.
-// Sourced from github.com/github/gitignore for the 10 major languages plus
-// common editor/OS patterns. All hidden directories (name starting with ".")
-// are also skipped unconditionally via the walk condition below — this handles
-// the long tail of hidden tool dirs (.claude, .config, .local, etc.).
-var skipDirs = map[string]bool{
-	// ── Version control ──────────────────────────────────────────────────────
-	".git": true, ".svn": true, ".hg": true, ".bzr": true,
-
-	// ── Dependency trees (Go, JS/TS, Ruby, Swift, PHP, Elixir) ──────────────
-	"vendor":           true, // Go, PHP, Ruby
-	"node_modules":     true, // JS/TS/Node
-	"bower_components": true,
-	"jspm_packages":    true,
-	"web_modules":      true,
-	"Pods":             true, // Swift/ObjC CocoaPods
-	"Carthage":         true, // Swift/ObjC Carthage
-	"deps":             true, // Elixir mix deps
-	"apm_modules":      true, // glitch Agent Package Manager
-
-	// ── Build / compiled output ──────────────────────────────────────────────
-	"build":   true, // Go, Java, C/C++, JS
-	"dist":    true, // JS/TS, Python
-	"target":  true, // Rust, Java/Maven, Kotlin
-	"out":     true, // Java, Go
-	"output":  true,
-	"bin":     true, // Go, C/C++
-	"obj":     true, // C/C++
-	"pkg":     true, // Go pkg cache
-	"_build":  true, // Elixir
-	"debug":   true, // Rust/C debug builds
-	"release": true, // Rust release builds
-	"classes": true, // Java compiled classes
-
-	// ── Framework / SSR build caches ─────────────────────────────────────────
-	".next":        true, // Next.js
-	".nuxt":        true, // Nuxt.js
-	".svelte-kit":  true, // SvelteKit
-	".astro":       true, // Astro
-	".output":      true, // Nuxt/Nitro
-	".vuepress":    true,
-	".docusaurus":  true,
-	".serverless":  true,
-	".fusebox":     true,
-	".firebase":    true,
-	".swiftpm":     true, // Swift Package Manager
-	"fastlane":     true, // iOS/Android CI
-
-	// ── Python ────────────────────────────────────────────────────────────────
-	"__pycache__":    true,
-	"__pypackages__": true,
-	".pytest_cache":  true,
-	".mypy_cache":    true,
-	".ruff_cache":    true,
-	".tox":           true,
-	".nox":           true,
-	".hypothesis":    true,
-	".pybuilder":     true,
-	"venv":           true,
-	".venv":          true,
-	"env":            true,
-	"site-packages":  true,
-	"htmlcov":        true,
-	".coverage":      true,
-	"develop-eggs":   true,
-	"eggs":           true,
-	"sdist":          true,
-	"wheels":         true,
-
-	// ── Java / Kotlin / Android ───────────────────────────────────────────────
-	".gradle":              true,
-	".mvn":                 true,
-	".kotlin":              true,
-	".externalNativeBuild": true,
-	".cxx":                 true,
-	"captures":             true, // Android profiler
-
-	// ── Rust ──────────────────────────────────────────────────────────────────
-	// (target/ covered above)
-
-	// ── Test / coverage output ────────────────────────────────────────────────
-	"coverage":     true,
-	".nyc_output":  true,
-	"test-results": true,
-	"testdata":     true, // Go testdata dirs (golden files, fixtures)
-	"__snapshots__": true, // Jest snapshots
-	"snapshots":    true,
-	"fixtures":     true,
-
-	// ── Editor / IDE ──────────────────────────────────────────────────────────
-	".idea":        true, // JetBrains
-	".vscode":      true, // VS Code
-	".vs":          true, // Visual Studio
-	"xcuserdata":   true, // Xcode
-	".idea_modules": true,
-
-	// ── OS artefacts ─────────────────────────────────────────────────────────
-	"__MACOSX":              true,
-	".AppleDouble":          true,
-	".Spotlight-V100":       true,
-	".TemporaryItems":       true,
-	".Trashes":              true,
-	".fseventsd":            true,
-	".DocumentRevisions-V100": true,
-
-	// ── Infra / cloud ─────────────────────────────────────────────────────────
-	".terraform": true,
-	".dynamodb":  true, // local DynamoDB data
-
-	// ── Generic temps / caches ───────────────────────────────────────────────
-	"tmp":    true,
-	"temp":   true,
-	"cache":  true,
-	".cache": true,
-	"log":    true,
-	"logs":   true,
-
-	// ── glitch-specific non-source dirs ────────────────────────────────────────
-	".worktrees":   true, // git worktrees
-	"systemprompts": true, // internal LLM system prompt templates — not source docs
-}
-
 // builtinIndexCode walks a path, chunks source files, embeds them, and stores
-// the results in the RAG vector store (brain_vectors table in glitch.db).
+// the results in the RAG vector store (glitch-vectors index in Elasticsearch).
 //
 // Args:
 //   - "path":            directory to walk (default ".")
@@ -183,14 +56,15 @@ func builtinIndexCode(ctx context.Context, args map[string]any, w io.Writer) (ma
 	}
 
 	extStr := toString(args["extensions"])
+	var exts []string
 	if extStr == "" {
-		extStr = strings.Join(defaultCodeExtensions, ",")
-	}
-	exts := map[string]bool{}
-	for _, e := range strings.Split(extStr, ",") {
-		e = strings.TrimSpace(e)
-		if e != "" {
-			exts[e] = true
+		exts = brainrag.DefaultCodeExtensions
+	} else {
+		for _, e := range strings.Split(extStr, ",") {
+			e = strings.TrimSpace(e)
+			if e != "" {
+				exts = append(exts, e)
+			}
 		}
 	}
 
@@ -219,23 +93,7 @@ func builtinIndexCode(ctx context.Context, args map[string]any, w io.Writer) (ma
 	}
 
 	// Pre-scan: count eligible files so we can recommend a model and warn on large repos.
-	prescanCount := 0
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			if d != nil && d.IsDir() {
-				name := d.Name()
-				if skipDirs[name] || (strings.HasPrefix(name, ".") && name != ".") {
-					return filepath.SkipDir
-				}
-			}
-			return nil
-		}
-		if exts[filepath.Ext(d.Name())] {
-			prescanCount++
-		}
-		return nil
-	})
-
+	prescanCount := brainrag.CountIndexableFiles(root, exts)
 	recModel, recRationale := recommendEmbedModel(prescanCount)
 	if w != nil {
 		fmt.Fprintf(w, "pre-scan: %d source files found\n", prescanCount)
@@ -252,124 +110,29 @@ func builtinIndexCode(ctx context.Context, args map[string]any, w io.Writer) (ma
 	if err != nil {
 		return nil, fmt.Errorf("builtin.index_code: open es: %w", err)
 	}
-	// Best-effort: ensure the vectors index exists. If ES is offline
-	// we surface that explicitly so the user knows what's wrong.
 	if err := es.EnsureIndices(ctx); err != nil {
 		return nil, fmt.Errorf("builtin.index_code: ensure es indices (is elasticsearch running?): %w", err)
 	}
 
 	rs := brainrag.NewRAGStoreForCWD(es, cwd)
 
-	fileCount := 0
-	chunkCount := 0
-
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			name := d.Name()
-			if skipDirs[name] || (strings.HasPrefix(name, ".") && name != ".") {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		ext := filepath.Ext(d.Name())
-		if !exts[ext] {
-			return nil
-		}
-
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			fmt.Fprintf(os.Stderr, "[index_code] warn: read %q: %v\n", path, readErr)
-			return nil
-		}
-
-		content := string(data)
-		chunks := chunkText(content, chunkSize)
-
-		for i, chunk := range chunks {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			// Metadata ID includes file path and approximate line range.
-			lineStart := countLines(content[:chunkStart(content, chunkSize, i)])
-			lineEnd := lineStart + countLines(chunk)
-			noteID := fmt.Sprintf("file:%s:L%d-L%d", path, lineStart+1, lineEnd)
-
-			if embedErr := rs.IndexNote(ctx, embedder, noteID, chunk); embedErr != nil {
-				fmt.Fprintf(os.Stderr, "[index_code] warn: embed %q chunk %d: %v\n", path, i, embedErr)
-				continue
-			}
-			chunkCount++
-		}
-		fileCount++
-		return nil
+	res, err := brainrag.IndexTree(ctx, brainrag.IndexTreeOptions{
+		Root:       root,
+		Extensions: exts,
+		ChunkSize:  chunkSize,
+		Embedder:   embedder,
+		Store:      rs,
+		Progress:   os.Stderr,
 	})
-
-	if err != nil && err != context.Canceled {
-		return nil, fmt.Errorf("builtin.index_code: walk %q: %w", root, err)
+	if err != nil {
+		return nil, fmt.Errorf("builtin.index_code: %w", err)
 	}
 
-	msg := fmt.Sprintf("indexed %d files, %d chunks", fileCount, chunkCount)
+	msg := fmt.Sprintf("indexed %d files, %d chunks", res.Files, res.Chunks)
 	if w != nil {
 		fmt.Fprintln(w, msg)
 	}
-	return map[string]any{"value": msg, "files": fileCount, "chunks": chunkCount}, nil
-}
-
-// chunkText splits text into chunks of at most chunkSize characters, with ~10% overlap.
-func chunkText(text string, chunkSize int) []string {
-	if len(text) == 0 {
-		return nil
-	}
-	overlap := chunkSize / 10
-	if overlap < 1 {
-		overlap = 1
-	}
-
-	var chunks []string
-	runes := []rune(text)
-	step := chunkSize - overlap
-	if step < 1 {
-		step = 1
-	}
-
-	for start := 0; start < len(runes); start += step {
-		end := start + chunkSize
-		if end > len(runes) {
-			end = len(runes)
-		}
-		chunks = append(chunks, string(runes[start:end]))
-		if end == len(runes) {
-			break
-		}
-	}
-	return chunks
-}
-
-// chunkStart returns the byte offset into content where chunk i starts.
-func chunkStart(content string, chunkSize, i int) int {
-	overlap := chunkSize / 10
-	if overlap < 1 {
-		overlap = 1
-	}
-	step := chunkSize - overlap
-	if step < 1 {
-		step = 1
-	}
-	runes := []rune(content)
-	start := i * step
-	if start > len(runes) {
-		start = len(runes)
-	}
-	return len(string(runes[:start]))
-}
-
-// countLines counts the number of newline characters in s.
-func countLines(s string) int {
-	return strings.Count(s, "\n")
+	return map[string]any{"value": msg, "files": res.Files, "chunks": res.Chunks}, nil
 }
 
 // buildEmbedder constructs a brainrag.Embedder from pipeline action args.
@@ -382,13 +145,11 @@ func buildEmbedder(args map[string]any) (brainrag.Embedder, error) {
 	rawKey := toString(args["embed_api_key"])
 	embedBaseURL := toString(args["embed_base_url"])
 
-	// Resolve "$ENV_VAR" style keys.
 	apiKey := rawKey
 	if strings.HasPrefix(rawKey, "$") {
 		apiKey = os.Getenv(rawKey[1:])
 	}
 
-	// Fall back to legacy args when embed_provider is not set.
 	if provider == "" {
 		provider = "ollama"
 	}

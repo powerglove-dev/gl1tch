@@ -74,11 +74,38 @@ func LoadDotenv(path string) {
 	}
 }
 
+// Options configures RunHeadless. Zero value matches the legacy
+// "headless CLI" behavior so existing call sites (cmd/serve.go) keep
+// working unchanged.
+type Options struct {
+	// SkipGlobalCollectors disables registration of the legacy
+	// global-supervisor collector services. Set this when the caller
+	// owns collector lifecycle through the workspace pod manager
+	// (i.e. the desktop app), so the same collectors don't run twice
+	// and stamp half their docs with workspace_id="" (the bug that
+	// made the brain popover render TOTAL INDEXED 0 even though the
+	// global path had ingested 366k events). Headless `glitch serve`
+	// has no pod manager and must leave this false.
+	SkipGlobalCollectors bool
+}
+
 // RunHeadless starts all background services (busd, supervisor, collectors,
 // cron, notify) without the TUI. Blocks until ctx is cancelled or a signal
-// is received. Used by the desktop GUI — it runs its own frontend while
-// glitch manages backend services.
+// is received. Used by `glitch serve` (pure-headless) and historically also
+// by the desktop GUI's RunBackend wrapper.
+//
+// Defaults match the headless CLI: every collector is registered as a
+// global supervisor service. Use RunHeadlessWithOptions to opt out of
+// the global collector registration.
 func RunHeadless(ctx context.Context) error {
+	return RunHeadlessWithOptions(ctx, Options{})
+}
+
+// RunHeadlessWithOptions is the option-taking variant of RunHeadless.
+// The desktop app (which manages collectors via the pod manager) calls
+// this with SkipGlobalCollectors:true so collectors only run once,
+// scoped to a workspace, with a non-empty workspace_id on every doc.
+func RunHeadlessWithOptions(ctx context.Context, opts Options) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("finding home dir: %w", err)
@@ -131,7 +158,18 @@ func RunHeadless(ctx context.Context) error {
 	// ── Services ───────────────────────────────────────────────────────────
 	obsSvc := suphandlers.NewObserverService()
 	sup.RegisterService(obsSvc)
-	suphandlers.RegisterCollectors(sup)
+	if !opts.SkipGlobalCollectors {
+		// In desktop mode the workspace pod manager owns collector
+		// lifecycle, so we skip global registration. Skipping is
+		// load-bearing: running both paths in parallel makes the
+		// global goroutines stamp every doc with workspace_id="" and
+		// the per-workspace pods just see the same files as already
+		// indexed and skip them, which is the root cause of the GUI
+		// brain popover showing TOTAL INDEXED 0.
+		suphandlers.RegisterCollectors(sup)
+	} else {
+		slog.Info("bootstrap: skipping global collector registration (caller owns workspace pods)")
+	}
 	sup.RegisterService(&suphandlers.CronService{})
 
 	// Brain — autonomous self-improvement loop.

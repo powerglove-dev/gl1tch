@@ -1,4 +1,4 @@
-import { Brain, Settings } from "lucide-react";
+import { Brain, Settings, Pencil, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { BrainActivity, BrainState } from "@/lib/types";
 import { formatTime12 } from "@/lib/time";
@@ -6,6 +6,7 @@ import {
   ListCollectors,
   CollectorsConfigPath,
   RecentCollectorLogs,
+  BrainDecisions,
 } from "../../wailsjs/go/main/App";
 
 interface LogEntry {
@@ -42,6 +43,19 @@ interface CollectorPayload {
   collectors: CollectorInfo[];
 }
 
+// DecisionsSnapshot mirrors glitchd.BrainDecisionsActivity. Populated
+// from the BrainDecisions Wails method on every popover open and on
+// the same 5s tick that refreshes the collectors list. Any field can
+// be missing when there are no decisions yet — the renderer treats
+// zero values as "no activity" rather than an error.
+interface DecisionsSnapshot {
+  total: number;
+  escalated: number;
+  last_decision_ms?: number;
+  last_provider?: string;
+  last_escalated?: boolean;
+}
+
 interface Props {
   state: BrainState;
   detail: string;
@@ -57,6 +71,10 @@ interface Props {
    *  share its CodeMirror + chat-refine surface with the rest of
    *  the editor flows. */
   onEditCollectors: () => void;
+  /** Open the structured config modal for a specific collector (or
+   *  the first one when no id is given). Plumbed up to App.tsx so
+   *  the modal lives at the root alongside EditorPopup. */
+  onConfigureCollector: (collectorId?: string) => void;
 }
 
 /**
@@ -81,6 +99,7 @@ export function BrainIndicator({
   activeWorkspaceId,
   activeWorkspaceTitle,
   onEditCollectors,
+  onConfigureCollector,
 }: Props) {
   const [open, setOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -93,6 +112,10 @@ export function BrainIndicator({
   const [anchorMs, setAnchorMs] = useState<number>(0);
   const [configPath, setConfigPath] = useState<string>("");
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  // Brain decisions snapshot, refreshed alongside the collectors list.
+  // null until the first fetch returns; the renderer treats null as
+  // "loading" and zero-valued fields as "no activity yet".
+  const [decisions, setDecisions] = useState<DecisionsSnapshot | null>(null);
   const [, setNowTick] = useState(0);
 
   const unreadCount = activity.filter((a) => a.unread).length;
@@ -139,6 +162,19 @@ export function BrainIndicator({
           setLogs((JSON.parse(json) as LogEntry[]) ?? []);
         } catch {
           setLogs([]);
+        }
+      });
+      // Brain decisions snapshot (total / escalated / last). Same
+      // workspace scoping as the collectors list. Errors collapse to
+      // the empty snapshot — decisions data is informational, never
+      // load-bearing for the rest of the popover.
+      BrainDecisions(wsId).then((json: string) => {
+        if (cancelled) return;
+        try {
+          const snap = JSON.parse(json) as DecisionsSnapshot;
+          setDecisions(snap);
+        } catch {
+          setDecisions({ total: 0, escalated: 0 });
         }
       });
     }
@@ -285,9 +321,13 @@ export function BrainIndicator({
                 ? `collectors · ${activeWorkspaceTitle}`
                 : "collectors"
             }
-            actionLabel="edit"
-            actionTitle={configPath || "edit observer.yaml"}
-            onAction={onEditCollectors}
+            actionLabel="add"
+            actionIcon="plus"
+            actionTitle="Configure collectors"
+            onAction={() => onConfigureCollector(undefined)}
+            secondaryActionLabel="raw"
+            secondaryActionTitle={configPath || "edit observer.yaml"}
+            onSecondaryAction={onEditCollectors}
           />
           {collectors.length === 0 ? (
             <div
@@ -305,10 +345,29 @@ export function BrainIndicator({
           ) : (
             <div style={{ paddingBottom: 6 }}>
               {collectors.map((c) => (
-                <CollectorRow key={c.name} info={c} anchorMs={anchorMs} />
+                <CollectorRow
+                  key={c.name}
+                  info={c}
+                  anchorMs={anchorMs}
+                  onEdit={() => onConfigureCollector(c.name)}
+                />
               ))}
             </div>
           )}
+
+          {/* Aggregate stats so the user can see at a glance that the
+              brain is doing work, even when no individual collector
+              has tripped activity. Computed across the same collector
+              payload the rows above use, so totals always match. */}
+          <CollectorStats collectors={collectors} logs={logs} />
+
+          {/* Brain decisions — counts of "the brain picked a chain"
+              events scoped to the active workspace. Shows whether the
+              brain is staying on the local Ollama or escalating to a
+              paid model. Mirrors the data backing the Kibana dashboard
+              so the popover and Lens charts always agree. */}
+          <SectionLabel>decisions</SectionLabel>
+          <DecisionsSection snapshot={decisions} />
 
           <SectionLabel>activity</SectionLabel>
           {activity.length === 0 ? (
@@ -374,21 +433,64 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 function SectionHeader({
   label,
   actionLabel,
+  actionIcon = "settings",
   actionTitle,
   onAction,
+  secondaryActionLabel,
+  secondaryActionTitle,
+  onSecondaryAction,
 }: {
   label: React.ReactNode;
   actionLabel?: string;
+  actionIcon?: "settings" | "plus";
   actionTitle?: string;
   onAction?: () => void;
+  /** Optional second button rendered to the LEFT of the primary
+   *  action. The collectors header uses this to expose the raw-YAML
+   *  escape hatch alongside the primary "add/configure" action. */
+  secondaryActionLabel?: string;
+  secondaryActionTitle?: string;
+  onSecondaryAction?: () => void;
 }) {
+  function renderButton(
+    label: string,
+    title: string | undefined,
+    onClick: () => void,
+    icon: "settings" | "plus" | "none",
+  ) {
+    return (
+      <button
+        onClick={onClick}
+        title={title}
+        style={{
+          background: "none",
+          border: "1px solid var(--border)",
+          color: "var(--cyan)",
+          cursor: "pointer",
+          padding: "2px 8px",
+          borderRadius: 5,
+          fontSize: 9,
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.08em",
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+        }}
+      >
+        {icon === "settings" && <Settings size={9} />}
+        {icon === "plus" && <Plus size={9} />}
+        {label}
+      </button>
+    );
+  }
   return (
     <div
       style={{
         padding: "12px 14px 4px",
         display: "flex",
         alignItems: "center",
-        gap: 8,
+        gap: 6,
         fontSize: 9,
         fontWeight: 700,
         textTransform: "uppercase",
@@ -398,30 +500,17 @@ function SectionHeader({
       }}
     >
       <span style={{ flex: 1 }}>{label}</span>
-      {actionLabel && onAction && (
-        <button
-          onClick={onAction}
-          title={actionTitle}
-          style={{
-            background: "none",
-            border: "1px solid var(--border)",
-            color: "var(--cyan)",
-            cursor: "pointer",
-            padding: "2px 8px",
-            borderRadius: 5,
-            fontSize: 9,
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.08em",
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-          }}
-        >
-          <Settings size={9} />
-          {actionLabel}
-        </button>
-      )}
+      {secondaryActionLabel &&
+        onSecondaryAction &&
+        renderButton(
+          secondaryActionLabel,
+          secondaryActionTitle,
+          onSecondaryAction,
+          "none",
+        )}
+      {actionLabel &&
+        onAction &&
+        renderButton(actionLabel, actionTitle, onAction, actionIcon)}
     </div>
   );
 }
@@ -429,9 +518,14 @@ function SectionHeader({
 function CollectorRow({
   info,
   anchorMs,
+  onEdit,
 }: {
   info: CollectorInfo;
   anchorMs: number;
+  /** Open the structured config modal for this collector. The
+   *  callback is wired up to the App-level modal so the popover
+   *  doesn't have to own modal state. */
+  onEdit?: () => void;
 }) {
   // nextRunIn = interval - ((now - anchor) mod interval)
   const now = Date.now();
@@ -506,11 +600,38 @@ function CollectorRow({
         >
           {info.enabled ? `next in ${formatDuration(nextInMs)}` : "disabled"}
         </span>
+        {onEdit && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit();
+            }}
+            title="Configure"
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--fg-dim)",
+              cursor: "pointer",
+              padding: 2,
+              display: "flex",
+              alignItems: "center",
+            }}
+          >
+            <Pencil size={10} />
+          </button>
+        )}
       </div>
-      {/* Activity stats — show whatever we have. ES counts come from
-          the brain's collectorTick; the run heartbeat comes from the
-          in-process registry each collector calls into. */}
-      {(total > 0 || lastRun > 0 || lastRunErr) && (
+      {/* Activity stats — always shown for enabled collectors so the
+          user can immediately tell whether each source is contributing
+          to THIS workspace. The fields are sourced from two paths:
+          ES counts (total, lastSeen) come from QueryCollectorActivityScoped,
+          which now filters by workspace_id; the run heartbeat
+          (lastRun, lastRunIndexed) comes from the in-process registry
+          each collector calls into after every poll cycle.
+          For disabled collectors we keep the old behavior of hiding
+          the row entirely so the popover doesn't get noisy. */}
+      {info.enabled && (
         <div
           style={{
             display: "flex",
@@ -522,9 +643,15 @@ function CollectorRow({
             flexWrap: "wrap",
           }}
         >
-          {total > 0 && (
-            <span style={{ fontVariantNumeric: "tabular-nums" }}>
-              {total.toLocaleString()} indexed
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>
+            {total > 0 ? `${total.toLocaleString()} indexed` : "0 indexed"}
+          </span>
+          {lastSeen > 0 && (
+            <span
+              style={{ fontVariantNumeric: "tabular-nums" }}
+              title={new Date(lastSeen).toLocaleString()}
+            >
+              · last seen {formatRelative(lastSeen)}
             </span>
           )}
           {lastRun > 0 && (
@@ -549,6 +676,248 @@ function CollectorRow({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// CollectorStats summarises the live collector payload into a few
+// glanceable numbers. The brain row already shows per-collector
+// status, but this aggregate view answers "is anything actually
+// happening?" without having to scan every row.
+//
+// Sources:
+//   - total docs across all collectors → from ES doc-count snapshots
+//   - active collectors → enabled count vs configured count
+//   - last successful run + window of runs in the last hour → from
+//     the in-process run heartbeat
+//   - error count → number of collectors whose most recent run failed
+// DecisionsSection renders the brain-decisions snapshot — total
+// chains the brain has routed, how many escalated to a paid model,
+// and the most recent decision's provider/timestamp. Mirrors the
+// data backing the Kibana dashboard so the popover and Lens charts
+// always agree on the numbers.
+//
+// Visual rules:
+//   - escalation rate colored green at 0%, cyan up to 25%, red above
+//   - "last decision" cell pulses cyan when fresh (< 60s) so the user
+//     can tell if a chain just ran without watching the activity feed
+//   - null snapshot (still loading) shows a thin placeholder grid
+//     instead of jumping to "0 decisions" so the section doesn't
+//     flicker on workspace switch
+function DecisionsSection({ snapshot }: { snapshot: DecisionsSnapshot | null }) {
+  if (snapshot == null) {
+    return (
+      <div
+        style={{
+          padding: "4px 14px 10px",
+          fontSize: 11,
+          color: "var(--fg-dim)",
+          fontStyle: "italic",
+        }}
+      >
+        loading…
+      </div>
+    );
+  }
+  const total = snapshot.total ?? 0;
+  const escalated = snapshot.escalated ?? 0;
+  const local = total - escalated;
+  const escalationPct = total > 0 ? Math.round((escalated / total) * 100) : 0;
+  const escalationColor =
+    total === 0
+      ? "var(--fg-dim)"
+      : escalationPct === 0
+        ? "var(--green)"
+        : escalationPct < 25
+          ? "var(--cyan)"
+          : "var(--red, #ff5555)";
+
+  const lastMs = snapshot.last_decision_ms ?? 0;
+  const lastFresh = lastMs > 0 && Date.now() - lastMs < 60 * 1000;
+  const lastLabel =
+    lastMs > 0
+      ? `${snapshot.last_provider || "?"} · ${formatRelative(lastMs)}`
+      : "—";
+
+  return (
+    <div
+      style={{
+        padding: "4px 14px 10px",
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        rowGap: 6,
+        columnGap: 12,
+        fontSize: 11,
+        color: "var(--fg)",
+      }}
+    >
+      <StatRow
+        label="total"
+        value={total.toLocaleString()}
+        color={total > 0 ? "var(--cyan)" : undefined}
+      />
+      <StatRow
+        label="escalated · paid"
+        value={
+          total > 0
+            ? `${escalated} (${escalationPct}%)`
+            : escalated.toString()
+        }
+        color={escalationColor}
+      />
+      <StatRow
+        label="local · ollama"
+        value={local.toLocaleString()}
+        color={local > 0 ? "var(--green)" : undefined}
+      />
+      <StatRow
+        label="last decision"
+        value={lastLabel}
+        color={
+          lastFresh
+            ? snapshot.last_escalated
+              ? "var(--red, #ff5555)"
+              : "var(--green)"
+            : undefined
+        }
+      />
+    </div>
+  );
+}
+
+function CollectorStats({
+  collectors,
+  logs,
+}: {
+  collectors: CollectorInfo[];
+  logs: LogEntry[];
+}) {
+  const now = Date.now();
+  let totalDocs = 0;
+  let enabled = 0;
+  let runsLastHour = 0;
+  let errors = 0;
+  let lastRun = 0;
+  for (const c of collectors) {
+    totalDocs += c.total_docs ?? 0;
+    if (c.enabled) enabled++;
+    if (c.last_run_ms && c.last_run_ms > 0) {
+      if (now - c.last_run_ms < 60 * 60 * 1000) runsLastHour++;
+      if (c.last_run_ms > lastRun) lastRun = c.last_run_ms;
+    }
+    if (c.last_run_error) errors++;
+  }
+  // Recent log activity gives a "still alive in the last minute"
+  // pulse signal independent of collector heartbeats — useful when
+  // a collector is busy mid-cycle and hasn't reported a run yet.
+  const recentLogs = logs.filter((l) => now - l.time_ms < 60 * 1000).length;
+
+  const healthColor =
+    errors > 0
+      ? "var(--red, #ff5555)"
+      : runsLastHour > 0 || recentLogs > 0
+        ? "var(--green)"
+        : enabled > 0
+          ? "var(--cyan)"
+          : "var(--fg-dim)";
+
+  return (
+    <>
+      <SectionLabel>stats</SectionLabel>
+      <div
+        style={{
+          padding: "4px 14px 10px",
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          rowGap: 6,
+          columnGap: 12,
+          fontSize: 11,
+          color: "var(--fg)",
+        }}
+      >
+        <StatRow
+          label="status"
+          value={
+            errors > 0
+              ? `${errors} error${errors === 1 ? "" : "s"}`
+              : runsLastHour > 0 || recentLogs > 0
+                ? "active"
+                : enabled > 0
+                  ? "idle"
+                  : "no collectors"
+          }
+          color={healthColor}
+        />
+        <StatRow
+          label="enabled"
+          value={`${enabled} / ${collectors.length}`}
+        />
+        <StatRow
+          label="total indexed"
+          value={totalDocs.toLocaleString()}
+          color={totalDocs > 0 ? "var(--cyan)" : undefined}
+        />
+        <StatRow
+          label="runs · last hour"
+          value={runsLastHour.toString()}
+          color={runsLastHour > 0 ? "var(--green)" : undefined}
+        />
+        <StatRow
+          label="last run"
+          value={lastRun > 0 ? formatRelative(lastRun) : "—"}
+        />
+        <StatRow
+          label="logs · last minute"
+          value={recentLogs.toString()}
+          color={recentLogs > 0 ? "var(--green)" : undefined}
+        />
+      </div>
+    </>
+  );
+}
+
+function StatRow({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: string;
+  color?: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        gap: 6,
+        minWidth: 0,
+      }}
+    >
+      <span
+        style={{
+          fontSize: 9,
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          color: "var(--fg-dim)",
+          opacity: 0.75,
+          flexShrink: 0,
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          fontVariantNumeric: "tabular-nums",
+          fontWeight: 600,
+          color: color ?? "var(--fg)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {value}
+      </span>
     </div>
   );
 }

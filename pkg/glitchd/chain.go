@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/8op-org/gl1tch/internal/collector"
+	"github.com/8op-org/gl1tch/internal/esearch"
 	"github.com/8op-org/gl1tch/internal/pipeline"
 	"github.com/8op-org/gl1tch/pkg/glitchproto"
 )
@@ -141,8 +145,129 @@ func RunChain(ctx context.Context, opts RunChainOpts, tokenCh chan<- string) err
 		runOpts = append(runOpts, pipeline.WithWorkspaceID(opts.WorkspaceID))
 	}
 
+	startedAt := time.Now()
 	_, err = pipeline.Run(ctx, p, mgr, "", runOpts...)
+	emitBrainDecision(ctx, p, opts, err, time.Since(startedAt))
 	return err
+}
+
+// emitBrainDecision indexes one glitch-brain-decisions doc per chain
+// run so Kibana can chart "is the brain handling more work locally
+// over time, or escalating to paid models more often?". Best-effort:
+// any failure to write is logged and swallowed — chain runs must never
+// fail because the audit log is unreachable.
+//
+// What gets recorded:
+//   - chosen_provider/chosen_model: the *root* step's executor (the one
+//     the brain picked first). For multi-step chains the rest live in
+//     all_providers / all_models so dashboards can answer both "what
+//     was the brain's first instinct" and "what did the run actually
+//     touch end-to-end".
+//   - escalated: true iff any step ran on a non-local provider. Local
+//     == Ollama (see esearch.IsLocalProvider).
+//   - question: the user's free-text instruction (or the first prompt
+//     body when no free-text was provided), capped to 4 KiB.
+//   - confidence/resolved: written as zero-values for now. The brain
+//     self-rating path will populate them once it lands; existing
+//     dashboards keep working in the meantime.
+func emitBrainDecision(
+	ctx context.Context,
+	p *pipeline.Pipeline,
+	opts RunChainOpts,
+	runErr error,
+	dur time.Duration,
+) {
+	if p == nil || len(p.Steps) == 0 {
+		return
+	}
+
+	cfg, cerr := collector.LoadConfig()
+	if cerr != nil || cfg.Elasticsearch.Address == "" {
+		return
+	}
+	es, eerr := esearch.New(cfg.Elasticsearch.Address)
+	if eerr != nil {
+		return
+	}
+
+	// Per-step provider/model rollup. Pipelines built from chains use
+	// the Executor field as the provider name and Model as the model.
+	// Shell-only steps have no executor and don't count toward routing
+	// decisions.
+	var allProviders, allModels []string
+	seenProv := map[string]bool{}
+	seenModel := map[string]bool{}
+	escalated := false
+	for _, st := range p.Steps {
+		if st.Executor == "" {
+			continue
+		}
+		if !seenProv[st.Executor] {
+			seenProv[st.Executor] = true
+			allProviders = append(allProviders, st.Executor)
+		}
+		if st.Model != "" && !seenModel[st.Model] {
+			seenModel[st.Model] = true
+			allModels = append(allModels, st.Model)
+		}
+		if !esearch.IsLocalProvider(st.Executor) {
+			escalated = true
+		}
+	}
+
+	// Find the root provider — the first step that actually has an
+	// executor. Skips leading shell steps so the "what did the brain
+	// pick" column reflects the routing decision, not pipeline plumbing.
+	chosenProvider := ""
+	chosenModel := ""
+	for _, st := range p.Steps {
+		if st.Executor != "" {
+			chosenProvider = st.Executor
+			chosenModel = st.Model
+			break
+		}
+	}
+
+	question := strings.TrimSpace(opts.UserText)
+	if question == "" {
+		// Fall back to the first step's prompt body so saved chains
+		// without a trailing user message still log a recognizable
+		// question. Capped so a giant pipeline prompt doesn't bloat
+		// the index.
+		question = strings.TrimSpace(p.Steps[0].Prompt)
+	}
+	if len(question) > 4096 {
+		question = question[:4096]
+	}
+
+	status := "success"
+	if runErr != nil {
+		status = "failure"
+	}
+
+	doc := esearch.BrainDecision{
+		WorkspaceID:    opts.WorkspaceID,
+		Question:       question,
+		ChosenProvider: chosenProvider,
+		ChosenModel:    chosenModel,
+		AllProviders:   allProviders,
+		AllModels:      allModels,
+		Escalated:      escalated,
+		Status:         status,
+		StepCount:      len(p.Steps),
+		DurationMs:     dur.Milliseconds(),
+		Timestamp:      time.Now().UTC(),
+	}
+
+	// Use a short detached context so a cancelled chain (user closed
+	// the chat) still gets its decision logged. The audit doc is small
+	// and ES is local — 2s is plenty.
+	writeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := es.Index(writeCtx, esearch.IndexBrainDecisions, "", doc); err != nil {
+		slog.Warn("brain-decisions: index failed", "err", err)
+	}
+	_ = ctx
 }
 
 // buildPipelineFromChain converts a desktop chain into a runnable pipeline.

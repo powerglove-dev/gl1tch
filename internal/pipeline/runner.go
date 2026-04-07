@@ -1832,7 +1832,27 @@ func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap 
 	}
 	stepVars["model"] = Interpolate(step.Model, snap)
 	for k, v := range step.Vars {
-		stepVars[k] = Interpolate(v, snap)
+		// Two-pass resolution: first the legacy {{.foo}} Go-template
+		// path via Interpolate, then ResolveStepInputs to expand
+		// {{ steps.<id>.<key> }} markers using accumulated step outputs.
+		// Without the second pass, shell steps that build their cmd
+		// from prior step output (e.g. `before='{{ steps.snapshot.value }}'`)
+		// would receive the literal template text instead of the value.
+		resolved := Interpolate(v, snap)
+		if !runCfg.literalPrompts {
+			if r2, err := ResolveStepInputs(resolved, ec, step.ID, runIDStr); err == nil {
+				resolved = r2
+			}
+		}
+		stepVars[k] = resolved
+	}
+	// Readonly is enforced by the executor side (glitchctx.ProcessBlocks
+	// honors GLITCH_READONLY=1 by refusing GLITCH_WRITE/GLITCH_RUN
+	// blocks). Setting it as a var means the cli_adapter promotes it
+	// to GLITCH_READONLY=1 in the subprocess env automatically — no
+	// per-plugin wiring required.
+	if step.Readonly {
+		stepVars["readonly"] = "1"
 	}
 
 	return newRegisteredExecutor(pl, promptOrInput, stepVars, w), nil

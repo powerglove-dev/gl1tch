@@ -59,6 +59,15 @@ const addPromptLastResponseColumn = `ALTER TABLE prompts ADD COLUMN last_respons
 // databases created before this column existed.
 const addPromptCWDColumn = `ALTER TABLE prompts ADD COLUMN cwd TEXT DEFAULT ''`
 
+// addPromptInputFormatColumn / addPromptOutputFormatColumn are the
+// migrations that add the optional input/output format hints to a
+// prompt. Empty string means "free-form text" — the default for any
+// prompt that hasn't opted into a structured shape yet. The builder UI
+// uses these to lint downstream plane wiring without forcing the user
+// to declare a schema upfront.
+const addPromptInputFormatColumn = `ALTER TABLE prompts ADD COLUMN input_format TEXT NOT NULL DEFAULT ''`
+const addPromptOutputFormatColumn = `ALTER TABLE prompts ADD COLUMN output_format TEXT NOT NULL DEFAULT ''`
+
 // createDraftsSchema is the DDL for the drafts table. A draft is a
 // work-in-progress prompt / workflow / skill / agent that the user is
 // iterating on with the gl1tch prompt agent. Each refinement turn is
@@ -84,6 +93,14 @@ const createDraftsSchema = `CREATE TABLE IF NOT EXISTS drafts (
   updated_at    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_drafts_ws_kind ON drafts(workspace_id, kind, updated_at DESC);`
+
+// addDraftInputFormatColumn / addDraftOutputFormatColumn mirror the
+// prompt format columns on the drafts table so the editor popup can
+// hold the user's in-progress format choices alongside the body
+// before they're promoted to the real prompts row. Empty = free-form
+// text, same convention as the prompts table.
+const addDraftInputFormatColumn = `ALTER TABLE drafts ADD COLUMN input_format TEXT NOT NULL DEFAULT ''`
+const addDraftOutputFormatColumn = `ALTER TABLE drafts ADD COLUMN output_format TEXT NOT NULL DEFAULT ''`
 
 // addClarificationStepIDColumn is the migration that adds step_id to the
 // clarifications table for databases created before this column existed.
@@ -256,6 +273,9 @@ func applySchema(db *sql.DB) error {
 	if err := applyPromptCWDMigration(db); err != nil {
 		return err
 	}
+	if err := applyPromptFormatColumnsMigration(db); err != nil {
+		return err
+	}
 	if err := applyClarificationsTableMigration(db); err != nil {
 		return err
 	}
@@ -295,7 +315,10 @@ func applySchema(db *sql.DB) error {
 	if err := applyWorkspacesTableMigration(db); err != nil {
 		return err
 	}
-	return applyDraftsTableMigration(db)
+	if err := applyDraftsTableMigration(db); err != nil {
+		return err
+	}
+	return applyDraftFormatColumnsMigration(db)
 }
 
 // applyDraftsTableMigration creates the drafts table and its index if
@@ -365,6 +388,45 @@ func applyPromptCWDMigration(db *sql.DB) error {
 	}
 	if count == 0 {
 		if _, err := db.Exec(addPromptCWDColumn); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyPromptFormatColumnsMigration adds the input_format and
+// output_format columns to the prompts table for legacy databases.
+// Same probe-then-add pattern as the other column migrations because
+// modernc.org/sqlite lacks ALTER TABLE ... ADD COLUMN IF NOT EXISTS.
+func applyPromptFormatColumnsMigration(db *sql.DB) error {
+	if err := addColumnIfMissing(db, "prompts", "input_format", addPromptInputFormatColumn); err != nil {
+		return err
+	}
+	return addColumnIfMissing(db, "prompts", "output_format", addPromptOutputFormatColumn)
+}
+
+// applyDraftFormatColumnsMigration is the drafts-table counterpart to
+// applyPromptFormatColumnsMigration. Runs after applyDraftsTableMigration
+// so the table is guaranteed to exist before we probe it.
+func applyDraftFormatColumnsMigration(db *sql.DB) error {
+	if err := addColumnIfMissing(db, "drafts", "input_format", addDraftInputFormatColumn); err != nil {
+		return err
+	}
+	return addColumnIfMissing(db, "drafts", "output_format", addDraftOutputFormatColumn)
+}
+
+// addColumnIfMissing probes pragma_table_info for column on table and
+// runs alterSQL only when the column is absent. Centralizes the
+// probe-then-add idiom so the format migrations don't repeat the same
+// scaffolding twice.
+func addColumnIfMissing(db *sql.DB, table, column, alterSQL string) error {
+	var count int
+	row := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, table, column)
+	if err := row.Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		if _, err := db.Exec(alterSQL); err != nil {
 			return err
 		}
 	}

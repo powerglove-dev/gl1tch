@@ -21,9 +21,54 @@ type ClaudeCollector struct {
 	// WorkspaceID is stamped on every indexed event so brain queries
 	// can scope to one workspace's claude history.
 	WorkspaceID string
+	// Dirs filters indexed entries by project path: only entries whose
+	// `project` field is inside one of these directories are indexed.
+	// This is what makes the collector workspace-scoped — without it,
+	// every workspace pod re-indexes the *entire* global ~/.claude
+	// history with its own workspace_id, and the brain popover shows
+	// identical counts for every workspace because they're all looking
+	// at the same source data with different attribution stamps.
+	//
+	// An empty Dirs slice means "no filter" — every entry is indexed.
+	// Used by the headless `glitch serve` path and by tests; the
+	// per-workspace pod manager path always passes a non-empty slice.
+	Dirs []string
 }
 
 func (c *ClaudeCollector) Name() string { return "claude" }
+
+// pathInDirs reports whether path is equal to or under any of dirs.
+// Used by the Claude collectors to filter global ~/.claude entries
+// down to just those that belong to the active workspace's directory
+// set. An empty dirs slice means "include everything" — preserves
+// the legacy behavior for the headless `glitch serve` path and tests
+// that build collectors without going through the pod manager.
+//
+// The match is a clean prefix compare: filepath.Clean both sides and
+// require either exact equality or that path starts with `dir + sep`.
+// This avoids the classic /foo matching /foobar bug.
+func pathInDirs(path string, dirs []string) bool {
+	if len(dirs) == 0 {
+		return true
+	}
+	if path == "" {
+		return false
+	}
+	cleanPath := filepath.Clean(path)
+	for _, d := range dirs {
+		if d == "" {
+			continue
+		}
+		cleanDir := filepath.Clean(d)
+		if cleanPath == cleanDir {
+			return true
+		}
+		if strings.HasPrefix(cleanPath, cleanDir+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
 
 // claudeHistoryEntry matches the JSONL schema in ~/.claude/history.jsonl.
 type claudeHistoryEntry struct {
@@ -120,6 +165,13 @@ func (c *ClaudeCollector) poll(ctx context.Context, es *esearch.Client, path str
 			continue
 		}
 
+		// Workspace scoping: skip entries whose project path isn't
+		// under any of this collector's directories. With no Dirs set
+		// (legacy / global path) every entry passes through.
+		if !pathInDirs(entry.Project, c.Dirs) {
+			continue
+		}
+
 		// Convert timestamp from unix millis.
 		ts := time.UnixMilli(entry.Timestamp)
 
@@ -162,9 +214,16 @@ func (c *ClaudeCollector) poll(ctx context.Context, es *esearch.Client, path str
 // ClaudeProjectCollector indexes per-project session JSONL files from
 // ~/.claude/projects/. Runs once on startup to backfill, then watches
 // for new files.
+//
+// Dirs has the same workspace-scoping semantics as ClaudeCollector:
+// only project directories whose decoded path is inside one of Dirs
+// are indexed. Without this filter, the per-workspace pod manager
+// would have every workspace pod re-index every Claude project on
+// the machine, producing the same total count in every workspace.
 type ClaudeProjectCollector struct {
 	Interval    time.Duration
 	WorkspaceID string
+	Dirs        []string
 }
 
 func (c *ClaudeProjectCollector) Name() string { return "claude-projects" }
@@ -219,8 +278,31 @@ func (c *ClaudeProjectCollector) pollProjects(ctx context.Context, es *esearch.C
 		return
 	}
 
+	// Pre-compute the set of encoded directory names that match this
+	// workspace. We compare against the on-disk directory names rather
+	// than trying to decode them — Claude Code encodes paths by
+	// replacing `/` with `-`, which is ambiguous to reverse because
+	// real path components can contain hyphens (e.g.
+	// "/Users/stokes/Projects/oblt-cli" decodes to four candidate
+	// paths). Encoding each workspace directory into the Claude form
+	// is unambiguous and dependency-free — no need to read the cwd
+	// field out of every session file.
+	encodedDirs := make(map[string]bool, len(c.Dirs))
+	for _, d := range c.Dirs {
+		if d == "" {
+			continue
+		}
+		encodedDirs[encodeClaudeDirName(filepath.Clean(d))] = true
+	}
+
 	for _, projDir := range entries {
 		if !projDir.IsDir() {
+			continue
+		}
+		// Workspace scoping: skip Claude project directories whose
+		// encoded name doesn't match any workspace dir. Empty Dirs
+		// means "include everything" — preserves the legacy behavior.
+		if len(encodedDirs) > 0 && !encodedDirs[projDir.Name()] {
 			continue
 		}
 		projectName := decodeClaudeProjectName(projDir.Name())
@@ -296,14 +378,31 @@ func (c *ClaudeProjectCollector) parseSessionFile(path, project string) []any {
 	return docs
 }
 
-// decodeClaudeProjectName converts the encoded directory name back to a
-// human-readable project name. e.g. "-Users-stokes-Projects-gl1tch" → "gl1tch"
+// decodeClaudeProjectName extracts a human-readable project label from
+// Claude Code's encoded project directory name. e.g.
+// "-Users-stokes-Projects-gl1tch" → "gl1tch". Used only for the
+// indexed event's `Repo` field (display label) — workspace scoping
+// goes the other direction via encodeClaudeDirName, which is lossless.
 func decodeClaudeProjectName(encoded string) string {
 	parts := strings.Split(encoded, "-")
 	if len(parts) > 0 {
 		return parts[len(parts)-1]
 	}
 	return encoded
+}
+
+// encodeClaudeDirName converts an absolute filesystem path into the
+// directory-name format Claude Code uses under ~/.claude/projects/:
+// every `/` becomes `-`. e.g. "/Users/stokes/Projects/oblt-cli" →
+// "-Users-stokes-Projects-oblt-cli".
+//
+// This is the lossless direction of the path↔name mapping. Unlike
+// decoding, encoding has no ambiguity from hyphens in path components,
+// which is why workspace-scoping for ClaudeProjectCollector compares
+// encoded workspace dirs to on-disk directory names instead of trying
+// to decode the directory names back to paths.
+func encodeClaudeDirName(absPath string) string {
+	return strings.ReplaceAll(absPath, "/", "-")
 }
 
 func truncate(s string, n int) string {

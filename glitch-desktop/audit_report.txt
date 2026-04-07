@@ -1,0 +1,22 @@
+CI/CD Audit Report:
+
+**Security Concerns:**
+
+* Unpinned actions using @main or @master:
+	+ Refactor workflow to pin @v tags instead (e.g., `~/.wails.json`).
+* Actions using @v tags with pinned commits: ensure all `go.mod` files are up-to-date.
+
+**Well-Configured Workflows:**
+
+* Discovery and workflow pipelines look well-configured.
+* TUI surface and orchestrator package can be refactored for better maintainability.
+
+**Workflows in Need of Attention:**
+
+* Internal auth code (session.go, line 42) should store session tokens securely.
+	+ Recommendation: use a secure token storage solution like HashiCorp's Vault.
+
+<brain type="finding" tags="auth,security" title="Session Token Storage">
+Found that session tokens are written to ~/.glitch/session without encryption. File: internal/auth/session.go line 42. This is a security concern and should be addressed using a secure token storage solution.
+</brain>
+

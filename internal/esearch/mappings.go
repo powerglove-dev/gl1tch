@@ -117,6 +117,55 @@ const vectorsMapping = `{
   }
 }`
 
+// brainDecisionsMapping is the schema for glitch-brain-decisions, the
+// per-decision audit log the brain emits every time it picks a chain
+// to answer a question. Each doc represents one "the brain decided to
+// route this work to provider X" event so Kibana can chart things like:
+//
+//   - average confidence over time, filtered to escalated:false (i.e.
+//     "is the local model getting more or less trustworthy at handling
+//     work without falling back to a paid model?")
+//   - escalation rate per workspace per day
+//   - cost saved by staying local vs. cost paid when escalating
+//   - which question types ELSER clusters together force escalation
+//
+// chosen_provider/chosen_model are the *first* (root) provider used by
+// the chain — for multi-step chains we also store all_providers as a
+// keyword array so a "did this run touch any paid model?" filter is a
+// single terms query. escalated is a derived bool: true iff any step
+// in the chain ran on a non-local provider. Local is currently just
+// "ollama" (per the gl1tch hard requirement that internal intelligence
+// runs on local Ollama).
+//
+// confidence starts as 0 until we wire the brain's self-rating into
+// chain.go — the field exists now so dashboards built today don't need
+// to be re-pointed when that lands.
+const brainDecisionsMapping = `{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0
+  },
+  "mappings": {
+    "properties": {
+      "issue_id":        { "type": "keyword" },
+      "workspace_id":    { "type": "keyword" },
+      "question":        { "type": "text" },
+      "chosen_provider": { "type": "keyword" },
+      "chosen_model":    { "type": "keyword" },
+      "all_providers":   { "type": "keyword" },
+      "all_models":      { "type": "keyword" },
+      "escalated":       { "type": "boolean" },
+      "confidence":      { "type": "float" },
+      "resolved":        { "type": "boolean" },
+      "status":          { "type": "keyword" },
+      "step_count":      { "type": "integer" },
+      "duration_ms":     { "type": "long" },
+      "cost_usd":        { "type": "float" },
+      "timestamp":       { "type": "date" }
+    }
+  }
+}`
+
 const insightsMapping = `{
   "settings": {
     "number_of_shards": 1,

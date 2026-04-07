@@ -153,7 +153,17 @@ func (a *App) startup(ctx context.Context) {
 	a.cancelBackend = cancel
 
 	go func() {
-		if err := glitchd.RunBackend(bgCtx); err != nil {
+		// SkipGlobalCollectors:true is load-bearing here. The desktop
+		// owns collector lifecycle through the workspace pod manager
+		// (InitPodManager + StartAllWorkspacePods below); running the
+		// global supervisor's collector services in parallel makes
+		// every indexed doc land in glitch-events with workspace_id=""
+		// because the global path doesn't know about workspaces.
+		// That bug rendered the brain popover as TOTAL INDEXED 0
+		// despite hundreds of thousands of events being indexed —
+		// every workspace-scoped query returned nothing.
+		opts := glitchd.BackendOptions{SkipGlobalCollectors: true}
+		if err := glitchd.RunBackendWithOptions(bgCtx, opts); err != nil {
 			log.Printf("backend: %v", err)
 		}
 	}()
@@ -167,6 +177,17 @@ func (a *App) startup(ctx context.Context) {
 	// pods all tear down cleanly on shutdown.
 	glitchd.InitPodManager(a.ctx)
 	go glitchd.StartAllWorkspacePods(a.ctx)
+	// Tool pod runs copilot + mattermost ONCE under
+	// glitchd.WorkspaceIDTools. Without it, those collectors either
+	// don't run at all (because we removed them from per-workspace
+	// pods to fix the duplication bug) or get re-indexed under every
+	// workspace. The brain popover query OR-includes this bucket so
+	// the rows still surface with their real (single) counts.
+	go func() {
+		if err := glitchd.StartToolPod(); err != nil {
+			log.Printf("backend: start tool pod: %v", err)
+		}
+	}()
 
 	a.startNotify()
 }
@@ -179,6 +200,9 @@ func (a *App) shutdown(_ context.Context) {
 	// the goroutines, so callers downstream don't see partially-
 	// torn-down state.
 	glitchd.StopAllWorkspacePods()
+	// Tear down the global tool pod (copilot + mattermost) too.
+	// Same waitgroup-on-exit semantics as workspace pods.
+	_ = glitchd.StopToolPod()
 
 	if a.notifyProc != nil {
 		_ = a.notifyProc.Kill()
@@ -277,10 +301,15 @@ func (a *App) UpdateWorkspaceTitle(id, title string) {
 }
 
 // AddWorkspaceDirectory opens a native picker and adds the selected
-// dir to the workspace. The dir is also appended to observer.yaml's
-// directories.paths list so the directories collector starts scanning
-// it on its next tick — without this sync, the workspace UI and the
-// brain would disagree about which dirs are being watched.
+// dir to the workspace's SQLite directory list. The directories
+// collector reads workspace directories at pod-start time (and the
+// brain's ListCollectorsForWorkspace re-merges them on every popover
+// tick), so no separate observer.yaml sync is needed — and writing
+// to the global file would leak this directory across every other
+// workspace.
+//
+// The pod is restarted so the new directory starts being scanned on
+// the next tick instead of waiting for an unrelated config write.
 func (a *App) AddWorkspaceDirectory(workspaceID string) {
 	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "Select Directory to Monitor",
@@ -298,22 +327,18 @@ func (a *App) AddWorkspaceDirectory(workspaceID string) {
 		return
 	}
 
-	// Sync to observer.yaml so the directories collector picks it up.
-	// Best-effort: a config write failure shouldn't roll back the
-	// workspace add (the user can fix the config and the dir will be
-	// scanned on the next tick anyway).
-	if err := glitchd.AddCollectorDirectory(dir); err != nil {
-		log.Printf("sync dir to observer.yaml: %v", err)
-	} else {
-		// Tell the brain something changed so the user gets feedback
-		// in the activity panel and the next collector tick reflects
-		// the new path immediately.
-		a.emitBrainActivity("checkin", "info",
-			"watching new directory",
-			filepath.Base(dir),
-			dir)
-		go a.refreshCollectorActivity(false)
+	// Restart the workspace pod so the directories collector picks up
+	// the new path immediately (it reads workspace.Directories at
+	// start time, not on every tick).
+	if err := glitchd.RestartWorkspacePod(workspaceID); err != nil {
+		log.Printf("restart pod after add dir: %v", err)
 	}
+
+	a.emitBrainActivity("checkin", "info",
+		"watching new directory",
+		filepath.Base(dir),
+		dir)
+	go a.refreshCollectorActivity(false)
 
 	ws, _ := st.GetWorkspace(a.ctx, workspaceID)
 	b, _ := json.Marshal(ws)
@@ -326,6 +351,11 @@ func (a *App) AddWorkspaceDirectory(workspaceID string) {
 // removing it from one keeps the collector alive for the other.
 // Collectors are keyed by path, not by workspace, so this is the
 // only dedup layer we need.
+// RemoveWorkspaceDirectory drops a directory from the workspace's
+// SQLite list and restarts the pod so the directories collector
+// stops scanning it on the next tick. Other workspaces are unaffected
+// — directories are always workspace-scoped now, so a sibling
+// workspace that still lists the same path keeps watching it.
 func (a *App) RemoveWorkspaceDirectory(workspaceID, dir string) {
 	st, err := glitchd.OpenStore()
 	if err != nil {
@@ -333,46 +363,21 @@ func (a *App) RemoveWorkspaceDirectory(workspaceID, dir string) {
 	}
 	_ = st.RemoveWorkspaceDirectory(a.ctx, workspaceID, dir)
 
-	// Cross-workspace check: if any other workspace still lists this
-	// directory, leave observer.yaml alone — the collector should
-	// keep running for the sibling workspace(s).
-	stillReferenced := false
-	if all, err := st.ListWorkspaces(a.ctx); err == nil {
-		for _, ws := range all {
-			if ws.ID == workspaceID {
-				continue
-			}
-			for _, d := range ws.Directories {
-				if d == dir {
-					stillReferenced = true
-					break
-				}
-			}
-			if stillReferenced {
-				break
-			}
-		}
+	// Restart the workspace pod so the directories collector picks
+	// up the removal on the next tick.
+	if err := glitchd.RestartWorkspacePod(workspaceID); err != nil {
+		log.Printf("restart pod after remove dir: %v", err)
 	}
 
-	if stillReferenced {
-		a.emitBrainActivity("checkin", "info",
-			"unlinked from workspace",
-			filepath.Base(dir)+" (still watched by another workspace)",
-			dir)
-	} else {
-		// Best-effort observer.yaml sync. We don't bail on failure
-		// for the same reason as Add — the workspace state is the
-		// user's source of truth and a config-write hiccup shouldn't
-		// undo it.
-		if err := glitchd.RemoveCollectorDirectory(dir); err != nil {
-			log.Printf("unsync dir from observer.yaml: %v", err)
-		} else {
-			a.emitBrainActivity("checkin", "info",
-				"stopped watching directory",
-				filepath.Base(dir),
-				dir)
-		}
-	}
+	// Note for the activity panel: we used to flag "still watched by
+	// another workspace" in the cross-workspace case, but now every
+	// workspace has an independent directory list, so removal is
+	// always local. Sibling workspaces are unaffected.
+	a.emitBrainActivity("checkin", "info",
+		"stopped watching directory",
+		filepath.Base(dir),
+		dir)
+	go a.refreshCollectorActivity(false)
 
 	ws, _ := st.GetWorkspace(a.ctx, workspaceID)
 	b, _ := json.Marshal(ws)
@@ -603,13 +608,18 @@ func (a *App) PromoteDraft(id int64, makeGlobal bool) string {
 	return glitchd.PromoteDraft(a.ctx, id, makeGlobal)
 }
 
-// UpdateDraftBody persists manual edits to a draft's title and body
-// without running a refinement turn. The editor popup calls this
-// before PromoteDraft so freshly-typed text in the CodeMirror surface
-// gets saved alongside any model-refined content. Returns "" on
-// success or an error message.
-func (a *App) UpdateDraftBody(id int64, title, body string) string {
-	return glitchd.UpdateDraftBody(a.ctx, id, title, body)
+// UpdateDraftBody persists manual edits to a draft's title, body, and
+// optional input/output format hints without running a refinement
+// turn. The editor popup calls this before PromoteDraft so
+// freshly-typed text in the CodeMirror surface gets saved alongside
+// any model-refined content.
+//
+// inputFormat and outputFormat are optional — empty string means
+// "free-form text", which is the default the popup ships with so
+// authors aren't forced to declare a schema before they've even run
+// the prompt once. Returns "" on success or an error message.
+func (a *App) UpdateDraftBody(id int64, title, body, inputFormat, outputFormat string) string {
+	return glitchd.UpdateDraftBody(a.ctx, id, title, body, inputFormat, outputFormat)
 }
 
 // RefineDraft runs one refinement turn: queries brainrag for relevant
@@ -1034,16 +1044,36 @@ func (a *App) ListCollectors(workspaceID string) string {
 		cols = []glitchd.CollectorInfo{}
 	}
 
-	// Merge in the most recent activity snapshot. The collector loop
-	// refreshes this every collectorPollInterval. We don't query ES on
-	// the user-facing path because the popover is opened often and ES
-	// queries can be slow on cold caches.
-	a.collectorMu.Lock()
-	snapshot := make(map[string]glitchd.CollectorActivity, len(a.collectorState))
-	for k, v := range a.collectorState {
-		snapshot[k] = v
+	// Pick the activity snapshot to merge in. Two paths:
+	//
+	//   workspaceID == ""  → use the cached global snapshot maintained
+	//                        by refreshCollectorActivity. Same behavior
+	//                        as before; supports the headless / pre-
+	//                        workspace startup window.
+	//
+	//   workspaceID != ""  → query ES inline with a workspace_id term
+	//                        filter so the popover shows ONLY this
+	//                        workspace's activity. The cached snapshot
+	//                        is global so it can't answer this on its
+	//                        own. The aggregation is one query against
+	//                        a keyword field — cheap enough to run on
+	//                        every popover open without caching.
+	snapshot := make(map[string]glitchd.CollectorActivity, 8)
+	if workspaceID == "" {
+		a.collectorMu.Lock()
+		for k, v := range a.collectorState {
+			snapshot[k] = v
+		}
+		a.collectorMu.Unlock()
+	} else {
+		queryCtx, cancel := context.WithTimeout(a.ctx, 3*time.Second)
+		defer cancel()
+		if rows, err := glitchd.QueryCollectorActivityScoped(queryCtx, workspaceID); err == nil {
+			for _, r := range rows {
+				snapshot[r.Source] = r
+			}
+		}
 	}
-	a.collectorMu.Unlock()
 
 	// Out type carries the static config, the ES doc-count snapshot,
 	// AND the in-process collector run heartbeat in a single flat
@@ -1083,6 +1113,35 @@ func (a *App) ListCollectors(workspaceID string) string {
 		"now_ms":     time.Now().UnixMilli(),
 		"collectors": merged,
 	})
+	return string(b)
+}
+
+// BrainDecisions returns a JSON snapshot of brain-decision activity
+// for the given workspace, used by the DECISIONS section of the
+// brain popover. Empty workspaceID falls back to the global view so
+// the popover renders during startup before a workspace is active.
+//
+// Output shape mirrors glitchd.BrainDecisionsActivity:
+//
+//	{
+//	  "total": 12,
+//	  "escalated": 3,
+//	  "last_decision_ms": 1712499600000,
+//	  "last_provider": "ollama",
+//	  "last_escalated": false
+//	}
+//
+// Returns "{}" on any error so the popover renders an empty section
+// instead of an error toast — the brain decision log is informational,
+// never load-bearing for the rest of the UI.
+func (a *App) BrainDecisions(workspaceID string) string {
+	ctx, cancel := context.WithTimeout(a.ctx, 3*time.Second)
+	defer cancel()
+	act, err := glitchd.QueryBrainDecisionsActivityScoped(ctx, workspaceID)
+	if err != nil || act == nil {
+		return "{}"
+	}
+	b, _ := json.Marshal(act)
 	return string(b)
 }
 
@@ -1144,6 +1203,41 @@ func (a *App) WriteCollectorsConfig(workspaceID, content string) string {
 		return ""
 	}
 	if err := glitchd.WriteCollectorConfig(content); err != nil {
+		return err.Error()
+	}
+	go a.refreshCollectorActivity(false)
+	return ""
+}
+
+// GetCollectorsConfigJSON returns the workspace's collectors config as
+// a JSON object whose shape mirrors the typed collector.Config struct.
+// Used by the schema-driven config modal so it can render structured
+// fields without parsing YAML in the renderer process.
+//
+// workspaceID="" is not supported here — the structured modal is
+// always per-workspace; global edits keep using the raw YAML editor.
+func (a *App) GetCollectorsConfigJSON(workspaceID string) string {
+	if workspaceID == "" {
+		return ""
+	}
+	s, err := glitchd.ReadWorkspaceCollectorConfigJSON(workspaceID)
+	if err != nil {
+		return ""
+	}
+	return s
+}
+
+// WriteCollectorsConfigJSON parses jsonContent into the typed Config,
+// re-marshals to YAML, and saves via the same validated writer the
+// raw YAML editor uses. Triggers a pod restart on success.
+//
+// Returns "" on success or the parse/validation error string so the
+// modal can render it inline.
+func (a *App) WriteCollectorsConfigJSON(workspaceID, jsonContent string) string {
+	if workspaceID == "" {
+		return "workspace id is required"
+	}
+	if err := glitchd.WriteWorkspaceCollectorConfigJSON(workspaceID, jsonContent); err != nil {
 		return err.Error()
 	}
 	go a.refreshCollectorActivity(false)

@@ -22,6 +22,10 @@ export function AskScoped(arg1, arg2) {
   return window['go']['main']['App']['AskScoped'](arg1, arg2);
 }
 
+export function BrainDecisions(arg1) {
+  return window['go']['main']['App']['BrainDecisions'](arg1);
+}
+
 export function CollectorsConfigPath(arg1) {
   return window['go']['main']['App']['CollectorsConfigPath'](arg1);
 }
@@ -60,6 +64,10 @@ export function DeleteWorkspace(arg1) {
 
 export function Doctor(arg1) {
   return window['go']['main']['App']['Doctor'](arg1);
+}
+
+export function GetCollectorsConfigJSON(arg1) {
+  return window['go']['main']['App']['GetCollectorsConfigJSON'](arg1);
 }
 
 export function GetDraft(arg1) {
@@ -170,8 +178,8 @@ export function StopRun(arg1) {
   return window['go']['main']['App']['StopRun'](arg1);
 }
 
-export function UpdateDraftBody(arg1, arg2, arg3) {
-  return window['go']['main']['App']['UpdateDraftBody'](arg1, arg2, arg3);
+export function UpdateDraftBody(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['UpdateDraftBody'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function UpdateWorkspaceTitle(arg1, arg2) {
@@ -184,6 +192,10 @@ export function WorkflowPathForName(arg1, arg2) {
 
 export function WriteCollectorsConfig(arg1, arg2) {
   return window['go']['main']['App']['WriteCollectorsConfig'](arg1, arg2);
+}
+
+export function WriteCollectorsConfigJSON(arg1, arg2) {
+  return window['go']['main']['App']['WriteCollectorsConfigJSON'](arg1, arg2);
 }
 
 export function WriteWorkflowFile(arg1, arg2) {

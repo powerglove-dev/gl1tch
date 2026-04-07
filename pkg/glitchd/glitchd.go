@@ -17,8 +17,34 @@ import (
 
 // RunBackend starts all background services (busd, supervisor, collectors,
 // brain, cron) as goroutines. Blocks until ctx is cancelled.
+//
+// Equivalent to RunBackendWithOptions(ctx, BackendOptions{}). Kept as
+// the zero-arg name for the rare caller that wants the legacy headless
+// behavior (every collector registered as a global supervisor service).
 func RunBackend(ctx context.Context) error {
 	return bootstrap.RunHeadless(ctx)
+}
+
+// BackendOptions configures RunBackendWithOptions. Mirrors the
+// internal bootstrap.Options struct but lives in pkg/glitchd so the
+// desktop app and other public callers don't have to import internal/.
+type BackendOptions struct {
+	// SkipGlobalCollectors disables the global supervisor's collector
+	// services. Set to true when the caller is going to manage
+	// collectors via the per-workspace pod manager (i.e. the desktop
+	// app calls InitPodManager + StartAllWorkspacePods after this
+	// returns). See the doc comment on bootstrap.Options for the full
+	// rationale — short version: running both paths makes every
+	// indexed doc end up with workspace_id="".
+	SkipGlobalCollectors bool
+}
+
+// RunBackendWithOptions is the option-taking variant of RunBackend.
+// The desktop app's app.go uses this with SkipGlobalCollectors:true.
+func RunBackendWithOptions(ctx context.Context, opts BackendOptions) error {
+	return bootstrap.RunHeadlessWithOptions(ctx, bootstrap.Options{
+		SkipGlobalCollectors: opts.SkipGlobalCollectors,
+	})
 }
 
 // QueryEngine creates an observer query engine connected to Elasticsearch.
