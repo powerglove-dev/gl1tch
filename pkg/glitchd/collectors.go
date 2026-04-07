@@ -190,6 +190,43 @@ func ListCollectorsForWorkspace(ctx context.Context, workspaceID string) ([]Coll
 		Source:     cfg.Mattermost.URL,
 	})
 
+	// Code-index — semantic embedding pass over the workspace's
+	// source files. Off by default because the first pass against a
+	// large tree can take minutes; the user opts in via the modal,
+	// after which AutoDetectFromWorkspace fills in the paths from
+	// the workspace's directories so they don't have to type them.
+	//
+	// Detail line summarizes the embedder so users immediately know
+	// "ollama nomic-embed-text" vs "voyage voyage-code-3" without
+	// opening the modal.
+	ciDetail := fmt.Sprintf("%d path(s)", len(cfg.CodeIndex.Paths))
+	if cfg.CodeIndex.Enabled {
+		provider := cfg.CodeIndex.EmbedProvider
+		if provider == "" {
+			provider = "ollama"
+		}
+		model := cfg.CodeIndex.EmbedModel
+		if model == "" {
+			switch provider {
+			case "ollama":
+				model = "nomic-embed-text"
+			case "openai":
+				model = "text-embedding-3-small"
+			case "voyage":
+				model = "voyage-code-3"
+			}
+		}
+		ciDetail = fmt.Sprintf("%d path(s) · %s %s",
+			len(cfg.CodeIndex.Paths), provider, model)
+	}
+	out = append(out, CollectorInfo{
+		Name:       "code-index",
+		Enabled:    cfg.CodeIndex.Enabled && len(cfg.CodeIndex.Paths) > 0,
+		IntervalMs: cfg.CodeIndex.Interval.Milliseconds(),
+		Detail:     ciDetail,
+		Source:     joinShort(cfg.CodeIndex.Paths),
+	})
+
 	return out, nil
 }
 

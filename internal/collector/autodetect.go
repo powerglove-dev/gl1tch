@@ -77,6 +77,30 @@ func AutoDetectFromWorkspace(cfg *Config, dirs []string) *Config {
 		cfg.Copilot.Enabled = true
 	}
 
+	// ── code-index paths ────────────────────────────────────────────
+	// When the user has flipped code-index on but hasn't manually
+	// listed paths, fall back to the workspace's directory set so
+	// flipping the toggle is enough to start indexing. Without this,
+	// code-index does nothing on a fresh workspace and the user has
+	// to dig into the YAML to make progress — which is exactly the
+	// "fix the code index so I can turn it on" friction.
+	//
+	// Manual paths in cfg.CodeIndex.Paths are preserved; we only fill
+	// in dirs that aren't already in the set, and only when the
+	// collector is actually enabled. Disabled code-index leaves Paths
+	// alone so a user who flips it on later still gets the empty
+	// state they wrote.
+	if cfg.CodeIndex.Enabled && len(dirs) > 0 {
+		existing := stringSet(cfg.CodeIndex.Paths)
+		for _, d := range dirs {
+			if d == "" || existing[d] {
+				continue
+			}
+			cfg.CodeIndex.Paths = append(cfg.CodeIndex.Paths, d)
+			existing[d] = true
+		}
+	}
+
 	return cfg
 }
 

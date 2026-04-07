@@ -199,6 +199,13 @@ func IndexTree(ctx context.Context, opts IndexTreeOptions) (IndexTreeResult, err
 	}
 
 	walkErr := filepath.WalkDir(opts.Root, func(path string, d fs.DirEntry, err error) error {
+		// Bail out of the walk immediately on cancellation. Without
+		// this, a `pod stop` issued during a multi-minute first-pass
+		// embed against a huge tree could keep the goroutine alive
+		// long after the rest of the supervisor had torn down.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil {
 			return err
 		}
@@ -243,7 +250,10 @@ func IndexTree(ctx context.Context, opts IndexTreeOptions) (IndexTreeResult, err
 		return nil
 	})
 
-	if walkErr != nil && walkErr != context.Canceled {
+	// Treat any context error (cancel + deadline) as a clean stop —
+	// the caller asked us to bail, the partial result we accumulated
+	// in `res` is still useful as a heartbeat number.
+	if walkErr != nil && walkErr != context.Canceled && walkErr != context.DeadlineExceeded {
 		return res, fmt.Errorf("brainrag: IndexTree: walk %q: %w", opts.Root, walkErr)
 	}
 	return res, nil
