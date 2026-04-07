@@ -279,6 +279,31 @@ func runCollectorGuarded(ctx context.Context, c Collector, es *esearch.Client, w
 	}()
 	slog.Info("pod manager: collector started",
 		"workspace", workspaceID, "collector", c.Name())
+	// "Alive" heartbeat fired BEFORE delegating to the collector's
+	// own Start. Without this, the popover row's last_run_ms stays
+	// at zero until the collector reaches its OWN RecordRun call —
+	// which for most collectors only happens on the first ticker
+	// tick, anywhere from 60s to 5min after launch depending on the
+	// configured Interval. The user opens the popover, sees a gray
+	// dot, and has no way to tell whether the collector is "starting
+	// up" or "silently dead in another process".
+	//
+	// More importantly, the in-process run registry is per-process.
+	// If there's a second gl1tch instance running (e.g. a stale
+	// `glitch serve` from another terminal, or a wails dev rebuild
+	// that orphaned the previous binary), the popover-rendering
+	// process and the indexing process can be two different binaries
+	// with two different registries. They share ES so document
+	// counts agree, but heartbeats don't. An "I'm alive" heartbeat
+	// at goroutine launch makes the THIS process's collectors
+	// visibly distinguishable from the other process's, so the user
+	// can immediately tell which side is doing the work.
+	//
+	// indexed=0 + nil error is the "freshly launched, no work yet"
+	// signal. The popover dot logic interprets it as cyan
+	// (`total > 0 || lastRun > 0`) and the row shows "ran just now"
+	// even before the first real poll completes.
+	RecordRun(c.Name(), time.Now(), 0, nil)
 	if err := c.Start(ctx, es); err != nil && ctx.Err() == nil {
 		slog.Warn("pod manager: collector exited",
 			"workspace", workspaceID, "collector", c.Name(), "err", err)
