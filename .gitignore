@@ -16,6 +16,7 @@ frontend/package.json.md5
 glitch
 glitch-*
 !glitch-desktop/
+!cmd/glitch-*/
 
 # WASM
 assets/plugin.wasm
