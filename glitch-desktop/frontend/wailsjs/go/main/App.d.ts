@@ -85,6 +85,20 @@ export function SaveWorkflow(arg1:string,arg2:string,arg3:string):Promise<string
 
 export function SkillPathForName(arg1:string,arg2:string):Promise<string>;
 
+export function StepThroughAbort(arg1:string):Promise<string>;
+
+export function StepThroughAccept(arg1:string):Promise<string>;
+
+export function StepThroughEditOutput(arg1:string,arg2:string):Promise<string>;
+
+export function StepThroughSave(arg1:string,arg2:string):Promise<string>;
+
+export function StepThroughSnapshot(arg1:string):Promise<string>;
+
+export function StepThroughStart(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function StepThroughStartFromChain(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
+
 export function StopDraftRefine(arg1:number):Promise<void>;
 
 export function StopRun(arg1:string):Promise<void>;

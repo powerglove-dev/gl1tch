@@ -159,13 +159,26 @@ func ProcessBlocks(output string, stdout, stderr io.Writer) string {
 		return output
 	}
 
+	// Resolve the workspace cwd once. The runner exports GLITCH_CWD on the
+	// plugin subprocess (see internal/executor/cli_adapter.go) when the
+	// step's cwd var is set. We prefer it over os.Getwd() because the
+	// process cwd of the plugin can be inherited from glitch-desktop's
+	// own working directory (which is wherever the user launched the app
+	// from), and that has nothing to do with the workspace the chain
+	// belongs to.
+	cwd := workspaceCwd()
+
 	output = writeBlockRe.ReplaceAllStringFunc(output, func(match string) string {
 		sub := writeBlockRe.FindStringSubmatch(match)
 		if len(sub) < 3 {
 			return match
 		}
-		path := ExpandHome(strings.TrimSpace(sub[1]))
+		rawPath := strings.TrimSpace(sub[1])
 		content := sub[2]
+		path, coerced := resolveSideEffectPath(rawPath, cwd)
+		if coerced {
+			fmt.Fprintf(stderr, "glitchctx: rewrote %q → %q (workspace-relative)\n", rawPath, path)
+		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			fmt.Fprintf(stderr, "glitchctx: mkdir %s: %v\n", filepath.Dir(path), err)
 			return fmt.Sprintf("[write failed: %s: %v]", path, err)
@@ -188,6 +201,14 @@ func ProcessBlocks(output string, stdout, stderr io.Writer) string {
 			shell = "sh"
 		}
 		cmd := exec.Command(shell, "-c", command)
+		// Pin shell commands to the workspace cwd. Without this the
+		// command runs in whatever directory the plugin process happened
+		// to inherit — usually glitch-desktop's launch dir, never the
+		// active workspace. The result was a grep emitting matches from
+		// a totally unrelated repo (the screenshot that flagged this).
+		if cwd != "" {
+			cmd.Dir = cwd
+		}
 		var out bytes.Buffer
 		cmd.Stdout = &out
 		cmd.Stderr = &out
@@ -198,6 +219,72 @@ func ProcessBlocks(output string, stdout, stderr io.Writer) string {
 	})
 
 	return output
+}
+
+// workspaceCwd returns the workspace working directory the harness pinned
+// for this run. Reads GLITCH_CWD (set by the runner via cli_adapter.go)
+// and falls back to os.Getwd() only when the env var is unset — which
+// matches the convention BuildShellContext already uses for the cwd it
+// reports to the LLM. Centralised so writes, runs, and the shell context
+// snapshot all agree on the same notion of "workspace dir".
+func workspaceCwd() string {
+	if cwd := os.Getenv("GLITCH_CWD"); cwd != "" {
+		return ExpandHome(cwd)
+	}
+	cwd, _ := os.Getwd()
+	return cwd
+}
+
+// resolveSideEffectPath turns an LLM-emitted file path into a real
+// filesystem path scoped to the workspace cwd. It handles the three
+// shapes the model commonly produces:
+//
+//   - "~/foo/bar.yaml" → expanded via ExpandHome (user's home dir)
+//   - "/.glitch/foo"   → leading slash that escapes to root. Coerced to
+//                        <cwd>/.glitch/foo. Returned coerced=true so the
+//                        caller can log the rewrite — silent path
+//                        surgery is the kind of magic that bites later.
+//   - "/abs/path"      → already a real absolute path that's NOT under
+//                        cwd. Left as-is. The user/LLM took explicit
+//                        responsibility, and we don't want to second-
+//                        guess legitimate absolute writes.
+//   - "relative/path"  → joined onto cwd.
+//
+// The "starts with /." heuristic catches the common LLM failure mode
+// (model thinks "the workspace root" looks like a leading slash) without
+// hijacking real absolute paths the user might want.
+func resolveSideEffectPath(raw, cwd string) (string, bool) {
+	path := ExpandHome(strings.TrimSpace(raw))
+	if path == "" {
+		return path, false
+	}
+
+	if !filepath.IsAbs(path) {
+		if cwd != "" {
+			return filepath.Join(cwd, path), false
+		}
+		return path, false
+	}
+
+	// Absolute path. The common LLM failure mode is "/.glitch/..." or
+	// "/cmd/...": a leading slash the model added thinking it meant
+	// "the root of the workspace". Detect by looking at the *real*
+	// existence of the parent directory. If the path's parent doesn't
+	// exist on disk AND we have a cwd, prefer the workspace-rooted
+	// version. Otherwise leave the absolute path alone.
+	if cwd != "" && !filepath.HasPrefix(path, cwd) {
+		// Trim the leading slash and re-anchor under cwd.
+		rel := strings.TrimPrefix(path, "/")
+		candidate := filepath.Join(cwd, rel)
+		// Only rewrite if the original parent doesn't exist (i.e. it
+		// would have failed anyway with a "no such directory" or
+		// "read-only filesystem" error). Real absolute writes to
+		// existing directories pass through unchanged.
+		if _, err := os.Stat(filepath.Dir(path)); err != nil {
+			return candidate, true
+		}
+	}
+	return path, false
 }
 
 // ExpandHome replaces a leading ~ with the user's home directory.

@@ -864,6 +864,117 @@ func (a *App) SaveChatWorkflow(workspaceID, name, stepsJSON, defaultProvider, de
 //     ask call — no explicit reindex is required.
 //  5. At any point, StepThroughAbort(sessionID) tears the run down.
 
+// StepThroughStartFromChain is the chat-bar entry point into step-through
+// mode. It parallels RunChain, but instead of running the chain to
+// completion it starts a paused step-through session and forwards per-step
+// pause events to the frontend as "step-through:event" wails events.
+//
+// Per the "step-through isn't a mode" rule (see project_step_through_mode):
+// the frontend routes chain.length >= 2 sends through this path. Single-
+// step sends keep going through RunChain / AskScoped and never pause.
+//
+// Lifecycle: chat:chunk and chat:event stream from the running step the
+// same way RunChain streams them, so the chat surface renders step output
+// in real time. On step_paused, the frontend shows an Accept/Abort
+// affordance; on final the session terminates and chat:done fires.
+func (a *App) StepThroughStartFromChain(
+	stepsJSON, userText, workspaceID, defaultProvider, defaultModel string,
+) string {
+	// Build system context from workspace — mirrors RunChain so chain
+	// steps see the same agents/workflows/dirs regardless of which path
+	// the chat bar took.
+	var dirs []string
+	var agents []glitchd.AgentInfo
+	var pipes []glitchd.WorkflowInfo
+	if workspaceID != "" {
+		if st, err := glitchd.OpenStore(); err == nil {
+			if ws, err := st.GetWorkspace(a.ctx, workspaceID); err == nil {
+				dirs = ws.Directories
+			}
+		}
+		agents = glitchd.ListAgents(dirs)
+		pipes = glitchd.DiscoverWorkspaceWorkflows(dirs)
+	}
+	systemCtx := glitchd.BuildSystemContext(dirs, agents, pipes)
+	var cwd string
+	if len(dirs) > 0 {
+		cwd = dirs[0]
+	}
+
+	// Register a run slot so StopRun cancels the session the same way it
+	// cancels a RunChain. The release closure fires when the pump goroutine
+	// observes the session's Events channel close.
+	runCtx, release := a.registerRun(workspaceID)
+
+	// Block-event pump — matches RunChain, which deliberately runs
+	// EventCh-only (no TokenCh). The StreamSplitter consumes
+	// <<GLITCH_TEXT>> markers and gl1tch-stats trailers and emits clean
+	// BlockEvents. Wiring TokenCh in parallel would re-emit the raw bytes
+	// verbatim and the chat surface would render the protocol markers
+	// alongside the parsed text — exactly the leak the screenshot showed.
+	eventCh := make(chan glitchd.BlockEvent, 64)
+	go func() {
+		for ev := range eventCh {
+			runtime.EventsEmit(a.ctx, "chat:event", encodeBlockEvent(workspaceID, ev))
+		}
+	}()
+
+	h, err := glitchd.StartStepThroughFromChain(runCtx, glitchd.StepThroughChainOpts{
+		WorkspaceID:     workspaceID,
+		StepsJSON:       stepsJSON,
+		UserText:        userText,
+		DefaultProvider: defaultProvider,
+		DefaultModel:    defaultModel,
+		SystemCtx:       systemCtx,
+		Cwd:             cwd,
+		EventCh:         eventCh,
+	})
+	if err != nil {
+		close(eventCh)
+		release()
+		a.emitError(workspaceID, err.Error())
+		return errorJSONStr(err.Error())
+	}
+
+	a.stepThroughMu.Lock()
+	a.stepThrough[h.ID] = h
+	a.stepThroughMu.Unlock()
+
+	// Pump session events → "step-through:event". Tag each event with
+	// workspace_id so the frontend can route it (matches chat:chunk
+	// semantics). On terminal events (final/error) we also emit the
+	// chat:done / chat:error pair so the existing streaming-state
+	// machinery in the React store flips out of "streaming" naturally.
+	go func(id, wsID string, events <-chan glitchd.StepThroughEvent) {
+		defer release()
+		defer close(eventCh)
+		for ev := range events {
+			payload := map[string]any{
+				"workspace_id": wsID,
+				"kind":         ev.Kind,
+				"session_id":   ev.SessionID,
+				"step_id":      ev.StepID,
+				"output":       ev.Output,
+				"final_output": ev.FinalOutput,
+				"error":        ev.Error,
+			}
+			runtime.EventsEmit(a.ctx, "step-through:event", payload)
+			switch ev.Kind {
+			case "final":
+				a.emitDone(wsID)
+			case "error":
+				a.emitError(wsID, ev.Error)
+			}
+		}
+		a.stepThroughMu.Lock()
+		delete(a.stepThrough, id)
+		a.stepThroughMu.Unlock()
+	}(h.ID, workspaceID, h.Session.Events)
+
+	out, _ := json.Marshal(map[string]string{"session_id": h.ID})
+	return string(out)
+}
+
 // StepThroughStart parses the supplied pipeline YAML, starts a step-through
 // session under the given workspace, and spawns a pump goroutine that
 // forwards every session event to the "step-through:event" Wails runtime

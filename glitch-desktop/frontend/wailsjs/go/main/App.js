@@ -170,6 +170,34 @@ export function SkillPathForName(arg1, arg2) {
   return window['go']['main']['App']['SkillPathForName'](arg1, arg2);
 }
 
+export function StepThroughAbort(arg1) {
+  return window['go']['main']['App']['StepThroughAbort'](arg1);
+}
+
+export function StepThroughAccept(arg1) {
+  return window['go']['main']['App']['StepThroughAccept'](arg1);
+}
+
+export function StepThroughEditOutput(arg1, arg2) {
+  return window['go']['main']['App']['StepThroughEditOutput'](arg1, arg2);
+}
+
+export function StepThroughSave(arg1, arg2) {
+  return window['go']['main']['App']['StepThroughSave'](arg1, arg2);
+}
+
+export function StepThroughSnapshot(arg1) {
+  return window['go']['main']['App']['StepThroughSnapshot'](arg1);
+}
+
+export function StepThroughStart(arg1, arg2, arg3) {
+  return window['go']['main']['App']['StepThroughStart'](arg1, arg2, arg3);
+}
+
+export function StepThroughStartFromChain(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['StepThroughStartFromChain'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function StopDraftRefine(arg1) {
   return window['go']['main']['App']['StopDraftRefine'](arg1);
 }

@@ -1,12 +1,15 @@
 import { useEffect, useCallback, useState, useRef } from "react";
 import { Titlebar } from "./components/Titlebar";
 import { Sidebar } from "./components/Sidebar";
+import { WorkspaceTabs } from "./components/WorkspaceTabs";
 import type { AgentEntry, WorkflowFileEntry, PromptEntry } from "./components/Sidebar";
 import { ActivitySidebar } from "./components/ActivitySidebar";
 import { MessageList } from "./components/MessageList";
 import { ChatInput } from "./components/ChatInput";
 import type { ProviderOption, ChainStep } from "./components/ChatInput";
 import { EditorPopup } from "./components/EditorPopup";
+import { PausePanel } from "./components/PausePanel";
+import { parseAgentOutput } from "./lib/parseAgentOutput";
 import { CollectorConfigModal } from "./components/collectors/CollectorConfigModal";
 import { useToast } from "./components/Toast";
 
@@ -34,6 +37,11 @@ import {
   CreateDraft,
   CreateDraftFromTarget,
   RunChain,
+  StepThroughStartFromChain,
+  StepThroughAccept,
+  StepThroughAbort,
+  StepThroughEditOutput,
+  StepThroughSave,
   AnswerClarification,
   Doctor,
   StopRun,
@@ -62,6 +70,29 @@ export function App() {
   const [selectedModel, setSelectedModel] = useState("");
   const [chain, setChain] = useState<ChainStep[]>([]);
   const [pendingClarify, setPendingClarify] = useState<{ workspace_id: string; run_id: string; question: string } | null>(null);
+  // Active step-through sessions keyed by workspace id. Each entry holds
+  // the session id plus (if paused) the step that's currently blocking
+  // on a user decision. Sessions are per-workspace because StopRun and
+  // the chat surface are already workspace-scoped — routing a pause to
+  // the wrong workspace's chat would be worse than dropping it.
+  // Each entry remembers the chain + resolved provider/model that started
+  // the session so save-as and rewind-by-replay can reconstitute it. The
+  // chain is cleared from the chat-input bar on send, so without this the
+  // only copy of the original user intent would be in the frontend's
+  // ephemeral state — and the session would be un-saveable mid-run.
+  const [stepSessions, setStepSessions] = useState<
+    Record<
+      string,
+      {
+        sessionId: string;
+        chain: ChainStep[];
+        userText: string;
+        provider: string;
+        model: string;
+        paused?: { stepId: string; output: string };
+      }
+    >
+  >({});
   // The currently open EditorPopup, if any. Holds just the draft id —
   // the popup loads its own state from GetDraft so the parent doesn't
   // have to mirror the draft body, turn history, etc.
@@ -178,6 +209,77 @@ export function App() {
       try { updateWorkspace(JSON.parse(data)); } catch {}
     }
     refreshSidebarData();
+  });
+
+  // Step-through lifecycle events. Routed per-workspace so a paused
+  // session in workspace A doesn't flash an Accept button in the chat
+  // of workspace B. "step_paused" stores the currently paused step;
+  // "step_committed" clears it (the runner is moving on); "final" and
+  // "error" drop the entire session entry (chat:done/chat:error already
+  // flipped the streaming state).
+  useWailsEvent("step-through:event", (data: unknown) => {
+    if (!data || typeof data !== "object") return;
+    const d = data as {
+      workspace_id?: string;
+      kind?: string;
+      session_id?: string;
+      step_id?: string;
+      output?: string;
+      error?: string;
+    };
+    const wsId = d.workspace_id;
+    if (!wsId || !d.session_id) return;
+    // The captured step "value" arrives raw from the executor — full of
+    // gl1tch protocol noise (<<GLITCH_TEXT>> markers, gl1tch-stats JSON,
+    // [wrote: …] acks, etc.). We run it through parseAgentOutput so the
+    // pause panel shows the same clean body the chat surface renders;
+    // otherwise the textarea is unreadable garbage.
+    //
+    // We also cap the editor draft to PAUSE_EDITOR_MAX_CHARS. A textarea
+    // holding hundreds of KB of monospace text causes visible scroll
+    // lag in Webkit (the user reported this on a grep dump). The full
+    // value still lives in the session on the backend; if the user
+    // hits Accept the runner uses the original. Edit & continue commits
+    // whatever's in the textarea, which is the truncated view — that's
+    // the honest tradeoff and matches "if you're going to edit a
+    // hundred KB blob, the panel isn't the right place".
+    const PAUSE_EDITOR_MAX_CHARS = 64 * 1024;
+    let cleanedOutput = "";
+    if (d.kind === "step_paused") {
+      const parsed = parseAgentOutput(d.output ?? "").body;
+      if (parsed.length > PAUSE_EDITOR_MAX_CHARS) {
+        cleanedOutput =
+          parsed.slice(0, PAUSE_EDITOR_MAX_CHARS) +
+          `\n\n… [truncated ${parsed.length - PAUSE_EDITOR_MAX_CHARS} chars for display — Accept commits the full output]`;
+      } else {
+        cleanedOutput = parsed;
+      }
+    }
+
+    setStepSessions((prev) => {
+      const next = { ...prev };
+      const existing = next[wsId];
+      if (!existing || existing.sessionId !== d.session_id) {
+        // Event for a session we don't track (e.g. HMR race) — drop it.
+        return prev;
+      }
+      switch (d.kind) {
+        case "step_paused":
+          next[wsId] = {
+            ...existing,
+            paused: { stepId: d.step_id ?? "", output: cleanedOutput },
+          };
+          break;
+        case "step_committed":
+          next[wsId] = { ...existing, paused: undefined };
+          break;
+        case "final":
+        case "error":
+          delete next[wsId];
+          break;
+      }
+      return next;
+    });
   });
 
   useWailsEvent("chat:clarify", (data: unknown) => {
@@ -627,20 +729,201 @@ export function App() {
     }
 
     if (chainToRun.length > 0) {
-      RunChain(
-        JSON.stringify(chainToRun),
-        text,
-        wsId,
-        resolvedDefaultProvider,
-        resolvedDefaultModel,
-      );
+      // Step-through routing rule (see project_step_through_mode):
+      // step-through isn't a mode, it's a property of the run. A chain
+      // of 2+ steps (or with a trailing user text that makes it ≥2) is
+      // consequential enough to pause between steps. A single step —
+      // whether chain-built or user-typed — runs straight through via
+      // the normal chain path so plain chat never pauses.
+      const effectiveSteps =
+        chainToRun.length + (text.trim() !== "" ? 1 : 0);
+      if (effectiveSteps >= 2) {
+        // Snapshot the chain + resolved provider/model so rewind-by-replay
+        // and save-as can reconstitute the session even after the chat
+        // bar's local chain state has been cleared.
+        const capturedChain = chainToRun;
+        const capturedText = text;
+        const capturedProvider = resolvedDefaultProvider;
+        const capturedModel = resolvedDefaultModel;
+        StepThroughStartFromChain(
+          JSON.stringify(capturedChain),
+          capturedText,
+          wsId,
+          capturedProvider,
+          capturedModel,
+        ).then((result) => {
+          try {
+            const parsed = JSON.parse(result);
+            if (parsed?.error) {
+              streamError(wsId, parsed.error);
+            } else if (parsed?.session_id) {
+              setStepSessions((prev) => ({
+                ...prev,
+                [wsId]: {
+                  sessionId: parsed.session_id,
+                  chain: capturedChain,
+                  userText: capturedText,
+                  provider: capturedProvider,
+                  model: capturedModel,
+                },
+              }));
+            }
+          } catch {
+            streamError(wsId, "step-through: bad response from backend");
+          }
+        });
+      } else {
+        RunChain(
+          JSON.stringify(chainToRun),
+          text,
+          wsId,
+          resolvedDefaultProvider,
+          resolvedDefaultModel,
+        );
+      }
       setChain([]);
     } else if (selectedProvider) {
       AskProvider(selectedProvider, selectedModel, text, wsId, "");
     } else {
       AskScoped(text, wsId);
     }
-  }, [addUserMessage, addUserChain, startAssistant, selectedProvider, selectedModel, observerDefaultProvider, observerDefaultModel, providers, state.activeWorkspaceId]);
+  }, [addUserMessage, addUserChain, startAssistant, streamError, selectedProvider, selectedModel, observerDefaultProvider, observerDefaultModel, providers, state.activeWorkspaceId]);
+
+  // Accept / Abort handlers for the paused-step banner. These fire the
+  // backend decision and optimistically clear the paused state — the
+  // authoritative clear still happens when "step_committed" or
+  // "final"/"error" arrives on the step-through:event topic.
+  const handleStepAccept = useCallback(() => {
+    const wsId = state.activeWorkspaceId;
+    if (!wsId) return;
+    const entry = stepSessions[wsId];
+    if (!entry?.paused) return;
+    StepThroughAccept(entry.sessionId).then(() => {
+      setStepSessions((prev) => {
+        const cur = prev[wsId];
+        if (!cur || cur.sessionId !== entry.sessionId) return prev;
+        return { ...prev, [wsId]: { ...cur, paused: undefined } };
+      });
+    });
+  }, [state.activeWorkspaceId, stepSessions]);
+
+  const handleStepAbort = useCallback(() => {
+    const wsId = state.activeWorkspaceId;
+    if (!wsId) return;
+    const entry = stepSessions[wsId];
+    if (!entry) return;
+    StepThroughAbort(entry.sessionId).then(() => {
+      setStepSessions((prev) => {
+        const next = { ...prev };
+        delete next[wsId];
+        return next;
+      });
+    });
+  }, [state.activeWorkspaceId, stepSessions]);
+
+  // EditOutput — keep the step's execution result but replace its
+  // captured "value" with whatever the user typed. Continues the run.
+  // The draft now lives inside PausePanel (to avoid re-rendering App
+  // on every keystroke); the panel hands the edited value back via
+  // the onEditAndContinue callback when the user clicks the button.
+  const handleStepEditOutput = useCallback(
+    (editedValue: string) => {
+      const wsId = state.activeWorkspaceId;
+      if (!wsId) return;
+      const entry = stepSessions[wsId];
+      if (!entry?.paused) return;
+      StepThroughEditOutput(entry.sessionId, editedValue).then(() => {
+        setStepSessions((prev) => {
+          const cur = prev[wsId];
+          if (!cur || cur.sessionId !== entry.sessionId) return prev;
+          return { ...prev, [wsId]: { ...cur, paused: undefined } };
+        });
+      });
+    },
+    [state.activeWorkspaceId, stepSessions],
+  );
+
+  // Save the currently running (or paused) session as a .workflow.yaml.
+  // Reuses the StepThroughSave wails binding which re-serializes the
+  // chain via ChainStepsToYAML on the backend. Produces identical output
+  // to the chat-bar Save button — the two paths share the serializer.
+  const handleStepSaveAs = useCallback(
+    (name: string) => {
+      const wsId = state.activeWorkspaceId;
+      if (!wsId) return;
+      const entry = stepSessions[wsId];
+      if (!entry) return;
+      StepThroughSave(entry.sessionId, name).then((result) => {
+        try {
+          const parsed = JSON.parse(result);
+          if (parsed?.error) {
+            toast.error("Couldn't save workflow", { detail: parsed.error });
+            return;
+          }
+          toast.success(`Saved ${name}.workflow.yaml`, { detail: parsed?.path });
+          refreshSidebarData();
+        } catch {
+          toast.error("Couldn't save workflow", {
+            detail: "Unexpected response from backend",
+          });
+        }
+      });
+    },
+    [state.activeWorkspaceId, stepSessions, toast, refreshSidebarData],
+  );
+
+  // Rewind-by-replay: abort the current session and re-run the captured
+  // chain from step 0. Honest about token cost — we don't have a
+  // checkpoint store wired for chain sessions, so every rewind replays
+  // the whole thing. `overrideChain` lets callers substitute an edited
+  // chain (used later when a prompt edit UI lands); pass undefined to
+  // replay verbatim (pure retry).
+  const handleStepRewind = useCallback(
+    (overrideChain?: ChainStep[]) => {
+      const wsId = state.activeWorkspaceId;
+      if (!wsId) return;
+      const entry = stepSessions[wsId];
+      if (!entry) return;
+      const nextChain = overrideChain ?? entry.chain;
+      StepThroughAbort(entry.sessionId);
+      setStepSessions((prev) => {
+        const next = { ...prev };
+        delete next[wsId];
+        return next;
+      });
+      startAssistant(wsId);
+      StepThroughStartFromChain(
+        JSON.stringify(nextChain),
+        entry.userText,
+        wsId,
+        entry.provider,
+        entry.model,
+      ).then((result) => {
+        try {
+          const parsed = JSON.parse(result);
+          if (parsed?.error) {
+            streamError(wsId, parsed.error);
+            return;
+          }
+          if (parsed?.session_id) {
+            setStepSessions((prev) => ({
+              ...prev,
+              [wsId]: {
+                sessionId: parsed.session_id,
+                chain: nextChain,
+                userText: entry.userText,
+                provider: entry.provider,
+                model: entry.model,
+              },
+            }));
+          }
+        } catch {
+          streamError(wsId, "step-through: bad response from backend");
+        }
+      });
+    },
+    [state.activeWorkspaceId, stepSessions, startAssistant, streamError],
+  );
 
   const handleSend = useCallback(
     (text: string) => {
@@ -703,6 +986,14 @@ export function App() {
   const activeClarify =
     pendingClarify && pendingClarify.workspace_id === state.activeWorkspaceId ? pendingClarify : null;
 
+  // Active step-through session for the current workspace, if any.
+  // `paused` is only set while a step is blocking on Accept/Abort;
+  // between-step streaming uses the normal chat surface.
+  const activeStepSession = state.activeWorkspaceId
+    ? stepSessions[state.activeWorkspaceId] ?? null
+    : null;
+  const activePaused = activeStepSession?.paused ?? null;
+
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--bg)" }}>
       <Titlebar
@@ -721,20 +1012,25 @@ export function App() {
       />
 
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+        {/* Workspace tab strip — always visible on the left edge */}
+        <WorkspaceTabs
+          workspaces={state.workspaces}
+          activeWorkspaceId={state.activeWorkspaceId}
+          onSwitch={handleSwitchWorkspace}
+          onDelete={handleDeleteWorkspace}
+          onRename={handleRenameWorkspace}
+          onNew={handleNewWorkspace}
+        />
+
         {state.sidebarOpen && (
           <Sidebar
-            onNewWorkspace={handleNewWorkspace}
             workspaces={state.workspaces}
             activeWorkspaceId={state.activeWorkspaceId}
-            onSwitchWorkspace={handleSwitchWorkspace}
-            onDeleteWorkspace={handleDeleteWorkspace}
-            onRenameWorkspace={handleRenameWorkspace}
             directories={directories}
             agents={agents}
             workflowFiles={workflowFiles}
             prompts={prompts}
             selectedAgent={selectedAgent}
-            brainActivity={state.brainActivity}
             onAddDirectory={handleAddDirectory}
             onRemoveDirectory={handleRemoveDirectory}
             onAddWorkflowFile={handleAddWorkflowFileToChain}
@@ -757,6 +1053,17 @@ export function App() {
             onAction={handleAction}
             thinking={active.streaming ? active.thinking : ""}
           />
+          {activePaused && state.activeWorkspaceId && (
+            <PausePanel
+              stepId={activePaused.stepId}
+              originalOutput={activePaused.output}
+              onAccept={handleStepAccept}
+              onEditAndContinue={handleStepEditOutput}
+              onRetry={() => handleStepRewind()}
+              onAbort={handleStepAbort}
+              onSaveAs={handleStepSaveAs}
+            />
+          )}
           <ChatInput
             disabled={false}
             streaming={active.streaming && !activeClarify}
