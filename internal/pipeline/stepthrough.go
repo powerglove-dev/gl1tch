@@ -91,8 +91,19 @@ type StepThroughEvent struct {
 	SessionID string `json:"session_id"`
 	StepID    string `json:"step_id,omitempty"`
 	Output    string `json:"output,omitempty"`
+	// StepIndex / StepTotal are 0-based / total step counts populated on
+	// step_paused events so the UI can render "step N of M" and decide
+	// whether the next click is "Continue" (more steps remain) or
+	// "Finish" (this is the last pause). Without these, users see the
+	// pause panel after the chain has visibly produced output and
+	// reasonably assume the run is done — then accepting kicks off
+	// another step they didn't expect. The screenshot that flagged this
+	// was a 2-step chain paused on step-1 with both steps' output
+	// already streamed into the chat surface.
+	StepIndex   int    `json:"step_index"`
+	StepTotal   int    `json:"step_total"`
 	FinalOutput string `json:"final_output,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 // NewStepThroughSession constructs an idle session bound to the given
@@ -174,6 +185,25 @@ func (s *StepThroughSession) intercept(ctx context.Context, stepID string, outpu
 		}
 	}
 
+	// Look up where this step sits in the pipeline so the UI can render
+	// progress + decide whether the next button should say "Continue" or
+	// "Finish". 0-based index; total counts every declared step including
+	// non-plugin ones because that matches what the user sees in the
+	// chain bar. If we can't find the step (shouldn't happen — the runner
+	// only invokes the interceptor for steps it owns) we fall back to
+	// 0/total so the UI just shows progress conservatively.
+	stepIndex := 0
+	stepTotal := 0
+	if s.pipeline != nil {
+		stepTotal = len(s.pipeline.Steps)
+		for i, st := range s.pipeline.Steps {
+			if st.ID == stepID {
+				stepIndex = i
+				break
+			}
+		}
+	}
+
 	s.mu.Lock()
 	s.state = statePaused
 	s.currentStep = stepID
@@ -183,6 +213,8 @@ func (s *StepThroughSession) intercept(ctx context.Context, stepID string, outpu
 		SessionID: s.ID,
 		StepID:    stepID,
 		Output:    outStr,
+		StepIndex: stepIndex,
+		StepTotal: stepTotal,
 	})
 	s.mu.Unlock()
 

@@ -89,7 +89,7 @@ export function App() {
         userText: string;
         provider: string;
         model: string;
-        paused?: { stepId: string; output: string };
+        paused?: { stepId: string; output: string; stepIndex: number; stepTotal: number };
       }
     >
   >({});
@@ -225,6 +225,8 @@ export function App() {
       session_id?: string;
       step_id?: string;
       output?: string;
+      step_index?: number;
+      step_total?: number;
       error?: string;
     };
     const wsId = d.workspace_id;
@@ -267,7 +269,12 @@ export function App() {
         case "step_paused":
           next[wsId] = {
             ...existing,
-            paused: { stepId: d.step_id ?? "", output: cleanedOutput },
+            paused: {
+              stepId: d.step_id ?? "",
+              output: cleanedOutput,
+              stepIndex: d.step_index ?? 0,
+              stepTotal: d.step_total ?? 0,
+            },
           };
           break;
         case "step_committed":
@@ -1056,6 +1063,8 @@ export function App() {
           {activePaused && state.activeWorkspaceId && (
             <PausePanel
               stepId={activePaused.stepId}
+              stepIndex={activePaused.stepIndex}
+              stepTotal={activePaused.stepTotal}
               originalOutput={activePaused.output}
               onAccept={handleStepAccept}
               onEditAndContinue={handleStepEditOutput}

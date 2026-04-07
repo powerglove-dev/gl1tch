@@ -955,6 +955,8 @@ func (a *App) StepThroughStartFromChain(
 				"session_id":   ev.SessionID,
 				"step_id":      ev.StepID,
 				"output":       ev.Output,
+				"step_index":   ev.StepIndex,
+				"step_total":   ev.StepTotal,
 				"final_output": ev.FinalOutput,
 				"error":        ev.Error,
 			}

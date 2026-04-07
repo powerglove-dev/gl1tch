@@ -27,6 +27,10 @@ import { useState, useEffect, useRef, type CSSProperties } from "react";
 
 interface Props {
   stepId: string;
+  /** 0-based index of the paused step within the chain. */
+  stepIndex: number;
+  /** Total number of steps in the chain. */
+  stepTotal: number;
   originalOutput: string;
   onAccept: () => void;
   onEditAndContinue: (editedValue: string) => void;
@@ -37,6 +41,8 @@ interface Props {
 
 export function PausePanel({
   stepId,
+  stepIndex,
+  stepTotal,
   originalOutput,
   onAccept,
   onEditAndContinue,
@@ -44,6 +50,14 @@ export function PausePanel({
   onAbort,
   onSaveAs,
 }: Props) {
+  // Whether this is the last step. The pause is post-step, so when
+  // index == total-1 the runner has nothing left to do once we accept;
+  // the button should say "Finish" so the user doesn't expect another
+  // pause to follow. Earlier pauses say "Continue" because clicking
+  // them visibly advances the chain to the next step.
+  const isLastStep = stepTotal > 0 && stepIndex >= stepTotal - 1;
+  const acceptLabel = isLastStep ? "Finish" : "Continue →";
+  const editLabel = isLastStep ? "Use edit & finish" : "Use edit & continue";
   const [saveName, setSaveName] = useState("");
   const [showSave, setShowSave] = useState(false);
   // Local draft state. Initialized from originalOutput; resynced via the
@@ -65,12 +79,15 @@ export function PausePanel({
       <div style={header}>
         <span style={label}>
           <span style={dot} />
-          paused · {stepId || "step"}
+          paused · step {stepIndex + 1} of {stepTotal || "?"}
+          <span style={stepIdBadge}>{stepId}</span>
         </span>
         <span style={hint}>
           {dirty
-            ? "edited — Edit & continue to use this output"
-            : "review, accept, edit, or retry"}
+            ? "edited — use edit & continue to commit"
+            : isLastStep
+            ? "this is the last step — Finish to wrap up"
+            : `Continue to run step ${stepIndex + 2} of ${stepTotal}`}
         </span>
       </div>
       <textarea
@@ -85,17 +102,23 @@ export function PausePanel({
           onClick={onAccept}
           style={primaryBtn}
           disabled={dirty}
-          title={dirty ? "Use Edit & continue to commit your edits" : "Accept and continue"}
+          title={
+            dirty
+              ? "Use edit & continue to commit your edits"
+              : isLastStep
+              ? "Finish the run"
+              : `Run the next step (${stepIndex + 2} of ${stepTotal})`
+          }
         >
-          Accept
+          {acceptLabel}
         </button>
         <button
           onClick={() => onEditAndContinue(draftRef.current)}
           style={dirty ? primaryBtn : secondaryBtn}
           disabled={!dirty}
-          title={dirty ? "Continue with the edited output" : "No edits to apply"}
+          title={dirty ? "Use the edited output and continue" : "No edits to apply"}
         >
-          Edit &amp; continue
+          {editLabel}
         </button>
         <button onClick={onRetry} style={secondaryBtn} title="Abort and replay the chain from the start">
           Retry
@@ -171,9 +194,20 @@ const header: CSSProperties = {
 const label: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  gap: 6,
+  gap: 8,
   color: "var(--fg)",
   fontWeight: 600,
+};
+
+const stepIdBadge: CSSProperties = {
+  fontWeight: 400,
+  fontSize: 10,
+  color: "var(--muted)",
+  background: "var(--bg)",
+  border: "1px solid var(--border)",
+  borderRadius: 3,
+  padding: "1px 6px",
+  fontFamily: "var(--font-mono, ui-monospace, SFMono-Regular, monospace)",
 };
 
 const dot: CSSProperties = {
