@@ -91,7 +91,14 @@ func run(
 		return 1, fmt.Errorf("prompt is required: no input received on stdin")
 	}
 
-	fullPrompt := glitchctx.ProtocolInstructions + glitchctx.BuildShellContext() + "\n## User Request\n" + prompt
+	// Inject both the input protocol (GLITCH_WRITE/RUN — lets the model
+	// trigger side effects) and the output protocol (GLITCH_TEXT/NOTE/…
+	// — lets the gl1tch chat render structured blocks). The order matters:
+	// instructions first, then shell snapshot, then the user's request.
+	fullPrompt := glitchctx.ProtocolInstructions +
+		glitchctx.OutputProtocolInstructions +
+		glitchctx.BuildShellContext() +
+		"\n## User Request\n" + prompt
 	model := os.Getenv("GLITCH_MODEL")
 	return executor(model, fullPrompt, stdout, stderr), nil
 }

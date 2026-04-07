@@ -64,8 +64,13 @@ func TestRun_ModelFromFlag(t *testing.T) {
 	if stub.calledModel != "ollama/llama3.2" {
 		t.Errorf("expected model ollama/llama3.2, got %q", stub.calledModel)
 	}
-	if stub.calledPrompt != "ping" {
-		t.Errorf("expected prompt 'ping', got %q", stub.calledPrompt)
+	// run() wraps the user's prompt with shell context + the output protocol,
+	// so just check the original survives the wrap.
+	if !strings.Contains(stub.calledPrompt, "ping") {
+		t.Errorf("expected user prompt 'ping' inside wrapped prompt, got %q", stub.calledPrompt)
+	}
+	if !strings.Contains(stub.calledPrompt, "<<GLITCH_TEXT>>") {
+		t.Errorf("expected output protocol injected, got %q", stub.calledPrompt)
 	}
 	if stdout.String() != "response text" {
 		t.Errorf("expected 'response text' in stdout, got %q", stdout.String())

@@ -10,6 +10,18 @@ import (
 	"strings"
 
 	"github.com/8op-org/gl1tch/internal/pipeline"
+	"github.com/8op-org/gl1tch/pkg/glitchproto"
+)
+
+// BlockEvent re-exports glitchproto.BlockEvent so callers in this package
+// don't need to import the proto package directly.
+type BlockEvent = glitchproto.BlockEvent
+
+// Block lifecycle phases re-exported from glitchproto.
+const (
+	BlockStart = glitchproto.BlockStart
+	BlockChunk = glitchproto.BlockChunk
+	BlockEnd   = glitchproto.BlockEnd
 )
 
 // ChainStep is a single step in a desktop builder chain. It mirrors the
@@ -48,6 +60,26 @@ type RunChainOpts struct {
 	// not the active workspace). Callers should set this to the workspace's
 	// primary directory.
 	Cwd string
+	// EventCh, if non-nil, receives structured BlockEvents parsed from the
+	// step writer's stdout via the gl1tch output protocol. Callers like the
+	// desktop app use this to render typed blocks (notes, tables, status
+	// pings) instead of raw text. The channel is closed by RunChain when
+	// the run finishes.
+	EventCh chan<- BlockEvent
+	// StepEvents, if non-nil, receives lifecycle pings for each step in the
+	// chain — Phase = "start" before the executor runs, Phase = "end" after
+	// it returns. The desktop app uses these to drive a "gl1tch is thinking"
+	// indicator while waiting on a provider for first output.
+	StepEvents chan<- StepEvent
+}
+
+// StepEvent is a coarse lifecycle ping for a single chain step. It carries
+// just enough metadata for the chat to label the in-flight provider call.
+type StepEvent struct {
+	Phase    string // "start" | "end"
+	StepID   string // pipeline step ID, e.g. "step-0"
+	Label    string // human label, e.g. "Security Scan"
+	Provider string // executor name when known
 }
 
 // RunChain executes a desktop builder chain sequentially. Each step's output
@@ -60,7 +92,15 @@ type RunChainOpts struct {
 //   - pipeline step: loaded from disk and inlined into the run as a sub-pipeline.
 //   - User text (if any) becomes a final implicit prompt step.
 func RunChain(ctx context.Context, opts RunChainOpts, tokenCh chan<- string) error {
-	defer close(tokenCh)
+	if tokenCh != nil {
+		defer close(tokenCh)
+	}
+	if opts.EventCh != nil {
+		defer close(opts.EventCh)
+	}
+	if opts.StepEvents != nil {
+		defer close(opts.StepEvents)
+	}
 
 	var steps []ChainStep
 	if err := json.Unmarshal([]byte(opts.StepsJSON), &steps); err != nil {
@@ -87,11 +127,9 @@ func RunChain(ctx context.Context, opts RunChainOpts, tokenCh chan<- string) err
 	}
 
 	mgr := buildManager()
-	w := &chainStreamWriter{
-		ch:        tokenCh,
-		ctx:       ctx,
-		stepNames: stepLabelsByID(p),
-	}
+	w := newChainStreamWriter(ctx, tokenCh, opts.EventCh)
+	defer w.Close()
+
 	runOpts := []pipeline.RunOption{
 		pipeline.WithStepWriter(w),
 		pipeline.WithSilentStatus(),
@@ -288,29 +326,71 @@ func stepLabelsByID(p *pipeline.Pipeline) map[string]string {
 	return out
 }
 
-// chainStreamWriter wraps a token channel and inserts a section header
-// whenever output transitions to a different step.
+// chainStreamWriter receives raw bytes from the pipeline runner and fans
+// them out two ways:
 //
-// Detection of step transitions is naive — we rely on the runner emitting
-// step boundaries via the status writer (which we silence). For now we just
-// stream raw output without per-step framing; the frontend can format
-// transitions later if we add a sentinel marker.
+//   - tokenCh (legacy): each Write() is forwarded verbatim as a string. Used
+//     by older callers that still treat the chat as a plain text stream.
+//   - eventCh (new):    bytes are routed through a glitchproto.StreamSplitter
+//     so the desktop chat receives structured BlockEvents (notes, tables,
+//     status pings) instead of raw text. The splitter handles markers that
+//     straddle Write boundaries.
+//
+// Either channel may be nil. The writer is safe to call from a single
+// goroutine; pipeline.Run guarantees serialized writes per step.
 type chainStreamWriter struct {
-	ch        chan<- string
-	ctx       context.Context
-	stepNames map[string]string
+	ctx      context.Context
+	tokenCh  chan<- string
+	eventCh  chan<- BlockEvent
+	splitter *glitchproto.StreamSplitter
+}
+
+func newChainStreamWriter(
+	ctx context.Context,
+	tokenCh chan<- string,
+	eventCh chan<- BlockEvent,
+) *chainStreamWriter {
+	w := &chainStreamWriter{ctx: ctx, tokenCh: tokenCh, eventCh: eventCh}
+	if eventCh != nil {
+		w.splitter = glitchproto.NewStreamSplitter(func(e BlockEvent) {
+			select {
+			case <-ctx.Done():
+			case eventCh <- e:
+			}
+		})
+	}
+	return w
 }
 
 func (w *chainStreamWriter) Write(p []byte) (int, error) {
-	select {
-	case <-w.ctx.Done():
-		return 0, w.ctx.Err()
-	case w.ch <- string(p):
-		return len(p), nil
+	if err := w.ctx.Err(); err != nil {
+		return 0, err
 	}
+	if w.tokenCh != nil {
+		select {
+		case <-w.ctx.Done():
+			return 0, w.ctx.Err()
+		case w.tokenCh <- string(p):
+		}
+	}
+	if w.splitter != nil {
+		if _, err := w.splitter.Write(p); err != nil {
+			return 0, err
+		}
+	}
+	return len(p), nil
 }
 
-var _ io.Writer = (*chainStreamWriter)(nil)
+// Close flushes the splitter so any trailing partial-line bytes get
+// emitted as a final text chunk. Safe to call when no splitter is set.
+func (w *chainStreamWriter) Close() error {
+	if w.splitter != nil {
+		return w.splitter.Close()
+	}
+	return nil
+}
+
+var _ io.WriteCloser = (*chainStreamWriter)(nil)
 
 // resolveLegacyWorkflowPath returns p unchanged if it exists, otherwise it
 // rewrites the legacy ".glitch/pipelines/<name>.pipeline.yaml" layout to the

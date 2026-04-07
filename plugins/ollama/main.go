@@ -62,6 +62,32 @@ func listModels(stdout io.Writer, stderr io.Writer) error {
 // locally. It is a package-level variable so tests can override it.
 var isModelPresentFn = isModelPresent
 
+// firstInstalledModelFn returns the first model name reported by `ollama list`,
+// or "" if none are installed / ollama isn't reachable. Package-level so tests
+// can override it. Used as the fallback when neither --model nor GLITCH_MODEL
+// is set, so chain runs that route to ollama don't require the caller to pin
+// a model name they may not know.
+var firstInstalledModelFn = firstInstalledModel
+
+func firstInstalledModel() string {
+	out, err := exec.Command("ollama", "list").Output()
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for i, line := range lines {
+		if i == 0 { // skip "NAME" header
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		return fields[0]
+	}
+	return ""
+}
+
 // isModelPresent returns true if the given model is already available locally
 // according to `ollama list`. It performs a case-insensitive match and handles
 // the common case where `ollama list` shows "llama3.2:latest" when the caller
@@ -182,7 +208,11 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, get
 		return err
 	}
 
-	// Resolve model: --model flag takes precedence over GLITCH_MODEL env var.
+	// Resolve model in priority order:
+	//   1. --model flag                  (explicit caller intent)
+	//   2. GLITCH_MODEL env var          (set by glitchd / chain runner)
+	//   3. first locally-installed model (fallback so chains routing through
+	//      ollama don't need the caller to pin a name they may not know).
 	model := *modelFlag
 	if model == "" {
 		model = getenv("GLITCH_MODEL")
@@ -195,6 +225,8 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, get
 	}
 
 	// --create-model: build Modelfile alias and exit without running inference.
+	// Creating an alias still requires an explicit name — we don't fall back
+	// here since the user must know which existing model they're aliasing.
 	if *createModelFlag != "" {
 		if model == "" {
 			return fmt.Errorf("model is required: set --model flag or GLITCH_MODEL environment variable")
@@ -203,7 +235,10 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, get
 	}
 
 	if model == "" {
-		return fmt.Errorf("model is required: set --model flag or GLITCH_MODEL environment variable")
+		model = firstInstalledModelFn()
+	}
+	if model == "" {
+		return fmt.Errorf("no model available: set --model, GLITCH_MODEL, or `ollama pull <model>` first")
 	}
 
 	// Read prompt from stdin.
@@ -234,7 +269,13 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, get
 		}
 	}
 
-	fullPrompt := glitchctx.ProtocolInstructions + glitchctx.BuildShellContext() + "\n## User Request\n" + prompt
+	// Both protocols: input lets the model write files / run shell, output
+	// makes its reply land in the chat as structured blocks. Order matters:
+	// instructions first, then shell snapshot, then user request.
+	fullPrompt := glitchctx.ProtocolInstructions +
+		glitchctx.OutputProtocolInstructions +
+		glitchctx.BuildShellContext() +
+		"\n## User Request\n" + prompt
 	result, err := callOllama(baseURL, model, fullPrompt, options)
 	if err != nil {
 		// Reactive fallback: model may have become unavailable between the check and inference.

@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/8op-org/gl1tch/glitchctx"
 )
 
 // knownGeminiModels is the static list of Gemini models for --list-models.
@@ -82,6 +84,11 @@ func run(
 		return 1, fmt.Errorf("prompt is required: no input received on stdin")
 	}
 
+	// gemini-cli is an agentic CLI with full tool access — only inject the
+	// OUTPUT protocol so its replies render as structured chat blocks.
+	fullPrompt := glitchctx.OutputProtocolInstructions +
+		"\n## User Request\n" + prompt
+
 	model := getenv("GLITCH_MODEL")
-	return executor(model, prompt, stdout, stderr), nil
+	return executor(model, fullPrompt, stdout, stderr), nil
 }

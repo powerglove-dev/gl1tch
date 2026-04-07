@@ -179,7 +179,13 @@ func run(
 		return 1, fmt.Errorf("pulling Ollama model: %w", err)
 	}
 
-	fullPrompt := glitchctx.BuildShellContext() + "\n## User Request\n" + prompt
+	// opencode is an agentic CLI with native tool access, so we don't need
+	// the input protocol (GLITCH_WRITE/RUN). We DO need the output protocol
+	// so its replies land in the chat as structured blocks instead of raw
+	// stdout the splitter has to guess at.
+	fullPrompt := glitchctx.OutputProtocolInstructions +
+		glitchctx.BuildShellContext() +
+		"\n## User Request\n" + prompt
 	code := executor(model, fullPrompt, stdout, stderr)
 	return code, nil
 }

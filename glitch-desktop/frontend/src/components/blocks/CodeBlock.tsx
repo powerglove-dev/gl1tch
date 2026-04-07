@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Copy, Check, ExternalLink } from "lucide-react";
+import { Collapsible } from "./Collapsible";
 
 interface Props {
   content: string;
@@ -48,9 +49,11 @@ export function CodeBlock({ content, language, filename }: Props) {
       </div>
 
       {/* Code */}
-      <pre className="p-4 overflow-x-auto text-[13px] leading-relaxed bg-bg-darker font-mono">
-        <code>{content}</code>
-      </pre>
+      <Collapsible maxHeight={320} label={`${language || "code"}`}>
+        <pre className="p-4 overflow-x-auto text-[13px] leading-relaxed bg-bg-darker font-mono">
+          <code>{content}</code>
+        </pre>
+      </Collapsible>
     </div>
   );
 }

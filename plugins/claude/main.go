@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/8op-org/gl1tch/glitchctx"
 )
 
 func main() {
@@ -63,6 +65,12 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, exe
 	if prompt == "" {
 		return 1, fmt.Errorf("prompt is required")
 	}
+	// claude-code is an agentic CLI with full tool access, so we only inject
+	// the OUTPUT protocol — its replies need to land in the gl1tch chat as
+	// structured blocks (notes, tables, status pings) rather than raw stdout
+	// the splitter has to reverse-engineer.
+	fullPrompt := glitchctx.OutputProtocolInstructions +
+		"\n## User Request\n" + prompt
 	model := os.Getenv("GLITCH_MODEL")
-	return executor(model, prompt, stdout, stderr), nil
+	return executor(model, fullPrompt, stdout, stderr), nil
 }

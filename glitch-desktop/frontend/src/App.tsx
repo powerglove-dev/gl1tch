@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useRef } from "react";
 import { Titlebar } from "./components/Titlebar";
 import { Statusbar } from "./components/Statusbar";
 import { Sidebar } from "./components/Sidebar";
@@ -31,13 +31,17 @@ import {
   RunChain,
   AnswerClarification,
   Doctor,
+  SaveMessage,
+  LoadMessages,
 } from "../wailsjs/go/main/App";
+import type { Message, Block } from "./lib/types";
 
 export function App() {
   const {
     state,
-    addUserMessage, startAssistant, appendChunk, finishAssistant, streamError,
-    setStatus, toggleSidebar, clearMessages,
+    addUserMessage, addUserChain, startAssistant, appendChunk, finishAssistant, streamError,
+    applyBlockEvent,
+    setStatus, toggleSidebar, clearMessages, setMessages,
     setWorkspaces, setActiveWorkspace, addWorkspace, removeWorkspace, updateWorkspace,
   } = useChatStore();
 
@@ -51,10 +55,34 @@ export function App() {
   const [chain, setChain] = useState<ChainStep[]>([]);
   const [pendingClarify, setPendingClarify] = useState<{ run_id: string; question: string } | null>(null);
 
+  // Observer default model — what "observer" mode delegates to when a chain
+  // step needs an actual executor. Persisted to localStorage so the user's
+  // pick survives restarts. The user sets this from the picker (★ button).
+  const [observerDefaultProvider, setObserverDefaultProvider] = useState<string>(
+    () => localStorage.getItem("gl1tch:observerProvider") ?? "",
+  );
+  const [observerDefaultModel, setObserverDefaultModel] = useState<string>(
+    () => localStorage.getItem("gl1tch:observerModel") ?? "",
+  );
+
+  // Tracks the (workspaceId, messageId) most recently persisted so we don't
+  // re-save the same row on every effect re-run. Cleared on workspace switch.
+  const lastSavedRef = useRef<{ workspaceId: string; messageId: string } | null>(null);
+
   // ── Wails events ──────────────────────────────────────────────────────
+  // Legacy raw-text streaming path (still used by non-chain ask flows).
   useWailsEvent("chat:chunk", (text: string) => appendChunk(text));
   useWailsEvent("chat:done", () => finishAssistant());
   useWailsEvent("chat:error", (msg: string) => streamError(msg));
+
+  // Structured block events from the chain runner's protocol splitter.
+  // Each event is a {kind, block, attrs?, text?} map (see encodeBlockEvent
+  // in glitch-desktop/app.go).
+  useWailsEvent("chat:event", (data: unknown) => {
+    if (data && typeof data === "object") {
+      applyBlockEvent(data as Parameters<typeof applyBlockEvent>[0]);
+    }
+  });
 
   useWailsEvent("status:all", (data: unknown) => {
     const s = data as Record<string, boolean>;
@@ -129,6 +157,75 @@ export function App() {
   useEffect(() => {
     refreshSidebarData();
   }, [state.activeWorkspaceId]);
+
+  // ── Chat history persistence ──────────────────────────────────────────
+  // Load saved messages whenever the active workspace changes. Maps the
+  // store's WorkspaceMessage shape (snake_case, blocks_json string) into
+  // the in-memory Message shape the chat store expects. Marks the most
+  // recent loaded ID as "already persisted" so the save effect below
+  // doesn't echo it back to the database.
+  useEffect(() => {
+    if (!state.activeWorkspaceId) {
+      lastSavedRef.current = null;
+      clearMessages();
+      return;
+    }
+    const wsId = state.activeWorkspaceId;
+    LoadMessages(wsId).then((json) => {
+      try {
+        const rows = JSON.parse(json) as Array<{
+          id: string;
+          role: string;
+          blocks_json: string;
+          timestamp: number;
+        }>;
+        const msgs: Message[] = (rows ?? []).map((r) => {
+          let blocks: Block[] = [];
+          try {
+            const parsed = JSON.parse(r.blocks_json);
+            if (Array.isArray(parsed)) blocks = parsed as Block[];
+          } catch {}
+          return {
+            id: r.id,
+            role: (r.role as Message["role"]) ?? "assistant",
+            blocks,
+            timestamp: r.timestamp,
+          };
+        });
+        setMessages(msgs);
+        const tail = msgs[msgs.length - 1];
+        lastSavedRef.current = tail
+          ? { workspaceId: wsId, messageId: tail.id }
+          : { workspaceId: wsId, messageId: "" };
+      } catch {
+        clearMessages();
+      }
+    });
+  }, [state.activeWorkspaceId, setMessages, clearMessages]);
+
+  // Persist newly committed messages. We only save the *tail* message: any
+  // edit upstream of the tail is either a re-write of an existing row (no-op
+  // for INSERT OR REPLACE) or a streaming chunk we don't care about.
+  // Streaming-in-flight messages are skipped — finishAssistant flips
+  // streaming=false on commit and the next pass through this effect saves it.
+  useEffect(() => {
+    const wsId = state.activeWorkspaceId;
+    if (!wsId) return;
+    const last = state.messages[state.messages.length - 1];
+    if (!last || last.streaming) return;
+    const seen = lastSavedRef.current;
+    if (seen && seen.workspaceId === wsId && seen.messageId === last.id) return;
+    lastSavedRef.current = { workspaceId: wsId, messageId: last.id };
+    SaveMessage(
+      wsId,
+      JSON.stringify({
+        id: last.id,
+        role: last.role,
+        blocks: last.blocks,
+        timestamp: last.timestamp,
+      }),
+    );
+  }, [state.messages, state.activeWorkspaceId]);
 
   // Refresh when window regains focus (picks up new files/prompts)
   useEffect(() => {
@@ -252,11 +349,55 @@ export function App() {
   // For chains: calls backend RunChain which runs each step sequentially with
   // its own provider, threading output between steps.
   const runChainNow = useCallback((chainToRun: ChainStep[], text: string) => {
-    const chainLabels = chainToRun.map((s) => `[${s.label}]`).join(" -> ");
-    const displayText = chainLabels ? (text ? `${chainLabels} -> ${text}` : chainLabels) : text;
-    if (!displayText) return;
+    if (chainToRun.length === 0 && !text.trim()) return;
 
-    addUserMessage(displayText);
+    // Resolve which provider will actually run prompt steps that don't set
+    // their own override. Priority order:
+    //   1. picker selection (user explicitly picked something)
+    //   2. observer default the user pinned with ★ in the picker
+    //   3. ollama as the global default (matches picker label "ES + Ollama"
+    //      and the local-first stance)
+    // For #3, look up the provider's default-or-first model so we don't
+    // hand the executor an empty GLITCH_MODEL — the source of the previous
+    // "model is required" errors.
+    let resolvedDefaultProvider: string;
+    let resolvedDefaultModel: string;
+
+    if (selectedProvider) {
+      resolvedDefaultProvider = selectedProvider;
+      resolvedDefaultModel = selectedModel;
+    } else if (observerDefaultProvider) {
+      resolvedDefaultProvider = observerDefaultProvider;
+      resolvedDefaultModel = observerDefaultModel;
+    } else {
+      resolvedDefaultProvider = "ollama";
+      const ollama = providers.find((p) => p.id === "ollama");
+      const def = ollama?.models.find((m) => m.default) ?? ollama?.models[0];
+      resolvedDefaultModel = def?.id ?? "";
+    }
+
+    // Render chain steps as chips in the user message (no more `[a] -> [b]`
+    // string mashup). Free-text is passed alongside as the chain's trailing
+    // note. Plain messages with no chain still go through addUserMessage.
+    if (chainToRun.length > 0) {
+      addUserChain(
+        chainToRun.map((s) => ({
+          label: s.label,
+          kind: s.type,
+          provider:
+            s.type === "prompt"
+              ? (s.executorOverride || resolvedDefaultProvider)
+              : undefined,
+          model:
+            s.type === "prompt"
+              ? (s.modelOverride || resolvedDefaultModel || undefined)
+              : undefined,
+        })),
+        text.trim() || undefined,
+      );
+    } else {
+      addUserMessage(text);
+    }
     startAssistant();
 
     if (text.trim() === "/doctor" && chainToRun.length === 0) {
@@ -265,17 +406,12 @@ export function App() {
     }
 
     if (chainToRun.length > 0) {
-      // Default provider for steps that don't override. Falls back to
-      // "github-copilot" so the chain still runs even when the picker is
-      // on "observer" (which only handles ES queries, not arbitrary prompts).
-      const defaultProvider = selectedProvider || "github-copilot";
-      const defaultModel = selectedModel;
       RunChain(
         JSON.stringify(chainToRun),
         text,
         state.activeWorkspaceId ?? "",
-        defaultProvider,
-        defaultModel,
+        resolvedDefaultProvider,
+        resolvedDefaultModel,
       );
       setChain([]);
     } else if (selectedProvider) {
@@ -283,7 +419,7 @@ export function App() {
     } else {
       AskScoped(text, state.activeWorkspaceId ?? "");
     }
-  }, [addUserMessage, startAssistant, selectedProvider, selectedModel, state.activeWorkspaceId]);
+  }, [addUserMessage, addUserChain, startAssistant, selectedProvider, selectedModel, observerDefaultProvider, observerDefaultModel, providers, state.activeWorkspaceId]);
 
   const handleSend = useCallback(
     (text: string) => {
@@ -302,6 +438,16 @@ export function App() {
   const handleSelectProvider = useCallback((providerId: string, modelId: string) => {
     setSelectedProvider(providerId);
     setSelectedModel(modelId);
+  }, []);
+
+  // Persist the observer default. The picker calls this when the user pins
+  // a model with the ★ button next to it. We round-trip via localStorage so
+  // the choice survives a restart and is read by the runChainNow fallback.
+  const handleSetObserverDefault = useCallback((providerId: string, modelId: string) => {
+    setObserverDefaultProvider(providerId);
+    setObserverDefaultModel(modelId);
+    localStorage.setItem("gl1tch:observerProvider", providerId);
+    localStorage.setItem("gl1tch:observerModel", modelId);
   }, []);
 
   const handleAction = useCallback(async () => {}, []);
@@ -363,14 +509,21 @@ export function App() {
         )}
 
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, background: "var(--bg)" }}>
-          <MessageList messages={state.messages} onAction={handleAction} />
+          <MessageList
+            messages={state.messages}
+            onAction={handleAction}
+            thinking={state.streaming ? state.thinking : ""}
+          />
           <ChatInput
             disabled={state.streaming && !pendingClarify}
             providers={providers}
             selectedProvider={selectedProvider}
             selectedModel={selectedModel}
+            observerDefaultProvider={observerDefaultProvider}
+            observerDefaultModel={observerDefaultModel}
             chain={chain}
             onSelectProvider={handleSelectProvider}
+            onSetObserverDefault={handleSetObserverDefault}
             onUpdateChainStep={handleUpdateChainStep}
             onRemoveChainStep={handleRemoveChainStep}
             onClearChain={handleClearChain}

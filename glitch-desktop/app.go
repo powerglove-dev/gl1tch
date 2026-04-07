@@ -337,10 +337,13 @@ func (a *App) RunChain(stepsJSON, userText, workspaceID, defaultProvider, defaul
 		clarifyCtx, clarifyCancel := context.WithCancel(context.Background())
 		go a.pollClarifications(clarifyCtx)
 
-		tokenCh := make(chan string, 64)
+		// Structured block events from the protocol splitter. Each event
+		// becomes a single Wails message, so the frontend can build typed
+		// blocks (notes, tables, status) incrementally as bytes arrive.
+		eventCh := make(chan glitchd.BlockEvent, 64)
 		go func() {
-			for token := range tokenCh {
-				runtime.EventsEmit(a.ctx, "chat:chunk", token)
+			for ev := range eventCh {
+				runtime.EventsEmit(a.ctx, "chat:event", encodeBlockEvent(ev))
 			}
 		}()
 
@@ -361,7 +364,8 @@ func (a *App) RunChain(stepsJSON, userText, workspaceID, defaultProvider, defaul
 			DefaultModel:    defaultModel,
 			SystemCtx:       systemCtx,
 			Cwd:             cwd,
-		}, tokenCh)
+			EventCh:         eventCh,
+		}, nil)
 		clarifyCancel()
 
 		if err != nil {
@@ -538,6 +542,28 @@ func (a *App) startNotify() {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+// encodeBlockEvent flattens a glitchd.BlockEvent into a plain map for the
+// Wails wire format. The frontend dispatches on the "kind" field
+// ("start" | "chunk" | "end") and reconstructs blocks from there.
+func encodeBlockEvent(ev glitchd.BlockEvent) map[string]any {
+	out := map[string]any{
+		"block": ev.Block,
+	}
+	switch ev.Kind {
+	case glitchd.BlockStart:
+		out["kind"] = "start"
+		if len(ev.Attrs) > 0 {
+			out["attrs"] = ev.Attrs
+		}
+	case glitchd.BlockChunk:
+		out["kind"] = "chunk"
+		out["text"] = ev.Text
+	case glitchd.BlockEnd:
+		out["kind"] = "end"
+	}
+	return out
+}
 
 func pingHTTP(url string) bool {
 	c := &http.Client{Timeout: 2 * time.Second}

@@ -7,6 +7,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/8op-org/gl1tch/glitchctx"
 )
 
 // captureExecutor records calls for assertion in tests.
@@ -39,7 +41,9 @@ func stdinRun(
 	if prompt == "" {
 		return 1, fmt.Errorf("prompt is required: no input received on stdin")
 	}
-	return executor(modelEnv, prompt, stdout, stderr), nil
+	fullPrompt := glitchctx.OutputProtocolInstructions +
+		"\n## User Request\n" + prompt
+	return executor(modelEnv, fullPrompt, stdout, stderr), nil
 }
 
 func TestListModels_OutputsJSON(t *testing.T) {
@@ -89,8 +93,13 @@ func TestPromptForwarded(t *testing.T) {
 	if err != nil || code != 0 {
 		t.Fatalf("unexpected: code=%d err=%v", code, err)
 	}
-	if cap.calledPrompt != "explain this code" {
+	// The user's prompt is wrapped with the output protocol instructions —
+	// just make sure the original text survives the wrap.
+	if !strings.Contains(cap.calledPrompt, "explain this code") {
 		t.Fatalf("prompt not forwarded: got %q", cap.calledPrompt)
+	}
+	if !strings.Contains(cap.calledPrompt, "<<GLITCH_TEXT>>") {
+		t.Fatalf("output protocol not injected: got %q", cap.calledPrompt)
 	}
 }
 

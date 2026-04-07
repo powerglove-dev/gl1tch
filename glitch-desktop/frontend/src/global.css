@@ -70,6 +70,10 @@ html, body, #root {
 @keyframes blink { 50% { opacity: 0; } }
 @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes glitch-dot {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }
+  40%           { opacity: 1;    transform: scale(1.1); }
+}
 
 .streaming-cursor {
   display: inline-block;
@@ -86,7 +90,7 @@ html, body, #root {
 }
 
 /* Markdown prose */
-.prose { line-height: 1.7; color: var(--fg); }
+.prose { line-height: 1.7; color: var(--fg); overflow-wrap: anywhere; word-break: break-word; }
 .prose p { margin-bottom: 0.6em; }
 .prose p:last-child { margin-bottom: 0; }
 .prose pre {

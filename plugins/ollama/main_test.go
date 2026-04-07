@@ -40,14 +40,22 @@ func TestRun_EmptyStdin(t *testing.T) {
 }
 
 func TestRun_MissingModel(t *testing.T) {
+	// Force the "no model anywhere" path by stubbing out the
+	// first-installed-model fallback so it returns "". Otherwise the test
+	// would pick up whatever the host machine has installed via `ollama list`.
+	prev := firstInstalledModelFn
+	firstInstalledModelFn = func() string { return "" }
+	defer func() { firstInstalledModelFn = prev }()
+
 	var stdout, stderr bytes.Buffer
-	// Neither --model flag nor GLITCH_MODEL env var is set.
+	// Neither --model flag nor GLITCH_MODEL env var is set, and there are
+	// no locally installed models to fall back to.
 	err := run([]string{}, strings.NewReader("tell me a joke"), &stdout, &stderr, noEnv)
 	if err == nil {
 		t.Fatal("expected error when model is not set, got nil")
 	}
-	if !strings.Contains(err.Error(), "model") {
-		t.Errorf("expected 'model' in error message, got: %v", err)
+	if !strings.Contains(err.Error(), "no model available") {
+		t.Errorf("expected 'no model available' in error message, got: %v", err)
 	}
 }
 

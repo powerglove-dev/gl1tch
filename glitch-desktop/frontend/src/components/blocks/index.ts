@@ -1,5 +1,8 @@
 export { TextBlock } from "./TextBlock";
 export { CodeBlock } from "./CodeBlock";
+export { ChainBlock } from "./ChainBlock";
+export { ActivityBlock } from "./ActivityBlock";
+export { BrainBlock } from "./BrainBlock";
 export { TableBlock } from "./TableBlock";
 export { ActionBlock } from "./ActionBlock";
 export { StatusBlock } from "./StatusBlock";
