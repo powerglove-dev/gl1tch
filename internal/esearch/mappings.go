@@ -166,6 +166,99 @@ const brainDecisionsMapping = `{
   }
 }`
 
+// tracesMapping is the schema for glitch-traces, the destination
+// index for the OTel SpanExporter implemented in
+// internal/telemetry/elasticsearch_exporter.go. Every span produced
+// by the gl1tch process (pipeline runs, brain cycles, executor
+// dispatches, collector pod startup, refine loops, etc.) lands here
+// as one document.
+//
+// We deliberately don't try to fit the upstream traces-apm-* schema:
+// gl1tch doesn't run an APM Server, and a custom flat document is
+// faster to query in Kibana Discover for the "what's happening
+// right now in this process" use case that motivates the index.
+// The shape mirrors the OTel data model just enough to be familiar
+// (trace_id, span_id, parent_span_id, status, attributes) without
+// dragging in the resource semantic conventions schema.
+//
+// attributes is "object enabled=false" so we keep the original
+// key=value structure on disk for inspection but don't blow up the
+// mapping with every span attribute every collector ever emitted.
+// trace_id and span_id are keyword so trace-id-jump queries work.
+// Resource attributes (service name, host, version, pid) are
+// flattened to top-level keyword fields because they're high-value
+// for slicing across many runs.
+const tracesMapping = `{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0
+  },
+  "mappings": {
+    "properties": {
+      "trace_id":        { "type": "keyword" },
+      "span_id":         { "type": "keyword" },
+      "parent_span_id":  { "type": "keyword" },
+      "name":            { "type": "keyword" },
+      "scope_name":      { "type": "keyword" },
+      "kind":            { "type": "keyword" },
+      "service_name":    { "type": "keyword" },
+      "service_version": { "type": "keyword" },
+      "host_name":       { "type": "keyword" },
+      "process_pid":     { "type": "long" },
+      "workspace_id":    { "type": "keyword" },
+      "collector":       { "type": "keyword" },
+      "status_code":     { "type": "keyword" },
+      "status_message":  { "type": "text" },
+      "start_time":      { "type": "date" },
+      "end_time":        { "type": "date" },
+      "duration_ms":     { "type": "long" },
+      "attributes":      { "type": "object", "enabled": false },
+      "resource":        { "type": "object", "enabled": false },
+      "events":          { "type": "object", "enabled": false }
+    }
+  }
+}`
+
+// logsMapping is the schema for glitch-logs, the destination index
+// the slog teeHandler ships every captured log record into. The
+// in-process LogBuffer in pkg/glitchd/logbuffer.go is a per-process
+// ring (great for the live brain popover, useless across restarts);
+// shipping the same records to ES gives us queryable history that
+// survives wails dev rebuilds, lets multiple gl1tch processes be
+// disambiguated by process_pid, and means "show me the last ten
+// times a workspace pod started for robots" is a Kibana query, not
+// a screenshot round-trip.
+//
+// process_pid is critical: when wails dev orphans a stale binary
+// or the user has a `glitch serve` running alongside the desktop,
+// the same source field can come from two different processes with
+// completely different in-memory state. Filtering by process_pid
+// in Kibana lets us tell them apart.
+//
+// attrs is the slog key=value pairs flattened to a single string
+// (matching the LogBuffer's existing UI shape). attrs_json keeps
+// the structured form so dashboards can drill into specific keys
+// without re-parsing.
+const logsMapping = `{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0
+  },
+  "mappings": {
+    "properties": {
+      "timestamp":   { "type": "date" },
+      "level":       { "type": "keyword" },
+      "source":      { "type": "keyword" },
+      "message":     { "type": "text" },
+      "attrs":       { "type": "text" },
+      "attrs_json":  { "type": "object", "enabled": false },
+      "process_pid": { "type": "long" },
+      "host_name":   { "type": "keyword" },
+      "service":     { "type": "keyword" }
+    }
+  }
+}`
+
 const insightsMapping = `{
   "settings": {
     "number_of_shards": 1,

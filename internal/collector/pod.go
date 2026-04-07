@@ -31,8 +31,22 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	oteltrace "go.opentelemetry.io/otel/trace"
+
 	"github.com/8op-org/gl1tch/internal/esearch"
 )
+
+// podTracer is the OTel tracer for collector pod lifecycle spans.
+// Every workspace pod start, every collector goroutine launch, and
+// every collector exit/panic is captured as a span here so the
+// glitch-traces index has a queryable narrative for "what happened
+// during the last 10 starts of the workspace pod for robots" — the
+// exact question that turned into multiple debugging round-trips
+// before this instrumentation existed.
+var podTracer = otel.Tracer("gl1tch/collector/pod")
 
 // PodManager owns the set of active workspace pods.
 //
@@ -204,9 +218,27 @@ func (m *PodManager) StartPod(workspaceID string) error {
 // public StartPod (which takes the lock for one operation) and by
 // RestartPod (which holds the lock across a Stop+Start so the two
 // halves are atomic from the perspective of any other caller).
+//
+// Wrapped in a workspace.pod.start span so the entire start
+// sequence — config load, directory resolution, autodetect,
+// collector instantiation, goroutine launch — is one queryable
+// row in glitch-traces. Span attributes record the resolved
+// directory count, autodetected git/github repo counts, and the
+// final collector list size, so a "why did this pod start with
+// 0 collectors" question is answered without re-running anything.
 func (m *PodManager) startPodLocked(workspaceID string) error {
+	ctx, span := podTracer.Start(m.parentCtx, "workspace.pod.start",
+		oteltrace.WithAttributes(
+			attribute.String("workspace_id", workspaceID),
+		),
+	)
+	defer span.End()
+
 	cfg, err := LoadWorkspaceConfig(workspaceID)
 	if err != nil {
+		span.SetStatus(codes.Error, "load workspace config failed")
+		span.RecordError(err)
+		slog.Error("pod manager: load config failed", "workspace", workspaceID, "err", err)
 		return fmt.Errorf("pod manager: load config for %s: %w", workspaceID, err)
 	}
 
@@ -219,14 +251,33 @@ func (m *PodManager) startPodLocked(workspaceID string) error {
 	dirs := m.workspaceDirs(workspaceID)
 	AutoDetectFromWorkspace(cfg, dirs)
 
+	span.SetAttributes(
+		attribute.Int("workspace.dir_count", len(dirs)),
+		attribute.Int("autodetect.git_repos", len(cfg.Git.Repos)),
+		attribute.Int("autodetect.github_repos", len(cfg.GitHub.Repos)),
+		attribute.Bool("autodetect.claude_enabled", cfg.Claude.Enabled),
+		attribute.Bool("autodetect.copilot_enabled", cfg.Copilot.Enabled),
+	)
+
 	collectors := m.builder(workspaceID, cfg, dirs)
+	collectorNames := make([]string, len(collectors))
+	for i, c := range collectors {
+		collectorNames[i] = c.Name()
+	}
+	span.SetAttributes(
+		attribute.Int("collectors.count", len(collectors)),
+		attribute.StringSlice("collectors.names", collectorNames),
+	)
 
 	m.mu.Lock()
 	if _, exists := m.pods[workspaceID]; exists {
 		m.mu.Unlock()
-		return fmt.Errorf("pod manager: pod for %s already running", workspaceID)
+		err := fmt.Errorf("pod manager: pod for %s already running", workspaceID)
+		span.SetStatus(codes.Error, "pod already running")
+		span.RecordError(err)
+		return err
 	}
-	ctx, cancel := context.WithCancel(m.parentCtx)
+	podCtx, cancel := context.WithCancel(m.parentCtx)
 	p := &pod{
 		workspaceID: workspaceID,
 		cancel:      cancel,
@@ -234,16 +285,24 @@ func (m *PodManager) startPodLocked(workspaceID string) error {
 	m.pods[workspaceID] = p
 	m.mu.Unlock()
 
-	slog.Info("pod manager: starting pod", "workspace", workspaceID, "collectors", len(collectors))
+	slog.Info("pod manager: starting pod",
+		"workspace", workspaceID,
+		"collectors", len(collectors),
+		"collector_names", collectorNames,
+		"dirs", len(dirs),
+		"git_repos", len(cfg.Git.Repos),
+		"github_repos", len(cfg.GitHub.Repos))
 
 	for _, c := range collectors {
 		p.wg.Add(1)
 		go func(c Collector) {
 			defer p.wg.Done()
-			runCollectorGuarded(ctx, c, m.es, workspaceID)
+			runCollectorGuarded(podCtx, c, m.es, workspaceID)
 		}(c)
 	}
 
+	span.SetStatus(codes.Ok, "pod started")
+	_ = ctx // span.End is the only consumer of ctx; the goroutines run under podCtx
 	return nil
 }
 
@@ -267,18 +326,35 @@ func (m *PodManager) startPodLocked(workspaceID string) error {
 // global tool pod path (startToolPodLocked) so every collector that
 // runs through the manager gets the same protection.
 func runCollectorGuarded(ctx context.Context, c Collector, es *esearch.Client, workspaceID string) {
+	// Each collector goroutine gets its own span so glitch-traces
+	// has a row per (workspace, collector) launch with attributes
+	// that answer "did this collector run, did it panic, when did
+	// it exit, and was es nil at launch time". This is the row I
+	// keep wishing existed every time the popover dot is gray.
+	ctx, span := podTracer.Start(ctx, "collector.run",
+		oteltrace.WithAttributes(
+			attribute.String("workspace_id", workspaceID),
+			attribute.String("collector", c.Name()),
+			attribute.Bool("es_nil", es == nil),
+		),
+	)
+	defer span.End()
+
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("pod manager: collector panicked",
 				"workspace", workspaceID,
 				"collector", c.Name(),
 				"panic", r)
-			RecordRun(c.Name(), time.Now(), 0,
-				fmt.Errorf("collector panicked: %v", r))
+			err := fmt.Errorf("collector panicked: %v", r)
+			span.SetStatus(codes.Error, "panic")
+			span.RecordError(err)
+			RecordRun(c.Name(), time.Now(), 0, err)
 		}
 	}()
 	slog.Info("pod manager: collector started",
 		"workspace", workspaceID, "collector", c.Name())
+	span.AddEvent("collector.alive")
 	// "Alive" heartbeat fired BEFORE delegating to the collector's
 	// own Start. Without this, the popover row's last_run_ms stays
 	// at zero until the collector reaches its OWN RecordRun call —
@@ -307,11 +383,17 @@ func runCollectorGuarded(ctx context.Context, c Collector, es *esearch.Client, w
 	if err := c.Start(ctx, es); err != nil && ctx.Err() == nil {
 		slog.Warn("pod manager: collector exited",
 			"workspace", workspaceID, "collector", c.Name(), "err", err)
+		span.SetStatus(codes.Error, "exited with error")
+		span.RecordError(err)
 		// Surface a clean exit error to the popover too. ctx-cancel
 		// path is excluded above so a normal pod stop doesn't paint
 		// every collector red.
 		RecordRun(c.Name(), time.Now(), 0,
 			fmt.Errorf("collector exited: %w", err))
+	} else if ctx.Err() != nil {
+		// Normal pod stop — span ends in OK status, popover stays
+		// the same color it was when the pod was alive.
+		span.SetStatus(codes.Ok, "context cancelled")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -16,6 +17,9 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+
+	"github.com/8op-org/gl1tch/internal/collector"
+	"github.com/8op-org/gl1tch/internal/esearch"
 )
 
 // feedCh is the package-level channel used by the FeedExporter.
@@ -101,6 +105,35 @@ func Setup(ctx context.Context, serviceName string) (func(context.Context) error
 		} else {
 			fileCloser = closer
 			traceOpts = append(traceOpts, sdktrace.WithBatcher(fileExp))
+		}
+	}
+
+	// Elasticsearch exporter — always wired in addition to whichever
+	// of OTLP/file is configured above. We want EVERY span to land
+	// in glitch-traces so the brain popover, Kibana Discover, and
+	// any future "what just broke" query has the same source of
+	// truth as the file exporter (the file is the local backstop;
+	// ES is the queryable history).
+	//
+	// Best-effort: if the ES address from observer.yaml can't be
+	// resolved or the client construction fails, we log and skip
+	// the ES exporter. Spans still go to the file (or OTLP) and
+	// the rest of the telemetry pipeline keeps working — losing
+	// queryable history is a degradation, not a fatal error.
+	if cfg, cerr := collector.LoadConfig(); cerr == nil {
+		addr := cfg.Elasticsearch.Address
+		if addr == "" {
+			addr = "http://localhost:9200"
+		}
+		if esClient, eerr := esearch.New(addr); eerr == nil {
+			esExp := NewElasticsearchExporter(esClient, serviceName)
+			// Batched (not Simple) so high-throughput pipeline
+			// runs don't hammer ES one bulk-index call per span.
+			// SDK default batch is 512 spans / 5s tick — fine.
+			traceOpts = append(traceOpts, sdktrace.WithBatcher(esExp))
+			slog.Info("telemetry: elasticsearch trace exporter enabled", "addr", addr)
+		} else {
+			slog.Warn("telemetry: elasticsearch trace exporter disabled", "err", eerr)
 		}
 	}
 

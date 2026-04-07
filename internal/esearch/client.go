@@ -33,6 +33,19 @@ const (
 	// dashboards for "confidence over time" and "local vs paid escalation
 	// rate". Written to from pkg/glitchd/chain.go after each chain run.
 	IndexBrainDecisions = "glitch-brain-decisions"
+	// IndexTraces is the destination for OTel spans shipped by the
+	// custom SpanExporter in internal/telemetry/elasticsearch_exporter.go.
+	// Every span produced by the gl1tch process (pipeline runs, brain
+	// cycles, executor dispatches, collector pod startup, refine loops)
+	// lands here as one document for "what's happening right now in
+	// this process" queries in Kibana Discover.
+	IndexTraces = "glitch-traces"
+	// IndexLogs is the destination for slog records teed out of the
+	// in-process LogBuffer (pkg/glitchd/logbuffer.go) so log history
+	// survives across restarts and wails dev rebuilds. Powers the
+	// "show me the last ten workspace-pod startups" Kibana query that
+	// makes screenshot round-trips unnecessary.
+	IndexLogs = "glitch-logs"
 )
 
 // Client wraps the Elasticsearch client with gl1tch-specific operations.
@@ -75,12 +88,14 @@ func (c *Client) Ping(ctx context.Context) error {
 // EnsureIndices creates all gl1tch indices if they don't already exist.
 func (c *Client) EnsureIndices(ctx context.Context) error {
 	indices := map[string]string{
-		IndexEvents:    eventsMapping,
-		IndexSummaries: summariesMapping,
-		IndexPipelines: pipelinesMapping,
-		IndexInsights:  insightsMapping,
+		IndexEvents:         eventsMapping,
+		IndexSummaries:      summariesMapping,
+		IndexPipelines:      pipelinesMapping,
+		IndexInsights:       insightsMapping,
 		IndexVectors:        vectorsMapping,
 		IndexBrainDecisions: brainDecisionsMapping,
+		IndexTraces:         tracesMapping,
+		IndexLogs:           logsMapping,
 	}
 	for name, mapping := range indices {
 		// Check if index exists.

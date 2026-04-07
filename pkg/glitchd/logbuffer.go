@@ -4,9 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/8op-org/gl1tch/internal/collector"
+	"github.com/8op-org/gl1tch/internal/esearch"
 )
 
 // LogEntry is one captured slog record. We strip slog's structured
@@ -99,25 +103,131 @@ func (b *LogBuffer) Snapshot(limit int) []LogEntry {
 	return out
 }
 
-// teeHandler wraps an inner slog.Handler and also records every
-// emitted record into Logs. This lets us preserve the existing
-// stderr/file log output unchanged while making the records visible
-// in the desktop UI.
+// teeHandler wraps an inner slog.Handler and ALSO records every
+// emitted record into both:
+//
+//   1. the in-process Logs ring buffer (powers the brain popover's
+//      live-tail view), and
+//   2. the package-level shipQueue (an unbounded but capped slice
+//      flushed to glitch-logs in ES on a 2s tick by the log
+//      shipper goroutine started by InstallLogTee).
+//
+// This lets us preserve the existing stderr/file log output
+// unchanged while making the records visible in the desktop UI AND
+// queryable across restarts via Kibana. The two sinks are
+// independent: ES outages don't affect the live ring buffer, and
+// vice versa.
 type teeHandler struct {
 	inner slog.Handler
 }
 
+// shipQueue holds slog records waiting to be bulk-indexed into ES.
+// Bounded so an extended ES outage doesn't hold the entire log
+// history hostage in process memory; we drop oldest on overflow.
+var (
+	shipQueue   []map[string]any
+	shipQueueMu sync.Mutex
+	shipMaxLen  = 2000
+	shipPID     = os.Getpid()
+	shipHost, _ = os.Hostname()
+)
+
 // InstallLogTee replaces slog's default handler with one that writes
-// every record both to the existing handler AND to the Logs ring
-// buffer. Call once at process startup.
+// every record to:
 //
-// Returns the previous default handler so callers can restore it on
-// shutdown if they want, but the desktop binary doesn't bother — the
-// process exits and the buffer goes with it.
+//   - the existing handler (stderr / file output),
+//   - the in-process Logs ring buffer, and
+//   - the ES log shipper queue (drained by a background goroutine
+//     into glitch-logs every 2 seconds).
+//
+// The log shipper picks up an ES client from observer.yaml on
+// startup. If ES is unreachable at install time the shipper still
+// starts; it just retries on every flush tick and keeps the queue
+// drained until ES comes back. ES outages cap the in-memory queue
+// at shipMaxLen entries — older records get dropped, not held
+// forever, so a long outage doesn't OOM the desktop.
+//
+// Returns the previous default handler so callers can restore it
+// on shutdown if they want, but the desktop binary doesn't bother
+// — the process exits and the buffer goes with it.
 func InstallLogTee() slog.Handler {
 	prev := slog.Default().Handler()
 	slog.SetDefault(slog.New(&teeHandler{inner: prev}))
+	go runLogShipper()
 	return prev
+}
+
+// runLogShipper drains the shipQueue into glitch-logs on a 2s
+// tick. Started exactly once by InstallLogTee. Lazy-resolves the
+// ES client on every tick so a process that starts before ES is
+// reachable still picks up the connection later — the shipper
+// never gives up.
+//
+// Failures are logged via the inner handler (NOT slog.Default(),
+// which would re-enter the tee and create a feedback loop) so the
+// user has a stderr breadcrumb when ES is unreachable.
+func runLogShipper() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		flushShipQueue()
+	}
+}
+
+// flushShipQueue snapshots the current queue and bulk-indexes it.
+// On any error the snapshotted records are NOT requeued — we
+// accept the loss in exchange for not double-indexing on partial
+// successes (the ES bulk API can succeed for some docs and fail
+// for others, and the surface area for "exactly which ones?" is
+// more trouble than it's worth for diagnostic logs).
+func flushShipQueue() {
+	shipQueueMu.Lock()
+	if len(shipQueue) == 0 {
+		shipQueueMu.Unlock()
+		return
+	}
+	batch := shipQueue
+	shipQueue = nil
+	shipQueueMu.Unlock()
+
+	cfg, err := collector.LoadConfig()
+	if err != nil {
+		return
+	}
+	addr := cfg.Elasticsearch.Address
+	if addr == "" {
+		addr = "http://localhost:9200"
+	}
+	client, err := esearch.New(addr)
+	if err != nil {
+		return
+	}
+
+	docs := make([]any, 0, len(batch))
+	for _, d := range batch {
+		docs = append(docs, d)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = client.BulkIndex(ctx, esearch.IndexLogs, docs)
+}
+
+// enqueueLogDoc is called from the teeHandler's Handle method
+// after the record has been forwarded to the inner handler and
+// pushed to the ring buffer. Drops the oldest entry when the
+// queue exceeds shipMaxLen so a stuck shipper can't OOM us.
+func enqueueLogDoc(doc map[string]any) {
+	shipQueueMu.Lock()
+	defer shipQueueMu.Unlock()
+	if len(shipQueue) >= shipMaxLen {
+		// Drop the oldest entry. A simple slice shift is O(N) but
+		// only runs when the queue is full and the shipper is
+		// stuck, so the cost is bounded by shipMaxLen and only
+		// pays out during ES outages.
+		shipQueue = shipQueue[1:]
+	}
+	shipQueue = append(shipQueue, doc)
 }
 
 func (h *teeHandler) Enabled(ctx context.Context, level slog.Level) bool {
@@ -139,6 +249,10 @@ func (h *teeHandler) Handle(ctx context.Context, r slog.Record) error {
 		Level:   r.Level.String(),
 		Message: r.Message,
 	}
+	// attrsJSON keeps the structured key/value form so the ES doc
+	// can carry the original shape (Kibana drills into nested keys
+	// without re-parsing the joined string).
+	attrsJSON := make(map[string]any)
 	var attrParts []string
 	r.Attrs(func(a slog.Attr) bool {
 		if a.Key == "source" || a.Key == "collector" {
@@ -147,6 +261,7 @@ func (h *teeHandler) Handle(ctx context.Context, r slog.Record) error {
 			}
 		}
 		attrParts = append(attrParts, fmt.Sprintf("%s=%s", a.Key, a.Value.String()))
+		attrsJSON[a.Key] = a.Value.Any()
 		return true
 	})
 	entry.Attrs = strings.Join(attrParts, " ")
@@ -168,11 +283,30 @@ func (h *teeHandler) Handle(ctx context.Context, r slog.Record) error {
 		}
 	}
 
-	if r.Time.IsZero() {
-		entry.TimeMs = time.Now().UnixMilli()
+	ts := r.Time
+	if ts.IsZero() {
+		ts = time.Now()
+		entry.TimeMs = ts.UnixMilli()
 	}
 
 	Logs.Push(entry)
+
+	// Enqueue for ES. Doc shape mirrors logsMapping in
+	// internal/esearch/mappings.go: timestamp + level + source +
+	// message + attrs (joined string for the popover) + attrs_json
+	// (structured for Kibana drill-downs) + process_pid + host_name
+	// so multiple gl1tch processes are visually distinguishable.
+	enqueueLogDoc(map[string]any{
+		"timestamp":   ts.UTC().Format(time.RFC3339Nano),
+		"level":       entry.Level,
+		"source":      entry.Source,
+		"message":     entry.Message,
+		"attrs":       entry.Attrs,
+		"attrs_json":  attrsJSON,
+		"process_pid": shipPID,
+		"host_name":   shipHost,
+		"service":     "gl1tch",
+	})
 	return err
 }
 
