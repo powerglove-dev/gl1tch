@@ -87,10 +87,6 @@ git:
 github:
   repos:
     - org/one
-mattermost:
-  url: https://mm.example.com
-  channels:
-    - dev
 `)
 		if err != nil {
 			t.Fatalf("WriteWorkspaceConfig: %v", err)
@@ -105,9 +101,6 @@ mattermost:
 		}
 		if len(cfg.GitHub.Repos) != 1 || cfg.GitHub.Repos[0] != "org/one" {
 			t.Errorf("github repos = %v", cfg.GitHub.Repos)
-		}
-		if cfg.Mattermost.URL != "https://mm.example.com" {
-			t.Errorf("mattermost url mismatch: %q", cfg.Mattermost.URL)
 		}
 		if cfg.Git.Interval.Seconds() != 30 {
 			t.Errorf("git interval mismatch: %v", cfg.Git.Interval)
@@ -145,32 +138,6 @@ mattermost:
 		}
 	})
 
-	t.Run("env var fallback for mattermost", func(t *testing.T) {
-		t.Setenv("GLITCH_MATTERMOST_URL", "https://env-mm.example.com")
-		t.Setenv("GLITCH_MATTERMOST_TOKEN", "env-token")
-
-		_ = WriteWorkspaceConfig("ws-env", `git:
-  repos: []
-`)
-		cfg, _ := LoadWorkspaceConfig("ws-env")
-		if cfg.Mattermost.URL != "https://env-mm.example.com" {
-			t.Errorf("mattermost url should fall back to env, got %q", cfg.Mattermost.URL)
-		}
-		if cfg.Mattermost.Token != "env-token" {
-			t.Errorf("mattermost token should fall back to env, got %q", cfg.Mattermost.Token)
-		}
-	})
-
-	t.Run("yaml file value beats env var", func(t *testing.T) {
-		t.Setenv("GLITCH_MATTERMOST_URL", "https://env-mm.example.com")
-		_ = WriteWorkspaceConfig("ws-override", `mattermost:
-  url: https://yaml-mm.example.com
-`)
-		cfg, _ := LoadWorkspaceConfig("ws-override")
-		if cfg.Mattermost.URL != "https://yaml-mm.example.com" {
-			t.Errorf("yaml should win over env, got %q", cfg.Mattermost.URL)
-		}
-	})
 }
 
 func TestEnsureWorkspaceConfig(t *testing.T) {

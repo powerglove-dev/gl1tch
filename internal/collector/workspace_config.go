@@ -6,10 +6,10 @@
 // same defaults — so loaders, editors, and tests can use one type
 // across both surfaces.
 //
-// The split lets each workspace declare its own git repos, mattermost
-// channels, github org, etc. independently. The supervisor's pod
-// manager (Phase 4) loads one config per active workspace and runs a
-// dedicated set of collector goroutines for each.
+// The split lets each workspace declare its own git repos, github
+// org, etc. independently. The supervisor's pod manager (Phase 4)
+// loads one config per active workspace and runs a dedicated set of
+// collector goroutines for each.
 //
 // Behavior on the global config:
 //
@@ -55,9 +55,7 @@ func WorkspaceConfigPath(workspaceID string) (string, error) {
 // intervals — so a brand-new workspace can start collecting nothing
 // without errors and the user can add sources via the popup.
 //
-// Same env-var fallbacks as LoadConfig: GLITCH_MATTERMOST_URL /
-// GLITCH_MATTERMOST_TOKEN apply to per-workspace configs too. The home
-// dir tilde expansion in Git.Repos is also applied.
+// Home-dir tilde expansion in Git.Repos is also applied.
 func LoadWorkspaceConfig(workspaceID string) (*Config, error) {
 	path, err := WorkspaceConfigPath(workspaceID)
 	if err != nil {
@@ -83,13 +81,6 @@ func loadConfigFromPath(path string) (*Config, error) {
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse collector config: %w", err)
-	}
-
-	if cfg.Mattermost.URL == "" {
-		cfg.Mattermost.URL = os.Getenv("GLITCH_MATTERMOST_URL")
-	}
-	if cfg.Mattermost.Token == "" {
-		cfg.Mattermost.Token = os.Getenv("GLITCH_MATTERMOST_TOKEN")
 	}
 
 	home, _ := os.UserHomeDir()
@@ -118,7 +109,6 @@ func defaultConfig() *Config {
 	cfg.Copilot.Enabled = false
 	cfg.Copilot.Interval = defaultCopilotInterval
 	cfg.GitHub.Interval = defaultGitHubInterval
-	cfg.Mattermost.Interval = defaultMattermostInterval
 	cfg.Directories.Interval = defaultDirectoriesInterval
 	cfg.CodeIndex.Enabled = false
 	cfg.CodeIndex.Interval = defaultCodeIndexInterval
@@ -181,10 +171,6 @@ copilot:
 github:
   interval: 300s
   repos: []
-
-mattermost:
-  interval: 60s
-  channels: []
 
 directories:
   interval: 120s

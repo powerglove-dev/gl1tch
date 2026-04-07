@@ -364,9 +364,9 @@ export function BrainIndicator({
 
           {/* Collectors block — a single flat list scoped to the
               active workspace. Directories/git/github come from the
-              workspace's SQLite row; claude/copilot/mattermost are
-              process-wide but shown under every workspace because
-              the brain's memory includes chat context. */}
+              workspace's SQLite row; claude/copilot are process-wide
+              but shown under every workspace because the brain's
+              memory includes chat context. */}
           <SectionHeader
             label={
               activeWorkspaceTitle

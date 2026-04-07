@@ -658,7 +658,7 @@ func buildDraftSystemPrompt(kind, currentBody, brainContext string) string {
 	case store.DraftKindAgent:
 		b.WriteString("The draft is an AGENT definition (Markdown). Keep persona and capabilities crisp; avoid generic AI boilerplate.\n")
 	case store.DraftKindCollectors:
-		b.WriteString("The draft is a gl1tch COLLECTORS YAML — it configures which sources (git, github, claude, copilot, mattermost, directories) the workspace's collector pod indexes. Output must be valid YAML matching the existing schema. Preserve unknown sections rather than dropping them. Default state for any newly added section should be opt-in (enabled flags off, repo lists empty) unless the user explicitly asked to enable something.\n")
+		b.WriteString("The draft is a gl1tch COLLECTORS YAML — it configures which sources (git, github, claude, copilot, directories) the workspace's collector pod indexes. Output must be valid YAML matching the existing schema. Preserve unknown sections rather than dropping them. Default state for any newly added section should be opt-in (enabled flags off, repo lists empty) unless the user explicitly asked to enable something.\n")
 	default:
 		b.WriteString("The draft is a free-form text artifact. Improve it without changing its essential intent.\n")
 	}

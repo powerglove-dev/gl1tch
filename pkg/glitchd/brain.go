@@ -62,11 +62,10 @@ func QueryCollectorActivity(ctx context.Context) ([]CollectorActivity, error) {
 // shows only `robots`-attributed activity instead of the global sum.
 //
 // The "tool pod" bucket (collector.WorkspaceIDTools) is OR-included
-// alongside the active workspace so global tool collectors (copilot,
-// mattermost) still surface in the popover. Their numbers are
-// identical across every workspace because the underlying data
-// genuinely is shared — that's a true reflection of the source, not
-// a re-indexing bug.
+// alongside the active workspace so global tool collectors (copilot)
+// still surface in the popover. Their numbers are identical across
+// every workspace because the underlying data genuinely is shared —
+// that's a true reflection of the source, not a re-indexing bug.
 //
 // An empty workspaceID returns the global view (every event in
 // glitch-events) — used during startup before any workspace is
@@ -99,8 +98,8 @@ func QueryCollectorActivityScoped(ctx context.Context, workspaceID string) ([]Co
 	//
 	//   1. workspace_id == active workspace
 	//   2. workspace_id == collector.WorkspaceIDTools (the global
-	//      tool pod's sentinel for copilot/mattermost — shared
-	//      across every workspace by design)
+	//      tool pod's sentinel for copilot — shared across every
+	//      workspace by design)
 	//   3. workspace_id field is MISSING ENTIRELY (legacy /
 	//      unattributed docs)
 	//

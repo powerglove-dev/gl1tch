@@ -194,12 +194,13 @@ func (a *App) startup(ctx context.Context) {
 		}
 	}()
 	go glitchd.StartAllWorkspacePods(a.ctx)
-	// Tool pod runs copilot + mattermost ONCE under
-	// glitchd.WorkspaceIDTools. Without it, those collectors either
-	// don't run at all (because we removed them from per-workspace
-	// pods to fix the duplication bug) or get re-indexed under every
-	// workspace. The brain popover query OR-includes this bucket so
-	// the rows still surface with their real (single) counts.
+	// Tool pod runs copilot ONCE under glitchd.WorkspaceIDTools.
+	// Without it copilot either doesn't run at all (it's removed
+	// from per-workspace pods to avoid duplicating the same flat
+	// command history under every workspace_id) or gets re-indexed
+	// under every workspace. The brain popover query OR-includes
+	// this bucket so the row still surfaces with its real (single)
+	// count.
 	go func() {
 		if err := glitchd.StartToolPod(); err != nil {
 			slog.Error("backend: start tool pod", "err", err)
@@ -217,7 +218,7 @@ func (a *App) shutdown(_ context.Context) {
 	// the goroutines, so callers downstream don't see partially-
 	// torn-down state.
 	glitchd.StopAllWorkspacePods()
-	// Tear down the global tool pod (copilot + mattermost) too.
+	// Tear down the global tool pod (copilot) too.
 	// Same waitgroup-on-exit semantics as workspace pods.
 	_ = glitchd.StopToolPod()
 
@@ -255,9 +256,9 @@ func (a *App) Ready() {
 
 // CreateWorkspace creates a new workspace and returns it as JSON.
 // As a side effect, the new workspace gets its own collector pod
-// started so anything the user adds to it (directories, mattermost
-// channels, github repos) starts collecting immediately without an
-// app restart.
+// started so anything the user adds to it (directories, github
+// repos, etc.) starts collecting immediately without an app
+// restart.
 func (a *App) CreateWorkspace(title string) string {
 	st, err := glitchd.OpenStore()
 	if err != nil {

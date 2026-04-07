@@ -12,8 +12,8 @@ import (
 
 // fakeCollector is a test double that records its lifecycle so the
 // pod manager tests can verify start/stop semantics without spinning
-// up real git/github/mattermost goroutines. It implements the
-// production Collector interface (Name + Start(ctx, *esearch.Client)).
+// up real git/github goroutines. It implements the production
+// Collector interface (Name + Start(ctx, *esearch.Client)).
 type fakeCollector struct {
 	name    string
 	started atomic.Int32
@@ -313,8 +313,6 @@ func TestBuildCollectorsFromConfig(t *testing.T) {
 		cfg := defaultConfig()
 		cfg.Git.Repos = []string{"/tmp/repo"}
 		cfg.GitHub.Repos = []string{"org/repo"}
-		cfg.Mattermost.URL = "https://mm.example.com"
-		cfg.Mattermost.Token = "tok"
 		// Per the opt-in default rule, claude/copilot are off in
 		// defaultConfig — flip them on here so this test exercises
 		// the full set of collectors.
@@ -324,10 +322,10 @@ func TestBuildCollectorsFromConfig(t *testing.T) {
 		out := BuildCollectorsFromConfig("ws-x", cfg, nil)
 
 		// Expected: git, claude, claude-projects, github,
-		// directories, pipeline = 6. Copilot AND mattermost are
-		// intentionally excluded from per-workspace pods because
-		// their data sources are global / shared across workspaces;
-		// they live in the tool pod path (BuildToolCollectorsFromConfig).
+		// directories, pipeline = 6. Copilot is intentionally
+		// excluded from per-workspace pods because its data source
+		// is global / shared across workspaces; it lives in the
+		// tool pod path (BuildToolCollectorsFromConfig).
 		if len(out) != 6 {
 			t.Errorf("collectors = %d, want 6: names=%v", len(out), names(out))
 		}
@@ -342,10 +340,9 @@ func TestBuildCollectorsFromConfig(t *testing.T) {
 }
 
 // TestBuildToolCollectorsFromConfig locks down the tool-pod
-// builder: copilot is included when enabled, mattermost is included
-// when both URL and token are set, and every collector returned must
-// be stamped with WorkspaceIDTools (not the empty string and not
-// any per-workspace id) so the OR-include query in
+// builder: copilot is included when enabled, and every collector
+// returned must be stamped with WorkspaceIDTools (not the empty
+// string and not any per-workspace id) so the OR-include query in
 // QueryCollectorActivityScoped can find them.
 func TestBuildToolCollectorsFromConfig(t *testing.T) {
 	t.Run("nil config returns empty slice", func(t *testing.T) {
@@ -355,14 +352,14 @@ func TestBuildToolCollectorsFromConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("empty config skips both", func(t *testing.T) {
+	t.Run("empty config skips copilot", func(t *testing.T) {
 		out := BuildToolCollectorsFromConfig(&Config{})
 		if len(out) != 0 {
 			t.Errorf("collectors = %d, want 0: names=%v", len(out), names(out))
 		}
 	})
 
-	t.Run("copilot enabled, mattermost off", func(t *testing.T) {
+	t.Run("copilot enabled", func(t *testing.T) {
 		cfg := &Config{}
 		cfg.Copilot.Enabled = true
 		out := BuildToolCollectorsFromConfig(cfg)
@@ -372,44 +369,6 @@ func TestBuildToolCollectorsFromConfig(t *testing.T) {
 		if got := workspaceIDOf(out[0]); got != WorkspaceIDTools {
 			t.Errorf("copilot WorkspaceID = %q, want %q",
 				got, WorkspaceIDTools)
-		}
-	})
-
-	t.Run("mattermost enabled needs both URL and token", func(t *testing.T) {
-		cfg := &Config{}
-		cfg.Mattermost.URL = "https://mm.example.com"
-		// Token missing → mattermost should be skipped.
-		out := BuildToolCollectorsFromConfig(cfg)
-		if len(out) != 0 {
-			t.Errorf("collectors = %d, want 0 (no token): names=%v",
-				len(out), names(out))
-		}
-
-		cfg.Mattermost.Token = "tok"
-		out = BuildToolCollectorsFromConfig(cfg)
-		if len(out) != 1 {
-			t.Fatalf("collectors = %d, want 1: names=%v", len(out), names(out))
-		}
-		if got := workspaceIDOf(out[0]); got != WorkspaceIDTools {
-			t.Errorf("mattermost WorkspaceID = %q, want %q",
-				got, WorkspaceIDTools)
-		}
-	})
-
-	t.Run("both enabled returns both", func(t *testing.T) {
-		cfg := &Config{}
-		cfg.Copilot.Enabled = true
-		cfg.Mattermost.URL = "https://mm.example.com"
-		cfg.Mattermost.Token = "tok"
-		out := BuildToolCollectorsFromConfig(cfg)
-		if len(out) != 2 {
-			t.Fatalf("collectors = %d, want 2: names=%v", len(out), names(out))
-		}
-		for _, c := range out {
-			if got := workspaceIDOf(c); got != WorkspaceIDTools {
-				t.Errorf("collector %q WorkspaceID = %q, want %q",
-					c.Name(), got, WorkspaceIDTools)
-			}
 		}
 	})
 }
@@ -435,8 +394,6 @@ func workspaceIDOf(c Collector) string {
 	case *ClaudeProjectCollector:
 		return v.WorkspaceID
 	case *CopilotCollector:
-		return v.WorkspaceID
-	case *MattermostCollector:
 		return v.WorkspaceID
 	case *DirectoryCollector:
 		return v.WorkspaceID

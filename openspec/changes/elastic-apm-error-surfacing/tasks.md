@@ -150,7 +150,9 @@ so it landed in the same change instead of a follow-up.
       5s schedule — no shutdown drain required.
 - [x] Wired `startTickSpan` into every collector's tick loop:
       git, github, directory, claude, claude-projects, code-index,
-      pipeline, copilot, mattermost.
+      pipeline, copilot. (mattermost was subsequently removed from
+      the codebase entirely — see the follow-up "drop mattermost"
+      commit.)
 - [x] `code_index.CodeIndexCollector.runOnce` signature bumped to
       `(int, error)` return so the per-tick `done` closure gets
       the real chunk count and last error.

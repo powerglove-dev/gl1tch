@@ -168,15 +168,16 @@ func RestartWorkspacePod(workspaceID string) error {
 	return podManager.RestartPod(workspaceID)
 }
 
-// StartToolPod starts the global "tool collectors" pod that owns
-// copilot + mattermost. These collectors read shared per-machine
-// data sources and run once with workspace_id=collector.WorkspaceIDTools
-// so the same source isn't re-indexed under every workspace.
+// StartToolPod starts the global "tool collectors" pod. Currently
+// only copilot runs here — it reads a shared per-machine data
+// source (~/.copilot/...) and must run once with
+// workspace_id=collector.WorkspaceIDTools so the same data isn't
+// re-indexed under every workspace.
 //
 // The brain popover OR-includes the tools bucket alongside the active
-// workspace's bucket via QueryCollectorActivityScoped, so users still
-// see copilot/mattermost rows in the popover with their real (single)
-// counts.
+// workspace's bucket via QueryCollectorActivityScoped, so the copilot
+// row still shows in every workspace's popover with its real (single)
+// count.
 //
 // Best-effort: returns the pod manager error so the desktop can log
 // it, but never propagates a startup failure that would block the rest
@@ -376,8 +377,8 @@ func ReadWorkspaceCollectorConfigYAML(workspaceID string) (string, error) {
 //     derived at read time from the SQLite list via AutoDetect.
 //     Persisting them would freeze auto-detected entries into the
 //     YAML and break the dynamic behavior.
-//  3. Everything else (claude/copilot/mattermost/code_index/intervals
-//     /enabled flags) round-trips through the YAML normally.
+//  3. Everything else (claude/copilot/code_index/intervals/enabled
+//     flags) round-trips through the YAML normally.
 //
 // Triggers the same pod restart on success.
 //

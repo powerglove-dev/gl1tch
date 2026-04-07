@@ -15,7 +15,6 @@ const (
 	defaultClaudeInterval      = 120 * time.Second
 	defaultCopilotInterval     = 120 * time.Second
 	defaultGitHubInterval      = 300 * time.Second
-	defaultMattermostInterval  = 60 * time.Second
 	defaultDirectoriesInterval = 120 * time.Second
 	defaultCodeIndexInterval   = 30 * time.Minute
 	defaultModel               = "llama3.2"
@@ -55,13 +54,6 @@ type Config struct {
 		Repos    []string      `yaml:"repos" json:"repos"`       // "owner/repo" format
 		Interval time.Duration `yaml:"interval" json:"interval"` // poll interval (default 300s)
 	} `yaml:"github" json:"github"`
-
-	Mattermost struct {
-		URL      string        `yaml:"url" json:"url"`             // server URL (or GLITCH_MATTERMOST_URL)
-		Token    string        `yaml:"token" json:"token"`         // bot/PAT (or GLITCH_MATTERMOST_TOKEN)
-		Channels []string      `yaml:"channels" json:"channels"`   // channel names to auto-join and monitor (empty = all)
-		Interval time.Duration `yaml:"interval" json:"interval"`   // poll interval (default 60s)
-	} `yaml:"mattermost" json:"mattermost"`
 
 	// Directories are project directories to scan for agents, skills,
 	// provider configs, and project structure. Added via the desktop GUI
@@ -160,15 +152,6 @@ github:
   repos: []
   # - elastic/ensemble
   # - 8op-org/gl1tch
-
-# Mattermost channel monitoring (uses GLITCH_MATTERMOST_URL/TOKEN env vars if set).
-mattermost:
-  interval: 60s
-  # url: "https://mattermost.example.com"
-  # token: "your-bot-token"
-  channels: []
-  # - town-square
-  # - engineering
 
 # Directories to scan for agents, skills, provider configs, and project structure.
 # Added via the desktop GUI or manually here.

@@ -54,11 +54,10 @@ func main() {
 
 	glitchd.InitPodManager(bgCtx)
 	go glitchd.StartAllWorkspacePods(bgCtx)
-	// Tool pod runs copilot + mattermost ONCE under
-	// glitchd.WorkspaceIDTools — same wiring as glitch-desktop's
-	// app.go startup hook. Without this the backfill would only
-	// repopulate per-workspace data and the brain popover's tool
-	// rows (copilot, mattermost) would stay at zero.
+	// Tool pod runs copilot ONCE under glitchd.WorkspaceIDTools —
+	// same wiring as glitch-desktop's app.go startup hook. Without
+	// this the backfill would only repopulate per-workspace data
+	// and the brain popover's copilot row would stay at zero.
 	go func() {
 		if err := glitchd.StartToolPod(); err != nil {
 			log.Printf("backfill: start tool pod: %v", err)

@@ -3,8 +3,8 @@
 // A pod is a tree of collector goroutines scoped to one workspace.
 // Each pod loads the workspace's collectors.yaml, instantiates one
 // collector per enabled section (git, github, claude, copilot,
-// mattermost, directories), stamps every indexed event with the
-// workspace id, and runs them under a per-pod context.
+// directories), stamps every indexed event with the workspace id,
+// and runs them under a per-pod context.
 //
 // PodManager owns the lifetime of all active pods. The desktop app
 // creates one PodManager at startup and asks it to start a pod for
@@ -73,8 +73,7 @@ type PodManager struct {
 	parentCtx context.Context
 	// builder produces the collectors a pod runs from a config. The
 	// production builder is BuildCollectorsFromConfig; tests inject
-	// their own to avoid spinning up real git/github/mattermost
-	// goroutines.
+	// their own to avoid spinning up real git/github goroutines.
 	builder PodCollectorBuilder
 	// dirsResolver is set by the desktop app via
 	// SetWorkspaceDirsResolver so the auto-detect overlay can read
@@ -95,7 +94,7 @@ type pod struct {
 
 // WorkspaceIDTools is the sentinel workspace_id stamped on every doc
 // produced by collectors that read global per-tool data — copilot's
-// flat command history, mattermost's shared channels, etc. These
+// flat command history being the sole remaining example. Tool
 // collectors run inside a single "tool pod" rather than per-workspace
 // so the same source data isn't re-indexed once per workspace and
 // the brain popover can OR-include this bucket alongside the active
@@ -560,17 +559,6 @@ func BuildCollectorsFromConfig(workspaceID string, cfg *Config, dirs []string) [
 		})
 	}
 
-	// Mattermost is intentionally NOT registered as a per-workspace
-	// collector. The data source is a single Mattermost server
-	// shared across every workspace; running one client per pod
-	// re-indexes the same channels under each workspace_id and the
-	// brain popover ends up showing identical mattermost counts
-	// everywhere. The tool-pod path (BuildToolCollectorsFromConfig)
-	// runs a single instance with workspace_id=WorkspaceIDTools, and
-	// the popover query OR-includes that bucket alongside the active
-	// workspace.
-	_ = cfg.Mattermost.URL // see comment above
-
 	// Directory collector always runs (even with empty paths) so the
 	// user can add directories at runtime via the desktop's "add
 	// directory" button. The collector re-reads its config on each
@@ -606,7 +594,7 @@ func BuildCollectorsFromConfig(workspaceID string, cfg *Config, dirs []string) [
 }
 
 // BuildToolCollectorsFromConfig instantiates the "global tool"
-// collector set: copilot + mattermost. These read shared, machine-
+// collector set: currently just copilot. These read shared, machine-
 // global data sources and run inside a single dedicated pod with
 // workspace_id=WorkspaceIDTools so the same source data isn't
 // re-indexed once per workspace.
@@ -628,16 +616,6 @@ func BuildToolCollectorsFromConfig(cfg *Config) []Collector {
 	if cfg.Copilot.Enabled {
 		out = append(out, &CopilotCollector{
 			Interval:    cfg.Copilot.Interval,
-			WorkspaceID: WorkspaceIDTools,
-		})
-	}
-
-	if cfg.Mattermost.URL != "" && cfg.Mattermost.Token != "" {
-		out = append(out, &MattermostCollector{
-			URL:         cfg.Mattermost.URL,
-			Token:       cfg.Mattermost.Token,
-			Channels:    cfg.Mattermost.Channels,
-			Interval:    cfg.Mattermost.Interval,
 			WorkspaceID: WorkspaceIDTools,
 		})
 	}
@@ -672,7 +650,7 @@ func (m *PodManager) startToolPodLocked() error {
 	collectors := BuildToolCollectorsFromConfig(cfg)
 	if len(collectors) == 0 {
 		// Nothing enabled — silently no-op so a user with no copilot
-		// or mattermost configured doesn't see scary errors.
+		// configured doesn't see scary errors.
 		slog.Info("pod manager: tool pod has no enabled collectors, skipping")
 		return nil
 	}

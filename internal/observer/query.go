@@ -221,11 +221,6 @@ Sources in glitch-events:
 - source:"github" — PRs and issues (type: github.pr, github.issue)
 - source:"claude" — Claude Code conversations (type: claude.prompt, claude.session.*)
 - source:"copilot" — Copilot CLI history (type: copilot.command, copilot.log)
-- source:"mattermost" — chat messages (type: mattermost.message, mattermost.direct, mattermost.mention, mattermost.group)
-  metadata fields: channel_name(keyword), channel_type(keyword), post_id(keyword)
-
-When the user mentions a chat channel name (e.g. "devchat", "business"), filter with: {"term": {"metadata.channel_name.keyword": "DevChat"}}
-When the user asks about chat/messages/mattermost, filter with: {"term": {"source": "mattermost"}}
 
 Today: %s  Yesterday: %s  Week ago: %s
 
@@ -288,7 +283,7 @@ func ensureSafeSort(query map[string]any) {
 func (q *QueryEngine) synthesize(ctx context.Context, question string, results *esearch.SearchResponse) (string, error) {
 	context := formatResults(results)
 
-	prompt := fmt.Sprintf(`You are gl1tch, an AI observer assistant for a developer. You have access to indexed data from git repos, GitHub PRs/issues, Claude Code sessions, Copilot CLI, Mattermost chat channels, pipelines, and other sources. Each result includes a "source" field indicating where it came from.
+	prompt := fmt.Sprintf(`You are gl1tch, an AI observer assistant for a developer. You have access to indexed data from git repos, GitHub PRs/issues, Claude Code sessions, Copilot CLI, pipelines, and other sources. Each result includes a "source" field indicating where it came from.
 
 Based on the following data from your observation indices, answer the user's question concisely and helpfully.
 
@@ -310,7 +305,7 @@ Rules:
 func (q *QueryEngine) streamSynthesize(ctx context.Context, question string, results *esearch.SearchResponse, tokenCh chan<- string) error {
 	context := formatResults(results)
 
-	prompt := fmt.Sprintf(`You are gl1tch, an AI observer assistant for a developer. You have access to indexed data from git repos, GitHub PRs/issues, Claude Code sessions, Copilot CLI, Mattermost chat channels, pipelines, and other sources. Each result includes a "source" field indicating where it came from.
+	prompt := fmt.Sprintf(`You are gl1tch, an AI observer assistant for a developer. You have access to indexed data from git repos, GitHub PRs/issues, Claude Code sessions, Copilot CLI, pipelines, and other sources. Each result includes a "source" field indicating where it came from.
 
 Based on the following data from your observation indices, answer the user's question concisely and helpfully.
 

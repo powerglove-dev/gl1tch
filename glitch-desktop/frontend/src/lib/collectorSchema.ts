@@ -61,8 +61,8 @@ export interface CollectorSpec {
    *  collector off without clearing every field. */
   enabledKey?: string;
   /** "true if the collector is effectively enabled" — some collectors
-   *  (git, github, mattermost) auto-enable when their list/credentials
-   *  are populated rather than via an explicit boolean. The schema
+   *  (git, github) auto-enable when their list/credentials are
+   *  populated rather than via an explicit boolean. The schema
    *  encodes that so the sidebar can show the right green dot. */
   isEnabled: (values: Record<string, unknown>) => boolean;
   fields: FieldSpec[];
@@ -233,44 +233,6 @@ export const COLLECTOR_SCHEMA: CollectorSpec[] = [
         label: "Poll interval",
         type: "duration",
         placeholder: "5m",
-      },
-    ],
-  },
-  {
-    id: "mattermost",
-    name: "Mattermost",
-    icon: "MessageSquare",
-    description:
-      "Joins channels and indexes messages so the brain can answer questions about team chat.",
-    isEnabled: (v) =>
-      !!getField(v, "mattermost.url") && !!getField(v, "mattermost.token"),
-    fields: [
-      {
-        key: "mattermost.url",
-        label: "Server URL",
-        description: "Base URL of the Mattermost server.",
-        type: "string",
-        placeholder: "https://mattermost.example.com",
-      },
-      {
-        key: "mattermost.token",
-        label: "Bot token",
-        description: "Personal access token or bot token.",
-        type: "secret",
-        placeholder: "$GLITCH_MATTERMOST_TOKEN or literal token",
-      },
-      {
-        key: "mattermost.channels",
-        label: "Channels",
-        description: "Channel names to join. Empty = all visible channels.",
-        type: "string-list",
-        placeholder: "town-square",
-      },
-      {
-        key: "mattermost.interval",
-        label: "Poll interval",
-        type: "duration",
-        placeholder: "60s",
       },
     ],
   },

@@ -205,8 +205,8 @@ export function CollectorConfigModal({
 
   // Toggle a collector's enabled flag from the sidebar without
   // navigating into it. For collectors with no enabledKey (git,
-  // github, mattermost) the toggle is a no-op visually because
-  // their "enabled" state is derived from list/credential presence.
+  // github) the toggle is a no-op visually because their
+  // "enabled" state is derived from list/credential presence.
   const toggleCollectorEnabled = useCallback(
     (spec: CollectorSpec) => {
       if (!spec.enabledKey) return;

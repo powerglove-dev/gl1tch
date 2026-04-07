@@ -53,9 +53,9 @@ var _ = time.Now
 // for the active workspace's view and gets a single flat list of
 // what's being watched for that workspace. Directories come from the
 // workspace row in SQLite; git and github are auto-derived from the
-// workspace's directories. Chat sources (claude, copilot, mattermost)
-// are process-wide but shown under every workspace because the
-// brain's memory doesn't silo chat context by project.
+// workspace's directories. Chat sources (claude, copilot) are
+// process-wide but shown under every workspace because the brain's
+// memory doesn't silo chat context by project.
 type CollectorInfo struct {
 	Name       string `json:"name"`
 	Enabled    bool   `json:"enabled"`
@@ -70,9 +70,8 @@ type CollectorInfo struct {
 
 // ListCollectorsForWorkspace returns the flat set of collectors
 // scoped to a single workspace. Directories come from the workspace
-// row in SQLite, and git/github/claude/copilot/mattermost intervals
-// + enablement come from that workspace's per-workspace
-// collectors.yaml.
+// row in SQLite, and git/github/claude/copilot intervals + enablement
+// come from that workspace's per-workspace collectors.yaml.
 //
 // workspaceID == "" falls back to the global observer.yaml view so
 // the function is still usable before the desktop picks an active
@@ -152,12 +151,11 @@ func ListCollectorsForWorkspace(ctx context.Context, workspaceID string) ([]Coll
 		Source:     joinShort(githubRepos),
 	})
 
-	// Chat sources — claude / copilot / mattermost. These are tied
-	// to the user's machine rather than any one workspace, but we
-	// surface them here because the brain's memory for any given
-	// workspace includes "what the user was discussing in claude
-	// when they were in this project". Enabled state comes from
-	// observer.yaml.
+	// Chat sources — claude / copilot. These are tied to the user's
+	// machine rather than any one workspace, but we surface them
+	// here because the brain's memory for any given workspace
+	// includes "what the user was discussing in claude when they
+	// were in this project". Enabled state comes from observer.yaml.
 
 	out = append(out, CollectorInfo{
 		Name:       "claude",
@@ -171,23 +169,6 @@ func ListCollectorsForWorkspace(ctx context.Context, workspaceID string) ([]Coll
 		Enabled:    cfg.Copilot.Enabled,
 		IntervalMs: cfg.Copilot.Interval.Milliseconds(),
 		Detail:     "copilot CLI history",
-	})
-
-	mmEnabled := cfg.Mattermost.URL != "" && cfg.Mattermost.Token != ""
-	mmDetail := "disabled"
-	if mmEnabled {
-		if len(cfg.Mattermost.Channels) > 0 {
-			mmDetail = fmt.Sprintf("%d channel(s)", len(cfg.Mattermost.Channels))
-		} else {
-			mmDetail = "all joined channels"
-		}
-	}
-	out = append(out, CollectorInfo{
-		Name:       "mattermost",
-		Enabled:    mmEnabled,
-		IntervalMs: cfg.Mattermost.Interval.Milliseconds(),
-		Detail:     mmDetail,
-		Source:     cfg.Mattermost.URL,
 	})
 
 	// Code-index — semantic embedding pass over the workspace's

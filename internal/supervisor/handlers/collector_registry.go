@@ -45,15 +45,6 @@ func RegisterCollectors(sup *supervisor.Supervisor) {
 		}))
 	}
 
-	if cfg.Mattermost.URL != "" && cfg.Mattermost.Token != "" {
-		sup.RegisterService(NewCollectorService(&collector.MattermostCollector{
-			URL:      cfg.Mattermost.URL,
-			Token:    cfg.Mattermost.Token,
-			Channels: cfg.Mattermost.Channels,
-			Interval: cfg.Mattermost.Interval,
-		}))
-	}
-
 	// Always register the directories collector — even with no paths
 	// configured up front. The collector's tick body re-reads
 	// observer.yaml every cycle (see currentDirs in directory.go), so
