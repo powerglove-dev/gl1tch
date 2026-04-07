@@ -37,10 +37,16 @@ export function ChainBlock({ steps, text }: Props) {
         {steps.map((step, i) => {
           const meta = KIND_META[step.kind] ?? KIND_META.prompt;
           const Icon = meta.Icon;
-          // For prompt steps, surface the resolved provider as a small badge
-          // appended to the chip. This makes the actual executor visible
-          // before the run starts — no more silent fallback to copilot.
+          // For prompt steps, surface the resolved provider (and model when
+          // known) as a small badge appended to the chip. This makes the
+          // actual executor visible before the run starts — no more silent
+          // fallback to copilot. We render `provider/model` when both are
+          // present so users can tell qwen3:8b from llama3.2 at a glance.
           const showProvider = step.kind === "prompt" && !!step.provider;
+          const providerBadge =
+            step.provider && step.model
+              ? `${step.provider}/${step.model}`
+              : step.provider || "";
           return (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <div
@@ -75,7 +81,7 @@ export function ChainBlock({ steps, text }: Props) {
                       fontFamily: "monospace",
                     }}
                   >
-                    {step.provider}
+                    {providerBadge}
                   </span>
                 )}
               </div>
