@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/8op-org/gl1tch/internal/esearch"
 )
@@ -239,14 +240,54 @@ func (m *PodManager) startPodLocked(workspaceID string) error {
 		p.wg.Add(1)
 		go func(c Collector) {
 			defer p.wg.Done()
-			slog.Info("pod manager: collector started", "workspace", workspaceID, "collector", c.Name())
-			if err := c.Start(ctx, m.es); err != nil && ctx.Err() == nil {
-				slog.Warn("pod manager: collector exited", "workspace", workspaceID, "collector", c.Name(), "err", err)
-			}
+			runCollectorGuarded(ctx, c, m.es, workspaceID)
 		}(c)
 	}
 
 	return nil
+}
+
+// runCollectorGuarded runs one collector's Start in a panic-safe
+// wrapper. If Start panics — most commonly because m.es is nil and
+// the collector tries to BulkIndex on the very first poll, or because
+// an external CLI subprocess returns malformed output that the
+// collector's parser doesn't handle — we recover, log the panic, and
+// emit a RecordRun with the panic message as the error so the brain
+// popover surfaces a red dot with a real failure reason instead of
+// silently gray-dotting forever.
+//
+// Without this wrapper a collector panic kills its goroutine without
+// updating the run registry; the popover row reads "0 indexed" with
+// no last_run_ms and no last_run_error, which is indistinguishable
+// from "the collector hasn't fired its first tick yet". The user has
+// no way to tell the difference and no way to discover the panic
+// short of catting the dev console at the exact moment it happened.
+//
+// Used by both the per-workspace pod path (startPodLocked) and the
+// global tool pod path (startToolPodLocked) so every collector that
+// runs through the manager gets the same protection.
+func runCollectorGuarded(ctx context.Context, c Collector, es *esearch.Client, workspaceID string) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("pod manager: collector panicked",
+				"workspace", workspaceID,
+				"collector", c.Name(),
+				"panic", r)
+			RecordRun(c.Name(), time.Now(), 0,
+				fmt.Errorf("collector panicked: %v", r))
+		}
+	}()
+	slog.Info("pod manager: collector started",
+		"workspace", workspaceID, "collector", c.Name())
+	if err := c.Start(ctx, es); err != nil && ctx.Err() == nil {
+		slog.Warn("pod manager: collector exited",
+			"workspace", workspaceID, "collector", c.Name(), "err", err)
+		// Surface a clean exit error to the popover too. ctx-cancel
+		// path is excluded above so a normal pod stop doesn't paint
+		// every collector red.
+		RecordRun(c.Name(), time.Now(), 0,
+			fmt.Errorf("collector exited: %w", err))
+	}
 }
 
 // StopPod cancels the workspace's pod context and waits for every
@@ -537,10 +578,10 @@ func (m *PodManager) startToolPodLocked() error {
 		p.wg.Add(1)
 		go func(c Collector) {
 			defer p.wg.Done()
-			slog.Info("pod manager: tool collector started", "collector", c.Name())
-			if err := c.Start(ctx, m.es); err != nil && ctx.Err() == nil {
-				slog.Warn("pod manager: tool collector exited", "collector", c.Name(), "err", err)
-			}
+			// Same panic-and-exit guard as the per-workspace path,
+			// keyed under the tool pod's reserved workspace id so
+			// red-dot diagnostics work uniformly across both surfaces.
+			runCollectorGuarded(ctx, c, m.es, WorkspaceIDTools)
 		}(c)
 	}
 

@@ -33,9 +33,31 @@ func (g *GitHubCollector) Start(ctx context.Context, es *esearch.Client) error {
 		g.Interval = 300 * time.Second // every 5 min
 	}
 
-	// Verify gh is available.
+	// Self-diagnostic startup log — same purpose as the git
+	// collector's: tell the user the goroutine actually launched.
+	// The brain popover can't distinguish "configured but never
+	// ticked" from "configured and silently dead" without it.
+	slog.Info("github collector: started",
+		"workspace", g.WorkspaceID,
+		"repos", len(g.Repos),
+		"interval", g.Interval)
+
+	// Nil-ES guard, same rationale as the git collector. We surface
+	// the failure via RecordRun so the popover row turns red with a
+	// real error instead of staying gray-dotted forever.
+	if es == nil {
+		err := fmt.Errorf("github collector: elasticsearch client is nil — check ES connectivity")
+		RecordRun("github", time.Now(), 0, err)
+		return err
+	}
+
+	// Verify gh is available. Same surfacing pattern: paint the row
+	// red with a clear "install gh" message instead of letting the
+	// goroutine exit and leaving the user staring at "0 indexed".
 	if _, err := exec.LookPath("gh"); err != nil {
-		return fmt.Errorf("github collector: gh CLI not found")
+		wrapped := fmt.Errorf("github collector: gh CLI not found on PATH — install gh and re-authenticate")
+		RecordRun("github", time.Now(), 0, wrapped)
+		return wrapped
 	}
 
 	// Track last poll time per repo.
@@ -44,36 +66,63 @@ func (g *GitHubCollector) Start(ctx context.Context, es *esearch.Client) error {
 	ticker := time.NewTicker(g.Interval)
 	defer ticker.Stop()
 
+	// Run one cycle immediately on startup so the first PRs/issues
+	// land in the brain popover without waiting g.Interval (default
+	// 5 minutes) for the first ticker tick. Symmetric with the git
+	// collector's startup backfill — the user opens gl1tch and
+	// expects to see existing activity, not a 5-minute "0 indexed"
+	// stretch.
+	g.runOnce(ctx, es, lastPoll)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			start := time.Now()
-			var lastErr error
-			for _, repo := range g.Repos {
-				since := lastPoll[repo]
-				if since.IsZero() {
-					since = time.Now().Add(-24 * time.Hour) // backfill 1 day on first run
-				}
-				if err := g.pollRepo(ctx, es, repo, since); err != nil {
-					lastErr = err
-					slog.Warn("github collector: poll error", "repo", repo, "err", err)
-					continue
-				}
-				lastPoll[repo] = time.Now()
-			}
-			// Heartbeat for the brain UI. We don't track per-poll
-			// counts here (the gh CLI returns them but we don't
-			// thread them up), so 0 means "this collector ran" — the
-			// brain UI's totals come from ES doc counts via
-			// QueryCollectorActivity.
-			RecordRun("github", start, 0, lastErr)
+			g.runOnce(ctx, es, lastPoll)
 		}
 	}
 }
 
-func (g *GitHubCollector) pollRepo(ctx context.Context, es *esearch.Client, repo string, since time.Time) error {
+// runOnce executes a single collection cycle across all configured
+// repos and records a heartbeat with the real indexed count. Lifted
+// out of Start() so the startup backfill and the periodic ticker
+// share one code path — earlier versions duplicated this loop and
+// got out of sync (the ticker reported indexed=0 hardcoded while
+// the lifted loop didn't exist at all).
+func (g *GitHubCollector) runOnce(ctx context.Context, es *esearch.Client, lastPoll map[string]time.Time) {
+	start := time.Now()
+	var lastErr error
+	indexed := 0
+	for _, repo := range g.Repos {
+		since := lastPoll[repo]
+		if since.IsZero() {
+			since = time.Now().Add(-24 * time.Hour) // backfill 1 day on first run
+		}
+		n, err := g.pollRepo(ctx, es, repo, since)
+		indexed += n
+		if err != nil {
+			lastErr = err
+			slog.Warn("github collector: poll error", "repo", repo, "err", err)
+			continue
+		}
+		lastPoll[repo] = time.Now()
+	}
+	// Heartbeat for the brain UI. We now thread the real per-poll
+	// indexed count up from pollRepo so the popover row shows
+	// "+N new" and the activity dot pulses on real activity instead
+	// of staying gray forever — the previous hardcoded zero made
+	// github look like it was running but never producing data.
+	RecordRun("github", start, indexed, lastErr)
+}
+
+// pollRepo runs one collection cycle against a single repo. Returns
+// the number of docs successfully indexed (so runOnce can report a
+// real per-poll count to the brain UI) plus any error from BulkIndex.
+// Sub-fetch errors are logged-and-skipped because the gh CLI is
+// chatty about transient permission/network failures and we don't
+// want one missing reviews list to mask a successful PR fetch.
+func (g *GitHubCollector) pollRepo(ctx context.Context, es *esearch.Client, repo string, since time.Time) (int, error) {
 	var docs []any
 
 	// Fetch recent PRs with full detail.
@@ -107,14 +156,14 @@ func (g *GitHubCollector) pollRepo(ctx context.Context, es *esearch.Client, repo
 		}
 	}
 
-	if len(docs) > 0 {
-		slog.Info("github collector: new activity", "repo", repo, "events", len(docs))
-		if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(g.WorkspaceID, docs)); err != nil {
-			return fmt.Errorf("bulk index: %w", err)
-		}
+	if len(docs) == 0 {
+		return 0, nil
 	}
-
-	return nil
+	slog.Info("github collector: new activity", "repo", repo, "events", len(docs))
+	if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(g.WorkspaceID, docs)); err != nil {
+		return 0, fmt.Errorf("bulk index: %w", err)
+	}
+	return len(docs), nil
 }
 
 func repoShortName(repo string) string {

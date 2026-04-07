@@ -31,21 +31,68 @@ func (g *GitCollector) Start(ctx context.Context, es *esearch.Client) error {
 		g.Interval = 60 * time.Second
 	}
 
-	// Track the last indexed SHA per repo so we only index new commits.
-	cursors := make(map[string]string)
+	// Self-diagnostic startup log so the user can grep the dev
+	// console to confirm the collector goroutine actually launched
+	// for their workspace, with the right repo set. The brain
+	// popover gives no other signal between "configured" and "ran
+	// at least once" — without this line a misconfigured pod looks
+	// identical to a healthy one that hasn't ticked yet.
+	slog.Info("git collector: started",
+		"workspace", g.WorkspaceID,
+		"repos", len(g.Repos),
+		"interval", g.Interval)
 
-	// Seed cursors with the latest commit so we don't backfill the entire history
-	// on first run. Only new commits from this point forward get indexed.
-	for _, repo := range g.Repos {
-		sha, _ := gitLatestSHA(repo)
-		if sha != "" {
-			cursors[repo] = sha
-			slog.Info("git collector: seeded cursor", "repo", filepath.Base(repo), "sha", sha[:8])
-		}
+	// Nil-ES guard. The pod manager constructs collectors with
+	// whatever ES client InitPodManager managed to build, and that
+	// can be nil if esearch.New itself failed. Without this check
+	// the very first BulkIndex call inside poll() nil-derefs and
+	// the goroutine dies before reaching RecordRun, leaving the
+	// brain popover stuck on a gray dot with no error message
+	// forever. Surfacing it as a RecordRun error paints the row
+	// red and tells the user exactly what to fix.
+	if es == nil {
+		err := fmt.Errorf("git collector: elasticsearch client is nil — check ES connectivity")
+		RecordRun("git", time.Now(), 0, err)
+		return err
 	}
+
+	// Track the last indexed SHA per repo so we only index new commits.
+	// Cursors start empty so the first poll cycle hits the
+	// empty-cursor branch in poll() and backfills the most recent 50
+	// commits per repo. An earlier version of this loop pre-seeded the
+	// cursor to HEAD on startup as a "don't backfill the entire
+	// history" optimization, but that overshot — it backfilled NOTHING
+	// because the very first poll's range was HEAD..HEAD, and the
+	// brain popover stayed stuck at "git: 0 indexed" for any user
+	// whose existing commits predated the desktop launch. The user's
+	// expectation is "I open gl1tch and my recent commits are already
+	// in the brain", so we backfill the last 50 instead.
+	cursors := make(map[string]string)
 
 	ticker := time.NewTicker(g.Interval)
 	defer ticker.Stop()
+
+	// Run one cycle immediately so the first 50 commits land in ES on
+	// startup instead of waiting g.Interval (default 60s) for the
+	// first ticker tick. The brain popover otherwise reads "0 indexed"
+	// for the first minute of every desktop session, which is the
+	// exact symptom that masked the cursor seed bug for as long as it
+	// did. RecordRun fires from the same path so the heartbeat lands
+	// on the row immediately too.
+	{
+		start := time.Now()
+		var lastErr error
+		indexed := 0
+		for _, repo := range g.Repos {
+			n, err := g.poll(ctx, es, repo, cursors)
+			indexed += n
+			if err != nil {
+				lastErr = err
+				slog.Warn("git collector: initial poll error", "repo", filepath.Base(repo), "err", err)
+			}
+		}
+		RecordRun("git", start, indexed, lastErr)
+	}
 
 	for {
 		select {
@@ -198,14 +245,6 @@ func gitLog(repo, rangeArg string) ([]gitCommit, error) {
 	}
 
 	return commits, nil
-}
-
-func gitLatestSHA(repo string) (string, error) {
-	out, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
 }
 
 func gitCurrentBranch(repo string) string {

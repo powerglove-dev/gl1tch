@@ -385,13 +385,17 @@ func WriteWorkspaceCollectorConfigJSON(workspaceID, jsonBody string) error {
 	}
 
 	// ── Strip derived fields before marshaling YAML ──────────────────
-	// directories.paths lives in SQLite. git.repos / github.repos are
-	// auto-detected from those directories at read time. Persisting
-	// any of these would override the live SQLite state on the next
-	// read and freeze the autodetect result.
+	// directories.paths lives in SQLite. git.repos / github.repos /
+	// code_index.paths are all auto-detected from those directories
+	// at read time via AutoDetectFromWorkspace. Persisting any of
+	// them would override the live SQLite state on the next read and
+	// freeze the autodetect result — e.g. removing a workspace dir
+	// later wouldn't drop its code_index entry because the YAML
+	// would still hold the stale absolute path.
 	cfg.Directories.Paths = nil
 	cfg.Git.Repos = nil
 	cfg.GitHub.Repos = nil
+	cfg.CodeIndex.Paths = nil
 
 	yamlBytes, err := yaml.Marshal(&cfg)
 	if err != nil {
@@ -402,8 +406,20 @@ func WriteWorkspaceCollectorConfigJSON(workspaceID, jsonBody string) error {
 
 // WriteWorkspaceCollectorConfig validates and writes new content to
 // a workspace's collectors.yaml. On a successful write, the
-// workspace's collector pod is restarted so the new config takes
-// effect immediately without requiring an app restart.
+// workspace's collector pod is restarted in the background so the
+// new config takes effect without blocking the caller.
+//
+// The restart is fire-and-forget by design: RestartPod calls
+// stopPodLocked → wg.Wait, which can block for many seconds while
+// in-flight collector work (Ollama embeddings, slow HTTP polls)
+// drains. The Wails save handler that calls into here MUST return
+// quickly or the desktop UI freezes — and worse, every other Wails
+// call (CreateWorkspace, ListWorkspaces, …) queues behind the hung
+// save because Wails serializes calls. So we kick the restart onto
+// a goroutine, return immediately, and let the pod cycle race in
+// the background. The YAML on disk is the source of truth either
+// way; the worst case is the new config takes a few extra seconds
+// to take effect.
 //
 // Returns nil on success, or the validation/IO error so the editor
 // popup can render it inline.
@@ -411,13 +427,15 @@ func WriteWorkspaceCollectorConfig(workspaceID, content string) error {
 	if err := collector.WriteWorkspaceConfig(workspaceID, content); err != nil {
 		return err
 	}
-	// Best-effort pod restart. If the pod manager isn't initialized
-	// (test path), or if the pod hasn't been started yet, we just
-	// log and continue — the next StartWorkspacePod call will pick
-	// up the new config.
-	if err := RestartWorkspacePod(workspaceID); err != nil {
-		slog.Warn("write workspace config: restart pod", "workspace", workspaceID, "err", err)
-	}
+	// Background restart. Errors are logged but never surfaced — by
+	// the time the goroutine runs, the Wails save handler has
+	// already returned to the frontend.
+	go func() {
+		if err := RestartWorkspacePod(workspaceID); err != nil {
+			slog.Warn("write workspace config: restart pod",
+				"workspace", workspaceID, "err", err)
+		}
+	}()
 	return nil
 }
 

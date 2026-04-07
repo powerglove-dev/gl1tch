@@ -1073,6 +1073,20 @@ func (a *App) ListCollectors(workspaceID string) string {
 				snapshot[r.Source] = r
 			}
 		}
+		// Code-index docs live in glitch-vectors, NOT glitch-events,
+		// so the source aggregation above can never find them. Look
+		// up the workspace's directories from SQLite, translate them
+		// into the brainrag "cwd:<abs>" scopes the collector writes
+		// under, and count the chunks in glitch-vectors directly so
+		// the popover row shows real numbers instead of the
+		// always-zero you'd get from the events index.
+		if st, err := glitchd.OpenStore(); err == nil {
+			if ws, err := st.GetWorkspace(queryCtx, workspaceID); err == nil && len(ws.Directories) > 0 {
+				if act, err := glitchd.QueryCodeIndexActivityScoped(queryCtx, ws.Directories); err == nil && act.TotalDocs > 0 {
+					snapshot["code-index"] = act
+				}
+			}
+		}
 	}
 
 	// Out type carries the static config, the ES doc-count snapshot,

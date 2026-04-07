@@ -94,11 +94,38 @@ func QueryCollectorActivityScoped(ctx context.Context, workspaceID string) ([]Co
 	// the live cluster: aggregating on `source` returns real buckets,
 	// `source.keyword` returns nothing.
 	//
-	// When workspaceID is non-empty we wrap the aggregation in a
-	// bool-should query that matches either the active workspace OR
-	// the tool-pod sentinel (collector.WorkspaceIDTools). ES
-	// short-circuits the terms filter so this is essentially free
-	// even on hundreds of thousands of docs.
+	// Scoped query shape (workspaceID != ""): a bool-should that
+	// matches THREE buckets, OR'd together:
+	//
+	//   1. workspace_id == active workspace
+	//   2. workspace_id == collector.WorkspaceIDTools (the global
+	//      tool pod's sentinel for copilot/mattermost — shared
+	//      across every workspace by design)
+	//   3. workspace_id field is MISSING ENTIRELY (legacy /
+	//      unattributed docs)
+	//
+	// Bucket #3 is the bug fix that put this comment here. The
+	// Event struct serializes WorkspaceID with `omitempty`, so any
+	// doc indexed before the workspace_id stamping was added — and
+	// every doc indexed via the cmd/observe.go IngestAll one-shot
+	// path which calls BulkIndex directly without StampWorkspaceID
+	// — lands in ES with NO `workspace_id` field at all. The old
+	// terms-only filter couldn't match a missing field, so those
+	// docs were invisible to the popover even though the unscoped
+	// activity log saw them just fine. Symptom: copilot row showed
+	// "0 indexed" while the activity log right below it logged
+	// "indexed 3697 new doc(s) since last poll · 3697 total". The
+	// scoped query was hiding the existing data, not failing to
+	// find it.
+	//
+	// We treat missing-field as "global / unattributed, visible to
+	// every workspace" rather than backfilling a workspace_id we
+	// can't reliably guess. New docs from properly-stamped
+	// collectors keep landing under their real workspace and the
+	// merge happens at query time.
+	//
+	// ES short-circuits all three branches so this is still
+	// essentially free even on hundreds of thousands of docs.
 	var body string
 	if workspaceID == "" {
 		body = `{
@@ -116,7 +143,13 @@ func QueryCollectorActivityScoped(ctx context.Context, workspaceID string) ([]Co
 		body = fmt.Sprintf(`{
 			"size": 0,
 			"query": {
-				"terms": { "workspace_id": [%q, %q] }
+				"bool": {
+					"should": [
+						{ "terms": { "workspace_id": [%q, %q] } },
+						{ "bool": { "must_not": { "exists": { "field": "workspace_id" } } } }
+					],
+					"minimum_should_match": 1
+				}
 			},
 			"aggs": {
 				"by_source": {
@@ -177,6 +210,103 @@ func QueryCollectorActivityScoped(ctx context.Context, workspaceID string) ([]Co
 			LastSeenMs: int64(b.LastSeen.Value),
 		})
 	}
+	return out, nil
+}
+
+// QueryCodeIndexActivityScoped counts the chunks in glitch-vectors
+// that belong to any of the given workspace directories. Each dir is
+// translated into a brainrag scope of the form "cwd:<abs path>", and
+// the query OR-includes all of them in a single ES request.
+//
+// Returns a single CollectorActivity-shaped row (Source = "code-index")
+// so the brain popover's existing merge path can stamp it onto the
+// code-index collector row without any popover-side schema changes.
+//
+// Empty dirs returns a zero-valued snapshot. Code-index data lives in
+// a separate index from glitch-events, so the existing source
+// aggregation in QueryCollectorActivityScoped can never find it —
+// this helper exists specifically to bridge that gap for the popover.
+func QueryCodeIndexActivityScoped(ctx context.Context, dirs []string) (CollectorActivity, error) {
+	out := CollectorActivity{Source: "code-index"}
+	if len(dirs) == 0 {
+		return out, nil
+	}
+
+	cfg, err := collector.LoadConfig()
+	if err != nil {
+		return out, err
+	}
+	addr := cfg.Elasticsearch.Address
+	if addr == "" {
+		addr = "http://localhost:9200"
+	}
+
+	// Build the list of "cwd:<abs>" scopes brainrag uses for code
+	// chunks. Same prefix as brainrag.NewRAGStoreForCWD so the
+	// scopes match what the collector wrote.
+	scopes := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		if d == "" {
+			continue
+		}
+		scopes = append(scopes, "cwd:"+d)
+	}
+	if len(scopes) == 0 {
+		return out, nil
+	}
+
+	scopesJSON, _ := json.Marshal(scopes)
+	body := fmt.Sprintf(`{
+		"size": 0,
+		"query": {
+			"terms": { "scope": %s }
+		},
+		"aggs": {
+			"last_seen": { "max": { "field": "indexed_at" } }
+		}
+	}`, scopesJSON)
+
+	url := fmt.Sprintf("%s/glitch-vectors/_search", addr)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader([]byte(body)))
+	if err != nil {
+		return out, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	hc := &http.Client{Timeout: 3 * time.Second}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return out, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		// Index doesn't exist yet — collector hasn't run.
+		return out, nil
+	}
+	if resp.StatusCode >= 400 {
+		raw, _ := io.ReadAll(resp.Body)
+		return out, fmt.Errorf("elasticsearch %d: %s", resp.StatusCode, string(raw))
+	}
+
+	var parsed struct {
+		Hits struct {
+			Total struct {
+				Value int64 `json:"value"`
+			} `json:"total"`
+		} `json:"hits"`
+		Aggregations struct {
+			LastSeen struct {
+				Value float64 `json:"value"`
+			} `json:"last_seen"`
+		} `json:"aggregations"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return out, err
+	}
+
+	out.TotalDocs = parsed.Hits.Total.Value
+	out.LastSeenMs = int64(parsed.Aggregations.LastSeen.Value)
 	return out, nil
 }
 

@@ -78,19 +78,23 @@ func AutoDetectFromWorkspace(cfg *Config, dirs []string) *Config {
 	}
 
 	// ── code-index paths ────────────────────────────────────────────
-	// When the user has flipped code-index on but hasn't manually
-	// listed paths, fall back to the workspace's directory set so
-	// flipping the toggle is enough to start indexing. Without this,
-	// code-index does nothing on a fresh workspace and the user has
-	// to dig into the YAML to make progress — which is exactly the
-	// "fix the code index so I can turn it on" friction.
+	// Always seed cfg.CodeIndex.Paths from the workspace's directory
+	// set, regardless of the Enabled toggle. This is what makes the
+	// "Configure collectors" modal show real paths the moment the
+	// user opens the Code Index tab — instead of an empty list with
+	// a hint that the user has to type each path manually. Once they
+	// can SEE the paths that would be indexed, flipping the toggle
+	// to enabled becomes a one-click decision.
 	//
-	// Manual paths in cfg.CodeIndex.Paths are preserved; we only fill
-	// in dirs that aren't already in the set, and only when the
-	// collector is actually enabled. Disabled code-index leaves Paths
-	// alone so a user who flips it on later still gets the empty
-	// state they wrote.
-	if cfg.CodeIndex.Enabled && len(dirs) > 0 {
+	// Runtime gating is unchanged: BuildCollectorsFromConfig still
+	// only instantiates a CodeIndexCollector when both Enabled is
+	// true AND Paths is non-empty, so populating Paths in the
+	// disabled state is harmless — the collector won't run.
+	//
+	// Manual paths in cfg.CodeIndex.Paths are preserved via the
+	// stringSet dedupe, so a user who has typed extra absolute
+	// paths in the YAML keeps them.
+	if len(dirs) > 0 {
 		existing := stringSet(cfg.CodeIndex.Paths)
 		for _, d := range dirs {
 			if d == "" || existing[d] {
