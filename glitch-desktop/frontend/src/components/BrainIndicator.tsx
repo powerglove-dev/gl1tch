@@ -1,4 +1,4 @@
-import { Brain, Settings, Pencil, Plus } from "lucide-react";
+import { Brain, Settings, Pencil, Plus, ScrollText, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { BrainActivity, BrainState } from "@/lib/types";
 import { formatTime12 } from "@/lib/time";
@@ -112,6 +112,19 @@ export function BrainIndicator({
   const [anchorMs, setAnchorMs] = useState<number>(0);
   const [configPath, setConfigPath] = useState<string>("");
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  // Drawer toggle for the focused logs view. The popover already
+  // renders an inline logs section at the bottom, but on a popover
+  // with claude/copilot/etc taking up most of the visible space the
+  // logs scroll below the fold and users miss them — making "are
+  // the collectors actually running" much harder to answer than it
+  // should be. The drawer is the dedicated full-height view that
+  // surfaces only the captured slog ring buffer.
+  const [showLogsDrawer, setShowLogsDrawer] = useState(false);
+  // Drawer logs are pulled with a higher limit than the inline
+  // section because users usually open it specifically to debug
+  // something and want enough context to see the full pod-startup
+  // sequence (~30+ lines for a typical workspace cold-start).
+  const [drawerLogs, setDrawerLogs] = useState<LogEntry[]>([]);
   // Brain decisions snapshot, refreshed alongside the collectors list.
   // null until the first fetch returns; the renderer treats null as
   // "loading" and zero-valued fields as "no activity yet".
@@ -132,6 +145,45 @@ export function BrainIndicator({
     window.addEventListener("mousedown", onClick);
     return () => window.removeEventListener("mousedown", onClick);
   }, [open]);
+
+  // Logs drawer fetch loop. Runs only when the drawer is open so we
+  // don't pay the Wails round-trip cost on every popover interaction
+  // for users who never open the drawer. Pulls the deeper limit
+  // (300) the drawer wants vs the 60 the inline section uses, and
+  // refreshes once a second so collector activity scrolls in live.
+  useEffect(() => {
+    if (!showLogsDrawer) return;
+    let cancelled = false;
+    function refresh() {
+      RecentCollectorLogs(300).then((json: string) => {
+        if (cancelled) return;
+        try {
+          setDrawerLogs((JSON.parse(json) as LogEntry[]) ?? []);
+        } catch {
+          setDrawerLogs([]);
+        }
+      });
+    }
+    refresh();
+    const id = window.setInterval(refresh, 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [showLogsDrawer]);
+
+  // Esc to close the drawer (mirrors the popover's own close
+  // semantics — Esc collapses the topmost overlay first).
+  useEffect(() => {
+    if (!showLogsDrawer) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setShowLogsDrawer(false);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showLogsDrawer]);
 
   // Fetch collectors when the popover opens, then tick every second so
   // the "next in Xs" / "Xs ago" labels stay live. We also re-fetch the
@@ -328,6 +380,9 @@ export function BrainIndicator({
             secondaryActionLabel="raw"
             secondaryActionTitle={configPath || "edit observer.yaml"}
             onSecondaryAction={onEditCollectors}
+            tertiaryActionLabel="logs"
+            tertiaryActionTitle="Show captured collector logs"
+            onTertiaryAction={() => setShowLogsDrawer(true)}
           />
           {collectors.length === 0 ? (
             <div
@@ -422,7 +477,169 @@ export function BrainIndicator({
         </div>
       )}
     </div>
+    {showLogsDrawer && (
+      <LogsDrawer
+        logs={drawerLogs}
+        onClose={() => setShowLogsDrawer(false)}
+      />
+    )}
     </>
+  );
+}
+
+// LogsDrawer is the focused captured-log view that opens when the
+// user clicks the "logs" button in the collectors header. It's a
+// modal-style overlay rather than an inline expansion of the
+// existing logs section because the popover's maxHeight=600 +
+// internal scroll buries inline content below the fold on most
+// workspaces — users open this drawer specifically to debug, and
+// the answer they need (was a collector started? did it panic?
+// did it index N docs?) is hard to find by scrolling a popover.
+//
+// The drawer takes its own click-outside / Esc / X-button close
+// handling so it doesn't fight with the popover's outside-click
+// listener (which would otherwise close BOTH on a single click).
+// Stop event propagation on the inner panel keeps the popover
+// open underneath when the user clicks inside the drawer.
+function LogsDrawer({
+  logs,
+  onClose,
+}: {
+  logs: LogEntry[];
+  onClose: () => void;
+}) {
+  return (
+    <div
+      onClick={(e) => {
+        // Click on the dimmed backdrop closes; clicks inside the
+        // panel are stopped below so they never reach this handler.
+        if (e.target === e.currentTarget) onClose();
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.65)",
+        backdropFilter: "blur(3px)",
+        zIndex: 9500, // above the brain popover (1000) and editor popup (9000)
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 32,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(880px, 100%)",
+          height: "min(640px, calc(100vh - 64px))",
+          background: "var(--bg-dark)",
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            padding: "12px 18px",
+            borderBottom: "1px solid var(--border)",
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            color: "var(--fg)",
+            fontSize: 11,
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: "0.08em",
+          }}
+        >
+          <ScrollText size={12} style={{ color: "var(--cyan)" }} />
+          <span style={{ flex: 1 }}>captured collector logs</span>
+          <span
+            style={{
+              fontWeight: 400,
+              textTransform: "none",
+              letterSpacing: 0,
+              color: "var(--fg-dim)",
+              fontSize: 10,
+            }}
+          >
+            {logs.length} entries · live
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            title="Close (Esc)"
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--fg-dim)",
+              cursor: "pointer",
+              padding: 4,
+              display: "flex",
+            }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflow: "auto",
+            background: "var(--bg)",
+            fontFamily:
+              "Berkeley Mono, JetBrains Mono, Fira Code, SF Mono, monospace",
+            fontSize: 11,
+            lineHeight: 1.6,
+            padding: "10px 0",
+          }}
+        >
+          {logs.length === 0 ? (
+            <div
+              style={{
+                padding: "40px 18px",
+                color: "var(--fg-dim)",
+                fontStyle: "italic",
+                textAlign: "center",
+              }}
+            >
+              No log output yet. The slog tee captures records from
+              every collector goroutine in this process — if this
+              stays empty after you've waited a minute or two, the
+              workspace pod isn't starting any collectors.
+            </div>
+          ) : (
+            logs.map((l, i) => (
+              <LogRow key={l.time_ms + "-" + i} entry={l} />
+            ))
+          )}
+        </div>
+
+        {/* Footer */}
+        <div
+          style={{
+            padding: "8px 18px",
+            borderTop: "1px solid var(--border)",
+            background: "var(--bg-dark)",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 10,
+            color: "var(--fg-dim)",
+          }}
+        >
+          <span style={{ flex: 1 }}>
+            esc to close · refreshes every 1s while open
+          </span>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -439,6 +656,9 @@ function SectionHeader({
   secondaryActionLabel,
   secondaryActionTitle,
   onSecondaryAction,
+  tertiaryActionLabel,
+  tertiaryActionTitle,
+  onTertiaryAction,
 }: {
   label: React.ReactNode;
   actionLabel?: string;
@@ -451,6 +671,16 @@ function SectionHeader({
   secondaryActionLabel?: string;
   secondaryActionTitle?: string;
   onSecondaryAction?: () => void;
+  /** Optional third button rendered to the LEFT of the secondary
+   *  action. Used for the collectors header's "logs" pop-out which
+   *  opens a focused log drawer over the popover — the existing
+   *  in-line logs section at the bottom of the popover gets buried
+   *  below the fold on most workspaces, so a button that scopes the
+   *  view to nothing-but-logs is the actual surface users want when
+   *  they're trying to figure out why a collector isn't running. */
+  tertiaryActionLabel?: string;
+  tertiaryActionTitle?: string;
+  onTertiaryAction?: () => void;
 }) {
   function renderButton(
     label: string,
@@ -500,6 +730,14 @@ function SectionHeader({
       }}
     >
       <span style={{ flex: 1 }}>{label}</span>
+      {tertiaryActionLabel &&
+        onTertiaryAction &&
+        renderButton(
+          tertiaryActionLabel,
+          tertiaryActionTitle,
+          onTertiaryAction,
+          "none",
+        )}
       {secondaryActionLabel &&
         onSecondaryAction &&
         renderButton(
