@@ -26,7 +26,13 @@ func main() {
 	bootstrap.LoadDotenv(".env")
 
 	ctx := context.Background()
-	shutdown, err := telemetry.Setup(ctx, "gl1tch")
+	// Service name is "gl1tch-cli" so the Elastic APM UI groups
+	// CLI-originated spans + errors separately from "gl1tch-desktop"
+	// (see glitch-desktop/app.go). Pipeline runner spans inherit the
+	// CLI service name but distinguish themselves via the tracer
+	// scope name "gl1tch/pipeline", which APM renders as a
+	// sub-bucket inside the Transactions view.
+	shutdown, err := telemetry.Setup(ctx, "gl1tch-cli")
 	if err == nil {
 		defer shutdown(ctx) //nolint:errcheck
 	}

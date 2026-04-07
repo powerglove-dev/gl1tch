@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"log/slog"
 	"net"
 	"net/http"
@@ -21,9 +20,10 @@ import (
 )
 
 type App struct {
-	ctx           context.Context
-	cancelBackend context.CancelFunc
-	notifyProc    *os.Process
+	ctx              context.Context
+	cancelBackend    context.CancelFunc
+	telemetryShutdown func(context.Context) error
+	notifyProc       *os.Process
 
 	// brainStarted guards runBrainLoop so a duplicate Ready() call (HMR,
 	// frontend reconnect) doesn't spawn a second loop and double-emit
@@ -60,6 +60,14 @@ type App struct {
 	runsMu  sync.Mutex
 	runs    map[string]runHandle
 	runsGen uint64
+
+	// stepThrough holds active interactive-authoring sessions keyed by
+	// session ID. Each entry is driven by a separate sequence of calls
+	// from the frontend (Start → Accept/EditOutput pairs → SaveAs/Abort),
+	// so sessions are independent and long-lived relative to `runs`. The
+	// map is cleaned up when the session terminates.
+	stepThroughMu sync.Mutex
+	stepThrough   map[string]*glitchd.StepThroughHandle
 }
 
 type runHandle struct {
@@ -71,6 +79,7 @@ func NewApp() *App {
 	return &App{
 		runs:           map[string]runHandle{},
 		collectorState: map[string]glitchd.CollectorActivity{},
+		stepThrough:    map[string]*glitchd.StepThroughHandle{},
 	}
 }
 
@@ -139,15 +148,32 @@ func (a *App) emitError(workspaceID, msg string) {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
-	// Install the slog tee HERE (not in main) so we run after Wails
-	// has finished any of its own logger setup — otherwise our tee
-	// gets clobbered. Everything collector goroutines log from this
-	// point forward is captured into glitchd.Logs and readable via
-	// the RecentCollectorLogs Wails method.
+	// Install the slog tee FIRST so every subsequent slog line is
+	// captured — including the ones that InitPodManager and
+	// SetupTelemetry emit during their own startup. The tee's
+	// shipper goroutine has a "es nil → requeue" fallback for the
+	// brief window before InitPodManager runs, so it's safe to
+	// install before the ES client exists.
 	glitchd.InstallLogTee()
-	// Emit a canary so the user sees the logs panel isn't broken
-	// even before any collector has ticked.
 	slog.Info("glitch: log tee installed")
+
+	// InitPodManager builds the shared ES client used by both the
+	// log-tee shipper (for glitch-logs) and the telemetry span
+	// exporter (for glitch-traces). Must run before SetupTelemetry
+	// so the telemetry path sees a reachable ES address.
+	glitchd.InitPodManager(a.ctx)
+
+	// OTel wiring: tracer + meter providers + the elasticsearch span
+	// exporter. Every pipeline run, collector tick, brain cycle, and
+	// pod start from here on produces spans that land in glitch-traces.
+	// Shutdown is deferred to OnShutdown so the batched exporter has a
+	// chance to drain before the process dies.
+	if shutdown, err := glitchd.SetupTelemetry(a.ctx, "gl1tch-desktop"); err != nil {
+		slog.Warn("telemetry: setup failed, continuing without traces", "err", err)
+	} else {
+		a.telemetryShutdown = shutdown
+		slog.Info("telemetry: wired for desktop (logs + traces → elasticsearch)")
+	}
 
 	bgCtx, cancel := context.WithCancel(context.Background())
 	a.cancelBackend = cancel
@@ -164,18 +190,9 @@ func (a *App) startup(ctx context.Context) {
 		// every workspace-scoped query returned nothing.
 		opts := glitchd.BackendOptions{SkipGlobalCollectors: true}
 		if err := glitchd.RunBackendWithOptions(bgCtx, opts); err != nil {
-			log.Printf("backend: %v", err)
+			slog.Error("backend", "err", err)
 		}
 	}()
-
-	// Initialize the per-workspace collector pod manager. Each
-	// workspace runs its own tree of collector goroutines so brain
-	// queries can be scoped to a single workspace's data and the
-	// "configure collectors" popup can edit per-workspace files
-	// without one workspace's mattermost watcher bleeding into
-	// another's. The manager is bound to the desktop ctx so its
-	// pods all tear down cleanly on shutdown.
-	glitchd.InitPodManager(a.ctx)
 	go glitchd.StartAllWorkspacePods(a.ctx)
 	// Tool pod runs copilot + mattermost ONCE under
 	// glitchd.WorkspaceIDTools. Without it, those collectors either
@@ -185,7 +202,7 @@ func (a *App) startup(ctx context.Context) {
 	// the rows still surface with their real (single) counts.
 	go func() {
 		if err := glitchd.StartToolPod(); err != nil {
-			log.Printf("backend: start tool pod: %v", err)
+			slog.Error("backend: start tool pod", "err", err)
 		}
 	}()
 
@@ -209,6 +226,17 @@ func (a *App) shutdown(_ context.Context) {
 	}
 	if a.cancelBackend != nil {
 		a.cancelBackend()
+	}
+
+	// Drain the OTel BatchSpanProcessor so the last batch of spans
+	// (especially the workspace.pod.stop / collector.run.exit spans
+	// that the teardown above just emitted) actually reaches
+	// glitch-traces instead of dying with the process. A 5s ceiling
+	// keeps a wedged ES from blocking app exit forever.
+	if a.telemetryShutdown != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = a.telemetryShutdown(shutdownCtx)
+		cancel()
 	}
 }
 
@@ -248,7 +276,7 @@ func (a *App) CreateWorkspace(title string) string {
 	// catches up in the background.
 	go func(id string) {
 		if perr := glitchd.StartWorkspacePod(id); perr != nil {
-			log.Printf("create workspace: start pod: %v", perr)
+			slog.Error("create workspace: start pod", "err", perr)
 		}
 	}(ws.ID)
 	b, _ := json.Marshal(ws)
@@ -276,10 +304,10 @@ func (a *App) DeleteWorkspace(id string) {
 	// Stop the pod first so collector goroutines exit before we
 	// delete the config they were reading from.
 	if err := glitchd.StopWorkspacePod(id); err != nil {
-		log.Printf("delete workspace: stop pod: %v", err)
+		slog.Error("delete workspace: stop pod", "err", err)
 	}
 	if err := collectorDeleteWorkspaceConfigBridge(id); err != nil {
-		log.Printf("delete workspace: remove config: %v", err)
+		slog.Error("delete workspace: remove config", "err", err)
 	}
 
 	st, err := glitchd.OpenStore()
@@ -329,7 +357,7 @@ func (a *App) AddWorkspaceDirectory(workspaceID string) {
 		return
 	}
 	if err := st.AddWorkspaceDirectory(a.ctx, workspaceID, dir); err != nil {
-		log.Printf("add dir: %v", err)
+		slog.Error("add dir", "err", err)
 		return
 	}
 
@@ -337,7 +365,7 @@ func (a *App) AddWorkspaceDirectory(workspaceID string) {
 	// the new path immediately (it reads workspace.Directories at
 	// start time, not on every tick).
 	if err := glitchd.RestartWorkspacePod(workspaceID); err != nil {
-		log.Printf("restart pod after add dir: %v", err)
+		slog.Error("restart pod after add dir", "err", err)
 	}
 
 	a.emitBrainActivity("checkin", "info",
@@ -372,7 +400,7 @@ func (a *App) RemoveWorkspaceDirectory(workspaceID, dir string) {
 	// Restart the workspace pod so the directories collector picks
 	// up the removal on the next tick.
 	if err := glitchd.RestartWorkspacePod(workspaceID); err != nil {
-		log.Printf("restart pod after remove dir: %v", err)
+		slog.Error("restart pod after remove dir", "err", err)
 	}
 
 	// Note for the activity panel: we used to flag "still watched by
@@ -809,6 +837,150 @@ func (a *App) RunChain(stepsJSON, userText, workspaceID, defaultProvider, defaul
 // working — only the signature gains the provider/model args.
 func (a *App) SaveChatWorkflow(workspaceID, name, stepsJSON, defaultProvider, defaultModel string) string {
 	return glitchd.SaveChainAsWorkflow(a.ctx, workspaceID, name, "", stepsJSON, defaultProvider, defaultModel)
+}
+
+// ── Step-through authoring sessions ───────────────────────────────────────
+//
+// Step-through mode runs a pipeline serially and pauses between each step so
+// the user can inspect the output, optionally hand-edit it, and continue or
+// abort. The goal is to bridge chat exploration → reusable workflow file
+// without forcing users to eyeball raw YAML as they go: they drive the run
+// from the desktop UI, then hit save-as to crystallize what they kept.
+//
+// Lifecycle from the frontend's POV:
+//
+//  1. StepThroughStart(workspaceID, yaml, userInput) → JSON {session_id} or {error}
+//  2. Subscribe to runtime event "step-through:event" (payload is a
+//     StepThroughEvent carrying kind = step_paused | step_committed |
+//     final | error). Events are tagged with session_id so multiple
+//     concurrent sessions don't cross-wire.
+//  3. On a step_paused event, call StepThroughAccept(sessionID) or
+//     StepThroughEditOutput(sessionID, edited) to unblock the runner.
+//  4. On a final event, optionally call StepThroughSave(sessionID, name)
+//     to persist the (unmodified) pipeline YAML to
+//     <workspace>/.glitch/workflows/<name>.workflow.yaml. The router's
+//     on-demand discover+embed path picks up the new file on the next
+//     ask call — no explicit reindex is required.
+//  5. At any point, StepThroughAbort(sessionID) tears the run down.
+
+// StepThroughStart parses the supplied pipeline YAML, starts a step-through
+// session under the given workspace, and spawns a pump goroutine that
+// forwards every session event to the "step-through:event" Wails runtime
+// topic. Returns a JSON {session_id: "..."} or {error: "..."} payload.
+func (a *App) StepThroughStart(workspaceID, yamlContent, userInput string) string {
+	h, err := glitchd.StartStepThrough(a.ctx, workspaceID, yamlContent, userInput)
+	if err != nil {
+		return errorJSONStr(err.Error())
+	}
+
+	a.stepThroughMu.Lock()
+	a.stepThrough[h.ID] = h
+	a.stepThroughMu.Unlock()
+
+	// Pump session events → Wails runtime events. When the session's
+	// Events channel closes, we drop the handle from the session map.
+	go func(id string, events <-chan glitchd.StepThroughEvent) {
+		for ev := range events {
+			runtime.EventsEmit(a.ctx, "step-through:event", ev)
+		}
+		a.stepThroughMu.Lock()
+		delete(a.stepThrough, id)
+		a.stepThroughMu.Unlock()
+	}(h.ID, h.Session.Events)
+
+	out, _ := json.Marshal(map[string]string{"session_id": h.ID})
+	return string(out)
+}
+
+// StepThroughAccept resumes a paused session with the current (unmodified)
+// step output. Returns "" on success or an error message.
+func (a *App) StepThroughAccept(sessionID string) string {
+	h := a.lookupStepThrough(sessionID)
+	if h == nil {
+		return "session not found"
+	}
+	if err := h.Session.Accept(); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// StepThroughEditOutput resumes a paused session after replacing the current
+// step's output "value" with editedValue. The edit is recorded in the
+// session's provenance map and surfaced via StepThroughSnapshot.
+func (a *App) StepThroughEditOutput(sessionID, editedValue string) string {
+	h := a.lookupStepThrough(sessionID)
+	if h == nil {
+		return "session not found"
+	}
+	if err := h.Session.EditOutput(editedValue); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// StepThroughAbort cancels a running session. Pending interceptor pauses
+// unblock with an abort decision and the runner context is cancelled. The
+// pump goroutine removes the handle from the session map once the Events
+// channel closes.
+func (a *App) StepThroughAbort(sessionID string) string {
+	h := a.lookupStepThrough(sessionID)
+	if h == nil {
+		return "session not found"
+	}
+	if err := h.Session.Abort(); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// StepThroughSnapshot returns the current session state as JSON. Useful for
+// reconnecting a frontend mid-session after an HMR or tab switch — the
+// frontend can re-render the paused output and edited-step markers without
+// replaying the event stream.
+func (a *App) StepThroughSnapshot(sessionID string) string {
+	h := a.lookupStepThrough(sessionID)
+	if h == nil {
+		return errorJSONStr("session not found")
+	}
+	snap := h.Session.Snapshot()
+	out, _ := json.Marshal(snap)
+	return string(out)
+}
+
+// StepThroughSave writes the session's original pipeline YAML to the
+// workspace's .glitch/workflows/<name>.workflow.yaml file. The router
+// auto-indexes new workflows on the next ask call (hash-based embedding
+// cache in internal/router/embed.go), so the saved workflow becomes
+// matchable immediately without an explicit reindex step.
+func (a *App) StepThroughSave(sessionID, name string) string {
+	h := a.lookupStepThrough(sessionID)
+	if h == nil {
+		return errorJSONStr("session not found")
+	}
+	path, err := glitchd.SaveStepThroughAs(a.ctx, h, name)
+	if err != nil {
+		return errorJSONStr(err.Error())
+	}
+	out, _ := json.Marshal(map[string]string{"path": path, "name": name})
+	return string(out)
+}
+
+// lookupStepThrough fetches the handle for a session ID under the session
+// mutex. Returns nil when the session is unknown (typically because it has
+// already terminated and been cleaned up by the pump goroutine).
+func (a *App) lookupStepThrough(sessionID string) *glitchd.StepThroughHandle {
+	a.stepThroughMu.Lock()
+	defer a.stepThroughMu.Unlock()
+	return a.stepThrough[sessionID]
+}
+
+// errorJSONStr returns a canned `{"error": "..."}` JSON payload the
+// frontend can surface inline. Kept narrow (string → string) so
+// Wails-generated bindings stay ergonomic.
+func errorJSONStr(msg string) string {
+	b, _ := json.Marshal(map[string]string{"error": msg})
+	return string(b)
 }
 
 // DeleteWorkflowFile removes a workflow YAML file by absolute path.
@@ -1264,17 +1436,21 @@ func (a *App) WriteCollectorsConfigJSON(workspaceID, jsonContent string) string 
 	return ""
 }
 
-// RecentCollectorLogs returns the last `limit` lines from the
-// in-process slog ring buffer as JSON. Used by the brain popover's
-// "Logs" tab so the user can see real-time collector chatter
-// (scanning, indexing, errors) without tailing stderr or running
-// the binary from a terminal.
+// RecentCollectorLogs returns the last `limit` log entries from the
+// glitch-logs Elasticsearch index as JSON, newest first. This is the
+// read path for the brain popover's live logs panel.
 //
-// limit ≤ 0 returns everything currently buffered (capped at the
-// ring's capacity). Newest first.
+// Records land in ES via the teeHandler's 2s ship queue
+// (InstallLogTee → runLogShipper), so there is a brief lag before a
+// freshly emitted log appears here — acceptable given the popover
+// polls every 1-5s. ES is the authoritative source: logs survive
+// restarts and are queryable across processes.
+//
+// Returns "[]" when ES is unavailable so the frontend always gets
+// valid JSON it can safely parse.
 func (a *App) RecentCollectorLogs(limit int) string {
-	entries := glitchd.Logs.Snapshot(limit)
-	if entries == nil {
+	entries, err := glitchd.QueryRecentLogs(glitchd.EsClient(), limit)
+	if err != nil || entries == nil {
 		entries = []glitchd.LogEntry{}
 	}
 	b, _ := json.Marshal(entries)

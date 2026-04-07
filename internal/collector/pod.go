@@ -37,6 +37,7 @@ import (
 	oteltrace "go.opentelemetry.io/otel/trace"
 
 	"github.com/8op-org/gl1tch/internal/esearch"
+	"github.com/8op-org/gl1tch/internal/telemetry"
 )
 
 // podTracer is the OTel tracer for collector pod lifecycle spans.
@@ -350,6 +351,16 @@ func runCollectorGuarded(ctx context.Context, c Collector, es *esearch.Client, w
 			span.SetStatus(codes.Error, "panic")
 			span.RecordError(err)
 			RecordRun(c.Name(), time.Now(), 0, err)
+			// Ship the recovered panic to Elastic APM with a full
+			// Go stack so Kibana's Errors UI shows this as a
+			// handled exception correlated to the parent
+			// collector.run span. stackSkip=1 trims this anon
+			// defer func so the top frame is the collector's own
+			// panicking code.
+			telemetry.CaptureError(ctx, err, map[string]any{
+				"workspace_id": workspaceID,
+				"collector":    c.Name(),
+			}, 1)
 		}
 	}()
 	slog.Info("pod manager: collector started",

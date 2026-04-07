@@ -23,11 +23,16 @@ func (p *PipelineIndexer) Start(ctx context.Context, es *esearch.Client) error {
 		p.Interval = 30 * time.Second
 	}
 
+	slog.Info("pipeline indexer: started",
+		"workspace", p.WorkspaceID,
+		"interval", p.Interval)
+
 	// Open our own store connection if none was provided.
 	if p.Store == nil {
 		s, err := store.Open()
 		if err != nil {
-			slog.Info("pipeline indexer: store unavailable", "err", err)
+			slog.Info("pipeline indexer: store unavailable",
+				"workspace", p.WorkspaceID, "err", err)
 			return nil
 		}
 		p.Store = s
@@ -40,7 +45,8 @@ func (p *PipelineIndexer) Start(ctx context.Context, es *esearch.Client) error {
 	runs, err := p.Store.QueryRuns(1)
 	if err == nil && len(runs) > 0 {
 		lastRunID = runs[0].ID
-		slog.Info("pipeline indexer: seeded to run", "id", lastRunID)
+		slog.Info("pipeline indexer: seeded to run",
+			"workspace", p.WorkspaceID, "id", lastRunID)
 	}
 
 	ticker := time.NewTicker(p.Interval)
@@ -51,15 +57,24 @@ func (p *PipelineIndexer) Start(ctx context.Context, es *esearch.Client) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			slog.Debug("pipeline indexer: tick",
+				"workspace", p.WorkspaceID, "after_id", lastRunID)
+			tickCtx, tickDone := startTickSpan(ctx, "pipeline", p.WorkspaceID)
 			start := time.Now()
-			newLast, err := p.poll(ctx, es, lastRunID)
+			newLast, err := p.poll(tickCtx, es, lastRunID)
 			indexed := 0
 			if newLast > lastRunID {
 				indexed = int(newLast - lastRunID)
 			}
+			slog.Debug("pipeline indexer: tick done",
+				"workspace", p.WorkspaceID,
+				"indexed", indexed,
+				"dur", time.Since(start))
+			tickDone(indexed, err)
 			RecordRun("pipeline", start, indexed, err)
 			if err != nil {
-				slog.Warn("pipeline indexer: poll error", "err", err)
+				slog.Warn("pipeline indexer: poll error",
+					"workspace", p.WorkspaceID, "err", err)
 				continue
 			}
 			lastRunID = newLast
@@ -119,7 +134,7 @@ func (p *PipelineIndexer) poll(ctx context.Context, es *esearch.Client, afterID 
 	}
 
 	if len(docs) > 0 {
-		slog.Info("pipeline indexer: new runs", "count", len(docs))
+		slog.Info("pipeline indexer: new runs", "workspace", p.WorkspaceID, "count", len(docs))
 		if err := es.BulkIndex(ctx, esearch.IndexPipelines, StampWorkspaceID(p.WorkspaceID, docs)); err != nil {
 			return afterID, err
 		}

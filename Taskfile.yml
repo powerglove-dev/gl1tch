@@ -32,6 +32,77 @@ tasks:
   # Core build tasks
   # ---------------------------------------------------------------------------
 
+  # ---------------------------------------------------------------------------
+  # Docker services — Elasticsearch + Kibana + APM server
+  # ---------------------------------------------------------------------------
+  # The observability stack gl1tch depends on runs via docker-compose.yml:
+  #
+  #   - elasticsearch (8.17.0) on :9200 — backs glitch-logs, glitch-events,
+  #     glitch-traces, glitch-vectors, etc.
+  #   - kibana (8.17.0) on :5601       — Discover + APM UI
+  #   - apm-server (8.17.0) on :8200   — OTLP ingest → traces-apm-*, error
+  #     intake for the Elastic APM Errors view
+  #
+  # gl1tch will happily keep running with none of these up — collectors
+  # log warnings, telemetry warns but doesn't fail, and the log-tee
+  # shipper requeues. But every dev workflow wants them up, so these
+  # tasks give you a one-shot way to bring them up/down/check status
+  # without memorizing the compose incantation.
+
+  services:up:
+    desc: "Start es + kibana + apm-server via docker compose (detached)"
+    cmds:
+      - docker compose up -d elasticsearch kibana apm-server
+      - echo "Waiting for apm-server health…"
+      - |
+        for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8200/ 2>/dev/null || echo 000)
+          if [ "$code" = "200" ]; then
+            echo "✓ apm-server ready at http://localhost:8200"
+            break
+          fi
+          sleep 2
+        done
+      - echo "✓ services up — es :9200 / kibana :5601 / apm :8200"
+
+  services:down:
+    desc: "Stop es + kibana + apm-server (data volumes preserved)"
+    cmds:
+      - docker compose stop elasticsearch kibana apm-server
+      - echo "✓ services stopped (volumes preserved — use 'task services:nuke' to wipe)"
+
+  services:restart:
+    desc: "Restart the full stack (es + kibana + apm-server)"
+    cmds:
+      - docker compose restart elasticsearch kibana apm-server
+
+  services:status:
+    desc: "Show running state + health of all gl1tch docker services"
+    cmds:
+      - docker compose ps
+      - |
+        echo
+        echo "Health checks:"
+        printf "  %-14s " "elasticsearch"; curl -s -o /dev/null -w "%{http_code}\n" http://localhost:9200/_cluster/health || echo "DOWN"
+        printf "  %-14s " "kibana";        curl -s -o /dev/null -w "%{http_code}\n" http://localhost:5601/api/status   || echo "DOWN"
+        printf "  %-14s " "apm-server";    curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8200/             || echo "DOWN"
+
+  services:logs:
+    desc: "Tail docker compose logs for the gl1tch services"
+    cmds:
+      - docker compose logs -f --tail=50 elasticsearch kibana apm-server
+
+  services:logs:apm:
+    desc: "Tail only apm-server logs (ingest + intake errors)"
+    cmds:
+      - docker compose logs -f --tail=100 apm-server
+
+  services:nuke:
+    desc: "DESTRUCTIVE — stop services AND delete their data volumes (wipe ES, Kibana, APM state)"
+    prompt: "This will wipe every glitch-* index + Kibana saved object. Continue?"
+    cmds:
+      - docker compose down -v
+
   backup:
     desc: "Snapshot current glitch config/data to .backups/ (gitignored)"
     cmds:
@@ -77,7 +148,7 @@ tasks:
     desc: "Build and run gl1tch desktop (single process — GUI + all backend services)"
     cmds:
       - cd glitch-desktop && ~/go/bin/wails build
-      - cp glitch-desktop/build/bin/glitch-desktop ~/.local/bin/glitch-desktop
+      - cp "glitch-desktop/build/bin/glitch-desktop.app/Contents/MacOS/glitch-desktop" ~/.local/bin/glitch-desktop
       - ~/.local/bin/glitch-desktop
 
   desktop:dev:
@@ -117,7 +188,7 @@ tasks:
       - "{{.BINARY}}"
 
   dev:
-    desc: "New-user clean build: backup+wipe config/data/binaries, rebuild from source, fetch APM agents (run manually)"
+    desc: "New-user clean build: backup+wipe config/data/binaries, rebuild from source (run manually)"
     deps: [backup]
     cmds:
       - tmux detach-client -s glitch 2>/dev/null || true
@@ -137,13 +208,6 @@ tasks:
       - rm -f bin/{{.BINARY}} bin/{{.BINARY}}-debug
       - mkdir -p bin
       - go build -o bin/{{.BINARY}} .
-      - |
-        if command -v apm >/dev/null 2>&1 && [ -f apm.yml ]; then
-          echo "Fetching APM agents..."
-          apm install && apm compile
-        else
-          echo "APM not installed or apm.yml not found — skipping agent fetch (run: task apm:install && task apm:fetch)"
-        fi
 
   prod:
     desc: "Daily driver: install fresh build from source to GOPATH/bin and ~/.local/bin (run manually)"
@@ -179,41 +243,6 @@ tasks:
     deps: [debug-build]
     cmds:
       - bash {{.ROOT_DIR}}/scripts/debug-tmux.sh
-
-  # ---------------------------------------------------------------------------
-  # APM — Agent Package Manager tasks
-  # ---------------------------------------------------------------------------
-
-  apm:install:
-    desc: "Install APM CLI (curl installer; idempotent — skips if already at latest)"
-    cmds:
-      - |
-        if command -v apm >/dev/null 2>&1; then
-          echo "APM already installed: $(apm --version)"
-        else
-          echo "Installing APM CLI..."
-          curl -sSL https://aka.ms/apm-unix | sh
-          echo "APM installed: $(apm --version)"
-        fi
-
-  apm:update:
-    desc: "Update APM CLI to the latest version"
-    cmds:
-      - curl -sSL https://aka.ms/apm-unix | sh
-      - |
-        echo "APM updated: $(apm --version)"
-
-  apm:fetch:
-    desc: "Install all agent dependencies from apm.yml and compile tool-native files"
-    cmds:
-      - apm install
-      - apm compile
-      - echo "APM agents ready — see .claude/agents/ for deployed files"
-
-  apm:audit:
-    desc: "Audit all APM packages for dangerous Unicode patterns"
-    cmds:
-      - apm audit
 
   # ---------------------------------------------------------------------------
   # Plugin tasks

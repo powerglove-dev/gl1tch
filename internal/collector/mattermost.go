@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -35,13 +36,20 @@ func (m *MattermostCollector) Start(ctx context.Context, es *esearch.Client) err
 	}
 	m.client = &http.Client{Timeout: 15 * time.Second}
 
+	slog.Info("mattermost collector: started",
+		"workspace", m.WorkspaceID,
+		"url", m.URL,
+		"channels", len(m.Channels),
+		"interval", m.Interval)
+
 	// Verify credentials and get our user ID.
 	me, err := m.getMe(ctx)
 	if err != nil {
 		return fmt.Errorf("mattermost collector: auth failed: %w", err)
 	}
 	m.userID = me.ID
-	slog.Info("mattermost collector: authenticated", "user", me.Username)
+	slog.Info("mattermost collector: authenticated",
+		"workspace", m.WorkspaceID, "user", me.Username)
 
 	// Auto-join configured channels.
 	if len(m.Channels) > 0 {
@@ -59,15 +67,21 @@ func (m *MattermostCollector) Start(ctx context.Context, es *esearch.Client) err
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			slog.Debug("mattermost collector: tick", "workspace", m.WorkspaceID)
+			tickCtx, tickDone := startTickSpan(ctx, "mattermost", m.WorkspaceID)
 			tickStart := time.Now()
 			tickIndexed := 0
 			var tickErr error
-			channels, err := m.getMyChannels(ctx)
+			channels, err := m.getMyChannels(tickCtx)
 			if err != nil {
-				slog.Warn("mattermost collector: list channels", "err", err)
+				slog.Warn("mattermost collector: list channels",
+					"workspace", m.WorkspaceID, "err", err)
+				tickDone(0, err)
 				RecordRun("mattermost", tickStart, 0, err)
 				continue
 			}
+			slog.Debug("mattermost collector: channels fetched",
+				"workspace", m.WorkspaceID, "count", len(channels))
 
 			// Filter to configured channels if specified.
 			if len(m.Channels) > 0 {
@@ -82,10 +96,18 @@ func (m *MattermostCollector) Start(ctx context.Context, es *esearch.Client) err
 					since = time.Now().Add(-1 * time.Hour).UnixMilli()
 				}
 
-				posts, err := m.getPostsSince(ctx, ch.ID, since)
+				posts, err := m.getPostsSince(tickCtx, ch.ID, since)
 				if err != nil {
-					slog.Warn("mattermost collector: poll channel", "channel", ch.DisplayName, "err", err)
+					slog.Warn("mattermost collector: poll channel",
+						"workspace", m.WorkspaceID,
+						"channel", ch.DisplayName, "err", err)
 					continue
+				}
+				if len(posts) > 0 {
+					slog.Debug("mattermost collector: channel posts",
+						"workspace", m.WorkspaceID,
+						"channel", ch.DisplayName,
+						"count", len(posts))
 				}
 
 				for _, post := range posts {
@@ -101,7 +123,7 @@ func (m *MattermostCollector) Start(ctx context.Context, es *esearch.Client) err
 					}
 
 					eventType := mmEventType(ch.Type, post.Message, me.Username)
-					sender := m.resolveUsername(ctx, post.UserID)
+					sender := m.resolveUsername(tickCtx, post.UserID)
 
 					docs = append(docs, esearch.Event{
 						Type:    eventType,
@@ -120,18 +142,16 @@ func (m *MattermostCollector) Start(ctx context.Context, es *esearch.Client) err
 					})
 
 					// Emit a chat-style line at DEBUG level so the
-					// raw message body never lands in the brain
-					// popover's slog ring buffer or the desktop logs
-					// panel by default. Channel content is sensitive
-					// (real names, internal discussion) and slog
-					// captures everything at INFO+ — we previously
-					// leaked entire conversations into the desktop's
-					// log surface every time the popover opened.
-					//
-					// Operators who do want a per-message tail can flip
-					// the slog level to DEBUG via env / settings; the
-					// payload is unchanged, only the visibility is.
-					if slog.Default().Enabled(ctx, slog.LevelDebug) {
+					// raw message body never lands in glitch-logs by
+					// default. Channel content is sensitive (real
+					// names, internal discussion) and since
+					// GL1TCH_LOG_LEVEL=debug is now the default for
+					// the desktop, we can't rely on the level gate
+					// alone. Require an explicit opt-in env var so
+					// operators who do want a per-message tail get it
+					// without every curious user shipping private
+					// channel text to Elasticsearch.
+					if os.Getenv("GL1TCH_MATTERMOST_DEBUG_BODIES") == "1" {
 						ts := time.UnixMilli(post.CreateAt).Format("15:04")
 						body := strings.ReplaceAll(strings.TrimSpace(post.Message), "\n", " / ")
 						if len(body) > 400 {
@@ -152,13 +172,21 @@ func (m *MattermostCollector) Start(ctx context.Context, es *esearch.Client) err
 			}
 
 			if len(docs) > 0 {
-				slog.Info("mattermost collector: new messages", "count", len(docs))
-				if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(m.WorkspaceID, docs)); err != nil {
-					slog.Warn("mattermost collector: bulk index", "err", err)
+				slog.Info("mattermost collector: new messages",
+					"workspace", m.WorkspaceID, "count", len(docs))
+				if err := es.BulkIndex(tickCtx, esearch.IndexEvents, StampWorkspaceID(m.WorkspaceID, docs)); err != nil {
+					slog.Warn("mattermost collector: bulk index",
+						"workspace", m.WorkspaceID, "err", err)
 					tickErr = err
 				}
 				tickIndexed = len(docs)
 			}
+			slog.Debug("mattermost collector: tick done",
+				"workspace", m.WorkspaceID,
+				"channels", len(channels),
+				"indexed", tickIndexed,
+				"dur", time.Since(tickStart))
+			tickDone(tickIndexed, tickErr)
 			RecordRun("mattermost", tickStart, tickIndexed, tickErr)
 		}
 	}

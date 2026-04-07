@@ -41,6 +41,11 @@ func (g *GitHubCollector) Start(ctx context.Context, es *esearch.Client) error {
 		"workspace", g.WorkspaceID,
 		"repos", len(g.Repos),
 		"interval", g.Interval)
+	for _, repo := range g.Repos {
+		slog.Debug("github collector: watching repo",
+			"workspace", g.WorkspaceID,
+			"repo", repo)
+	}
 
 	// Nil-ES guard, same rationale as the git collector. We surface
 	// the failure via RecordRun so the popover row turns red with a
@@ -91,6 +96,8 @@ func (g *GitHubCollector) Start(ctx context.Context, es *esearch.Client) error {
 // got out of sync (the ticker reported indexed=0 hardcoded while
 // the lifted loop didn't exist at all).
 func (g *GitHubCollector) runOnce(ctx context.Context, es *esearch.Client, lastPoll map[string]time.Time) {
+	slog.Debug("github collector: tick", "workspace", g.WorkspaceID, "repos", len(g.Repos))
+	tickCtx, tickDone := startTickSpan(ctx, "github", g.WorkspaceID)
 	start := time.Now()
 	var lastErr error
 	indexed := 0
@@ -99,15 +106,18 @@ func (g *GitHubCollector) runOnce(ctx context.Context, es *esearch.Client, lastP
 		if since.IsZero() {
 			since = time.Now().Add(-24 * time.Hour) // backfill 1 day on first run
 		}
-		n, err := g.pollRepo(ctx, es, repo, since)
+		slog.Debug("github collector: poll repo", "workspace", g.WorkspaceID, "repo", repo, "since", since.Format(time.RFC3339))
+		n, err := g.pollRepo(tickCtx, es, repo, since)
 		indexed += n
 		if err != nil {
 			lastErr = err
-			slog.Warn("github collector: poll error", "repo", repo, "err", err)
+			slog.Warn("github collector: poll error", "workspace", g.WorkspaceID, "repo", repo, "err", err)
 			continue
 		}
 		lastPoll[repo] = time.Now()
 	}
+	slog.Debug("github collector: tick done", "workspace", g.WorkspaceID, "indexed", indexed, "dur", time.Since(start))
+	tickDone(indexed, lastErr)
 	// Heartbeat for the brain UI. We now thread the real per-poll
 	// indexed count up from pollRepo so the popover row shows
 	// "+N new" and the activity dot pulses on real activity instead
@@ -159,7 +169,7 @@ func (g *GitHubCollector) pollRepo(ctx context.Context, es *esearch.Client, repo
 	if len(docs) == 0 {
 		return 0, nil
 	}
-	slog.Info("github collector: new activity", "repo", repo, "events", len(docs))
+	slog.Info("github collector: new activity", "workspace", g.WorkspaceID, "repo", repo, "events", len(docs))
 	if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(g.WorkspaceID, docs)); err != nil {
 		return 0, fmt.Errorf("bulk index: %w", err)
 	}

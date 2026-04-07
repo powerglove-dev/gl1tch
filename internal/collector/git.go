@@ -41,6 +41,11 @@ func (g *GitCollector) Start(ctx context.Context, es *esearch.Client) error {
 		"workspace", g.WorkspaceID,
 		"repos", len(g.Repos),
 		"interval", g.Interval)
+	for _, repo := range g.Repos {
+		slog.Debug("git collector: watching repo",
+			"workspace", g.WorkspaceID,
+			"repo", repo)
+	}
 
 	// Nil-ES guard. The pod manager constructs collectors with
 	// whatever ES client InitPodManager managed to build, and that
@@ -80,6 +85,7 @@ func (g *GitCollector) Start(ctx context.Context, es *esearch.Client) error {
 	// did. RecordRun fires from the same path so the heartbeat lands
 	// on the row immediately too.
 	{
+		slog.Debug("git collector: initial poll", "workspace", g.WorkspaceID, "repos", len(g.Repos))
 		start := time.Now()
 		var lastErr error
 		indexed := 0
@@ -88,9 +94,10 @@ func (g *GitCollector) Start(ctx context.Context, es *esearch.Client) error {
 			indexed += n
 			if err != nil {
 				lastErr = err
-				slog.Warn("git collector: initial poll error", "repo", filepath.Base(repo), "err", err)
+				slog.Warn("git collector: initial poll error", "workspace", g.WorkspaceID, "repo", filepath.Base(repo), "err", err)
 			}
 		}
+		slog.Debug("git collector: initial poll done", "workspace", g.WorkspaceID, "indexed", indexed, "dur", time.Since(start))
 		RecordRun("git", start, indexed, lastErr)
 	}
 
@@ -99,17 +106,21 @@ func (g *GitCollector) Start(ctx context.Context, es *esearch.Client) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			slog.Debug("git collector: tick", "workspace", g.WorkspaceID, "repos", len(g.Repos))
+			tickCtx, tickDone := startTickSpan(ctx, "git", g.WorkspaceID)
 			start := time.Now()
 			var lastErr error
 			indexed := 0
 			for _, repo := range g.Repos {
-				n, err := g.poll(ctx, es, repo, cursors)
+				n, err := g.poll(tickCtx, es, repo, cursors)
 				indexed += n
 				if err != nil {
 					lastErr = err
-					slog.Warn("git collector: poll error", "repo", filepath.Base(repo), "err", err)
+					slog.Warn("git collector: poll error", "workspace", g.WorkspaceID, "repo", filepath.Base(repo), "err", err)
 				}
 			}
+			slog.Debug("git collector: tick done", "workspace", g.WorkspaceID, "indexed", indexed, "dur", time.Since(start))
+			tickDone(indexed, lastErr)
 			// Heartbeat for the brain UI: tells the desktop "git ran
 			// at T, took D, found N new commits, err=…". The brain
 			// popover shows last-run timestamps so users can see a
@@ -142,7 +153,10 @@ func (g *GitCollector) poll(ctx context.Context, es *esearch.Client, repo string
 	}
 
 	repoName := filepath.Base(repo)
-	slog.Info("git collector: new commits", "repo", repoName, "count", len(commits))
+	slog.Info("git collector: new commits",
+		"workspace", g.WorkspaceID,
+		"repo", repoName,
+		"count", len(commits))
 
 	// Index each commit as an event.
 	var docs []any

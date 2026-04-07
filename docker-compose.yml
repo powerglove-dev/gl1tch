@@ -56,6 +56,45 @@ services:
       retries: 20
       start_period: 60s
 
+  apm-server:
+    image: docker.elastic.co/apm/apm-server:8.17.0
+    container_name: glitch-apm
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      kibana:
+        condition: service_healthy
+    ports:
+      # 8200 is apm-server's single listener — serves the native APM
+      # intake endpoint, OTLP/gRPC, and OTLP/HTTP on the same port
+      # (distinguished by protocol). glitch's telemetry.Setup wires an
+      # otlptracegrpc exporter pointed here so every span emitted by
+      # the CLI + desktop also lands in traces-apm-*, powering Kibana's
+      # APM UI on top of our existing flat glitch-traces index.
+      - "8200:8200"
+    command: >
+      apm-server -e
+      -E output.elasticsearch.hosts=["http://elasticsearch:9200"]
+      -E apm-server.host=0.0.0.0:8200
+      -E apm-server.auth.anonymous.enabled=true
+      -E apm-server.auth.anonymous.allow_agent=["*"]
+      -E apm-server.auth.anonymous.allow_service=["*"]
+      -E apm-server.auth.anonymous.rate_limit.event_limit=10000
+      -E apm-server.auth.anonymous.rate_limit.ip_limit=1000
+      -E apm-server.rum.enabled=false
+      -E apm-server.kibana.enabled=true
+      -E apm-server.kibana.host=http://kibana:5601
+      -E setup.kibana.host=http://kibana:5601
+    healthcheck:
+      # /healthcheck returns 200 once apm-server is ready to ingest.
+      # Wait on this so desktop startup doesn't see connection refused
+      # on its first batch.
+      test: ["CMD-SHELL", "curl -sf http://localhost:8200/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
 volumes:
   glitch-es-data:
   glitch-kibana-data:

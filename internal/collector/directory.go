@@ -36,16 +36,33 @@ func (d *DirectoryCollector) Start(ctx context.Context, es *esearch.Client) erro
 		d.Interval = 120 * time.Second
 	}
 
+	slog.Info("directory collector: started",
+		"workspace", d.WorkspaceID,
+		"dirs", len(d.Dirs),
+		"interval", d.Interval)
+	for _, dir := range d.Dirs {
+		slog.Debug("directory collector: watching dir",
+			"workspace", d.WorkspaceID,
+			"dir", dir)
+	}
+
+	if es == nil {
+		err := fmt.Errorf("directory collector: elasticsearch client is nil — check ES connectivity")
+		RecordRun("directories", time.Now(), 0, err)
+		return err
+	}
+
 	// Track which directories we've already scanned in this run so we
 	// can spot newly-added paths and pick them up without a restart.
-	// The desktop's "Add directory" button writes to observer.yaml,
-	// and we re-read that file on every tick — so adding a directory
-	// in the UI starts indexing it on the next cycle, no restart.
+	// The desktop's "Add directory" button writes the workspace
+	// config and triggers a pod restart, so in practice known is
+	// seeded fresh on every pod start; the runtime-discovery path is
+	// defensive for the case where a workspace's collectors.yaml is
+	// edited in place.
 	known := make(map[string]bool, len(d.Dirs))
 
-	// scanAll runs scanDirectory for the union of static d.Dirs +
-	// any paths discovered by re-reading observer.yaml. Returns the
-	// total directories scanned and the last error seen.
+	// scanAll runs scanDirectory across the current workspace dirs.
+	// Returns the total directories scanned and the last error seen.
 	scanAll := func() (int, error) {
 		dirs := d.currentDirs()
 		var lastErr error
@@ -54,22 +71,29 @@ func (d *DirectoryCollector) Start(ctx context.Context, es *esearch.Client) erro
 			if !known[dir] {
 				known[dir] = true
 				newOnes++
-				slog.Info("directory collector: new directory picked up", "dir", dir)
+				slog.Info("directory collector: new directory picked up",
+					"workspace", d.WorkspaceID, "dir", dir)
 			}
+			slog.Debug("directory collector: scanning",
+				"workspace", d.WorkspaceID, "dir", dir)
 			if err := d.scanDirectory(ctx, es, dir); err != nil {
 				lastErr = err
-				slog.Warn("directory collector: scan error", "dir", dir, "err", err)
+				slog.Warn("directory collector: scan error",
+					"workspace", d.WorkspaceID, "dir", dir, "err", err)
 			}
 		}
 		if newOnes > 0 {
-			slog.Info("directory collector: discovered new dirs", "count", newOnes)
+			slog.Info("directory collector: discovered new dirs",
+				"workspace", d.WorkspaceID, "count", newOnes)
 		}
 		return len(dirs), lastErr
 	}
 
 	// Initial scan on startup so we don't wait for the first tick.
+	slog.Debug("directory collector: initial scan", "workspace", d.WorkspaceID)
 	if _, err := scanAll(); err != nil {
-		slog.Warn("directory collector: initial scan error", "err", err)
+		slog.Warn("directory collector: initial scan error",
+			"workspace", d.WorkspaceID, "err", err)
 	}
 
 	ticker := time.NewTicker(d.Interval)
@@ -80,8 +104,20 @@ func (d *DirectoryCollector) Start(ctx context.Context, es *esearch.Client) erro
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			slog.Debug("directory collector: tick", "workspace", d.WorkspaceID)
+			_, tickDone := startTickSpan(ctx, "directory", d.WorkspaceID)
 			start := time.Now()
-			_, lastErr := scanAll()
+			n, lastErr := scanAll()
+			slog.Debug("directory collector: tick done",
+				"workspace", d.WorkspaceID,
+				"dirs_scanned", n,
+				"dur", time.Since(start))
+			// Use n as the "indexed" count for the span attribute —
+			// it's the number of directories scanned, which is the
+			// closest per-tick volume metric the directory
+			// collector produces. Real doc counts go through the
+			// brain UI's ES aggregation.
+			tickDone(n, lastErr)
 			// Heartbeat: indexed count is 0 here because scanDirectory
 			// doesn't return one. The brain UI uses ES doc counts for
 			// totals; this entry just proves the collector ran.
@@ -119,7 +155,6 @@ func (d *DirectoryCollector) scanDirectory(ctx context.Context, es *esearch.Clie
 	}
 
 	repoName := filepath.Base(dir)
-	slog.Info("directory collector: scanning", "dir", repoName)
 
 	var docs []any
 
@@ -142,10 +177,16 @@ func (d *DirectoryCollector) scanDirectory(ctx context.Context, es *esearch.Clie
 	docs = append(docs, d.scanGitRemote(dir, repoName)...)
 
 	if len(docs) > 0 {
-		slog.Info("directory collector: indexed artifacts", "dir", repoName, "count", len(docs))
+		slog.Info("directory collector: indexed artifacts",
+			"workspace", d.WorkspaceID,
+			"dir", repoName,
+			"count", len(docs))
 		if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(d.WorkspaceID, docs)); err != nil {
 			return fmt.Errorf("bulk index: %w", err)
 		}
+	} else {
+		slog.Debug("directory collector: no artifacts",
+			"workspace", d.WorkspaceID, "dir", repoName)
 	}
 
 	return nil

@@ -21,6 +21,7 @@ import (
 	"github.com/8op-org/gl1tch/internal/esearch"
 	"github.com/8op-org/gl1tch/internal/observer"
 	"github.com/8op-org/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/telemetry"
 )
 
 var tracer = otel.Tracer("gl1tch/brain")
@@ -100,6 +101,24 @@ func (s *Service) cycle(ctx context.Context, cfg *collector.Config) {
 
 	publishStatus(StatusImproving, "analyzing recent activity", 0)
 	defer publishStatus(StatusIdle, "", 0)
+
+	// Panic guard — a bad observer query, a nil store, a provider
+	// response that breaks one of the learnFrom* helpers should NOT
+	// tear down the brain goroutine for the rest of the process
+	// lifetime. Recover, log, ship to Elastic APM with a full Go
+	// stack, and let the next ticker tick retry the cycle cleanly.
+	defer func() {
+		if r := recover(); r != nil {
+			err := fmt.Errorf("brain cycle panicked: %v", r)
+			slog.Error("brain: cycle panicked", "panic", r)
+			span.SetStatus(codes.Error, "panic")
+			span.RecordError(err)
+			telemetry.CaptureError(ctx, err, map[string]any{
+				"subsystem": "brain",
+			}, 1)
+			publishStatus(StatusIdle, "cycle failed — see logs", 0)
+		}
+	}()
 
 	es, err := esearch.New(cfg.Elasticsearch.Address)
 	if err != nil || es.Ping(ctx) != nil {

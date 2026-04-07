@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -27,6 +28,7 @@ import (
 	"github.com/8op-org/gl1tch/internal/executor"
 	"github.com/8op-org/gl1tch/internal/game"
 	"github.com/8op-org/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/telemetry"
 )
 
 var (
@@ -86,7 +88,41 @@ type runConfig struct {
 	lastUsage  game.TokenUsage
 	packLoader game.WorldPackLoader // optional; used to read PackWeights for ComputeXP
 	tuner      *game.Tuner         // optional; fires async after scoring if conditions met
+
+	// stepInterceptor, when set, is invoked after each step completes successfully
+	// and before its output is propagated to the ExecutionContext. The interceptor
+	// can replace the output (hand-edit) or signal abort. Used by step-through
+	// authoring sessions in the desktop app. Implies serial execution.
+	stepInterceptor StepInterceptor
+	// forceMaxParallel, when > 0, overrides the pipeline's MaxParallel setting.
+	// Step-through sessions set this to 1 to guarantee serial execution so the
+	// interceptor's pause window cannot race against parallel sibling launches.
+	forceMaxParallel int
 }
+
+// StepDecision is the response from a StepInterceptor after observing a
+// completed step's output. The interceptor decides whether to continue
+// unchanged, replace the output with a hand-edited value, or abort the run.
+type StepDecision struct {
+	// Action is one of: "continue", "edit_output", "abort".
+	Action string
+	// EditedOutput is the new value to substitute when Action == "edit_output".
+	// Only the "value" key is replaced; other keys in the output map are
+	// preserved.
+	EditedOutput string
+}
+
+// StepInterceptor is a callback invoked between step completion and the
+// propagation of that step's output to the ExecutionContext. It receives the
+// step ID and the raw output map. It returns a StepDecision telling the
+// runner how to proceed. Returning a non-nil error aborts the run with that
+// error.
+//
+// Interceptor calls block the runner's main drain loop, so they can take as
+// long as the user needs (e.g. waiting on a UI prompt). The runner forces
+// serial execution (max_parallel = 1) when an interceptor is configured, so
+// no other step is running while the interceptor blocks.
+type StepInterceptor func(ctx context.Context, stepID string, output map[string]any) (StepDecision, error)
 
 // WithRunStore attaches a result store to the run so results are persisted.
 // The store receives a RecordRunStart call before execution and
@@ -174,6 +210,29 @@ func WithPackLoader(l game.WorldPackLoader) RunOption {
 // conditions are checked and, if met, Tune is launched in a background goroutine.
 func WithTuner(t *game.Tuner) RunOption {
 	return func(c *runConfig) { c.tuner = t }
+}
+
+// WithStepInterceptor installs a callback that fires after each step
+// completes successfully, before that step's output is propagated to the
+// ExecutionContext. Used by interactive step-through workflow authoring in
+// the desktop app — the interceptor is the pause/resume seam between the
+// runner and the UI. Setting an interceptor implies WithMaxParallel(1) to
+// avoid races against parallel sibling step launches.
+func WithStepInterceptor(fn StepInterceptor) RunOption {
+	return func(c *runConfig) {
+		c.stepInterceptor = fn
+		if c.forceMaxParallel == 0 {
+			c.forceMaxParallel = 1
+		}
+	}
+}
+
+// WithMaxParallel overrides the pipeline's MaxParallel setting at runtime.
+// A value of 1 guarantees serial step execution; this is required when a
+// StepInterceptor is configured so the interceptor's blocking pause cannot
+// race against in-flight parallel siblings.
+func WithMaxParallel(n int) RunOption {
+	return func(c *runConfig) { c.forceMaxParallel = n }
 }
 
 // WithResumeFrom instructs the runner to resume an existing run from a
@@ -760,6 +819,13 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *executor.Manager, userInput s
 	if maxParallel <= 0 {
 		maxParallel = 8
 	}
+	// Step-through and other callers can pin parallelism to a specific value
+	// (typically 1) at runtime. This is required for interceptor-driven
+	// pause/resume so the drain loop's blocking interceptor cannot race
+	// against parallel sibling launches.
+	if cfg.forceMaxParallel > 0 {
+		maxParallel = cfg.forceMaxParallel
+	}
 
 	// Expand for_each steps before DAG construction.
 	steps, err := expandForEachSteps(p.Steps, userInput, p.Vars)
@@ -928,6 +994,39 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *executor.Manager, userInput s
 		go func() {
 			defer wg.Done()
 			defer func() { <-semaphore }()
+
+			// Panic guard for the step execution goroutine. A panic
+			// in dispatchStep — a provider driver barfing on a bad
+			// response, a template evaluator hitting nil, a plugin
+			// crashing — used to take the whole pipeline run with
+			// it because this goroutine is unsupervised. Recover,
+			// log, ship to Elastic APM with a full stack, and mark
+			// the step failed by sending a synthetic stepResult
+			// down completedCh so the dispatcher can move on to
+			// on_failure or finish the run cleanly.
+			defer func() {
+				if r := recover(); r != nil {
+					err := fmt.Errorf("pipeline step panicked: %v", r)
+					slog.Error("pipeline runner: step panicked",
+						"run_id", cfg.runID,
+						"pipe", cfg.pipeName,
+						"step", id,
+						"panic", r)
+					telemetry.CaptureError(ctx, err, map[string]any{
+						"run_id":   cfg.runID,
+						"pipeline": cfg.pipeName,
+						"step":     id,
+					}, 1)
+					writeStepStatus(cfg.statusWriter, id, "failed")
+					writeStepError(cfg.statusWriter, err)
+					// Non-blocking send — completedCh is sized for
+					// every step in the run, so this never drops.
+					select {
+					case completedCh <- stepResult{id: id, err: err}:
+					default:
+					}
+				}
+			}()
 
 			snap := ec.Snapshot()
 			args := interpolateArgs(step.Args, snap)
@@ -1142,6 +1241,52 @@ func runDAG(ctx context.Context, p *Pipeline, mgr *executor.Manager, userInput s
 					cancelPipeline()
 				}
 			} else {
+				// Step-through interception point. When a StepInterceptor is
+				// configured, the runner has been forced to serial execution
+				// (forceMaxParallel = 1), so no other step goroutine is in
+				// flight. The interceptor receives the just-completed output,
+				// can replace its "value" with a hand-edited string, or signal
+				// abort. Edits flow into the EC propagation below, so any
+				// downstream step's template snapshot picks them up naturally.
+				if cfg.stepInterceptor != nil {
+					decision, ierr := cfg.stepInterceptor(ctx, res.id, res.output)
+					if ierr != nil {
+						st.mu.Lock()
+						st.status = statusFailed
+						st.mu.Unlock()
+						firstStepErrMu.Lock()
+						if firstStepErr == nil {
+							firstStepErr = fmt.Errorf("pipeline: step %q: interceptor: %w", res.id, ierr)
+						}
+						firstStepErrMu.Unlock()
+						cancelPipeline()
+						continue
+					}
+					switch decision.Action {
+					case "abort":
+						st.mu.Lock()
+						st.status = statusFailed
+						st.mu.Unlock()
+						firstStepErrMu.Lock()
+						if firstStepErr == nil {
+							firstStepErr = fmt.Errorf("pipeline: step %q: aborted by user", res.id)
+						}
+						firstStepErrMu.Unlock()
+						cancelPipeline()
+						continue
+					case "edit_output":
+						if res.output == nil {
+							res.output = map[string]any{}
+						}
+						res.output["value"] = decision.EditedOutput
+						lastOutputMu.Lock()
+						lastOutput = decision.EditedOutput
+						lastOutputMu.Unlock()
+					case "continue", "":
+						// no-op
+					}
+				}
+
 				st.mu.Lock()
 				st.status = statusDone
 				st.output = res.output

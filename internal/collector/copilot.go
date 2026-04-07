@@ -28,11 +28,17 @@ func (c *CopilotCollector) Start(ctx context.Context, es *esearch.Client) error 
 		c.Interval = 120 * time.Second
 	}
 
+	slog.Info("copilot collector: started",
+		"workspace", c.WorkspaceID,
+		"interval", c.Interval)
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("copilot collector: home dir: %w", err)
 	}
 	copilotDir := filepath.Join(home, ".copilot")
+	slog.Debug("copilot collector: watching dir",
+		"workspace", c.WorkspaceID, "path", copilotDir)
 
 	// Track state.
 	var lastCommandCount int
@@ -42,21 +48,34 @@ func (c *CopilotCollector) Start(ctx context.Context, es *esearch.Client) error 
 	defer ticker.Stop()
 
 	// Run once immediately to backfill.
+	slog.Debug("copilot collector: initial poll", "workspace", c.WorkspaceID)
 	lastCommandCount = c.pollCommands(ctx, es, copilotDir, lastCommandCount)
 	c.pollLogs(ctx, es, copilotDir, indexedLogs)
+	slog.Debug("copilot collector: initial poll done",
+		"workspace", c.WorkspaceID,
+		"commands", lastCommandCount,
+		"log_files", len(indexedLogs))
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			slog.Debug("copilot collector: tick", "workspace", c.WorkspaceID)
+			tickCtx, tickDone := startTickSpan(ctx, "copilot", c.WorkspaceID)
 			start := time.Now()
 			before := lastCommandCount
 			beforeLogs := len(indexedLogs)
-			lastCommandCount = c.pollCommands(ctx, es, copilotDir, lastCommandCount)
-			c.pollLogs(ctx, es, copilotDir, indexedLogs)
-			RecordRun("copilot", start,
-				(lastCommandCount-before)+(len(indexedLogs)-beforeLogs), nil)
+			lastCommandCount = c.pollCommands(tickCtx, es, copilotDir, lastCommandCount)
+			c.pollLogs(tickCtx, es, copilotDir, indexedLogs)
+			indexed := (lastCommandCount - before) + (len(indexedLogs) - beforeLogs)
+			slog.Debug("copilot collector: tick done",
+				"workspace", c.WorkspaceID,
+				"new_commands", lastCommandCount-before,
+				"new_log_files", len(indexedLogs)-beforeLogs,
+				"dur", time.Since(start))
+			tickDone(indexed, nil)
+			RecordRun("copilot", start, indexed, nil)
 		}
 	}
 }
@@ -102,9 +121,11 @@ func (c *CopilotCollector) pollCommands(ctx context.Context, es *esearch.Client,
 	}
 
 	if len(docs) > 0 {
-		slog.Info("copilot collector: new commands", "count", len(docs))
+		slog.Info("copilot collector: new commands",
+			"workspace", c.WorkspaceID, "count", len(docs))
 		if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(c.WorkspaceID, docs)); err != nil {
-			slog.Warn("copilot collector: index error", "err", err)
+			slog.Warn("copilot collector: index error",
+				"workspace", c.WorkspaceID, "err", err)
 			return lastCount // don't advance cursor on error
 		}
 	}
@@ -131,10 +152,16 @@ func (c *CopilotCollector) pollLogs(ctx context.Context, es *esearch.Client, dir
 		docs := c.parseLogFile(path)
 		if len(docs) > 0 {
 			if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(c.WorkspaceID, docs)); err != nil {
-				slog.Warn("copilot collector: log index error", "file", filepath.Base(path), "err", err)
+				slog.Warn("copilot collector: log index error",
+					"workspace", c.WorkspaceID,
+					"file", filepath.Base(path),
+					"err", err)
 				continue
 			}
-			slog.Info("copilot collector: indexed log", "file", filepath.Base(path), "events", len(docs))
+			slog.Info("copilot collector: indexed log",
+				"workspace", c.WorkspaceID,
+				"file", filepath.Base(path),
+				"events", len(docs))
 		}
 		indexed[path] = true
 	}

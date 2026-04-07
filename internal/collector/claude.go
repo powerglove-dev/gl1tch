@@ -84,6 +84,15 @@ func (c *ClaudeCollector) Start(ctx context.Context, es *esearch.Client) error {
 		c.Interval = 120 * time.Second
 	}
 
+	slog.Info("claude collector: started",
+		"workspace", c.WorkspaceID,
+		"dirs", len(c.Dirs),
+		"interval", c.Interval)
+	for _, dir := range c.Dirs {
+		slog.Debug("claude collector: workspace dir filter",
+			"workspace", c.WorkspaceID, "dir", dir)
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("claude collector: home dir: %w", err)
@@ -95,7 +104,11 @@ func (c *ClaudeCollector) Start(ctx context.Context, es *esearch.Client) error {
 	// Seed the offset to the end of the file so we only index new entries.
 	if info, err := os.Stat(historyPath); err == nil {
 		lastOffset = info.Size()
-		slog.Info("claude collector: seeded offset", "bytes", lastOffset)
+		slog.Info("claude collector: seeded offset",
+			"workspace", c.WorkspaceID, "bytes", lastOffset)
+	} else {
+		slog.Debug("claude collector: history file missing",
+			"workspace", c.WorkspaceID, "path", historyPath, "err", err)
 	}
 
 	ticker := time.NewTicker(c.Interval)
@@ -106,17 +119,26 @@ func (c *ClaudeCollector) Start(ctx context.Context, es *esearch.Client) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			slog.Debug("claude collector: tick",
+				"workspace", c.WorkspaceID, "offset", lastOffset)
+			tickCtx, tickDone := startTickSpan(ctx, "claude", c.WorkspaceID)
 			start := time.Now()
-			newOffset, err := c.poll(ctx, es, historyPath, lastOffset)
+			newOffset, err := c.poll(tickCtx, es, historyPath, lastOffset)
 			// Heartbeat: bytes-of-new-data is a reasonable stand-in
 			// for "indexed count" since the .jsonl is line-delimited.
 			indexed := int(newOffset - lastOffset)
 			if indexed < 0 {
 				indexed = 0
 			}
+			slog.Debug("claude collector: tick done",
+				"workspace", c.WorkspaceID,
+				"new_bytes", indexed,
+				"dur", time.Since(start))
+			tickDone(indexed, err)
 			RecordRun("claude", start, indexed, err)
 			if err != nil {
-				slog.Warn("claude collector: poll error", "err", err)
+				slog.Warn("claude collector: poll error",
+					"workspace", c.WorkspaceID, "err", err)
 				continue
 			}
 			lastOffset = newOffset
@@ -147,6 +169,7 @@ func (c *ClaudeCollector) poll(ctx context.Context, es *esearch.Client, path str
 	}
 
 	var docs []any
+	skippedScope := 0
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1024*256), 1024*256)
 
@@ -169,6 +192,7 @@ func (c *ClaudeCollector) poll(ctx context.Context, es *esearch.Client, path str
 		// under any of this collector's directories. With no Dirs set
 		// (legacy / global path) every entry passes through.
 		if !pathInDirs(entry.Project, c.Dirs) {
+			skippedScope++
 			continue
 		}
 
@@ -200,10 +224,16 @@ func (c *ClaudeCollector) poll(ctx context.Context, es *esearch.Client, path str
 	newOffset, _ := f.Seek(0, 1) // current position
 
 	if len(docs) > 0 {
-		slog.Info("claude collector: new prompts", "count", len(docs))
+		slog.Info("claude collector: new prompts",
+			"workspace", c.WorkspaceID,
+			"count", len(docs),
+			"skipped_out_of_scope", skippedScope)
 		if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(c.WorkspaceID, docs)); err != nil {
 			return offset, fmt.Errorf("bulk index: %w", err)
 		}
+	} else if skippedScope > 0 {
+		slog.Debug("claude collector: all entries out of scope",
+			"workspace", c.WorkspaceID, "skipped", skippedScope)
 	}
 
 	return newOffset, nil
@@ -241,6 +271,11 @@ func (c *ClaudeProjectCollector) Start(ctx context.Context, es *esearch.Client) 
 		c.Interval = 300 * time.Second // every 5 min
 	}
 
+	slog.Info("claude-projects collector: started",
+		"workspace", c.WorkspaceID,
+		"dirs", len(c.Dirs),
+		"interval", c.Interval)
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("claude-projects: home dir: %w", err)
@@ -254,9 +289,16 @@ func (c *ClaudeProjectCollector) Start(ctx context.Context, es *esearch.Client) 
 	defer ticker.Stop()
 
 	// Run once immediately.
+	slog.Debug("claude-projects collector: initial poll",
+		"workspace", c.WorkspaceID, "projects_dir", projectsDir)
 	start := time.Now()
 	beforeCount := len(indexed)
 	c.pollProjects(ctx, es, projectsDir, indexed)
+	slog.Debug("claude-projects collector: initial poll done",
+		"workspace", c.WorkspaceID,
+		"new_files", len(indexed)-beforeCount,
+		"total_files", len(indexed),
+		"dur", time.Since(start))
 	RecordRun("claude-projects", start, len(indexed)-beforeCount, nil)
 
 	for {
@@ -264,9 +306,17 @@ func (c *ClaudeProjectCollector) Start(ctx context.Context, es *esearch.Client) 
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			slog.Debug("claude-projects collector: tick",
+				"workspace", c.WorkspaceID, "known_files", len(indexed))
+			tickCtx, tickDone := startTickSpan(ctx, "claude-projects", c.WorkspaceID)
 			start := time.Now()
 			before := len(indexed)
-			c.pollProjects(ctx, es, projectsDir, indexed)
+			c.pollProjects(tickCtx, es, projectsDir, indexed)
+			slog.Debug("claude-projects collector: tick done",
+				"workspace", c.WorkspaceID,
+				"new_files", len(indexed)-before,
+				"dur", time.Since(start))
+			tickDone(len(indexed)-before, nil)
 			RecordRun("claude-projects", start, len(indexed)-before, nil)
 		}
 	}
@@ -295,6 +345,7 @@ func (c *ClaudeProjectCollector) pollProjects(ctx context.Context, es *esearch.C
 		encodedDirs[encodeClaudeDirName(filepath.Clean(d))] = true
 	}
 
+	skippedScope := 0
 	for _, projDir := range entries {
 		if !projDir.IsDir() {
 			continue
@@ -303,6 +354,7 @@ func (c *ClaudeProjectCollector) pollProjects(ctx context.Context, es *esearch.C
 		// encoded name doesn't match any workspace dir. Empty Dirs
 		// means "include everything" — preserves the legacy behavior.
 		if len(encodedDirs) > 0 && !encodedDirs[projDir.Name()] {
+			skippedScope++
 			continue
 		}
 		projectName := decodeClaudeProjectName(projDir.Name())
@@ -312,6 +364,10 @@ func (c *ClaudeProjectCollector) pollProjects(ctx context.Context, es *esearch.C
 		if err != nil {
 			continue
 		}
+		slog.Debug("claude-projects: matched project dir",
+			"workspace", c.WorkspaceID,
+			"project", projectName,
+			"files", len(files))
 
 		for _, f := range files {
 			if indexed[f] {
@@ -321,13 +377,24 @@ func (c *ClaudeProjectCollector) pollProjects(ctx context.Context, es *esearch.C
 			docs := c.parseSessionFile(f, projectName)
 			if len(docs) > 0 {
 				if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(c.WorkspaceID, docs)); err != nil {
-					slog.Warn("claude-projects: index error", "file", filepath.Base(f), "err", err)
+					slog.Warn("claude-projects: index error",
+						"workspace", c.WorkspaceID,
+						"file", filepath.Base(f),
+						"err", err)
 					continue
 				}
-				slog.Info("claude-projects: indexed session", "project", projectName, "events", len(docs))
+				slog.Info("claude-projects: indexed session",
+					"workspace", c.WorkspaceID,
+					"project", projectName,
+					"file", filepath.Base(f),
+					"events", len(docs))
 			}
 			indexed[f] = true
 		}
+	}
+	if skippedScope > 0 {
+		slog.Debug("claude-projects: filtered out-of-scope dirs",
+			"workspace", c.WorkspaceID, "skipped", skippedScope)
 	}
 }
 

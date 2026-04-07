@@ -63,8 +63,20 @@ func (c *CodeIndexCollector) Start(ctx context.Context, es *esearch.Client) erro
 	if len(c.Paths) == 0 {
 		// Nothing to do — exit cleanly so the supervisor doesn't keep a
 		// goroutine spinning on an empty config.
-		slog.Info("code-index collector: no paths configured, exiting")
+		slog.Info("code-index collector: no paths configured, exiting",
+			"workspace", c.WorkspaceID)
 		return nil
+	}
+
+	slog.Info("code-index collector: started",
+		"workspace", c.WorkspaceID,
+		"paths", len(c.Paths),
+		"interval", c.Interval,
+		"provider", c.EmbedProvider,
+		"model", c.EmbedModel)
+	for _, p := range c.Paths {
+		slog.Debug("code-index collector: watching path",
+			"workspace", c.WorkspaceID, "path", p)
 	}
 
 	embedder, err := c.buildEmbedder()
@@ -74,7 +86,10 @@ func (c *CodeIndexCollector) Start(ctx context.Context, es *esearch.Client) erro
 
 	// Index immediately on start so users see results without waiting
 	// a full Interval; subsequent runs are time-based.
-	c.runOnce(ctx, es, embedder)
+	slog.Debug("code-index collector: initial run", "workspace", c.WorkspaceID)
+	initCtx, initDone := startTickSpan(ctx, "code-index", c.WorkspaceID)
+	initN, initErr := c.runOnce(initCtx, es, embedder)
+	initDone(initN, initErr)
 
 	ticker := time.NewTicker(c.Interval)
 	defer ticker.Stop()
@@ -84,7 +99,10 @@ func (c *CodeIndexCollector) Start(ctx context.Context, es *esearch.Client) erro
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			c.runOnce(ctx, es, embedder)
+			slog.Debug("code-index collector: tick", "workspace", c.WorkspaceID)
+			tickCtx, tickDone := startTickSpan(ctx, "code-index", c.WorkspaceID)
+			n, err := c.runOnce(tickCtx, es, embedder)
+			tickDone(n, err)
 		}
 	}
 }
@@ -92,25 +110,32 @@ func (c *CodeIndexCollector) Start(ctx context.Context, es *esearch.Client) erro
 // runOnce walks every configured path and indexes all matching files.
 // Errors on individual paths are logged but don't abort the rest of the
 // run; the heartbeat captures the last error for the brain UI.
-func (c *CodeIndexCollector) runOnce(ctx context.Context, es *esearch.Client, embedder brainrag.Embedder) {
+//
+// Returns (totalChunks, lastErr) so the caller can feed both into its
+// per-tick span for the APM Transactions view — callers that don't
+// care can ignore both values.
+func (c *CodeIndexCollector) runOnce(ctx context.Context, es *esearch.Client, embedder brainrag.Embedder) (int, error) {
 	start := time.Now()
 	totalChunks := 0
 	var lastErr error
 
 	for _, path := range c.Paths {
 		if ctx.Err() != nil {
-			return
+			return totalChunks, lastErr
 		}
 		abs := expandPath(path)
 		if abs == "" {
 			continue
 		}
 		if _, statErr := os.Stat(abs); statErr != nil {
-			slog.Warn("code-index collector: path missing", "path", abs, "err", statErr)
+			slog.Warn("code-index collector: path missing",
+				"workspace", c.WorkspaceID, "path", abs, "err", statErr)
 			lastErr = statErr
 			continue
 		}
 
+		slog.Debug("code-index collector: indexing path",
+			"workspace", c.WorkspaceID, "path", abs)
 		store := brainrag.NewRAGStoreForCWD(es, abs)
 		res, err := brainrag.IndexTree(ctx, brainrag.IndexTreeOptions{
 			Root:       abs,
@@ -121,15 +146,25 @@ func (c *CodeIndexCollector) runOnce(ctx context.Context, es *esearch.Client, em
 			Progress:   nil, // collector logs via slog instead
 		})
 		if err != nil {
-			slog.Warn("code-index collector: index failed", "path", abs, "err", err)
+			slog.Warn("code-index collector: index failed",
+				"workspace", c.WorkspaceID, "path", abs, "err", err)
 			lastErr = err
 			continue
 		}
 		totalChunks += res.Chunks
-		slog.Info("code-index collector: indexed", "path", filepath.Base(abs), "files", res.Files, "chunks", res.Chunks)
+		slog.Info("code-index collector: indexed",
+			"workspace", c.WorkspaceID,
+			"path", filepath.Base(abs),
+			"files", res.Files,
+			"chunks", res.Chunks)
 	}
 
+	slog.Debug("code-index collector: run done",
+		"workspace", c.WorkspaceID,
+		"total_chunks", totalChunks,
+		"dur", time.Since(start))
 	RecordRun("code-index", start, totalChunks, lastErr)
+	return totalChunks, lastErr
 }
 
 // buildEmbedder mirrors pipeline.buildEmbedder but reads from the
