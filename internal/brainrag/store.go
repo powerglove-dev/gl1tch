@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/8op-org/gl1tch/internal/esearch"
 	"github.com/8op-org/gl1tch/internal/store"
@@ -117,6 +118,12 @@ func (r *RAGStore) IndexNote(ctx context.Context, embedder Embedder, noteID, tex
 		Vector:  vec,
 		Hash:    h,
 		EmbedID: embedID,
+		// Stamp the actual write time so QueryCodeIndexActivityScoped
+		// can return last_seen_ms and the brain popover's code-index
+		// row can render "last seen Xs ago" instead of always-zero.
+		// vectorsMapping declares indexed_at as a `date` field; ES
+		// parses RFC3339Nano cleanly without a custom format.
+		IndexedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if err := r.es.Index(ctx, esearch.IndexVectors, docID(r.scope, noteID), doc); err != nil {
 		return fmt.Errorf("brainrag: upsert vector for %q: %w", noteID, err)
