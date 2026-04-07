@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -288,102 +287,13 @@ func removeString(haystack []string, needle string) []string {
 	return out
 }
 
-// isGitRepo reports whether path contains a .git directory (or is
-// itself one — for bare repos). We're deliberately loose here so
-// worktrees and submodule dirs still count: the git collector can
-// handle any of them.
-func isGitRepo(path string) bool {
-	if path == "" {
-		return false
-	}
-	if info, err := os.Stat(filepath.Join(path, ".git")); err == nil {
-		// .git can be a directory (normal repo) or a file (worktree).
-		_ = info
-		return true
-	}
-	if info, err := os.Stat(filepath.Join(path, "HEAD")); err == nil && !info.IsDir() {
-		return true // bare repo
-	}
-	return false
-}
-
-// githubRepoSlug extracts "owner/repo" from the git remote origin of
-// the given directory. Returns "" if the dir isn't a git repo, has no
-// origin, or the origin isn't on github.com. We parse .git/config
-// directly rather than shelling out to `git remote -v` so this works
-// in sandboxed builds without git on PATH.
-func githubRepoSlug(dir string) string {
-	// Try both layouts: .git as a directory (normal repo) or .git as a
-	// file that points to the real gitdir (worktrees / submodules).
-	gitDir := filepath.Join(dir, ".git")
-	if info, err := os.Stat(gitDir); err == nil && !info.IsDir() {
-		// .git file format: "gitdir: /abs/path"
-		b, err := os.ReadFile(gitDir)
-		if err == nil {
-			line := strings.TrimSpace(string(b))
-			if strings.HasPrefix(line, "gitdir:") {
-				gitDir = strings.TrimSpace(strings.TrimPrefix(line, "gitdir:"))
-				if !filepath.IsAbs(gitDir) {
-					gitDir = filepath.Join(dir, gitDir)
-				}
-			}
-		}
-	}
-	cfgPath := filepath.Join(gitDir, "config")
-	raw, err := os.ReadFile(cfgPath)
-	if err != nil {
-		return ""
-	}
-
-	// Extremely targeted parse: find [remote "origin"] section and
-	// grab its url = line. Good enough for 99% of configs without
-	// pulling in a real ini parser.
-	lines := strings.Split(string(raw), "\n")
-	inOrigin := false
-	var originURL string
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[remote ") {
-			inOrigin = strings.Contains(trimmed, `"origin"`)
-			continue
-		}
-		if strings.HasPrefix(trimmed, "[") {
-			inOrigin = false
-			continue
-		}
-		if inOrigin && strings.HasPrefix(trimmed, "url") {
-			if eq := strings.Index(trimmed, "="); eq >= 0 {
-				originURL = strings.TrimSpace(trimmed[eq+1:])
-				break
-			}
-		}
-	}
-	if originURL == "" {
-		return ""
-	}
-
-	// Accept both shapes:
-	//   https://github.com/owner/repo(.git)?
-	//   git@github.com:owner/repo(.git)?
-	var slug string
-	switch {
-	case strings.Contains(originURL, "github.com/"):
-		i := strings.Index(originURL, "github.com/")
-		slug = originURL[i+len("github.com/"):]
-	case strings.Contains(originURL, "github.com:"):
-		i := strings.Index(originURL, "github.com:")
-		slug = originURL[i+len("github.com:"):]
-	default:
-		return ""
-	}
-	slug = strings.TrimSuffix(slug, ".git")
-	slug = strings.TrimSuffix(slug, "/")
-	// Sanity: must look like "owner/repo" (exactly one slash, no spaces).
-	if strings.Count(slug, "/") != 1 || strings.ContainsAny(slug, " \t") {
-		return ""
-	}
-	return slug
-}
+// isGitRepo and githubRepoSlug used to live here. They've been
+// promoted to internal/collector (IsGitRepo / GitHubRepoSlug) so
+// the pod manager's auto-detect overlay can share the same
+// implementation. Local aliases keep the existing call sites in
+// this file readable.
+func isGitRepo(path string) bool         { return collector.IsGitRepo(path) }
+func githubRepoSlug(dir string) string   { return collector.GitHubRepoSlug(dir) }
 
 // writeCollectorConfigStruct re-marshals a Config and writes it to
 // observer.yaml. Used by Add/RemoveCollectorDirectory.

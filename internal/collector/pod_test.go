@@ -196,6 +196,76 @@ func TestPodManager_StartStop(t *testing.T) {
 	})
 }
 
+func TestPodManager_ConcurrentRestart(t *testing.T) {
+	// Two concurrent RestartPod calls for the same workspace must
+	// serialize via the per-workspace lock so the end state is
+	// exactly one set of running collectors. Without the lock the
+	// second restart would race with the first's Start and either
+	// drop one operation or leak goroutines.
+	withTempHome(t)
+	_ = WriteWorkspaceConfig("ws-race", "git:\n  repos: []\n")
+
+	var totalBuilds atomic.Int32
+	var mu sync.Mutex
+	var fakes []*fakeCollector
+
+	mgr := NewPodManager(context.Background(), nil, func(string, *Config) []Collector {
+		totalBuilds.Add(1)
+		f := newFakeCollector("racer")
+		mu.Lock()
+		fakes = append(fakes, f)
+		mu.Unlock()
+		return []Collector{f}
+	})
+
+	// Initial pod so the restarts have something to stop.
+	if err := mgr.StartPod("ws-race"); err != nil {
+		t.Fatalf("initial start: %v", err)
+	}
+
+	// Fire 5 concurrent restarts. Each should stop the previous
+	// pod and start a fresh one. With the per-workspace lock these
+	// serialize, so total builds = 1 (initial) + 5 (each restart)
+	// and exactly one pod is running at the end.
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := mgr.RestartPod("ws-race"); err != nil {
+				t.Errorf("restart: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := totalBuilds.Load(); got != 6 {
+		t.Errorf("totalBuilds = %d, want 6 (1 initial + 5 restarts)", got)
+	}
+	if active := mgr.ActiveWorkspaces(); len(active) != 1 || active[0] != "ws-race" {
+		t.Errorf("ActiveWorkspaces = %v, want [ws-race]", active)
+	}
+
+	// Every fake except the most recent must be stopped.
+	mu.Lock()
+	all := append([]*fakeCollector{}, fakes...)
+	mu.Unlock()
+	if len(all) != 6 {
+		t.Fatalf("expected 6 fake collectors, got %d", len(all))
+	}
+	for i, f := range all[:5] {
+		if f.stopped.Load() != 1 {
+			t.Errorf("fake %d not stopped: stopped=%d", i, f.stopped.Load())
+		}
+	}
+	// Last one should still be running (no Stop called yet).
+	if all[5].stopped.Load() != 0 {
+		t.Errorf("most recent fake should still be running, got stopped=%d", all[5].stopped.Load())
+	}
+
+	_ = mgr.StopPod("ws-race")
+}
+
 func TestPodManager_ParentContextCancel(t *testing.T) {
 	withTempHome(t)
 	_ = WriteWorkspaceConfig("ws-cancel", "git:\n  repos: []\n")

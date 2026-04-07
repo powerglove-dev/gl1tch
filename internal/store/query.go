@@ -9,14 +9,43 @@ import (
 
 // QueryRuns returns up to limit runs ordered by started_at descending.
 // Reads use s.db directly since WAL mode allows concurrent readers.
+//
+// Equivalent to QueryRunsForWorkspace with workspaceID="" (no filter).
 func (s *Store) QueryRuns(limit int) ([]Run, error) {
-	rows, err := s.db.Query(
-		`SELECT id, kind, name, started_at, finished_at, exit_status, stdout, stderr, metadata, steps
-		   FROM runs
-		  ORDER BY started_at DESC
-		  LIMIT ?`,
-		limit,
+	return s.QueryRunsForWorkspace("", limit)
+}
+
+// QueryRunsForWorkspace is the workspace-aware variant of QueryRuns.
+// When workspaceID is non-empty, only runs whose workspace_id column
+// matches are returned. The PipelineIndexer uses this to scope its
+// indexing to one workspace's runs so workspace A's pod doesn't
+// re-index workspace B's pipeline runs.
+//
+// Empty workspaceID returns the unfiltered list — preserves the
+// legacy behavior for callers that don't have a workspace context.
+func (s *Store) QueryRunsForWorkspace(workspaceID string, limit int) ([]Run, error) {
+	var (
+		rows *sql.Rows
+		err  error
 	)
+	if workspaceID == "" {
+		rows, err = s.db.Query(
+			`SELECT id, kind, name, workspace_id, started_at, finished_at, exit_status, stdout, stderr, metadata, steps
+			   FROM runs
+			  ORDER BY started_at DESC
+			  LIMIT ?`,
+			limit,
+		)
+	} else {
+		rows, err = s.db.Query(
+			`SELECT id, kind, name, workspace_id, started_at, finished_at, exit_status, stdout, stderr, metadata, steps
+			   FROM runs
+			  WHERE workspace_id = ?
+			  ORDER BY started_at DESC
+			  LIMIT ?`,
+			workspaceID, limit,
+		)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +59,7 @@ func (s *Store) QueryRuns(limit int) ([]Run, error) {
 		var stdout, stderr, metadata, steps sql.NullString
 
 		if err := rows.Scan(
-			&r.ID, &r.Kind, &r.Name, &r.StartedAt,
+			&r.ID, &r.Kind, &r.Name, &r.WorkspaceID, &r.StartedAt,
 			&finishedAt, &exitStatus,
 			&stdout, &stderr, &metadata, &steps,
 		); err != nil {
@@ -67,7 +96,7 @@ func (s *Store) QueryRuns(limit int) ([]Run, error) {
 // GetRun returns the run with the given id, or an error if not found.
 func (s *Store) GetRun(id int64) (*Run, error) {
 	row := s.db.QueryRow(
-		`SELECT id, kind, name, started_at, finished_at, exit_status, stdout, stderr, metadata, steps
+		`SELECT id, kind, name, workspace_id, started_at, finished_at, exit_status, stdout, stderr, metadata, steps
 		   FROM runs WHERE id = ?`,
 		id,
 	)
@@ -76,7 +105,7 @@ func (s *Store) GetRun(id int64) (*Run, error) {
 	var exitStatus sql.NullInt64
 	var stdout, stderr, metadata, steps sql.NullString
 	if err := row.Scan(
-		&r.ID, &r.Kind, &r.Name, &r.StartedAt,
+		&r.ID, &r.Kind, &r.Name, &r.WorkspaceID, &r.StartedAt,
 		&finishedAt, &exitStatus,
 		&stdout, &stderr, &metadata, &steps,
 	); err != nil {

@@ -112,20 +112,16 @@ func ListCollectorsForWorkspace(ctx context.Context, workspaceID string) ([]Coll
 		dirs = append(dirs, cfg.Directories.Paths...)
 	}
 
-	// Derive git and github sets from the workspace dirs. This makes
-	// "add a directory" the only knob the user needs to think about:
-	// the derived sources update automatically when the workspace
-	// changes.
-	var gitRepos []string
-	var githubRepos []string
-	for _, d := range dirs {
-		if isGitRepo(d) {
-			gitRepos = append(gitRepos, d)
-			if slug := githubRepoSlug(d); slug != "" {
-				githubRepos = append(githubRepos, slug)
-			}
-		}
-	}
+	// Apply the same do-what-I-mean overlay the pod manager uses
+	// when actually running collectors. This guarantees the brain
+	// popover and the running pod show the same state — without it
+	// the popover could promise "git: 2 repos" while the pod was
+	// actually running zero git collectors because the workspace
+	// config didn't list them.
+	collector.AutoDetectFromWorkspace(cfg, dirs)
+
+	gitRepos := append([]string{}, cfg.Git.Repos...)
+	githubRepos := append([]string{}, cfg.GitHub.Repos...)
 
 	var out []CollectorInfo
 

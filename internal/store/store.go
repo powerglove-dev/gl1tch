@@ -82,17 +82,24 @@ type StoreWriter interface {
 }
 
 // Run represents a recorded pipeline or agent run.
+//
+// WorkspaceID identifies the workspace whose chain bar (or
+// equivalent execution surface) produced the run. Empty means
+// "global / unattributed" — used for legacy rows from before the
+// workspace-scoped split and for runs from CLI tools that don't
+// have a workspace context.
 type Run struct {
-	ID         int64
-	Kind       string // "pipeline" | "agent"
-	Name       string
-	StartedAt  int64  // unix millis
-	FinishedAt *int64 // nil if in-flight
-	ExitStatus *int   // nil if in-flight
-	Stdout     string
-	Stderr     string
-	Metadata   string       // JSON blob
-	Steps      []StepRecord // per-step records, populated from the steps column
+	ID          int64
+	Kind        string // "pipeline" | "agent"
+	Name        string
+	WorkspaceID string
+	StartedAt   int64  // unix millis
+	FinishedAt  *int64 // nil if in-flight
+	ExitStatus  *int   // nil if in-flight
+	Stdout      string
+	Stderr      string
+	Metadata    string       // JSON blob
+	Steps       []StepRecord // per-step records, populated from the steps column
 }
 
 // Store manages the SQLite result database.

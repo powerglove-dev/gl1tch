@@ -70,6 +70,20 @@ func InitPodManager(ctx context.Context) *collector.PodManager {
 		}
 		podManagerEs = es
 		podManager = collector.NewPodManager(ctx, es, nil)
+		// Wire the workspace-dirs resolver so the auto-detect
+		// overlay can read each workspace's directories without
+		// the collector package having to import store directly.
+		podManager.SetWorkspaceDirsResolver(func(workspaceID string) []string {
+			st, sErr := OpenStore()
+			if sErr != nil {
+				return nil
+			}
+			ws, wErr := st.GetWorkspace(ctx, workspaceID)
+			if wErr != nil {
+				return nil
+			}
+			return ws.Directories
+		})
 	})
 	return podManager
 }

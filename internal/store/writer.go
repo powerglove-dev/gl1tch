@@ -55,13 +55,29 @@ func (w *writer) close() {
 // RecordRunStart inserts a new in-flight run row and returns its ID.
 // started_at is recorded in unix milliseconds.
 // metadata is an optional JSON blob (pass "" to omit).
+//
+// Equivalent to RecordRunStartWithWorkspace with workspaceID="".
+// Kept as a convenience wrapper for callers (chiefly the legacy
+// pipeline runner path) that don't yet have a workspace id to thread.
 func (s *Store) RecordRunStart(kind, name, metadata string) (int64, error) {
+	return s.RecordRunStartWithWorkspace(kind, name, metadata, "")
+}
+
+// RecordRunStartWithWorkspace is the workspace-aware variant of
+// RecordRunStart. The workspace_id is stamped on the row so the
+// PipelineIndexer can scope its query to one workspace's runs and
+// avoid cross-workspace contamination in glitch-pipelines.
+//
+// Empty workspaceID is allowed and means "global / unattributed",
+// preserving the legacy behavior for callers that don't have a
+// workspace context.
+func (s *Store) RecordRunStartWithWorkspace(kind, name, metadata, workspaceID string) (int64, error) {
 	startedAt := time.Now().UnixMilli()
 	var id int64
 	err := s.writer.send(func(db *sql.DB) error {
 		res, err := db.Exec(
-			`INSERT INTO runs (kind, name, started_at, metadata) VALUES (?, ?, ?, ?)`,
-			kind, name, startedAt, metadata,
+			`INSERT INTO runs (kind, name, started_at, metadata, workspace_id) VALUES (?, ?, ?, ?, ?)`,
+			kind, name, startedAt, metadata, workspaceID,
 		)
 		if err != nil {
 			return err

@@ -3,21 +3,33 @@ package store
 import "database/sql"
 
 // createSchema is the DDL for the runs table.
+//
+// workspace_id ties each run to the workspace it executed in (set by
+// the chain runner via the pipeline runner's WithWorkspaceID option)
+// so the PipelineIndexer can scope its query to a single workspace's
+// runs and avoid cross-contamination in the glitch-pipelines index.
 const createSchema = `CREATE TABLE IF NOT EXISTS runs (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  kind        TEXT NOT NULL,
-  name        TEXT NOT NULL,
-  started_at  INTEGER NOT NULL,
-  finished_at INTEGER,
-  exit_status INTEGER,
-  stdout      TEXT,
-  stderr      TEXT,
-  metadata    TEXT
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind         TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  started_at   INTEGER NOT NULL,
+  finished_at  INTEGER,
+  exit_status  INTEGER,
+  stdout       TEXT,
+  stderr       TEXT,
+  metadata     TEXT,
+  workspace_id TEXT NOT NULL DEFAULT ''
 );`
 
 // addStepsColumn is the migration that adds the steps column to an existing
 // runs table that was created before this column existed.
 const addStepsColumn = `ALTER TABLE runs ADD COLUMN steps TEXT DEFAULT '[]'`
+
+// addRunsWorkspaceIDColumn migrates legacy runs tables (created before
+// the workspace-scoped collectors split) to include a workspace_id
+// keyword column. Empty string means "global / unattributed" so
+// pre-existing rows continue to work without backfill.
+const addRunsWorkspaceIDColumn = `ALTER TABLE runs ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`
 
 // createBrainNotesSchema is the DDL for the brain_notes table.
 const createBrainNotesSchema = `CREATE TABLE IF NOT EXISTS brain_notes (
@@ -227,6 +239,9 @@ func applySchema(db *sql.DB) error {
 		return err
 	}
 	if err := applyStepsColumnMigration(db); err != nil {
+		return err
+	}
+	if err := applyRunsWorkspaceIDMigration(db); err != nil {
 		return err
 	}
 	if err := applyBrainNotesTableMigration(db); err != nil {
@@ -446,6 +461,24 @@ func applyStepsColumnMigration(db *sql.DB) error {
 	}
 	if count == 0 {
 		if _, err := db.Exec(addStepsColumn); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyRunsWorkspaceIDMigration adds the workspace_id column to the
+// runs table for legacy databases. Same probe-then-add pattern as
+// the other column migrations because modernc/sqlite lacks
+// ALTER TABLE ... ADD COLUMN IF NOT EXISTS.
+func applyRunsWorkspaceIDMigration(db *sql.DB) error {
+	var count int
+	row := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('runs') WHERE name='workspace_id'`)
+	if err := row.Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		if _, err := db.Exec(addRunsWorkspaceIDColumn); err != nil {
 			return err
 		}
 	}

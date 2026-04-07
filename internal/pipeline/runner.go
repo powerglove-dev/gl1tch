@@ -75,6 +75,9 @@ type runConfig struct {
 	//                                single-step pipelines (e.g. RefineDraft, StreamPrompt) where the
 	//                                prompt body is user content that may legitimately contain
 	//                                unresolved template syntax (e.g. a workflow YAML being edited).
+	workspaceID string //              tags the row in the runs table so the PipelineIndexer can
+	//                                scope to one workspace's runs and avoid cross-contamination
+	//                                in glitch-pipelines. Empty = global / unattributed.
 
 	// Game scoring fields, protected by stepFailuresMu.
 	stepFailuresMu sync.Mutex
@@ -149,6 +152,16 @@ func WithNoClarification() RunOption {
 // references stay loud.
 func WithLiteralPrompts() RunOption {
 	return func(c *runConfig) { c.literalPrompts = true }
+}
+
+// WithWorkspaceID stamps the workspace id on the runs table row this
+// run produces, so the PipelineIndexer can filter its query by
+// workspace and one workspace's pod doesn't index another's runs.
+//
+// Empty workspaceID is the legacy "global / unattributed" path,
+// equivalent to not setting the option at all.
+func WithWorkspaceID(workspaceID string) RunOption {
+	return func(c *runConfig) { c.workspaceID = workspaceID }
 }
 
 // WithPackLoader attaches a WorldPackLoader to the run. The active pack's
@@ -319,7 +332,11 @@ func Run(ctx context.Context, p *Pipeline, mgr *executor.Manager, userInput stri
 				meta = string(b)
 			}
 		}
-		id, err := cfg.store.RecordRunStart("pipeline", p.Name, meta)
+		// Use the workspace-aware variant so the row carries the
+		// workspace id (if any) for the PipelineIndexer's filter.
+		// The non-workspace path falls through to empty workspace
+		// id which preserves the legacy global behavior.
+		id, err := cfg.store.RecordRunStartWithWorkspace("pipeline", p.Name, meta, cfg.workspaceID)
 		if err == nil {
 			cfg.runID = id
 		}

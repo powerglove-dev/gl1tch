@@ -134,6 +134,12 @@ func RunChain(ctx context.Context, opts RunChainOpts, tokenCh chan<- string) err
 		pipeline.WithStepWriter(w),
 		pipeline.WithSilentStatus(),
 	}
+	// Stamp the run row with the chain's workspace id so the
+	// per-workspace PipelineIndexer can filter to its own runs and
+	// avoid cross-workspace contamination in glitch-pipelines.
+	if opts.WorkspaceID != "" {
+		runOpts = append(runOpts, pipeline.WithWorkspaceID(opts.WorkspaceID))
+	}
 
 	_, err = pipeline.Run(ctx, p, mgr, "", runOpts...)
 	return err

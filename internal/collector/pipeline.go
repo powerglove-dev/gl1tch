@@ -69,7 +69,11 @@ func (p *PipelineIndexer) Start(ctx context.Context, es *esearch.Client) error {
 
 func (p *PipelineIndexer) poll(ctx context.Context, es *esearch.Client, afterID int64) (int64, error) {
 	// Query recent runs and filter for those after our cursor.
-	runs, err := p.Store.QueryRuns(50)
+	// When WorkspaceID is set (workspace pod path), filter at the
+	// SQL layer so workspace A's pod doesn't index workspace B's
+	// runs. Empty WorkspaceID preserves the legacy global behavior
+	// for the supervisor's collector_registry path.
+	runs, err := p.Store.QueryRunsForWorkspace(p.WorkspaceID, 50)
 	if err != nil {
 		return afterID, err
 	}

@@ -35,11 +35,23 @@ import (
 
 // PodManager owns the set of active workspace pods.
 //
-// PodManager is safe for concurrent use; the desktop app may call
-// StartPod / StopPod from any goroutine in response to UI actions.
-// Internal state is protected by a single mutex held only across
-// map mutations and pod lookups, never across the long-running
-// goroutine launches themselves.
+// PodManager is safe for concurrent use. Two locks divide the work:
+//
+//   - mu protects the pods + podLocks maps. Held only across the
+//     map lookup/insert; never across the long-running goroutine
+//     launches or wg.Wait() so it stays cheap.
+//   - podLocks holds a per-workspace mutex that the Start / Stop /
+//     Restart paths acquire for the *entire* duration of their
+//     operation. This serializes concurrent ops for the same
+//     workspace so a save-then-save-again can't drop a request or
+//     leak goroutines, while ops for different workspaces remain
+//     fully parallel.
+//
+// The per-workspace locks live forever (we never delete them, even
+// when their pod is stopped) because allocating a fresh mutex on
+// every Start would defeat the purpose if a fast Restart raced
+// against a Stop. The map grows by O(workspaces), which is bounded
+// by the user's actual workspace count — small.
 type PodManager struct {
 	es        *esearch.Client
 	parentCtx context.Context
@@ -48,9 +60,14 @@ type PodManager struct {
 	// their own to avoid spinning up real git/github/mattermost
 	// goroutines.
 	builder PodCollectorBuilder
+	// dirsResolver is set by the desktop app via
+	// SetWorkspaceDirsResolver so the auto-detect overlay can read
+	// the active workspace's directories without importing store.
+	dirsResolver WorkspaceDirsResolver
 
-	mu   sync.Mutex
-	pods map[string]*pod
+	mu       sync.Mutex
+	pods     map[string]*pod
+	podLocks map[string]*sync.Mutex
 }
 
 // pod holds the runtime handles for one workspace's collectors.
@@ -81,7 +98,58 @@ func NewPodManager(parentCtx context.Context, es *esearch.Client, builder PodCol
 		parentCtx: parentCtx,
 		builder:   builder,
 		pods:      map[string]*pod{},
+		podLocks:  map[string]*sync.Mutex{},
 	}
+}
+
+// WorkspaceDirsResolver is the optional callback the pod manager
+// uses to look up a workspace's directories without having to
+// import store directly (which would create a cycle: store →
+// collector → store). The desktop wires this to a closure that
+// hits glitchd.OpenStore + ws.GetWorkspace.
+//
+// Returning nil from the resolver is fine — the manager just
+// proceeds with no auto-detect, which preserves the legacy
+// behavior for tests and headless paths.
+type WorkspaceDirsResolver func(workspaceID string) []string
+
+// SetWorkspaceDirsResolver wires the resolver. Safe to call before
+// or after pods have started; the resolver is consulted on each
+// StartPod / RestartPod.
+func (m *PodManager) SetWorkspaceDirsResolver(r WorkspaceDirsResolver) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.dirsResolver = r
+}
+
+// workspaceDirs returns the directories associated with a workspace
+// via the configured resolver. Returns nil when no resolver is set.
+func (m *PodManager) workspaceDirs(workspaceID string) []string {
+	m.mu.Lock()
+	r := m.dirsResolver
+	m.mu.Unlock()
+	if r == nil {
+		return nil
+	}
+	return r(workspaceID)
+}
+
+// lockFor returns the per-workspace mutex for the given id, creating
+// it on demand. Held by Start/Stop/Restart for the entire operation
+// so two concurrent ops on the same workspace serialize cleanly.
+//
+// Locks are never deleted from the map. We accept the bounded leak
+// (one mutex per workspace ever started) in exchange for not having
+// to coordinate "is anyone else holding this lock" cleanup logic.
+func (m *PodManager) lockFor(workspaceID string) *sync.Mutex {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	lk, ok := m.podLocks[workspaceID]
+	if !ok {
+		lk = &sync.Mutex{}
+		m.podLocks[workspaceID] = lk
+	}
+	return lk
 }
 
 // StartPod loads the workspace's config and starts every collector
@@ -99,11 +167,33 @@ func (m *PodManager) StartPod(workspaceID string) error {
 	if workspaceID == "" {
 		return errors.New("pod manager: workspace id is required")
 	}
+	// Serialize all start/stop/restart calls for this workspace so a
+	// concurrent Restart can't race with us mid-launch.
+	lk := m.lockFor(workspaceID)
+	lk.Lock()
+	defer lk.Unlock()
+	return m.startPodLocked(workspaceID)
+}
 
+// startPodLocked is the unlocked body of StartPod. Callers MUST hold
+// the per-workspace lock before invoking this. Used both by the
+// public StartPod (which takes the lock for one operation) and by
+// RestartPod (which holds the lock across a Stop+Start so the two
+// halves are atomic from the perspective of any other caller).
+func (m *PodManager) startPodLocked(workspaceID string) error {
 	cfg, err := LoadWorkspaceConfig(workspaceID)
 	if err != nil {
 		return fmt.Errorf("pod manager: load config for %s: %w", workspaceID, err)
 	}
+
+	// Apply the do-what-I-mean overlay: auto-enable collectors that
+	// the workspace's directories provide evidence for (.git → git,
+	// origin URL → github, ~/.claude or per-dir .claude/ → claude,
+	// same for copilot). Without this the user would have to manually
+	// flip every collector on, even when the workspace clearly has
+	// the tooling installed.
+	dirs := m.workspaceDirs(workspaceID)
+	AutoDetectFromWorkspace(cfg, dirs)
 
 	collectors := m.builder(workspaceID, cfg)
 
@@ -144,6 +234,20 @@ func (m *PodManager) StartPod(workspaceID string) error {
 // caller can safely create or recreate state for the same workspace
 // id afterward without leaking goroutines.
 func (m *PodManager) StopPod(workspaceID string) error {
+	if workspaceID == "" {
+		return nil
+	}
+	// Same serialization as StartPod — a Stop racing a concurrent
+	// Start would otherwise drop one of the operations.
+	lk := m.lockFor(workspaceID)
+	lk.Lock()
+	defer lk.Unlock()
+	return m.stopPodLocked(workspaceID)
+}
+
+// stopPodLocked is the unlocked body of StopPod. Callers MUST hold
+// the per-workspace lock.
+func (m *PodManager) stopPodLocked(workspaceID string) error {
 	m.mu.Lock()
 	p, ok := m.pods[workspaceID]
 	if !ok {
@@ -164,12 +268,20 @@ func (m *PodManager) StopPod(workspaceID string) error {
 // config takes effect without requiring a full app restart.
 //
 // Safe to call when no pod is currently running — it just does the
-// start half.
+// start half. The per-workspace lock is held across the entire
+// stop+start so two concurrent restarts on the same workspace
+// serialize fully (no goroutine leaks, no dropped operations).
 func (m *PodManager) RestartPod(workspaceID string) error {
-	if err := m.StopPod(workspaceID); err != nil {
+	if workspaceID == "" {
+		return errors.New("pod manager: workspace id is required")
+	}
+	lk := m.lockFor(workspaceID)
+	lk.Lock()
+	defer lk.Unlock()
+	if err := m.stopPodLocked(workspaceID); err != nil {
 		return err
 	}
-	return m.StartPod(workspaceID)
+	return m.startPodLocked(workspaceID)
 }
 
 // ActiveWorkspaces returns the workspace ids of pods currently

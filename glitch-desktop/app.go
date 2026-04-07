@@ -1305,20 +1305,17 @@ func (a *App) runBrainLoop() {
 			// response can't stall the rest of the brain loop.
 			go a.runTriageOnce()
 		case <-checkinTick.C:
-			// Periodic "I'm here" pulse. Tone matches whatever the
-			// brain is currently doing — silent error states get a
-			// nudge instead of a chipper "watching".
-			state, _ := a.deriveBrainState()
-			switch state {
-			case brainStateError:
+			// Periodic check-in. We only emit a brain activity row
+			// when there's something genuinely actionable — i.e. an
+			// error the user needs to know about. Idle/collecting/
+			// analyzing states are already shown live in the brain
+			// indicator's color + the collectors panel; spamming
+			// "watching · no new activity" rows on top of that just
+			// fills the activity log with noise. The brain status
+			// publish loop above keeps the live indicator fresh.
+			if state, _ := a.deriveBrainState(); state == brainStateError {
 				a.emitBrainActivity("alert", "warn", "brain offline",
 					"local model unreachable — start ollama to re-enable triage", "")
-			case brainStateCollecting, brainStateAnalyzing:
-				a.emitBrainActivity("checkin", "info", "watching",
-					"collectors running · nothing notable yet", "")
-			default:
-				a.emitBrainActivity("checkin", "info", "watching",
-					"no new activity", "")
 			}
 		}
 	}
