@@ -33,6 +33,13 @@ interface ChatState {
   byWorkspace: Record<string, WorkspaceChat>;
   status: SystemStatus;
   sidebarOpen: boolean;
+  /** Right-side activity sidebar visibility. Default true so the
+   *  activity stream is visible the moment the user opens gl1tch —
+   *  the whole point of moving it out of the brain popover dropdown
+   *  was to make it ambient instead of a hidden surface. Toggleable
+   *  from the titlebar (mirror of the left sidebar control) so
+   *  users who want a wider chat column can hide it. */
+  activitySidebarOpen: boolean;
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
   /** Rolling buffer of brain activity entries (alerts + check-ins),
@@ -65,6 +72,7 @@ type Action =
   | { type: "STREAM_ERROR"; workspaceId: string; message: string }
   | { type: "SET_STATUS"; status: Partial<SystemStatus> }
   | { type: "TOGGLE_SIDEBAR" }
+  | { type: "TOGGLE_ACTIVITY_SIDEBAR" }
   | { type: "CLEAR_MESSAGES"; workspaceId: string }
   | { type: "SET_MESSAGES"; workspaceId: string; messages: Message[] }
   | { type: "SET_WORKSPACES"; workspaces: Workspace[] }
@@ -211,6 +219,7 @@ const initialState: ChatState = {
   byWorkspace: {},
   status: { ollama: false, elasticsearch: false, busd: false, brain: "idle", brainDetail: "" },
   sidebarOpen: true,
+  activitySidebarOpen: true,
   workspaces: [],
   activeWorkspaceId: null,
   brainActivity: [],
@@ -323,6 +332,9 @@ function reducer(state: ChatState, action: Action): ChatState {
 
     case "TOGGLE_SIDEBAR":
       return { ...state, sidebarOpen: !state.sidebarOpen };
+
+    case "TOGGLE_ACTIVITY_SIDEBAR":
+      return { ...state, activitySidebarOpen: !state.activitySidebarOpen };
 
     case "CLEAR_MESSAGES":
       return withSlice(state, action.workspaceId, (s) =>
@@ -449,6 +461,10 @@ export function useChatStore() {
     ),
     setStatus: useCallback((status: Partial<SystemStatus>) => dispatch({ type: "SET_STATUS", status }), []),
     toggleSidebar: useCallback(() => dispatch({ type: "TOGGLE_SIDEBAR" }), []),
+    toggleActivitySidebar: useCallback(
+      () => dispatch({ type: "TOGGLE_ACTIVITY_SIDEBAR" }),
+      [],
+    ),
     clearMessages: useCallback(
       (workspaceId: string) => dispatch({ type: "CLEAR_MESSAGES", workspaceId }),
       [],

@@ -52,6 +52,20 @@ export function dayLabel(ts: number): string {
 }
 
 /**
+ * "just now" / "5m" / "3h" / "2d" — short relative-time formatter for
+ * the brain popover and the activity sidebar. Lifted out of
+ * BrainIndicator's local helper so multiple surfaces can render the
+ * same shape without copy-pasting.
+ */
+export function formatRelative(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return "just now";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
+  return `${Math.floor(diff / 86_400_000)}d`;
+}
+
+/**
  * True if two timestamps fall on different calendar days. Used by the
  * chat list to decide whether to insert a day separator before a row.
  */

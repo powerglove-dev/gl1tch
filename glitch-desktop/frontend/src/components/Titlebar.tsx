@@ -1,10 +1,15 @@
-import { PanelLeft } from "lucide-react";
+import { PanelLeft, PanelRight } from "lucide-react";
 import { BrainIndicator } from "./BrainIndicator";
 import type { BrainActivity, BrainState } from "@/lib/types";
 
 interface Props {
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
+  /** Right-side activity sidebar visibility. Mirrors the left
+   *  sidebar's toggle so the user can hide either side independently
+   *  for a wider chat column. */
+  activitySidebarOpen: boolean;
+  onToggleActivitySidebar: () => void;
   brainState: BrainState;
   brainDetail: string;
   brainActivity: BrainActivity[];
@@ -32,6 +37,8 @@ const LOGO_LINES = [
 export function Titlebar({
   sidebarOpen,
   onToggleSidebar,
+  activitySidebarOpen,
+  onToggleActivitySidebar,
   brainState,
   brainDetail,
   brainActivity,
@@ -99,6 +106,32 @@ export function Titlebar({
         onEditCollectors={onEditCollectors}
         onConfigureCollector={onConfigureCollector}
       />
+
+      {/* Right-side activity sidebar toggle. Mirrors the left
+          PanelLeft button at the start of the titlebar so the
+          user has matching hide/show controls on both sides. */}
+      <button
+        onClick={onToggleActivitySidebar}
+        style={{
+          WebkitAppRegion: "no-drag",
+          background: "none",
+          border: "none",
+          color: "var(--fg-dim)",
+          cursor: "pointer",
+          padding: 4,
+          borderRadius: 6,
+          display: "flex",
+          alignItems: "center",
+          marginLeft: 8,
+        } as React.CSSProperties}
+        title={
+          activitySidebarOpen
+            ? "Hide activity sidebar"
+            : "Show activity sidebar"
+        }
+      >
+        <PanelRight size={15} />
+      </button>
     </div>
   );
 }

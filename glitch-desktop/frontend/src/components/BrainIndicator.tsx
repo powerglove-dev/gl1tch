@@ -1,7 +1,7 @@
 import { Brain, Settings, Pencil, Plus, ScrollText, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { BrainActivity, BrainState } from "@/lib/types";
-import { formatTime12 } from "@/lib/time";
+import { formatTime12, formatRelative } from "@/lib/time";
 import {
   ListCollectors,
   CollectorsConfigPath,
@@ -424,26 +424,13 @@ export function BrainIndicator({
           <SectionLabel>decisions</SectionLabel>
           <DecisionsSection snapshot={decisions} />
 
-          <SectionLabel>activity</SectionLabel>
-          {activity.length === 0 ? (
-            <div
-              style={{
-                padding: "10px 14px 16px",
-                color: "var(--fg-dim)",
-                fontStyle: "italic",
-                fontSize: 11,
-              }}
-            >
-              No activity yet — the brain will speak up when it has something
-              for you.
-            </div>
-          ) : (
-            <div>
-              {activity.map((entry) => (
-                <ActivityRow key={entry.id} entry={entry} />
-              ))}
-            </div>
-          )}
+          {/* Activity used to render here as a dropdown — moved to
+              the right-side ActivitySidebar so it's an ambient panel
+              instead of a hidden surface buried under collectors /
+              stats / decisions. The popover keeps activity in its
+              prop list because (a) it still drives the unread badge
+              on the brain icon and (b) the markRead semantics on
+              popover-open still apply to keep the badge consistent. */}
 
           {/* Live collector logs — tail of the in-process slog ring
               buffer. Auto-refreshes alongside the collectors list. */}
@@ -1270,93 +1257,9 @@ function formatDuration(ms: number): string {
   return `${h}h ${m % 60}m`;
 }
 
-function ActivityRow({ entry }: { entry: BrainActivity }) {
-  const sevColor =
-    entry.severity === "error"
-      ? "var(--red, #ff5555)"
-      : entry.severity === "warn"
-        ? "var(--yellow)"
-        : "var(--cyan)";
-  return (
-    <div
-      style={{
-        padding: "10px 14px",
-        borderBottom: "1px solid var(--border)",
-        display: "flex",
-        gap: 10,
-        alignItems: "flex-start",
-      }}
-    >
-      <div
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: 999,
-          background: sevColor,
-          marginTop: 6,
-          flexShrink: 0,
-          boxShadow: entry.unread ? `0 0 6px ${sevColor}` : "none",
-        }}
-      />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "baseline",
-            gap: 8,
-            color: "var(--fg)",
-            fontWeight: entry.unread ? 600 : 500,
-          }}
-        >
-          <span
-            style={{
-              flex: 1,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {entry.title}
-          </span>
-          <span
-            style={{ fontSize: 10, color: "var(--fg-dim)" }}
-            title={formatRelative(entry.timestamp)}
-          >
-            {formatTime12(entry.timestamp)}
-          </span>
-        </div>
-        {entry.detail && (
-          <div
-            style={{
-              marginTop: 3,
-              color: "var(--fg-dim)",
-              fontSize: 11,
-              lineHeight: 1.4,
-            }}
-          >
-            {entry.detail}
-          </div>
-        )}
-        {entry.source && (
-          <div
-            style={{
-              marginTop: 4,
-              color: "var(--fg-dim)",
-              opacity: 0.7,
-              fontSize: 10,
-              fontFamily: "monospace",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {entry.source}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+// ActivityRow moved to ActivitySidebar.tsx where the activity panel
+// now lives. The popover keeps tracking the activity prop only for
+// the unread badge on the brain icon.
 
 function visualForState(state: BrainState): {
   color: string;
@@ -1385,11 +1288,6 @@ function visualForState(state: BrainState): {
   }
 }
 
-function formatRelative(ts: number): string {
-  const diff = Date.now() - ts;
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
-  return `${Math.floor(diff / 86_400_000)}d`;
-}
+// formatRelative moved to @/lib/time so the brain popover and the
+// new ActivitySidebar render the same shape from a single source.
 

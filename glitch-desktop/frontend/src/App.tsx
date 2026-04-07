@@ -2,6 +2,7 @@ import { useEffect, useCallback, useState, useRef } from "react";
 import { Titlebar } from "./components/Titlebar";
 import { Sidebar } from "./components/Sidebar";
 import type { AgentEntry, WorkflowFileEntry, PromptEntry } from "./components/Sidebar";
+import { ActivitySidebar } from "./components/ActivitySidebar";
 import { MessageList } from "./components/MessageList";
 import { ChatInput } from "./components/ChatInput";
 import type { ProviderOption, ChainStep } from "./components/ChatInput";
@@ -46,7 +47,7 @@ export function App() {
     state, active,
     addUserMessage, addUserChain, startAssistant, appendChunk, finishAssistant, streamError,
     applyBlockEvent,
-    setStatus, toggleSidebar, setMessages,
+    setStatus, toggleSidebar, toggleActivitySidebar, setMessages,
     setWorkspaces, setActiveWorkspace, addWorkspace, removeWorkspace, updateWorkspace,
     addBrainActivity, markBrainRead,
   } = useChatStore();
@@ -707,6 +708,8 @@ export function App() {
       <Titlebar
         sidebarOpen={state.sidebarOpen}
         onToggleSidebar={toggleSidebar}
+        activitySidebarOpen={state.activitySidebarOpen}
+        onToggleActivitySidebar={toggleActivitySidebar}
         brainState={state.status.brain}
         brainDetail={state.status.brainDetail}
         brainActivity={state.brainActivity}
@@ -773,6 +776,20 @@ export function App() {
             onStop={handleStop}
           />
         </div>
+
+        {/* Right-side activity sidebar — mirrors the left
+            workspace sidebar's hide/show pattern. The brain
+            popover used to render this list as a buried dropdown;
+            it's now an ambient panel that's visible by default
+            so users immediately see what the brain is up to
+            without clicking the brain icon. */}
+        {state.activitySidebarOpen && (
+          <ActivitySidebar
+            activity={state.brainActivity}
+            onMarkRead={markBrainRead}
+            onClose={toggleActivitySidebar}
+          />
+        )}
       </div>
 
       {/* Editor popup — modal overlay for editing prompts and
