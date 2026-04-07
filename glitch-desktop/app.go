@@ -239,12 +239,18 @@ func (a *App) CreateWorkspace(title string) string {
 	if err != nil {
 		return "{}"
 	}
-	// Best-effort pod start. We don't fail workspace creation if
-	// the pod can't start — the user can fix collector config later
-	// and restart the pod via the editor popup save.
-	if perr := glitchd.StartWorkspacePod(ws.ID); perr != nil {
-		log.Printf("create workspace: start pod: %v", perr)
-	}
+	// Background pod start. Same rationale as
+	// WriteWorkspaceCollectorConfig: StartWorkspacePod can block on
+	// the per-workspace mutex behind another in-flight Restart, and
+	// any blocking work here freezes every subsequent Wails call
+	// because they're serialized by the Wails runtime. Returning the
+	// new workspace immediately lets the UI render it; the pod
+	// catches up in the background.
+	go func(id string) {
+		if perr := glitchd.StartWorkspacePod(id); perr != nil {
+			log.Printf("create workspace: start pod: %v", perr)
+		}
+	}(ws.ID)
 	b, _ := json.Marshal(ws)
 	return string(b)
 }
