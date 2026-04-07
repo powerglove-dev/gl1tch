@@ -24,6 +24,10 @@ const (
 	IndexSummaries = "glitch-summaries"
 	IndexPipelines = "glitch-pipelines"
 	IndexInsights  = "glitch-insights"
+	// IndexVectors stores embedding vectors for brain notes and code
+	// chunks. Replaces the SQLite-backed brainrag store. Uses a
+	// dense_vector mapping with kNN search enabled.
+	IndexVectors = "glitch-vectors"
 )
 
 // Client wraps the Elasticsearch client with gl1tch-specific operations.
@@ -70,6 +74,7 @@ func (c *Client) EnsureIndices(ctx context.Context) error {
 		IndexSummaries: summariesMapping,
 		IndexPipelines: pipelinesMapping,
 		IndexInsights:  insightsMapping,
+		IndexVectors:   vectorsMapping,
 	}
 	for name, mapping := range indices {
 		// Check if index exists.
@@ -233,4 +238,132 @@ func (c *Client) IsAvailable() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	return c.Ping(ctx) == nil
+}
+
+// DeleteByQuery removes documents matching query from the given
+// indices. Used by the brainrag migration to clear stale vectors when
+// scope or embed_id changes. Returns the number of deleted docs.
+func (c *Client) DeleteByQuery(ctx context.Context, indices []string, query map[string]any) (int64, error) {
+	body, err := json.Marshal(map[string]any{"query": query})
+	if err != nil {
+		return 0, err
+	}
+	res, err := c.es.DeleteByQuery(
+		indices,
+		bytes.NewReader(body),
+		c.es.DeleteByQuery.WithContext(ctx),
+		c.es.DeleteByQuery.WithRefresh(true),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("esearch: delete-by-query: %w", err)
+	}
+	defer res.Body.Close()
+	if res.IsError() {
+		b, _ := io.ReadAll(res.Body)
+		return 0, fmt.Errorf("esearch: delete-by-query: %s: %s", res.Status(), b)
+	}
+	var parsed struct {
+		Deleted int64 `json:"deleted"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&parsed)
+	return parsed.Deleted, nil
+}
+
+// VectorHit is a single result from VectorSearch.
+type VectorHit struct {
+	NoteID string  `json:"note_id"`
+	Text   string  `json:"text"`
+	Score  float64 `json:"score"`
+}
+
+// VectorSearch runs a kNN search against IndexVectors with the given
+// query embedding, scoped to a single scope keyword and (optionally)
+// filtered to a set of note_ids. Returns up to topK hits sorted by
+// similarity score (highest first).
+//
+// Powers the new ES-backed brainrag.RAGStore. The "filter" path lets
+// callers narrow the kNN search to notes linked to a specific
+// workspace, matching the old SQLite store's behavior.
+func (c *Client) VectorSearch(
+	ctx context.Context,
+	scope string,
+	embedID string,
+	query []float32,
+	topK int,
+	noteIDFilter []string,
+) ([]VectorHit, error) {
+	if topK <= 0 {
+		topK = 5
+	}
+
+	// Build the bool filter: scope is required, embed_id is required
+	// (so we never mix dimensions), note_id filter is optional.
+	must := []map[string]any{
+		{"term": map[string]any{"scope": scope}},
+		{"term": map[string]any{"embed_id": embedID}},
+	}
+	if len(noteIDFilter) > 0 {
+		must = append(must, map[string]any{
+			"terms": map[string]any{"note_id": noteIDFilter},
+		})
+	}
+
+	body := map[string]any{
+		"size": topK,
+		"_source": []string{"note_id", "text"},
+		// num_candidates ~= 10x topK is the standard ES recommendation
+		// for HNSW recall vs. latency tradeoff.
+		"knn": map[string]any{
+			"field":          "vector",
+			"query_vector":   query,
+			"k":              topK,
+			"num_candidates": topK * 10,
+			"filter": map[string]any{
+				"bool": map[string]any{"must": must},
+			},
+		},
+	}
+
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	res, err := c.es.Search(
+		c.es.Search.WithContext(ctx),
+		c.es.Search.WithIndex(IndexVectors),
+		c.es.Search.WithBody(bytes.NewReader(raw)),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("esearch: vector search: %w", err)
+	}
+	defer res.Body.Close()
+	if res.IsError() {
+		b, _ := io.ReadAll(res.Body)
+		return nil, fmt.Errorf("esearch: vector search: %s: %s", res.Status(), b)
+	}
+
+	var parsed struct {
+		Hits struct {
+			Hits []struct {
+				Score  float64 `json:"_score"`
+				Source struct {
+					NoteID string `json:"note_id"`
+					Text   string `json:"text"`
+				} `json:"_source"`
+			} `json:"hits"`
+		} `json:"hits"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&parsed); err != nil {
+		return nil, fmt.Errorf("esearch: decode vector search: %w", err)
+	}
+
+	out := make([]VectorHit, 0, len(parsed.Hits.Hits))
+	for _, h := range parsed.Hits.Hits {
+		out = append(out, VectorHit{
+			NoteID: h.Source.NoteID,
+			Text:   h.Source.Text,
+			Score:  h.Score,
+		})
+	}
+	return out, nil
 }

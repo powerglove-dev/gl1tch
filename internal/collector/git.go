@@ -48,16 +48,29 @@ func (g *GitCollector) Start(ctx context.Context, es *esearch.Client) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			start := time.Now()
+			var lastErr error
+			indexed := 0
 			for _, repo := range g.Repos {
-				if err := g.poll(ctx, es, repo, cursors); err != nil {
+				n, err := g.poll(ctx, es, repo, cursors)
+				indexed += n
+				if err != nil {
+					lastErr = err
 					slog.Warn("git collector: poll error", "repo", filepath.Base(repo), "err", err)
 				}
 			}
+			// Heartbeat for the brain UI: tells the desktop "git ran
+			// at T, took D, found N new commits, err=…". The brain
+			// popover shows last-run timestamps so users can see a
+			// collector is alive even when it has nothing to index.
+			RecordRun("git", start, indexed, lastErr)
 		}
 	}
 }
 
-func (g *GitCollector) poll(ctx context.Context, es *esearch.Client, repo string, cursors map[string]string) error {
+// poll runs one collection cycle for a single repo and returns the
+// number of commits indexed (for the run heartbeat) plus any error.
+func (g *GitCollector) poll(ctx context.Context, es *esearch.Client, repo string, cursors map[string]string) (int, error) {
 	lastSHA := cursors[repo]
 
 	// Build git log range.
@@ -71,10 +84,10 @@ func (g *GitCollector) poll(ctx context.Context, es *esearch.Client, repo string
 
 	commits, err := gitLog(repo, rangeArg)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if len(commits) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	repoName := filepath.Base(repo)
@@ -98,12 +111,12 @@ func (g *GitCollector) poll(ctx context.Context, es *esearch.Client, repo string
 	}
 
 	if err := es.BulkIndex(ctx, esearch.IndexEvents, docs); err != nil {
-		return fmt.Errorf("bulk index: %w", err)
+		return 0, fmt.Errorf("bulk index: %w", err)
 	}
 
 	// Update cursor to newest commit.
 	cursors[repo] = commits[0].sha
-	return nil
+	return len(commits), nil
 }
 
 type gitCommit struct {

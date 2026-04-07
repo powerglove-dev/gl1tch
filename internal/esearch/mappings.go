@@ -66,6 +66,48 @@ const pipelinesMapping = `{
   }
 }`
 
+// vectorsMapping is the dense_vector + metadata mapping for the
+// brainrag → ES migration. Replaces the SQLite brain_vectors table.
+//
+// Notes on the schema:
+//   - We deliberately omit "dims" so ES 8.11+ infers the dimensionality
+//     from the first indexed document. This lets nomic-embed-text (768)
+//     coexist with text-embedding-3-small (1536), voyage-code-3 (1024),
+//     and synthetic test vectors without requiring a re-create per
+//     embedder. The trade-off: every doc in the index must have the
+//     SAME dimensionality after the first one. We segment by embed_id
+//     in the bool filter on every query so cross-embedder noise can't
+//     leak in, and we recommend wiping the index when changing the
+//     primary embedder model.
+//   - similarity=cosine because all our embedders return unit-ish
+//     vectors and cosine is what brainrag's old SQLite path used.
+//   - index=true enables HNSW kNN search (the whole point of the
+//     migration). Without it, knn queries return errors.
+//   - scope is "cwd:/abs/path" for code chunks and "workspace:<id>"
+//     for brain notes — single field with a prefix discriminator so
+//     we can filter by either with one keyword field.
+const vectorsMapping = `{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0
+  },
+  "mappings": {
+    "properties": {
+      "scope":      { "type": "keyword" },
+      "note_id":    { "type": "keyword" },
+      "text":       { "type": "text" },
+      "vector":     {
+        "type": "dense_vector",
+        "index": true,
+        "similarity": "cosine"
+      },
+      "hash":       { "type": "keyword" },
+      "embed_id":   { "type": "keyword" },
+      "indexed_at": { "type": "date" }
+    }
+  }
+}`
+
 const insightsMapping = `{
   "settings": {
     "number_of_shards": 1,

@@ -128,6 +128,39 @@ export interface SystemStatus {
   ollama: boolean;
   elasticsearch: boolean;
   busd: boolean;
-  brain: "idle" | "improving";
+  /** Live brain state — drives the persistent brain icon. */
+  brain: BrainState;
+  /** Short human-readable detail for the icon tooltip. */
   brainDetail: string;
+}
+
+/** Visual states the persistent brain indicator can be in. */
+export type BrainState =
+  | "idle"        // nothing happening
+  | "collecting"  // background collectors running, brain is "watching"
+  | "analyzing"   // local model is triaging buffered items right now
+  | "alert"       // unread alert(s) waiting for the user
+  | "error";      // local model unreachable / brain offline
+
+/** Severity for a brain alert / activity entry. */
+export type BrainSeverity = "info" | "warn" | "error";
+
+/**
+ * One entry in the Activity panel. The brain emits two flavors of these:
+ *  - "alert": something the user should look at (severity warn/error)
+ *  - "checkin": low-noise periodic status ("watching", "stored 12 commits…")
+ */
+export interface BrainActivity {
+  id: string;
+  /** "alert" surfaces in the systray; "checkin" stays in-app only. */
+  kind: "alert" | "checkin";
+  severity: BrainSeverity;
+  title: string;
+  /** One-line reason / summary. */
+  detail: string;
+  /** Optional source pointer (workspace id, file path, run id, …). */
+  source?: string;
+  timestamp: number;
+  /** True until the user has opened the brain panel after this landed. */
+  unread: boolean;
 }

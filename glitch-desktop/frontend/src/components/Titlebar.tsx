@@ -1,8 +1,16 @@
 import { PanelLeft } from "lucide-react";
+import { BrainIndicator } from "./BrainIndicator";
+import type { BrainActivity, BrainState } from "@/lib/types";
 
 interface Props {
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
+  brainState: BrainState;
+  brainDetail: string;
+  brainActivity: BrainActivity[];
+  onMarkBrainRead: () => void;
+  activeWorkspaceId: string | null;
+  activeWorkspaceTitle: string;
 }
 
 const LOGO_LINES = [
@@ -14,12 +22,22 @@ const LOGO_LINES = [
   " ╚═════╝ ╚══════╝╚═╝   ╚═╝    ╚═════╝╚═╝  ╚═╝",
 ];
 
-export function Titlebar({ sidebarOpen, onToggleSidebar }: Props) {
+export function Titlebar({
+  sidebarOpen,
+  onToggleSidebar,
+  brainState,
+  brainDetail,
+  brainActivity,
+  onMarkBrainRead,
+  activeWorkspaceId,
+  activeWorkspaceTitle,
+}: Props) {
   return (
     <div
-      className="flex items-center px-4 select-none"
+      className="flex items-center select-none"
       style={{
         height: 52,
+        padding: "0 18px",
         background: "var(--bg-dark)",
         borderBottom: "1px solid var(--border)",
         WebkitAppRegion: "drag",
@@ -58,6 +76,18 @@ export function Titlebar({ sidebarOpen, onToggleSidebar }: Props) {
       >
         {LOGO_LINES.join("\n")}
       </pre>
+
+      <div style={{ flex: 1 }} />
+
+      {/* Persistent brain indicator — the only ambient status surface. */}
+      <BrainIndicator
+        state={brainState}
+        detail={brainDetail}
+        activity={brainActivity}
+        onMarkRead={onMarkBrainRead}
+        activeWorkspaceId={activeWorkspaceId}
+        activeWorkspaceTitle={activeWorkspaceTitle}
+      />
     </div>
   );
 }

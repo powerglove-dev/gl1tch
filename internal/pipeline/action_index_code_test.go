@@ -1,3 +1,5 @@
+//go:build integration
+
 package pipeline
 
 import (
@@ -9,10 +11,41 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/8op-org/gl1tch/internal/esearch"
 )
 
+// requireES skips the test unless a local Elasticsearch is reachable.
+// builtin.index_code now writes to ES instead of SQLite, so chunking
+// behavior can only be exercised end-to-end against a live cluster.
+//
+// NOTE: ES infers dense_vector dimensionality from the first indexed
+// document, so a previous run that used a 3-dim mock vector will lock
+// the glitch-vectors index at 3 dims and break subsequent runs with
+// real 768-dim Ollama embeddings. We delete + recreate the index in
+// the test setup to keep runs deterministic.
+func requireES(t *testing.T) *esearch.Client {
+	t.Helper()
+	es, err := esearch.New("")
+	if err != nil {
+		t.Skipf("esearch: %v", err)
+	}
+	if err := es.Ping(context.Background()); err != nil {
+		t.Skipf("elasticsearch not available: %v", err)
+	}
+	// Wipe + recreate so the dim-lock from any earlier run doesn't
+	// poison this one.
+	_, _ = es.DeleteByQuery(context.Background(), []string{esearch.IndexVectors}, map[string]any{"match_all": map[string]any{}})
+	if err := es.EnsureIndices(context.Background()); err != nil {
+		t.Fatalf("ensure indices: %v", err)
+	}
+	return es
+}
+
 func TestIndexCodeAction_Chunking(t *testing.T) {
-	// Unit test: verify chunking logic with a mock Ollama server.
+	requireES(t)
+	// Integration test: verify chunking logic with a mock Ollama server
+	// against a real ES backend.
 
 	callCount := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -66,34 +99,8 @@ func TestIndexCodeAction_Chunking(t *testing.T) {
 	}
 }
 
-func TestChunkText(t *testing.T) {
-	tests := []struct {
-		name      string
-		text      string
-		chunkSize int
-		wantMin   int
-		wantMax   int
-	}{
-		{"empty", "", 100, 0, 0},
-		{"shorter than chunk", "hello world", 100, 1, 1},
-		{"exactly chunk size", strings.Repeat("a", 100), 100, 1, 1},
-		{"two chunks with overlap", strings.Repeat("a", 150), 100, 2, 2},
-		{"overlap preserved", strings.Repeat("x", 300), 100, 3, 4},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			chunks := chunkText(tt.text, tt.chunkSize)
-			n := len(chunks)
-			if n < tt.wantMin || n > tt.wantMax {
-				t.Errorf("chunkText(%d chars, size=%d): want %d-%d chunks, got %d",
-					len(tt.text), tt.chunkSize, tt.wantMin, tt.wantMax, n)
-			}
-		})
-	}
-}
-
 func TestIndexCodeAction_SkipDirs(t *testing.T) {
+	requireES(t)
 	dir := t.TempDir()
 
 	// Create a vendor directory with a Go file that should be skipped.

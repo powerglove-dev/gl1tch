@@ -33,11 +33,40 @@ func (d *DirectoryCollector) Start(ctx context.Context, es *esearch.Client) erro
 		d.Interval = 120 * time.Second
 	}
 
-	// Run initial scan immediately for each directory.
-	for _, dir := range d.Dirs {
-		if err := d.scanDirectory(ctx, es, dir); err != nil {
-			slog.Warn("directory collector: initial scan error", "dir", dir, "err", err)
+	// Track which directories we've already scanned in this run so we
+	// can spot newly-added paths and pick them up without a restart.
+	// The desktop's "Add directory" button writes to observer.yaml,
+	// and we re-read that file on every tick — so adding a directory
+	// in the UI starts indexing it on the next cycle, no restart.
+	known := make(map[string]bool, len(d.Dirs))
+
+	// scanAll runs scanDirectory for the union of static d.Dirs +
+	// any paths discovered by re-reading observer.yaml. Returns the
+	// total directories scanned and the last error seen.
+	scanAll := func() (int, error) {
+		dirs := d.currentDirs()
+		var lastErr error
+		newOnes := 0
+		for _, dir := range dirs {
+			if !known[dir] {
+				known[dir] = true
+				newOnes++
+				slog.Info("directory collector: new directory picked up", "dir", dir)
+			}
+			if err := d.scanDirectory(ctx, es, dir); err != nil {
+				lastErr = err
+				slog.Warn("directory collector: scan error", "dir", dir, "err", err)
+			}
 		}
+		if newOnes > 0 {
+			slog.Info("directory collector: discovered new dirs", "count", newOnes)
+		}
+		return len(dirs), lastErr
+	}
+
+	// Initial scan on startup so we don't wait for the first tick.
+	if _, err := scanAll(); err != nil {
+		slog.Warn("directory collector: initial scan error", "err", err)
 	}
 
 	ticker := time.NewTicker(d.Interval)
@@ -48,13 +77,40 @@ func (d *DirectoryCollector) Start(ctx context.Context, es *esearch.Client) erro
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			for _, dir := range d.Dirs {
-				if err := d.scanDirectory(ctx, es, dir); err != nil {
-					slog.Warn("directory collector: scan error", "dir", dir, "err", err)
-				}
-			}
+			start := time.Now()
+			_, lastErr := scanAll()
+			// Heartbeat: indexed count is 0 here because scanDirectory
+			// doesn't return one. The brain UI uses ES doc counts for
+			// totals; this entry just proves the collector ran.
+			RecordRun("directories", start, 0, lastErr)
 		}
 	}
+}
+
+// currentDirs returns the union of the directories the collector was
+// constructed with (d.Dirs, from the initial config snapshot) and the
+// directories currently listed in observer.yaml. Re-reads the file
+// every call so changes the desktop makes via the in-app editor (or
+// AddWorkspaceDirectory) take effect on the next tick.
+func (d *DirectoryCollector) currentDirs() []string {
+	seen := make(map[string]bool, len(d.Dirs))
+	out := make([]string, 0, len(d.Dirs))
+	add := func(p string) {
+		if p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	for _, p := range d.Dirs {
+		add(p)
+	}
+	if cfg, err := LoadConfig(); err == nil && cfg != nil {
+		for _, p := range cfg.Directories.Paths {
+			add(p)
+		}
+	}
+	return out
 }
 
 func (d *DirectoryCollector) scanDirectory(ctx context.Context, es *esearch.Client, dir string) error {

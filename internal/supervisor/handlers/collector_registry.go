@@ -54,12 +54,17 @@ func RegisterCollectors(sup *supervisor.Supervisor) {
 		}))
 	}
 
-	if len(cfg.Directories.Paths) > 0 {
-		sup.RegisterService(NewCollectorService(&collector.DirectoryCollector{
-			Dirs:     cfg.Directories.Paths,
-			Interval: cfg.Directories.Interval,
-		}))
-	}
+	// Always register the directories collector — even with no paths
+	// configured up front. The collector's tick body re-reads
+	// observer.yaml every cycle (see currentDirs in directory.go), so
+	// directories the user adds later via the desktop's "Add directory"
+	// button get picked up without a restart. Without this, an empty
+	// directories.paths at startup meant the collector goroutine
+	// never even started, defeating the dynamic re-read.
+	sup.RegisterService(NewCollectorService(&collector.DirectoryCollector{
+		Dirs:     cfg.Directories.Paths,
+		Interval: cfg.Directories.Interval,
+	}))
 
 	// PipelineIndexer is registered without a store — it opens its own.
 	sup.RegisterService(NewCollectorService(&collector.PipelineIndexer{}))

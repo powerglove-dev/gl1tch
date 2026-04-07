@@ -20,6 +20,22 @@ final class EventRouter {
     func handle(event: String, payload: [String: Any]) {
         switch event {
 
+        case "brain.alert.raised":
+            // gl1tch's brain raised an alert (collector deltas, model
+            // unreachable, …). Severity controls whether we treat it as
+            // a normal notification or a "needs attention" one.
+            let title = stringValue(payload, keys: ["title"])
+            let subtitle = stringValue(payload, keys: ["subtitle", "detail"])
+            let severity = stringValue(payload, keys: ["severity"])
+            let category = severity == "error"
+                ? NotificationManager.categoryPipelineFailed
+                : NotificationManager.categoryDefault
+            notifier.post(
+                title: title.isEmpty ? "gl1tch · brain" : title,
+                subtitle: subtitle,
+                categoryID: category
+            )
+
         case "pipeline.run.completed":
             let name = stringValue(payload, keys: ["pipeline", "name"])
             trackPipeline(name: name)

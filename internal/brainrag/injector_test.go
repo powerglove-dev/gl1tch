@@ -1,3 +1,5 @@
+//go:build integration
+
 package brainrag
 
 import (
@@ -11,7 +13,10 @@ import (
 	"github.com/8op-org/gl1tch/internal/store"
 )
 
-// openTestStore opens a fresh SQLite store in a temp directory.
+// openTestStore opens a fresh SQLite store in a temp directory. Used
+// only by injector tests that need to read brain note bodies — the
+// vector store itself lives in ES, but BrainNote rows still live in
+// SQLite.
 func openTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	s, err := store.OpenAt(filepath.Join(t.TempDir(), "test.db"))
@@ -23,8 +28,8 @@ func openTestStore(t *testing.T) *store.Store {
 }
 
 func TestBrainInjector_Unavailable(t *testing.T) {
-	// Point injector at a non-existent server — Ollama unavailable.
-	rs := NewRAGStore(openTestStore(t).DB(), "/test/cwd")
+	es := openTestES(t)
+	rs := NewRAGStore(es, "test:"+t.Name())
 	s := openTestStore(t)
 
 	inj := &BrainInjector{
@@ -47,7 +52,8 @@ func TestBrainInjector_Unavailable(t *testing.T) {
 func TestBrainInjector_FilterByLinkedNotes(t *testing.T) {
 	ctx := context.Background()
 
-	// Create two notes in the store.
+	// Create two notes in the (sqlite) store. Bodies are looked up by
+	// the injector after the RAG query returns IDs.
 	s := openTestStore(t)
 	id1, _ := s.InsertBrainNote(ctx, store.BrainNote{RunID: 1, StepID: "s1", Body: "Go is great"})
 	id2, _ := s.InsertBrainNote(ctx, store.BrainNote{RunID: 1, StepID: "s2", Body: "Python is cool"})
@@ -57,7 +63,8 @@ func TestBrainInjector_FilterByLinkedNotes(t *testing.T) {
 	// 3 calls: index note1, index note2, embed query
 	srv := mockOllama(t, [][]float32{v, v, v})
 
-	rs := NewRAGStore(s.DB(), "/test/cwd")
+	es := openTestES(t)
+	rs := NewRAGStore(es, "test:"+t.Name())
 
 	id1str := fmt.Sprintf("%d", id1)
 	id2str := fmt.Sprintf("%d", id2)

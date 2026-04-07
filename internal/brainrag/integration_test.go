@@ -50,8 +50,8 @@ func TestEmbed_RealOllama(t *testing.T) {
 func TestRAGStore_RealIndexAndQuery(t *testing.T) {
 	checkModelAvailable(t, "nomic-embed-text")
 
-	s := openTestStore(t)
-	rs := NewRAGStore(s.DB(), "/test/cwd")
+	es := openTestES(t)
+	rs := NewRAGStore(es, "test:"+t.Name())
 	emb := NewOllamaEmbedder(DefaultBaseURL, DefaultEmbedModel)
 
 	ctx := context.Background()

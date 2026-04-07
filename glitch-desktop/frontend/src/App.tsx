@@ -1,11 +1,12 @@
 import { useEffect, useCallback, useState, useRef } from "react";
 import { Titlebar } from "./components/Titlebar";
-import { Statusbar } from "./components/Statusbar";
 import { Sidebar } from "./components/Sidebar";
-import type { AgentEntry, WorkflowFileEntry, PromptEntry, WorkflowEntry } from "./components/Sidebar";
+import type { AgentEntry, WorkflowFileEntry, PromptEntry } from "./components/Sidebar";
 import { MessageList } from "./components/MessageList";
 import { ChatInput } from "./components/ChatInput";
 import type { ProviderOption, ChainStep } from "./components/ChatInput";
+import { EditorPopup } from "./components/EditorPopup";
+import { useToast } from "./components/Toast";
 
 import { useChatStore } from "./lib/store";
 import { useWailsEvent } from "./lib/wails";
@@ -24,36 +25,45 @@ import {
   ListAgents,
   ListWorkflows,
   ListPrompts,
-  ListChatWorkflows,
   SaveChatWorkflow,
-  DeleteChatWorkflow,
+  DeleteWorkflowFile,
   DeletePrompt,
+  RunWorkflow,
+  CreateDraft,
+  CreateDraftFromTarget,
   RunChain,
   AnswerClarification,
   Doctor,
+  StopRun,
   SaveMessage,
   LoadMessages,
 } from "../wailsjs/go/main/App";
-import type { Message, Block } from "./lib/types";
+import type { Message, Block, BrainActivity } from "./lib/types";
 
 export function App() {
   const {
-    state,
+    state, active,
     addUserMessage, addUserChain, startAssistant, appendChunk, finishAssistant, streamError,
     applyBlockEvent,
-    setStatus, toggleSidebar, clearMessages, setMessages,
+    setStatus, toggleSidebar, setMessages,
     setWorkspaces, setActiveWorkspace, addWorkspace, removeWorkspace, updateWorkspace,
+    addBrainActivity, markBrainRead,
   } = useChatStore();
+
+  const toast = useToast();
 
   const [providers, setProviders] = useState<ProviderOption[]>([]);
   const [agents, setAgents] = useState<AgentEntry[]>([]);
   const [workflowFiles, setWorkflowFiles] = useState<WorkflowFileEntry[]>([]);
   const [prompts, setPrompts] = useState<PromptEntry[]>([]);
-  const [workflows, setWorkflows] = useState<WorkflowEntry[]>([]);
   const [selectedProvider, setSelectedProvider] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [chain, setChain] = useState<ChainStep[]>([]);
-  const [pendingClarify, setPendingClarify] = useState<{ run_id: string; question: string } | null>(null);
+  const [pendingClarify, setPendingClarify] = useState<{ workspace_id: string; run_id: string; question: string } | null>(null);
+  // The currently open EditorPopup, if any. Holds just the draft id —
+  // the popup loads its own state from GetDraft so the parent doesn't
+  // have to mirror the draft body, turn history, etc.
+  const [openDraftId, setOpenDraftId] = useState<number | null>(null);
 
   // Observer default model — what "observer" mode delegates to when a chain
   // step needs an actual executor. Persisted to localStorage so the user's
@@ -65,23 +75,42 @@ export function App() {
     () => localStorage.getItem("gl1tch:observerModel") ?? "",
   );
 
-  // Tracks the (workspaceId, messageId) most recently persisted so we don't
-  // re-save the same row on every effect re-run. Cleared on workspace switch.
-  const lastSavedRef = useRef<{ workspaceId: string; messageId: string } | null>(null);
+  // Tracks the most recently persisted (workspaceId, messageId) per workspace
+  // so we don't re-save the same row on every effect re-run. Per-workspace so
+  // a save in workspace A doesn't suppress a save in workspace B.
+  const lastSavedRef = useRef<Map<string, string>>(new Map());
+  // Workspaces we've already hydrated from the DB. Without this, switching
+  // back to a workspace mid-stream would re-fire LoadMessages and clobber
+  // the in-flight assistant message.
+  const hydratedRef = useRef<Set<string>>(new Set());
 
   // ── Wails events ──────────────────────────────────────────────────────
-  // Legacy raw-text streaming path (still used by non-chain ask flows).
-  useWailsEvent("chat:chunk", (text: string) => appendChunk(text));
-  useWailsEvent("chat:done", () => finishAssistant());
-  useWailsEvent("chat:error", (msg: string) => streamError(msg));
+  // All chat events carry a workspace_id so we can route them to the right
+  // workspace's slice instead of whichever happens to be active when the
+  // event arrives. The active view is just a derived slice off byWorkspace.
+  useWailsEvent("chat:chunk", (data: unknown) => {
+    const d = data as { workspace_id?: string; text?: string };
+    if (d?.workspace_id && d?.text != null) appendChunk(d.workspace_id, d.text);
+  });
+
+  useWailsEvent("chat:done", (data: unknown) => {
+    const d = data as { workspace_id?: string };
+    if (d?.workspace_id) finishAssistant(d.workspace_id);
+  });
+
+  useWailsEvent("chat:error", (data: unknown) => {
+    const d = data as { workspace_id?: string; message?: string };
+    if (d?.workspace_id) streamError(d.workspace_id, d.message ?? "error");
+  });
 
   // Structured block events from the chain runner's protocol splitter.
-  // Each event is a {kind, block, attrs?, text?} map (see encodeBlockEvent
-  // in glitch-desktop/app.go).
+  // Each event is a {workspace_id, kind, block, attrs?, text?} map (see
+  // encodeBlockEvent in glitch-desktop/app.go).
   useWailsEvent("chat:event", (data: unknown) => {
-    if (data && typeof data === "object") {
-      applyBlockEvent(data as Parameters<typeof applyBlockEvent>[0]);
-    }
+    if (!data || typeof data !== "object") return;
+    const d = data as { workspace_id?: string };
+    if (!d.workspace_id) return;
+    applyBlockEvent(d.workspace_id, data as Parameters<typeof applyBlockEvent>[1]);
   });
 
   useWailsEvent("status:all", (data: unknown) => {
@@ -89,10 +118,50 @@ export function App() {
     if (s) setStatus({ ollama: s.ollama ?? false, elasticsearch: s.elasticsearch ?? false, busd: s.busd ?? false });
   });
 
+  // brain:status — live state of the brain indicator. Backend can emit
+  // either the legacy ["idle"|"improving", detail] tuple or an object
+  // {state, detail}. We coerce both to the new BrainState union; legacy
+  // "improving" maps to "analyzing".
   useWailsEvent("brain:status", (data: unknown) => {
+    let rawState = "";
+    let detail = "";
     if (Array.isArray(data)) {
-      setStatus({ brain: (data[0] as "idle" | "improving") ?? "idle", brainDetail: (data[1] as string) ?? "" });
+      rawState = (data[0] as string) ?? "";
+      detail = (data[1] as string) ?? "";
+    } else if (data && typeof data === "object") {
+      const d = data as { state?: string; detail?: string };
+      rawState = d.state ?? "";
+      detail = d.detail ?? "";
     }
+    const map: Record<string, "idle" | "collecting" | "analyzing" | "alert" | "error"> = {
+      idle: "idle",
+      collecting: "collecting",
+      analyzing: "analyzing",
+      improving: "analyzing", // legacy alias
+      alert: "alert",
+      error: "error",
+    };
+    setStatus({ brain: map[rawState] ?? "idle", brainDetail: detail });
+  });
+
+  // brain:activity — one entry for the activity stream. Sent by the
+  // backend when the local-model triage loop produces a finding or when
+  // the brain wants to drop a periodic check-in.
+  useWailsEvent("brain:activity", (data: unknown) => {
+    if (!data || typeof data !== "object") return;
+    const d = data as Partial<BrainActivity>;
+    if (!d.title) return;
+    const entry: BrainActivity = {
+      id: d.id ?? `brain-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      kind: d.kind === "alert" ? "alert" : "checkin",
+      severity: d.severity === "warn" || d.severity === "error" ? d.severity : "info",
+      title: d.title,
+      detail: d.detail ?? "",
+      source: d.source,
+      timestamp: d.timestamp ?? Date.now(),
+      unread: true,
+    };
+    addBrainActivity(entry);
   });
 
   useWailsEvent("workspace:updated", (data: unknown) => {
@@ -103,10 +172,10 @@ export function App() {
   });
 
   useWailsEvent("chat:clarify", (data: unknown) => {
-    const d = data as { run_id: string; question: string };
-    if (d?.run_id && d?.question) {
-      setPendingClarify(d);
-      appendChunk("\n\n**Clarification needed:** " + d.question + "\n");
+    const d = data as { workspace_id?: string; run_id?: string; question?: string };
+    if (d?.workspace_id && d?.run_id && d?.question) {
+      setPendingClarify({ workspace_id: d.workspace_id, run_id: d.run_id, question: d.question });
+      appendChunk(d.workspace_id, "\n\n**Clarification needed:** " + d.question + "\n");
     }
   });
 
@@ -131,7 +200,9 @@ export function App() {
     });
   }, []);
 
-  // Reload sidebar data (agents, workflow files, prompts, saved workflows)
+  // Reload sidebar data (agents, workflow files, prompts).
+  // Workflows are file-backed only as of the YAML unification — there's
+  // no separate DB-backed list to fetch.
   const refreshSidebarData = useCallback(() => {
     if (state.activeWorkspaceId) {
       ListAgents(state.activeWorkspaceId).then((json) => {
@@ -140,13 +211,9 @@ export function App() {
       ListWorkflows(state.activeWorkspaceId).then((json) => {
         try { setWorkflowFiles(JSON.parse(json) ?? []); } catch {}
       });
-      ListChatWorkflows(state.activeWorkspaceId).then((json) => {
-        try { setWorkflows(JSON.parse(json) ?? []); } catch {}
-      });
     } else {
       setAgents([]);
       setWorkflowFiles([]);
-      setWorkflows([]);
     }
     ListPrompts().then((json) => {
       try { setPrompts(JSON.parse(json) ?? []); } catch {}
@@ -159,18 +226,16 @@ export function App() {
   }, [state.activeWorkspaceId]);
 
   // ── Chat history persistence ──────────────────────────────────────────
-  // Load saved messages whenever the active workspace changes. Maps the
-  // store's WorkspaceMessage shape (snake_case, blocks_json string) into
-  // the in-memory Message shape the chat store expects. Marks the most
-  // recent loaded ID as "already persisted" so the save effect below
-  // doesn't echo it back to the database.
+  // Hydrate a workspace's messages from the DB the first time we see it.
+  // Skipped on subsequent switches so the in-memory slice (which may have
+  // an in-flight stream) is preserved. Workspaces with no rows still get
+  // marked as hydrated so we don't refetch on every switch.
   useEffect(() => {
-    if (!state.activeWorkspaceId) {
-      lastSavedRef.current = null;
-      clearMessages();
-      return;
-    }
     const wsId = state.activeWorkspaceId;
+    if (!wsId) return;
+    if (hydratedRef.current.has(wsId)) return;
+    hydratedRef.current.add(wsId);
+
     LoadMessages(wsId).then((json) => {
       try {
         const rows = JSON.parse(json) as Array<{
@@ -192,40 +257,37 @@ export function App() {
             timestamp: r.timestamp,
           };
         });
-        setMessages(msgs);
+        setMessages(wsId, msgs);
         const tail = msgs[msgs.length - 1];
-        lastSavedRef.current = tail
-          ? { workspaceId: wsId, messageId: tail.id }
-          : { workspaceId: wsId, messageId: "" };
+        if (tail) lastSavedRef.current.set(wsId, tail.id);
       } catch {
-        clearMessages();
+        setMessages(wsId, []);
       }
     });
-  }, [state.activeWorkspaceId, setMessages, clearMessages]);
+  }, [state.activeWorkspaceId, setMessages]);
 
-  // Persist newly committed messages. We only save the *tail* message: any
-  // edit upstream of the tail is either a re-write of an existing row (no-op
-  // for INSERT OR REPLACE) or a streaming chunk we don't care about.
-  // Streaming-in-flight messages are skipped — finishAssistant flips
-  // streaming=false on commit and the next pass through this effect saves it.
+  // Persist newly committed messages for *every* workspace that has unsaved
+  // tail rows. We can't scope this to the active workspace because a stream
+  // running in workspace A while the user is looking at workspace B would
+  // never get its tail saved otherwise.
   useEffect(() => {
-    const wsId = state.activeWorkspaceId;
-    if (!wsId) return;
-    const last = state.messages[state.messages.length - 1];
-    if (!last || last.streaming) return;
-    const seen = lastSavedRef.current;
-    if (seen && seen.workspaceId === wsId && seen.messageId === last.id) return;
-    lastSavedRef.current = { workspaceId: wsId, messageId: last.id };
-    SaveMessage(
-      wsId,
-      JSON.stringify({
-        id: last.id,
-        role: last.role,
-        blocks: last.blocks,
-        timestamp: last.timestamp,
-      }),
-    );
-  }, [state.messages, state.activeWorkspaceId]);
+    for (const [wsId, slice] of Object.entries(state.byWorkspace)) {
+      const last = slice.messages[slice.messages.length - 1];
+      if (!last || last.streaming) continue;
+      const seen = lastSavedRef.current.get(wsId);
+      if (seen === last.id) continue;
+      lastSavedRef.current.set(wsId, last.id);
+      SaveMessage(
+        wsId,
+        JSON.stringify({
+          id: last.id,
+          role: last.role,
+          blocks: last.blocks,
+          timestamp: last.timestamp,
+        }),
+      );
+    }
+  }, [state.byWorkspace]);
 
   // Refresh when window regains focus (picks up new files/prompts)
   useEffect(() => {
@@ -252,19 +314,21 @@ export function App() {
         const ws: Workspace = JSON.parse(json);
         addWorkspace(ws);
         setActiveWorkspace(ws.id);
-        clearMessages();
+        // New workspaces have no DB rows; mark hydrated so the loader skips them.
+        hydratedRef.current.add(ws.id);
       } catch {}
     });
-  }, [addWorkspace, setActiveWorkspace, clearMessages]);
+  }, [addWorkspace, setActiveWorkspace]);
 
   const handleSwitchWorkspace = useCallback((id: string) => {
     setActiveWorkspace(id);
-    clearMessages();
-  }, [setActiveWorkspace, clearMessages]);
+  }, [setActiveWorkspace]);
 
   const handleDeleteWorkspace = useCallback((id: string) => {
     DeleteWorkspace(id);
     removeWorkspace(id);
+    hydratedRef.current.delete(id);
+    lastSavedRef.current.delete(id);
   }, [removeWorkspace]);
 
   const handleRenameWorkspace = useCallback((id: string, title: string) => {
@@ -303,63 +367,162 @@ export function App() {
   const handleClearChain = useCallback(() => setChain([]), []);
 
   // ── Workflow management ──────────────────────────────────────────────
+  //
+  // Workflows are file-backed (.workflow.yaml under
+  // <workspace>/.glitch/workflows/) as of the YAML unification. There's
+  // no DB intermediary anymore — saving the chain bar writes a YAML
+  // file directly, and deleting removes the file.
 
   const handleSaveWorkflow = useCallback((name: string) => {
     if (!state.activeWorkspaceId || chain.length === 0) return;
     const stepsJSON = JSON.stringify(chain);
-    SaveChatWorkflow(state.activeWorkspaceId, name, stepsJSON).then(() => {
+    // Resolve the provider/model that will get baked into the saved
+    // YAML for any prompt step that doesn't override it. Same priority
+    // as runChainNow: explicit picker → observer default → ollama.
+    let provider = selectedProvider || observerDefaultProvider || "ollama";
+    let model = selectedProvider ? selectedModel : observerDefaultModel;
+    if (!model && provider === "ollama") {
+      const ollama = providers.find((p) => p.id === "ollama");
+      const def = ollama?.models.find((m) => m.default) ?? ollama?.models[0];
+      model = def?.id ?? "";
+    }
+    SaveChatWorkflow(state.activeWorkspaceId!, name, stepsJSON, provider, model).then((result) => {
+      // Backend returns {error: "..."} on failure or {path, name} on
+      // success. Surface both via the toast — errors offer a retry
+      // action, success is a quick confirmation so the user knows the
+      // file actually landed.
+      try {
+        const parsed = JSON.parse(result);
+        if (parsed?.error) {
+          toast.error("Couldn't save workflow", {
+            detail: parsed.error,
+            actions: [{ label: "Retry", onClick: () => handleSaveWorkflow(name) }],
+          });
+          return;
+        }
+        toast.success(`Saved ${name}.workflow.yaml`, {
+          detail: parsed?.path,
+        });
+      } catch {
+        // Malformed payload — treat as a generic save failure rather
+        // than swallowing it silently.
+        toast.error("Couldn't save workflow", {
+          detail: "Unexpected response from backend",
+          actions: [{ label: "Retry", onClick: () => handleSaveWorkflow(name) }],
+        });
+      }
       refreshSidebarData();
     });
-  }, [state.activeWorkspaceId, chain, refreshSidebarData]);
+  }, [state.activeWorkspaceId, chain, refreshSidebarData, selectedProvider, selectedModel, observerDefaultProvider, observerDefaultModel, providers, toast]);
 
-  const handleLoadWorkflow = useCallback((w: WorkflowEntry) => {
-    try {
-      const steps = JSON.parse(w.StepsJSON) as ChainStep[];
-      setChain(steps);
-    } catch {}
-  }, []);
+  // Run a workflow file directly (the sidebar's ▶ button). Calls the
+  // backend's existing RunWorkflow path so the YAML gets executed in
+  // the workspace's primary directory.
+  const handleRunWorkflowFile = useCallback((p: WorkflowFileEntry) => {
+    if (!state.activeWorkspaceId) return;
+    const wsId = state.activeWorkspaceId;
+    addUserMessage(wsId, `▶ ${p.name}`);
+    startAssistant(wsId);
+    RunWorkflow(p.path, "", wsId);
+  }, [state.activeWorkspaceId, addUserMessage, startAssistant]);
 
-  // Run immediately: load the workflow into the chain and trigger send with no extra text.
-  // We use a microtask so the chain state is committed before send reads it.
-  const handleRunWorkflow = useCallback((w: WorkflowEntry) => {
-    try {
-      const steps = JSON.parse(w.StepsJSON) as ChainStep[];
-      setChain(steps);
-      // Defer send so the chain state is in place
-      setTimeout(() => {
-        // We can't call handleSend here directly because of stale closure;
-        // instead, simulate by dispatching to the existing flow.
-        // Use a ref-based approach: just call the send logic inline.
-        runChainNow(steps, "");
-      }, 0);
-    } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleDeleteWorkflow = useCallback((id: number) => {
-    DeleteChatWorkflow(id).then(() => {
-      setWorkflows((prev) => prev.filter((w) => w.ID !== id));
+  // Delete a workflow file from disk and refresh the sidebar list.
+  // We optimistically remove from local state on success and surface
+  // the path in the toast so the user knows exactly what got deleted.
+  const handleDeleteWorkflowFile = useCallback((p: WorkflowFileEntry) => {
+    DeleteWorkflowFile(p.path).then((err) => {
+      if (err) {
+        toast.error("Couldn't delete workflow", { detail: err });
+        return;
+      }
+      setWorkflowFiles((prev) => prev.filter((wf) => wf.path !== p.path));
+      toast.success(`Deleted ${p.name}.workflow.yaml`, { detail: p.path });
     });
+  }, [toast]);
+
+  // ── Editor popup handlers ────────────────────────────────────────────
+  // Opening the popup is always "create or load a draft, then set
+  // openDraftId". The popup component does the actual loading via
+  // GetDraft so we don't need to mirror its state in the parent.
+
+  const openEditor = useCallback((draftId: number) => {
+    setOpenDraftId(draftId);
+  }, []);
+
+  const handleNewWorkflow = useCallback(() => {
+    if (!state.activeWorkspaceId) return;
+    // Empty body, empty title — the popup will prompt the user to
+    // type a name and either chat-refine or hand-write the YAML.
+    CreateDraft(state.activeWorkspaceId, "workflow", "", "").then((json) => {
+      try {
+        const d = JSON.parse(json);
+        if (d?.error) {
+          toast.error("Couldn't create draft", { detail: d.error });
+          return;
+        }
+        if (d?.id) openEditor(d.id);
+      } catch {}
+    });
+  }, [state.activeWorkspaceId, openEditor, toast]);
+
+  const handleEditWorkflowFile = useCallback((p: WorkflowFileEntry) => {
+    if (!state.activeWorkspaceId) return;
+    CreateDraftFromTarget(state.activeWorkspaceId, "workflow", 0, p.path).then((json) => {
+      try {
+        const d = JSON.parse(json);
+        if (d?.error) {
+          toast.error("Couldn't open workflow", { detail: d.error });
+          return;
+        }
+        if (d?.id) openEditor(d.id);
+      } catch {}
+    });
+  }, [state.activeWorkspaceId, openEditor, toast]);
+
+  const handleNewPrompt = useCallback(() => {
+    if (!state.activeWorkspaceId) return;
+    CreateDraft(state.activeWorkspaceId, "prompt", "", "").then((json) => {
+      try {
+        const d = JSON.parse(json);
+        if (d?.error) {
+          toast.error("Couldn't create draft", { detail: d.error });
+          return;
+        }
+        if (d?.id) openEditor(d.id);
+      } catch {}
+    });
+  }, [state.activeWorkspaceId, openEditor, toast]);
+
+  const handleEditPrompt = useCallback((p: PromptEntry) => {
+    if (!state.activeWorkspaceId) return;
+    CreateDraftFromTarget(state.activeWorkspaceId, "prompt", p.ID, "").then((json) => {
+      try {
+        const d = JSON.parse(json);
+        if (d?.error) {
+          toast.error("Couldn't open prompt", { detail: d.error });
+          return;
+        }
+        if (d?.id) openEditor(d.id);
+      } catch {}
+    });
+  }, [state.activeWorkspaceId, openEditor, toast]);
+
+  const closeEditor = useCallback(() => {
+    setOpenDraftId(null);
   }, []);
 
   // ── Send ──────────────────────────────────────────────────────────────
 
   // runChainNow is the canonical execution path for a chain + optional text.
-  // Used by both manual send (handleSend) and auto-run (handleRunWorkflow).
-  // For chains: calls backend RunChain which runs each step sequentially with
-  // its own provider, threading output between steps.
+  // Pinned to the workspace that was active at submit time so the run keeps
+  // delivering events into the right slice even if the user switches away.
   const runChainNow = useCallback((chainToRun: ChainStep[], text: string) => {
     if (chainToRun.length === 0 && !text.trim()) return;
+    const wsId = state.activeWorkspaceId ?? "";
+    if (!wsId) return;
 
     // Resolve which provider will actually run prompt steps that don't set
-    // their own override. Priority order:
-    //   1. picker selection (user explicitly picked something)
-    //   2. observer default the user pinned with ★ in the picker
-    //   3. ollama as the global default (matches picker label "ES + Ollama"
-    //      and the local-first stance)
-    // For #3, look up the provider's default-or-first model so we don't
-    // hand the executor an empty GLITCH_MODEL — the source of the previous
-    // "model is required" errors.
+    // their own override. Priority: picker → observer default → ollama.
     let resolvedDefaultProvider: string;
     let resolvedDefaultModel: string;
 
@@ -376,11 +539,9 @@ export function App() {
       resolvedDefaultModel = def?.id ?? "";
     }
 
-    // Render chain steps as chips in the user message (no more `[a] -> [b]`
-    // string mashup). Free-text is passed alongside as the chain's trailing
-    // note. Plain messages with no chain still go through addUserMessage.
     if (chainToRun.length > 0) {
       addUserChain(
+        wsId,
         chainToRun.map((s) => ({
           label: s.label,
           kind: s.type,
@@ -396,12 +557,12 @@ export function App() {
         text.trim() || undefined,
       );
     } else {
-      addUserMessage(text);
+      addUserMessage(wsId, text);
     }
-    startAssistant();
+    startAssistant(wsId);
 
     if (text.trim() === "/doctor" && chainToRun.length === 0) {
-      Doctor();
+      Doctor(wsId);
       return;
     }
 
@@ -409,40 +570,42 @@ export function App() {
       RunChain(
         JSON.stringify(chainToRun),
         text,
-        state.activeWorkspaceId ?? "",
+        wsId,
         resolvedDefaultProvider,
         resolvedDefaultModel,
       );
       setChain([]);
     } else if (selectedProvider) {
-      AskProvider(selectedProvider, selectedModel, text, state.activeWorkspaceId ?? "", "");
+      AskProvider(selectedProvider, selectedModel, text, wsId, "");
     } else {
-      AskScoped(text, state.activeWorkspaceId ?? "");
+      AskScoped(text, wsId);
     }
   }, [addUserMessage, addUserChain, startAssistant, selectedProvider, selectedModel, observerDefaultProvider, observerDefaultModel, providers, state.activeWorkspaceId]);
 
   const handleSend = useCallback(
     (text: string) => {
-      // If there's a pending clarification, answer it instead
-      if (pendingClarify) {
-        addUserMessage(text);
+      // If there's a pending clarification for the active workspace, answer it.
+      if (pendingClarify && pendingClarify.workspace_id === state.activeWorkspaceId) {
+        addUserMessage(pendingClarify.workspace_id, text);
         AnswerClarification(pendingClarify.run_id, text);
         setPendingClarify(null);
         return;
       }
       runChainNow(chain, text);
     },
-    [addUserMessage, pendingClarify, chain, runChainNow],
+    [addUserMessage, pendingClarify, chain, runChainNow, state.activeWorkspaceId],
   );
+
+  const handleStop = useCallback(() => {
+    if (!state.activeWorkspaceId) return;
+    StopRun(state.activeWorkspaceId);
+  }, [state.activeWorkspaceId]);
 
   const handleSelectProvider = useCallback((providerId: string, modelId: string) => {
     setSelectedProvider(providerId);
     setSelectedModel(modelId);
   }, []);
 
-  // Persist the observer default. The picker calls this when the user pins
-  // a model with the ★ button next to it. We round-trip via localStorage so
-  // the choice survives a restart and is read by the runChainNow fallback.
   const handleSetObserverDefault = useCallback((providerId: string, modelId: string) => {
     setObserverDefaultProvider(providerId);
     setObserverDefaultModel(modelId);
@@ -468,18 +631,30 @@ export function App() {
   const activeWs = (state.workspaces ?? []).find((w) => w.id === state.activeWorkspaceId);
   const directories = activeWs?.directories ?? [];
 
-  const lastDone = state.messages.flatMap((m) => m.blocks).filter((b) => b.type === "done").at(-1);
-  const doneModel = lastDone?.type === "done" ? lastDone.model : undefined;
-  const doneTokens = lastDone?.type === "done" ? lastDone.tokens : undefined;
+  // doneModel/doneTokens were used by the now-deleted Statusbar. The
+  // chat surface (DoneBlock + chain chip) already shows the same info,
+  // so we no longer need to derive them here.
 
   // Derive selected agent from chain for sidebar highlight
   const selectedAgent = chain.find((s) => s.type === "agent")?.type === "agent"
     ? (chain.find((s) => s.type === "agent") as { name: string })?.name ?? null
     : null;
 
+  const activeClarify =
+    pendingClarify && pendingClarify.workspace_id === state.activeWorkspaceId ? pendingClarify : null;
+
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--bg)" }}>
-      <Titlebar sidebarOpen={state.sidebarOpen} onToggleSidebar={toggleSidebar} />
+      <Titlebar
+        sidebarOpen={state.sidebarOpen}
+        onToggleSidebar={toggleSidebar}
+        brainState={state.status.brain}
+        brainDetail={state.status.brainDetail}
+        brainActivity={state.brainActivity}
+        onMarkBrainRead={markBrainRead}
+        activeWorkspaceId={state.activeWorkspaceId}
+        activeWorkspaceTitle={activeWs?.title ?? ""}
+      />
 
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
         {state.sidebarOpen && (
@@ -494,28 +669,32 @@ export function App() {
             agents={agents}
             workflowFiles={workflowFiles}
             prompts={prompts}
-            workflows={workflows}
             selectedAgent={selectedAgent}
+            brainActivity={state.brainActivity}
             onAddDirectory={handleAddDirectory}
             onRemoveDirectory={handleRemoveDirectory}
             onAddWorkflowFile={handleAddWorkflowFileToChain}
+            onRunWorkflowFile={handleRunWorkflowFile}
+            onDeleteWorkflowFile={handleDeleteWorkflowFile}
+            onEditWorkflowFile={handleEditWorkflowFile}
+            onNewWorkflow={handleNewWorkflow}
             onAddAgent={handleAddAgentToChain}
             onAddPrompt={handleAddPromptToChain}
-            onLoadWorkflow={handleLoadWorkflow}
-            onRunWorkflow={handleRunWorkflow}
-            onDeleteWorkflow={handleDeleteWorkflow}
             onDeletePrompt={handleDeletePrompt}
+            onEditPrompt={handleEditPrompt}
+            onNewPrompt={handleNewPrompt}
           />
         )}
 
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, background: "var(--bg)" }}>
           <MessageList
-            messages={state.messages}
+            messages={active.messages}
             onAction={handleAction}
-            thinking={state.streaming ? state.thinking : ""}
+            thinking={active.streaming ? active.thinking : ""}
           />
           <ChatInput
-            disabled={state.streaming && !pendingClarify}
+            disabled={false}
+            streaming={active.streaming && !activeClarify}
             providers={providers}
             selectedProvider={selectedProvider}
             selectedModel={selectedModel}
@@ -529,11 +708,27 @@ export function App() {
             onClearChain={handleClearChain}
             onSaveWorkflow={handleSaveWorkflow}
             onSend={handleSend}
+            onStop={handleStop}
           />
         </div>
       </div>
 
-      <Statusbar status={state.status} model={selectedProvider || doneModel} tokens={doneTokens} />
+      {/* Editor popup — modal overlay for editing prompts and
+          workflows with the chat-driven refinement loop. The parent
+          owns nothing except the open draft id; the popup loads its
+          own state via GetDraft. */}
+      {openDraftId != null && state.activeWorkspaceId && (
+        <EditorPopup
+          draftId={openDraftId}
+          workspaceId={state.activeWorkspaceId}
+          providers={providers}
+          observerDefaultProvider={observerDefaultProvider}
+          observerDefaultModel={observerDefaultModel}
+          onSetObserverDefault={handleSetObserverDefault}
+          onClose={closeEditor}
+          onSaved={refreshSidebarData}
+        />
+      )}
     </div>
   );
 }

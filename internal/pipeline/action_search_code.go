@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/8op-org/gl1tch/internal/brainrag"
-	"github.com/8op-org/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/esearch"
 )
 
 func init() {
@@ -49,13 +49,11 @@ func builtinSearchCode(ctx context.Context, args map[string]any, w io.Writer) (m
 
 	cwd := toString(args["cwd"])
 
-	s, err := store.Open()
+	es, err := esearch.New("")
 	if err != nil {
-		return nil, fmt.Errorf("builtin.search_code: open store: %w", err)
+		return nil, fmt.Errorf("builtin.search_code: open es: %w", err)
 	}
-	defer s.Close()
-
-	rs := brainrag.NewRAGStore(s.DB(), cwd)
+	rs := brainrag.NewRAGStoreForCWD(es, cwd)
 
 	entries, err := rs.QueryWithText(ctx, embedder, query, topK)
 	if err != nil {

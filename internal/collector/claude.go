@@ -58,7 +58,15 @@ func (c *ClaudeCollector) Start(ctx context.Context, es *esearch.Client) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			start := time.Now()
 			newOffset, err := c.poll(ctx, es, historyPath, lastOffset)
+			// Heartbeat: bytes-of-new-data is a reasonable stand-in
+			// for "indexed count" since the .jsonl is line-delimited.
+			indexed := int(newOffset - lastOffset)
+			if indexed < 0 {
+				indexed = 0
+			}
+			RecordRun("claude", start, indexed, err)
 			if err != nil {
 				slog.Warn("claude collector: poll error", "err", err)
 				continue
@@ -183,14 +191,20 @@ func (c *ClaudeProjectCollector) Start(ctx context.Context, es *esearch.Client) 
 	defer ticker.Stop()
 
 	// Run once immediately.
+	start := time.Now()
+	beforeCount := len(indexed)
 	c.pollProjects(ctx, es, projectsDir, indexed)
+	RecordRun("claude-projects", start, len(indexed)-beforeCount, nil)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			start := time.Now()
+			before := len(indexed)
 			c.pollProjects(ctx, es, projectsDir, indexed)
+			RecordRun("claude-projects", start, len(indexed)-before, nil)
 		}
 	}
 }

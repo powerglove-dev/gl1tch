@@ -1,37 +1,62 @@
+// Package brainrag provides vector embedding + retrieval-augmented
+// generation for brain notes and indexed code chunks.
+//
+// As of the ES migration, the store is backed by Elasticsearch's
+// dense_vector + kNN search instead of the previous SQLite blob
+// approach. This consolidates the vector store onto the same backend
+// the observer already uses (glitch-events, glitch-summaries, …) so
+// the brain has a single memory substrate. Kibana can now visualize
+// the same vectors the runtime queries against.
 package brainrag
 
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"os"
-	"sort"
 
+	"github.com/8op-org/gl1tch/internal/esearch"
 	"github.com/8op-org/gl1tch/internal/store"
 )
 
-// VectorEntry is a stored embedding for a brain note.
+// VectorEntry is a stored embedding for a brain note or code chunk.
+// Kept for backward compatibility with consumers that read the
+// QueryWithText results — only the public fields are used now (the
+// raw vector blob lives only in ES).
 type VectorEntry struct {
 	NoteID string    `json:"note_id"`
 	Text   string    `json:"text"`
-	Vector []float32 `json:"vector"`
-	Hash   string    `json:"hash"` // SHA256 of text
+	Vector []float32 `json:"vector,omitempty"`
+	Hash   string    `json:"hash,omitempty"`
 }
 
-// RAGStore is a SQLite-backed vector store scoped to a working directory.
+// RAGStore is an Elasticsearch-backed vector store scoped to a single
+// "scope" string (typically a working directory or workspace id). All
+// reads and writes are filtered by scope so multiple workspaces can
+// share the same backing index without bleeding into each other.
 type RAGStore struct {
-	db  *sql.DB
-	cwd string
+	es    *esearch.Client
+	scope string
 }
 
-// NewRAGStore creates a RAGStore backed by db, scoped to cwd.
-// The brain_vectors table must already exist (applied by store.Open/OpenAt).
-func NewRAGStore(db *sql.DB, cwd string) *RAGStore {
-	return &RAGStore{db: db, cwd: cwd}
+// NewRAGStore returns an ES-backed store scoped to scope.
+//
+// The scope namespacing convention:
+//   - "cwd:/abs/path"     for indexed code chunks
+//   - "workspace:<id>"    for workspace brain notes
+//
+// Callers that previously passed a working directory should keep doing
+// so — NewRAGStoreForCWD is a thin wrapper that adds the prefix.
+func NewRAGStore(es *esearch.Client, scope string) *RAGStore {
+	return &RAGStore{es: es, scope: scope}
+}
+
+// NewRAGStoreForCWD returns a store scoped to a working-directory
+// path. The "cwd:" prefix is added automatically so callers don't
+// have to think about the scope discriminator.
+func NewRAGStoreForCWD(es *esearch.Client, cwd string) *RAGStore {
+	return &RAGStore{es: es, scope: "cwd:" + cwd}
 }
 
 // hashText returns the SHA256 hex hash of text.
@@ -40,40 +65,44 @@ func hashText(text string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// encodeVector serializes a float32 slice as a little-endian IEEE 754 byte blob.
-func encodeVector(v []float32) []byte {
-	buf := make([]byte, len(v)*4)
-	for i, f := range v {
-		binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(f))
-	}
-	return buf
+// vectorDoc is the wire shape of a doc in IndexVectors. Mirrors the
+// fields declared in vectorsMapping (see internal/esearch/mappings.go).
+type vectorDoc struct {
+	Scope     string    `json:"scope"`
+	NoteID    string    `json:"note_id"`
+	Text      string    `json:"text"`
+	Vector    []float32 `json:"vector"`
+	Hash      string    `json:"hash"`
+	EmbedID   string    `json:"embed_id"`
+	IndexedAt string    `json:"indexed_at,omitempty"`
 }
 
-// decodeVector deserializes a little-endian IEEE 754 byte blob to a float32 slice.
-func decodeVector(b []byte) []float32 {
-	v := make([]float32, len(b)/4)
-	for i := range v {
-		v[i] = math.Float32frombits(binary.LittleEndian.Uint32(b[i*4:]))
-	}
-	return v
+// docID is the ES document _id we use for upserts. We hash scope +
+// note_id because note_id often contains slashes (file paths) and
+// colons that ES would otherwise interpret as URL path segments. The
+// raw scope and note_id are still stored as fields on the doc body
+// for filtering and display.
+func docID(scope, noteID string) string {
+	h := sha256.Sum256([]byte(scope + "\x00" + noteID))
+	return hex.EncodeToString(h[:])
 }
 
-// IndexNote computes an embedding for text and stores it under noteID scoped to r.cwd.
-// If an entry already exists with the same hash and embed_id, it is a no-op.
+// IndexNote upserts an embedding for text under noteID. If the same
+// content is already indexed under the same embedder, this is a no-op
+// (we read-back the existing doc by id and compare hash + embed_id).
 func (r *RAGStore) IndexNote(ctx context.Context, embedder Embedder, noteID, text string) error {
+	if r == nil || r.es == nil {
+		return nil
+	}
 	h := hashText(text)
 	embedID := embedder.ID()
 
-	var existingHash, existingEmbedID string
-	err := r.db.QueryRowContext(ctx,
-		`SELECT hash, embed_id FROM brain_vectors WHERE cwd = ? AND note_id = ?`,
-		r.cwd, noteID,
-	).Scan(&existingHash, &existingEmbedID)
-	if err == nil && existingHash == h && existingEmbedID == embedID {
-		return nil // already up-to-date
-	}
-	if err != nil && err != sql.ErrNoRows {
-		return fmt.Errorf("brainrag: check existing vector: %w", err)
+	// Existence/freshness check: query by id+filter to avoid re-embedding
+	// content the user hasn't touched. Cheaper than always re-running
+	// the embedder, especially for OpenAI/Voyage where embeddings cost
+	// real money.
+	if r.alreadyFresh(ctx, noteID, h, embedID) {
+		return nil
 	}
 
 	vec, err := embedder.Embed(ctx, text)
@@ -81,188 +110,110 @@ func (r *RAGStore) IndexNote(ctx context.Context, embedder Embedder, noteID, tex
 		return fmt.Errorf("brainrag: index note %q: %w", noteID, err)
 	}
 
-	blob := encodeVector(vec)
-	_, err = r.db.ExecContext(ctx,
-		`INSERT INTO brain_vectors (cwd, note_id, text, vector, hash, embed_id)
-		 VALUES (?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(cwd, note_id) DO UPDATE SET
-		   text       = excluded.text,
-		   vector     = excluded.vector,
-		   hash       = excluded.hash,
-		   embed_id   = excluded.embed_id,
-		   indexed_at = CURRENT_TIMESTAMP`,
-		r.cwd, noteID, text, blob, h, embedID,
-	)
-	if err != nil {
+	doc := vectorDoc{
+		Scope:   r.scope,
+		NoteID:  noteID,
+		Text:    text,
+		Vector:  vec,
+		Hash:    h,
+		EmbedID: embedID,
+	}
+	if err := r.es.Index(ctx, esearch.IndexVectors, docID(r.scope, noteID), doc); err != nil {
 		return fmt.Errorf("brainrag: upsert vector for %q: %w", noteID, err)
 	}
 	return nil
 }
 
-// RefreshStale re-embeds notes whose SHA256(body) differs from the stored hash.
-// Embedder unavailability is handled gracefully: a warning is printed and stale
-// entries are skipped.
+// alreadyFresh returns true if a doc with the given id already exists
+// in ES with the same hash and embed_id, meaning re-embedding would
+// be wasted work.
+func (r *RAGStore) alreadyFresh(ctx context.Context, noteID, hash, embedID string) bool {
+	q := map[string]any{
+		"size": 1,
+		"_source": []string{"hash", "embed_id"},
+		"query": map[string]any{
+			"bool": map[string]any{
+				"filter": []map[string]any{
+					{"term": map[string]any{"scope": r.scope}},
+					{"term": map[string]any{"note_id": noteID}},
+					{"term": map[string]any{"hash": hash}},
+					{"term": map[string]any{"embed_id": embedID}},
+				},
+			},
+		},
+	}
+	resp, err := r.es.Search(ctx, []string{esearch.IndexVectors}, q)
+	if err != nil {
+		return false
+	}
+	return resp.Total > 0
+}
+
+// RefreshStale re-embeds notes whose SHA256(body) differs from the
+// stored hash. Embedder unavailability is handled gracefully — the
+// caller can keep going on best-effort.
 func (r *RAGStore) RefreshStale(ctx context.Context, embedder Embedder, notes []store.BrainNote) error {
-	embedID := embedder.ID()
+	if r == nil || r.es == nil {
+		return nil
+	}
 	for _, n := range notes {
 		id := fmt.Sprintf("%d", n.ID)
-		h := hashText(n.Body)
-
-		var existingHash string
-		err := r.db.QueryRowContext(ctx,
-			`SELECT hash FROM brain_vectors WHERE cwd = ? AND note_id = ?`,
-			r.cwd, id,
-		).Scan(&existingHash)
-		if err == nil && existingHash == h {
-			continue
-		}
-		if err != nil && err != sql.ErrNoRows {
-			fmt.Fprintf(os.Stderr, "[brainrag] warn: check stale %s: %v\n", id, err)
-			continue
-		}
-
-		vec, err := embedder.Embed(ctx, n.Body)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[brainrag] warn: could not embed note %s: %v\n", id, err)
-			continue
-		}
-
-		blob := encodeVector(vec)
-		if _, err = r.db.ExecContext(ctx,
-			`INSERT INTO brain_vectors (cwd, note_id, text, vector, hash, embed_id)
-			 VALUES (?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(cwd, note_id) DO UPDATE SET
-			   text       = excluded.text,
-			   vector     = excluded.vector,
-			   hash       = excluded.hash,
-			   embed_id   = excluded.embed_id,
-			   indexed_at = CURRENT_TIMESTAMP`,
-			r.cwd, id, n.Body, blob, h, embedID,
-		); err != nil {
-			fmt.Fprintf(os.Stderr, "[brainrag] warn: upsert stale vector %s: %v\n", id, err)
+		if err := r.IndexNote(ctx, embedder, id, n.Body); err != nil {
+			fmt.Fprintf(os.Stderr, "[brainrag] warn: refresh %s: %v\n", id, err)
 		}
 	}
 	return nil
 }
 
-// Query embeds the query text and returns the top-K most similar note IDs for r.cwd.
-// If filter is non-empty, only entries whose NoteID is in filter are considered.
-// Returns an empty slice (not an error) if the embedder is unavailable.
+// Query embeds q and returns the top-K most similar note IDs scoped
+// to r.scope. If filter is non-empty, only notes whose note_id is in
+// filter are considered (used to scope brain RAG to workspace-linked
+// notes).
+//
+// Returns an empty slice (not an error) on embedder failure so callers
+// can degrade gracefully when Ollama is offline.
 func (r *RAGStore) Query(ctx context.Context, embedder Embedder, q string, topK int, filter []string) ([]string, error) {
+	if r == nil || r.es == nil {
+		return nil, nil
+	}
 	qVec, err := embedder.Embed(ctx, q)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[brainrag] warn: query embed failed: %v\n", err)
 		return nil, nil
 	}
-
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT note_id, vector FROM brain_vectors WHERE cwd = ? AND embed_id = ?`,
-		r.cwd, embedder.ID(),
-	)
+	hits, err := r.es.VectorSearch(ctx, r.scope, embedder.ID(), qVec, topK, filter)
 	if err != nil {
-		return nil, fmt.Errorf("brainrag: query vectors: %w", err)
+		return nil, fmt.Errorf("brainrag: vector search: %w", err)
 	}
-	defer rows.Close()
-
-	filterSet := make(map[string]struct{}, len(filter))
-	for _, id := range filter {
-		filterSet[id] = struct{}{}
+	out := make([]string, 0, len(hits))
+	for _, h := range hits {
+		out = append(out, h.NoteID)
 	}
-
-	type scoredEntry struct {
-		noteID string
-		score  float32
-	}
-	var scored []scoredEntry
-
-	for rows.Next() {
-		var noteID string
-		var blob []byte
-		if err := rows.Scan(&noteID, &blob); err != nil {
-			continue
-		}
-		if len(filter) > 0 {
-			if _, ok := filterSet[noteID]; !ok {
-				continue
-			}
-		}
-		s := CosineSimilarity(qVec, decodeVector(blob))
-		scored = append(scored, scoredEntry{noteID: noteID, score: s})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("brainrag: query rows: %w", err)
-	}
-
-	sort.Slice(scored, func(i, j int) bool {
-		return scored[i].score > scored[j].score
-	})
-
-	if topK <= 0 {
-		topK = 5
-	}
-	if topK > len(scored) {
-		topK = len(scored)
-	}
-
-	ids := make([]string, topK)
-	for i := range topK {
-		ids[i] = scored[i].noteID
-	}
-	return ids, nil
+	return out, nil
 }
 
-// QueryWithText embeds the query and returns the top-K most similar entries
-// with both their note IDs and original text.
-// Returns an empty slice (not an error) if the embedder is unavailable.
+// QueryWithText runs the same kNN search but returns hits with their
+// original text inline, so callers (e.g. the brain injector) don't
+// have to round-trip back to SQLite to fetch the body.
 func (r *RAGStore) QueryWithText(ctx context.Context, embedder Embedder, q string, topK int) ([]VectorEntry, error) {
+	if r == nil || r.es == nil {
+		return nil, nil
+	}
 	qVec, err := embedder.Embed(ctx, q)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[brainrag] warn: query embed failed: %v\n", err)
 		return nil, nil
 	}
-
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT note_id, text, vector FROM brain_vectors WHERE cwd = ? AND embed_id = ?`,
-		r.cwd, embedder.ID(),
-	)
+	hits, err := r.es.VectorSearch(ctx, r.scope, embedder.ID(), qVec, topK, nil)
 	if err != nil {
-		return nil, fmt.Errorf("brainrag: query vectors: %w", err)
+		return nil, fmt.Errorf("brainrag: vector search: %w", err)
 	}
-	defer rows.Close()
-
-	type scoredEntry struct {
-		entry VectorEntry
-		score float32
+	out := make([]VectorEntry, 0, len(hits))
+	for _, h := range hits {
+		out = append(out, VectorEntry{
+			NoteID: h.NoteID,
+			Text:   h.Text,
+		})
 	}
-	var scored []scoredEntry
-
-	for rows.Next() {
-		var e VectorEntry
-		var blob []byte
-		if err := rows.Scan(&e.NoteID, &e.Text, &blob); err != nil {
-			continue
-		}
-		s := CosineSimilarity(qVec, decodeVector(blob))
-		scored = append(scored, scoredEntry{entry: e, score: s})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("brainrag: query rows: %w", err)
-	}
-
-	sort.Slice(scored, func(i, j int) bool {
-		return scored[i].score > scored[j].score
-	})
-
-	if topK <= 0 {
-		topK = 5
-	}
-	if topK > len(scored) {
-		topK = len(scored)
-	}
-
-	results := make([]VectorEntry, topK)
-	for i := range topK {
-		results[i] = scored[i].entry
-	}
-	return results, nil
+	return out, nil
 }

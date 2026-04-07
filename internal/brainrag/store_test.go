@@ -1,3 +1,5 @@
+//go:build integration
+
 package brainrag
 
 import (
@@ -6,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/8op-org/gl1tch/internal/esearch"
 )
 
 // mockOllama creates a test HTTP server that returns pre-set embeddings per call.
@@ -24,6 +28,24 @@ func mockOllama(t *testing.T, embeddings [][]float32) *httptest.Server {
 	return srv
 }
 
+// openTestES dials the local Elasticsearch and skips the test if it
+// isn't reachable. Each test gets a unique scope so parallel runs can
+// share the same backing index without interference.
+func openTestES(t *testing.T) *esearch.Client {
+	t.Helper()
+	es, err := esearch.New("")
+	if err != nil {
+		t.Skipf("esearch: %v", err)
+	}
+	if err := es.Ping(context.Background()); err != nil {
+		t.Skipf("elasticsearch not available: %v", err)
+	}
+	if err := es.EnsureIndices(context.Background()); err != nil {
+		t.Fatalf("ensure indices: %v", err)
+	}
+	return es
+}
+
 func TestRAGStore_IndexAndQuery(t *testing.T) {
 	// Three distinct embeddings: v0, v1, v2.
 	// v0 and v2 are similar (parallel), v1 is orthogonal.
@@ -40,8 +62,9 @@ func TestRAGStore_IndexAndQuery(t *testing.T) {
 	srv := mockOllama(t, embeddings)
 	emb := NewOllamaEmbedder(srv.URL, "test-model")
 
-	s := openTestStore(t)
-	rs := NewRAGStore(s.DB(), "/test/cwd")
+	es := openTestES(t)
+	scope := "test:" + t.Name()
+	rs := NewRAGStore(es, scope)
 
 	ctx := context.Background()
 	if err := rs.IndexNote(ctx, emb, "note-0", "text about Go"); err != nil {
@@ -72,13 +95,12 @@ func TestRAGStore_IndexAndQuery_Filter(t *testing.T) {
 	v0 := []float32{1, 0, 0}
 	v1 := []float32{0, 1, 0}
 	v2 := []float32{2, 0, 0}
-	// Index note-0,1,2 then query
 	embeddings := [][]float32{v0, v1, v2, v0}
 	srv := mockOllama(t, embeddings)
 	emb := NewOllamaEmbedder(srv.URL, "test-model")
 
-	s := openTestStore(t)
-	rs := NewRAGStore(s.DB(), "/test/cwd")
+	es := openTestES(t)
+	rs := NewRAGStore(es, "test:"+t.Name())
 
 	ctx := context.Background()
 	_ = rs.IndexNote(ctx, emb, "note-0", "text 0")
@@ -105,8 +127,8 @@ func TestRAGStore_IdempotentIndex(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := openTestStore(t)
-	rs := NewRAGStore(s.DB(), "/test/cwd")
+	es := openTestES(t)
+	rs := NewRAGStore(es, "test:"+t.Name())
 	ctx := context.Background()
 	emb := NewOllamaEmbedder(srv.URL, "test-model")
 

@@ -50,7 +50,13 @@ func (p *PipelineIndexer) Start(ctx context.Context, es *esearch.Client) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			start := time.Now()
 			newLast, err := p.poll(ctx, es, lastRunID)
+			indexed := 0
+			if newLast > lastRunID {
+				indexed = int(newLast - lastRunID)
+			}
+			RecordRun("pipeline", start, indexed, err)
 			if err != nil {
 				slog.Warn("pipeline indexer: poll error", "err", err)
 				continue

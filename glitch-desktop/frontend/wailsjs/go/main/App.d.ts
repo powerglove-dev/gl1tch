@@ -9,23 +9,35 @@ export function AskProvider(arg1:string,arg2:string,arg3:string,arg4:string,arg5
 
 export function AskScoped(arg1:string,arg2:string):Promise<void>;
 
+export function CollectorsConfigPath():Promise<string>;
+
+export function CreateDraft(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
+
+export function CreateDraftFromTarget(arg1:string,arg2:string,arg3:number,arg4:string):Promise<string>;
+
 export function CreatePrompt(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function CreateWorkspace(arg1:string):Promise<string>;
 
-export function DeleteChatWorkflow(arg1:number):Promise<void>;
+export function DeleteDraft(arg1:number):Promise<void>;
+
+export function DeleteWorkflowFile(arg1:string):Promise<string>;
 
 export function DeletePrompt(arg1:number):Promise<void>;
 
 export function DeleteWorkspace(arg1:string):Promise<void>;
 
-export function Doctor():Promise<void>;
+export function Doctor(arg1:string):Promise<void>;
+
+export function GetDraft(arg1:number):Promise<string>;
 
 export function GetWorkflowFileDetails(arg1:string):Promise<string>;
 
 export function ListAgents(arg1:string):Promise<string>;
 
-export function ListChatWorkflows(arg1:string):Promise<string>;
+export function ListCollectors(arg1:string):Promise<string>;
+
+export function ListDrafts(arg1:string,arg2:string):Promise<string>;
 
 export function ListPrompts():Promise<string>;
 
@@ -37,20 +49,40 @@ export function ListWorkspaces():Promise<string>;
 
 export function LoadMessages(arg1:string):Promise<string>;
 
+export function PromoteDraft(arg1:number,arg2:boolean):Promise<string>;
+
+export function ReadCollectorsConfig():Promise<string>;
+
+export function ReadWorkflowFile(arg1:string):Promise<string>;
+
 export function Ready():Promise<void>;
+
+export function RecentCollectorLogs(arg1:number):Promise<string>;
+
+export function RefineDraft(arg1:number,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function RemoveWorkspaceDirectory(arg1:string,arg2:string):Promise<void>;
 
 export function RunChain(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
-export function RunWorkflow(arg1:string,arg2:string):Promise<void>;
+export function RunWorkflow(arg1:string,arg2:string,arg3:string):Promise<void>;
 
-export function SaveChatWorkflow(arg1:string,arg2:string,arg3:string):Promise<string>;
+export function SaveChatWorkflow(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
 
 export function SaveMessage(arg1:string,arg2:string):Promise<void>;
 
 export function SaveWorkflow(arg1:string,arg2:string,arg3:string):Promise<string>;
 
-export function UpdateChatWorkflow(arg1:number,arg2:string,arg3:string):Promise<void>;
+export function StopDraftRefine(arg1:number):Promise<void>;
+
+export function StopRun(arg1:string):Promise<void>;
+
+export function UpdateDraftBody(arg1:number,arg2:string,arg3:string):Promise<string>;
 
 export function UpdateWorkspaceTitle(arg1:string,arg2:string):Promise<void>;
+
+export function WorkflowPathForName(arg1:string,arg2:string):Promise<string>;
+
+export function WriteCollectorsConfig(arg1:string):Promise<string>;
+
+export function WriteWorkflowFile(arg1:string,arg2:string):Promise<string>;

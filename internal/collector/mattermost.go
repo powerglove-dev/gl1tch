@@ -58,9 +58,13 @@ func (m *MattermostCollector) Start(ctx context.Context, es *esearch.Client) err
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			tickStart := time.Now()
+			tickIndexed := 0
+			var tickErr error
 			channels, err := m.getMyChannels(ctx)
 			if err != nil {
 				slog.Warn("mattermost collector: list channels", "err", err)
+				RecordRun("mattermost", tickStart, 0, err)
 				continue
 			}
 
@@ -84,8 +88,14 @@ func (m *MattermostCollector) Start(ctx context.Context, es *esearch.Client) err
 				}
 
 				for _, post := range posts {
-					// Skip our own messages and system messages.
-					if post.UserID == m.userID || post.Type != "" {
+					// Skip system messages (joins/leaves/pins) but
+					// DO index the user's own messages — we want the
+					// brain to have the full conversational context,
+					// not just one side of every thread.
+					if post.Type != "" {
+						continue
+					}
+					if strings.TrimSpace(post.Message) == "" {
 						continue
 					}
 
@@ -93,11 +103,11 @@ func (m *MattermostCollector) Start(ctx context.Context, es *esearch.Client) err
 					sender := m.resolveUsername(ctx, post.UserID)
 
 					docs = append(docs, esearch.Event{
-						Type:   eventType,
-						Source: "mattermost",
-						Author: sender,
-						Message: truncate(post.Message, 500),
-						Body:   post.Message,
+						Type:    eventType,
+						Source:  "mattermost",
+						Author:  sender,
+						Message: post.Message, // full body in the indexed field
+						Body:    post.Message,
 						Metadata: map[string]any{
 							"post_id":      post.ID,
 							"channel_id":   ch.ID,
@@ -107,6 +117,26 @@ func (m *MattermostCollector) Start(ctx context.Context, es *esearch.Client) err
 						},
 						Timestamp: time.UnixMilli(post.CreateAt),
 					})
+
+					// Emit a chat-style log line so the user can tail
+					// real conversations from the brain popover's
+					// logs panel. Format: "#channel <author> HH:MM
+					// said <message>". Multi-line messages collapse
+					// to a single line with " / " as a soft break
+					// so the log row stays scan-readable.
+					ts := time.UnixMilli(post.CreateAt).Format("15:04")
+					body := strings.ReplaceAll(strings.TrimSpace(post.Message), "\n", " / ")
+					if len(body) > 400 {
+						body = body[:397] + "…"
+					}
+					channelLabel := ch.DisplayName
+					if channelLabel == "" {
+						channelLabel = ch.ID
+					}
+					slog.Info(
+						fmt.Sprintf("mattermost: #%s <%s> %s said %s",
+							channelLabel, sender, ts, body),
+					)
 				}
 
 				lastPoll[ch.ID] = time.Now().UnixMilli()
@@ -116,8 +146,11 @@ func (m *MattermostCollector) Start(ctx context.Context, es *esearch.Client) err
 				slog.Info("mattermost collector: new messages", "count", len(docs))
 				if err := es.BulkIndex(ctx, esearch.IndexEvents, docs); err != nil {
 					slog.Warn("mattermost collector: bulk index", "err", err)
+					tickErr = err
 				}
+				tickIndexed = len(docs)
 			}
+			RecordRun("mattermost", tickStart, tickIndexed, tickErr)
 		}
 	}
 }

@@ -1,6 +1,7 @@
 import { useRef, useCallback, useState, useEffect } from "react";
-import { ArrowUp, ChevronDown, Cpu, X, ChevronRight, FileText, Play, Bot, Save } from "lucide-react";
+import { ArrowUp, X, ChevronRight, FileText, Play, Bot, Save, Square } from "lucide-react";
 import { GetWorkflowFileDetails } from "../../wailsjs/go/main/App";
+import { ProviderPicker } from "./ProviderPicker";
 
 interface WorkflowStepInfo {
   id: string;
@@ -33,6 +34,10 @@ export type ChainStep =
 
 interface Props {
   disabled: boolean;
+  /** True when the *active* workspace has a run in flight. The input stays
+   *  enabled (so the user can compose follow-ups), but the send button
+   *  swaps for a stop button that cancels the active workspace's run. */
+  streaming: boolean;
   providers: ProviderOption[];
   selectedProvider: string;
   selectedModel: string;
@@ -49,6 +54,8 @@ interface Props {
   onClearChain: () => void;
   onSaveWorkflow: (name: string) => void;
   onSend: (text: string) => void;
+  /** Cancel the active workspace's in-flight run. */
+  onStop: () => void;
 }
 
 function StepEditor({
@@ -364,41 +371,14 @@ function ChainPill({
 }
 
 export function ChatInput({
-  disabled, providers, selectedProvider, selectedModel,
+  disabled, streaming, providers, selectedProvider, selectedModel,
   observerDefaultProvider, observerDefaultModel,
   chain, onSelectProvider, onSetObserverDefault, onUpdateChainStep, onRemoveChainStep,
-  onClearChain, onSaveWorkflow, onSend,
+  onClearChain, onSaveWorkflow, onSend, onStop,
 }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
-  const pickerRef = useRef<HTMLDivElement>(null);
-  const pickerButtonRef = useRef<HTMLButtonElement>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [savingWorkflow, setSavingWorkflow] = useState(false);
   const [workflowName, setWorkflowName] = useState("");
-
-  // Close the provider picker when the user clicks anywhere outside the
-  // dropdown (or its toggle button) or hits Escape. The dropdown is a
-  // free-floating popover so without this it stays stuck open until you
-  // click the toggle a second time.
-  useEffect(() => {
-    if (!pickerOpen) return;
-    const onPointerDown = (e: PointerEvent) => {
-      const t = e.target as Node | null;
-      if (!t) return;
-      if (pickerRef.current?.contains(t)) return;
-      if (pickerButtonRef.current?.contains(t)) return;
-      setPickerOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPickerOpen(false);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [pickerOpen]);
 
   const handleSend = useCallback(() => {
     if (!ref.current) return;
@@ -429,18 +409,6 @@ export function ChatInput({
     setWorkflowName("");
     setSavingWorkflow(false);
   }
-
-  const currentProvider = providers.find((p) => p.id === selectedProvider);
-  const providerLabel = currentProvider?.label ?? "observer";
-
-  // Resolve a friendly model name for the picker's "observer" entry so the
-  // user can see at a glance what observer mode will route to when nothing
-  // else handles a chain step. Falls back to the model id if no label match.
-  const observerDefaultProviderObj = providers.find((p) => p.id === observerDefaultProvider);
-  const observerDefaultModelLabel =
-    observerDefaultProviderObj?.models.find((m) => m.id === observerDefaultModel)?.label ||
-    observerDefaultModel ||
-    "auto";
 
   return (
     <div style={{ borderTop: "1px solid var(--border)", background: "var(--bg-dark)", padding: "10px 20px 14px" }}>
@@ -536,7 +504,7 @@ export function ChatInput({
             onKeyDown={handleKeyDown} onInput={handleInput}
             autoFocus
             placeholder={
-              disabled
+              streaming
                 ? "Compose next message while this one runs..."
                 : chain.length > 0
                 ? "Add context or just send the chain..."
@@ -550,136 +518,50 @@ export function ChatInput({
             }}
           />
 
-          {/* Provider picker - compact, right of input */}
-          <div style={{ position: "relative", display: "inline-block", flexShrink: 0 }}>
+          {/* Provider picker — compact dropdown right of the input. */}
+          <ProviderPicker
+            providers={providers}
+            selectedProvider={selectedProvider}
+            selectedModel={selectedModel}
+            observerDefaultProvider={observerDefaultProvider}
+            observerDefaultModel={observerDefaultModel}
+            onSelectProvider={onSelectProvider}
+            onSetObserverDefault={onSetObserverDefault}
+            align="right"
+          />
+
+          {/* Send / Stop button — swaps to stop while the active workspace
+              has a run in flight, so the user can cancel without leaving
+              the workspace. */}
+          {streaming ? (
             <button
-              ref={pickerButtonRef}
-              onClick={() => setPickerOpen(!pickerOpen)}
+              onClick={onStop}
+              title="Stop"
               style={{
-                display: "flex", alignItems: "center", gap: 3,
-                padding: "5px 7px", borderRadius: 8, fontSize: 10,
-                background: "transparent",
-                border: "1px solid var(--border)",
-                color: "var(--fg-dim)", cursor: "pointer",
-                whiteSpace: "nowrap",
+                width: 30, height: 30, borderRadius: 8,
+                background: "var(--red, #ff5555)",
+                border: "none", color: "var(--bg-dark)",
+                cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
               }}
-              title={`${providerLabel} / ${selectedModel || "default"}`}
             >
-              <Cpu size={10} style={{ color: "var(--cyan)" }} />
-              <span style={{ color: "var(--cyan)" }}>{providerLabel}</span>
-              <ChevronDown size={9} />
+              <Square size={12} strokeWidth={3} fill="currentColor" />
             </button>
-
-            {pickerOpen && (
-              <div
-                ref={pickerRef}
-                style={{
-                  position: "absolute", bottom: "100%", right: 0, marginBottom: 4,
-                  background: "var(--bg-dark)", border: "1px solid var(--border-bright)",
-                  borderRadius: 8, padding: 4, minWidth: 240, maxHeight: 320, overflowY: "auto",
-                  zIndex: 100, boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
-                }}
-              >
-                <button
-                  onClick={() => { onSelectProvider("", ""); setPickerOpen(false); }}
-                  style={{
-                    width: "100%", display: "flex", alignItems: "center", gap: 6,
-                    padding: "6px 8px", borderRadius: 4, fontSize: 12,
-                    background: !selectedProvider ? "var(--bg-surface)" : "transparent",
-                    border: "none", color: "var(--fg)", cursor: "pointer", textAlign: "left",
-                  }}
-                  title={`observer routes chain prompts to ${observerDefaultProvider || "the first installed model"}`}
-                >
-                  <span style={{ color: "var(--cyan)", fontWeight: 600 }}>observer</span>
-                  <span style={{ color: "var(--fg-dim)", fontSize: 10, marginLeft: "auto" }}>
-                    → {observerDefaultModelLabel}
-                  </span>
-                </button>
-
-                {providers.map((p) => (
-                  <div key={p.id}>
-                    <div style={{ padding: "6px 8px 2px", fontSize: 10, color: "var(--fg-dim)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                      {p.label}
-                    </div>
-                    {p.models.map((m) => {
-                      const isObserverDefault =
-                        observerDefaultProvider === p.id && observerDefaultModel === m.id;
-                      return (
-                        <div
-                          key={m.id}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            borderRadius: 4,
-                            background:
-                              selectedProvider === p.id && selectedModel === m.id
-                                ? "var(--bg-surface)"
-                                : "transparent",
-                          }}
-                        >
-                          <button
-                            onClick={() => { onSelectProvider(p.id, m.id); setPickerOpen(false); }}
-                            style={{
-                              flex: 1,
-                              display: "flex", alignItems: "center", gap: 6,
-                              padding: "4px 4px 4px 16px", fontSize: 12,
-                              background: "transparent",
-                              border: "none", color: "var(--fg)", cursor: "pointer", textAlign: "left",
-                            }}
-                          >
-                            {m.label || m.id}
-                            {m.default && <span style={{ fontSize: 9, color: "var(--green)", marginLeft: 4 }}>default</span>}
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onSetObserverDefault(p.id, m.id);
-                            }}
-                            title={
-                              isObserverDefault
-                                ? "current observer default"
-                                : "pin as observer default"
-                            }
-                            style={{
-                              padding: "4px 8px",
-                              background: "transparent",
-                              border: "none",
-                              cursor: "pointer",
-                              color: isObserverDefault ? "var(--yellow)" : "var(--fg-dim)",
-                              fontSize: 12,
-                              lineHeight: 1,
-                            }}
-                            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--yellow)")}
-                            onMouseLeave={(e) =>
-                              (e.currentTarget.style.color = isObserverDefault
-                                ? "var(--yellow)"
-                                : "var(--fg-dim)")
-                            }
-                          >
-                            {isObserverDefault ? "★" : "☆"}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Send button */}
-          <button
-            onClick={handleSend} disabled={disabled}
-            style={{
-              width: 30, height: 30, borderRadius: 8,
-              background: disabled ? "var(--bg-surface)" : "var(--cyan)",
-              border: "none", color: disabled ? "var(--fg-dim)" : "var(--bg-dark)",
-              cursor: disabled ? "default" : "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-            }}
-          >
-            <ArrowUp size={15} strokeWidth={2.5} />
-          </button>
+          ) : (
+            <button
+              onClick={handleSend} disabled={disabled}
+              title="Send"
+              style={{
+                width: 30, height: 30, borderRadius: 8,
+                background: disabled ? "var(--bg-surface)" : "var(--cyan)",
+                border: "none", color: disabled ? "var(--fg-dim)" : "var(--bg-dark)",
+                cursor: disabled ? "default" : "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+              }}
+            >
+              <ArrowUp size={15} strokeWidth={2.5} />
+            </button>
+          )}
         </div>
       </div>
     </div>

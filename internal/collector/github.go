@@ -46,17 +46,26 @@ func (g *GitHubCollector) Start(ctx context.Context, es *esearch.Client) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			start := time.Now()
+			var lastErr error
 			for _, repo := range g.Repos {
 				since := lastPoll[repo]
 				if since.IsZero() {
 					since = time.Now().Add(-24 * time.Hour) // backfill 1 day on first run
 				}
 				if err := g.pollRepo(ctx, es, repo, since); err != nil {
+					lastErr = err
 					slog.Warn("github collector: poll error", "repo", repo, "err", err)
 					continue
 				}
 				lastPoll[repo] = time.Now()
 			}
+			// Heartbeat for the brain UI. We don't track per-poll
+			// counts here (the gh CLI returns them but we don't
+			// thread them up), so 0 means "this collector ran" — the
+			// brain UI's totals come from ES doc counts via
+			// QueryCollectorActivity.
+			RecordRun("github", start, 0, lastErr)
 		}
 	}
 }

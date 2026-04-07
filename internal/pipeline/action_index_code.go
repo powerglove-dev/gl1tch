@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/8op-org/gl1tch/internal/brainrag"
-	"github.com/8op-org/gl1tch/internal/store"
+	"github.com/8op-org/gl1tch/internal/esearch"
 )
 
 func init() {
@@ -248,13 +248,17 @@ func builtinIndexCode(ctx context.Context, args map[string]any, w io.Writer) (ma
 		}
 	}
 
-	s, err := store.Open()
+	es, err := esearch.New("")
 	if err != nil {
-		return nil, fmt.Errorf("builtin.index_code: open store: %w", err)
+		return nil, fmt.Errorf("builtin.index_code: open es: %w", err)
 	}
-	defer s.Close()
+	// Best-effort: ensure the vectors index exists. If ES is offline
+	// we surface that explicitly so the user knows what's wrong.
+	if err := es.EnsureIndices(ctx); err != nil {
+		return nil, fmt.Errorf("builtin.index_code: ensure es indices (is elasticsearch running?): %w", err)
+	}
 
-	rs := brainrag.NewRAGStore(s.DB(), cwd)
+	rs := brainrag.NewRAGStoreForCWD(es, cwd)
 
 	fileCount := 0
 	chunkCount := 0

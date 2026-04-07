@@ -1,6 +1,7 @@
-import { useEffect, useRef, type CSSProperties } from "react";
+import { Fragment, useEffect, useRef, type CSSProperties } from "react";
 import { Cpu, Terminal } from "lucide-react";
 import type { Message, Block } from "@/lib/types";
+import { formatTime12, dayLabel, isNewDay } from "@/lib/time";
 import {
   TextBlock,
   CodeBlock,
@@ -110,7 +111,24 @@ function MessageRow({
             textAlign: isUser ? "right" : "left",
           }}
         >
-          {isUser ? "you" : "gl1tch"}
+          <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6 }}>
+            <span>{isUser ? "you" : "gl1tch"}</span>
+            {message.timestamp > 0 && (
+              <span
+                style={{
+                  fontWeight: 400,
+                  textTransform: "none",
+                  letterSpacing: 0,
+                  color: "var(--fg-dim)",
+                  opacity: 0.7,
+                  fontSize: 10,
+                }}
+                title={new Date(message.timestamp).toLocaleString()}
+              >
+                {formatTime12(message.timestamp)}
+              </span>
+            )}
+          </span>
         </div>
 
         {/* Message body */}
@@ -229,12 +247,62 @@ export function MessageList({ messages, onAction, thinking }: Props) {
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-        {messages.map((msg) => (
-          <MessageRow key={msg.id} message={msg} onAction={onAction} />
-        ))}
+        {messages.map((msg, i) => {
+          // Insert a day separator the first time we see a message
+          // and every time the calendar day changes between rows.
+          const prev = messages[i - 1];
+          const showSeparator =
+            i === 0 || isNewDay(prev?.timestamp ?? 0, msg.timestamp);
+          return (
+            <Fragment key={msg.id}>
+              {showSeparator && msg.timestamp > 0 && (
+                <DaySeparator label={dayLabel(msg.timestamp)} />
+              )}
+              <MessageRow message={msg} onAction={onAction} />
+            </Fragment>
+          );
+        })}
         {thinking && <ThinkingPill text={thinking} />}
         <div ref={bottomRef} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * "── Today ──" style divider injected between messages on day
+ * boundaries. Subtle so it never competes with chat content but
+ * always visible enough to anchor the user in time.
+ */
+function DaySeparator({ label }: { label: string }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        margin: "4px 0 -4px",
+      }}
+      aria-label={`Day: ${label}`}
+    >
+      <span style={{ flex: 1, height: 1, background: "var(--border)", opacity: 0.6 }} />
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          textTransform: "uppercase",
+          letterSpacing: "0.12em",
+          color: "var(--fg-dim)",
+          opacity: 0.8,
+          padding: "2px 10px",
+          borderRadius: 999,
+          border: "1px solid var(--border)",
+          background: "var(--bg-dark)",
+        }}
+      >
+        {label}
+      </span>
+      <span style={{ flex: 1, height: 1, background: "var(--border)", opacity: 0.6 }} />
     </div>
   );
 }

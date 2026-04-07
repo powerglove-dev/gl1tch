@@ -49,8 +49,13 @@ func (c *CopilotCollector) Start(ctx context.Context, es *esearch.Client) error 
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			start := time.Now()
+			before := lastCommandCount
+			beforeLogs := len(indexedLogs)
 			lastCommandCount = c.pollCommands(ctx, es, copilotDir, lastCommandCount)
 			c.pollLogs(ctx, es, copilotDir, indexedLogs)
+			RecordRun("copilot", start,
+				(lastCommandCount-before)+(len(indexedLogs)-beforeLogs), nil)
 		}
 	}
 }

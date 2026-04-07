@@ -2,6 +2,7 @@ import { StrictMode, Component } from "react";
 import type { ReactNode, ErrorInfo } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { ToastProvider } from "./components/Toast";
 import "./global.css";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
@@ -28,7 +29,9 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: string |
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary>
-      <App />
+      <ToastProvider>
+        <App />
+      </ToastProvider>
     </ErrorBoundary>
   </StrictMode>,
 );

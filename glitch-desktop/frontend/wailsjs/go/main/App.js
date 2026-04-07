@@ -18,6 +18,18 @@ export function AskScoped(arg1, arg2) {
   return window['go']['main']['App']['AskScoped'](arg1, arg2);
 }
 
+export function CollectorsConfigPath() {
+  return window['go']['main']['App']['CollectorsConfigPath']();
+}
+
+export function CreateDraft(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['CreateDraft'](arg1, arg2, arg3, arg4);
+}
+
+export function CreateDraftFromTarget(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['CreateDraftFromTarget'](arg1, arg2, arg3, arg4);
+}
+
 export function CreatePrompt(arg1, arg2, arg3) {
   return window['go']['main']['App']['CreatePrompt'](arg1, arg2, arg3);
 }
@@ -26,8 +38,12 @@ export function CreateWorkspace(arg1) {
   return window['go']['main']['App']['CreateWorkspace'](arg1);
 }
 
-export function DeleteChatWorkflow(arg1) {
-  return window['go']['main']['App']['DeleteChatWorkflow'](arg1);
+export function DeleteDraft(arg1) {
+  return window['go']['main']['App']['DeleteDraft'](arg1);
+}
+
+export function DeleteWorkflowFile(arg1) {
+  return window['go']['main']['App']['DeleteWorkflowFile'](arg1);
 }
 
 export function DeletePrompt(arg1) {
@@ -38,8 +54,12 @@ export function DeleteWorkspace(arg1) {
   return window['go']['main']['App']['DeleteWorkspace'](arg1);
 }
 
-export function Doctor() {
-  return window['go']['main']['App']['Doctor']();
+export function Doctor(arg1) {
+  return window['go']['main']['App']['Doctor'](arg1);
+}
+
+export function GetDraft(arg1) {
+  return window['go']['main']['App']['GetDraft'](arg1);
 }
 
 export function GetWorkflowFileDetails(arg1) {
@@ -50,8 +70,12 @@ export function ListAgents(arg1) {
   return window['go']['main']['App']['ListAgents'](arg1);
 }
 
-export function ListChatWorkflows(arg1) {
-  return window['go']['main']['App']['ListChatWorkflows'](arg1);
+export function ListCollectors(arg1) {
+  return window['go']['main']['App']['ListCollectors'](arg1);
+}
+
+export function ListDrafts(arg1, arg2) {
+  return window['go']['main']['App']['ListDrafts'](arg1, arg2);
 }
 
 export function ListPrompts() {
@@ -74,8 +98,28 @@ export function LoadMessages(arg1) {
   return window['go']['main']['App']['LoadMessages'](arg1);
 }
 
+export function PromoteDraft(arg1, arg2) {
+  return window['go']['main']['App']['PromoteDraft'](arg1, arg2);
+}
+
+export function ReadCollectorsConfig() {
+  return window['go']['main']['App']['ReadCollectorsConfig']();
+}
+
+export function ReadWorkflowFile(arg1) {
+  return window['go']['main']['App']['ReadWorkflowFile'](arg1);
+}
+
 export function Ready() {
   return window['go']['main']['App']['Ready']();
+}
+
+export function RecentCollectorLogs(arg1) {
+  return window['go']['main']['App']['RecentCollectorLogs'](arg1);
+}
+
+export function RefineDraft(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['RefineDraft'](arg1, arg2, arg3, arg4);
 }
 
 export function RemoveWorkspaceDirectory(arg1, arg2) {
@@ -86,12 +130,12 @@ export function RunChain(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['RunChain'](arg1, arg2, arg3, arg4, arg5);
 }
 
-export function RunWorkflow(arg1, arg2) {
-  return window['go']['main']['App']['RunWorkflow'](arg1, arg2);
+export function RunWorkflow(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RunWorkflow'](arg1, arg2, arg3);
 }
 
-export function SaveChatWorkflow(arg1, arg2, arg3) {
-  return window['go']['main']['App']['SaveChatWorkflow'](arg1, arg2, arg3);
+export function SaveChatWorkflow(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['SaveChatWorkflow'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function SaveMessage(arg1, arg2) {
@@ -102,10 +146,30 @@ export function SaveWorkflow(arg1, arg2, arg3) {
   return window['go']['main']['App']['SaveWorkflow'](arg1, arg2, arg3);
 }
 
-export function UpdateChatWorkflow(arg1, arg2, arg3) {
-  return window['go']['main']['App']['UpdateChatWorkflow'](arg1, arg2, arg3);
+export function StopDraftRefine(arg1) {
+  return window['go']['main']['App']['StopDraftRefine'](arg1);
+}
+
+export function StopRun(arg1) {
+  return window['go']['main']['App']['StopRun'](arg1);
+}
+
+export function UpdateDraftBody(arg1, arg2, arg3) {
+  return window['go']['main']['App']['UpdateDraftBody'](arg1, arg2, arg3);
 }
 
 export function UpdateWorkspaceTitle(arg1, arg2) {
   return window['go']['main']['App']['UpdateWorkspaceTitle'](arg1, arg2);
+}
+
+export function WorkflowPathForName(arg1, arg2) {
+  return window['go']['main']['App']['WorkflowPathForName'](arg1, arg2);
+}
+
+export function WriteCollectorsConfig(arg1) {
+  return window['go']['main']['App']['WriteCollectorsConfig'](arg1);
+}
+
+export function WriteWorkflowFile(arg1, arg2) {
+  return window['go']['main']['App']['WriteWorkflowFile'](arg1, arg2);
 }

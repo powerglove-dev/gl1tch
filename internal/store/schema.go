@@ -47,6 +47,32 @@ const addPromptLastResponseColumn = `ALTER TABLE prompts ADD COLUMN last_respons
 // databases created before this column existed.
 const addPromptCWDColumn = `ALTER TABLE prompts ADD COLUMN cwd TEXT DEFAULT ''`
 
+// createDraftsSchema is the DDL for the drafts table. A draft is a
+// work-in-progress prompt / workflow / skill / agent that the user is
+// iterating on with the gl1tch prompt agent. Each refinement turn is
+// appended to turns_json so the conversation history survives restarts
+// and the user can resume tomorrow.
+//
+// kind ∈ {"prompt", "workflow", "skill", "agent"}.
+//
+// target_id is set when the draft is editing an existing prompt row;
+// target_path is set when the draft is editing a file-backed entity
+// (workflow yaml, skill md). Both unset means the draft is brand new
+// and hasn't been promoted yet.
+const createDraftsSchema = `CREATE TABLE IF NOT EXISTS drafts (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  workspace_id  TEXT    NOT NULL,
+  kind          TEXT    NOT NULL,
+  title         TEXT    NOT NULL DEFAULT '',
+  body          TEXT    NOT NULL DEFAULT '',
+  turns_json    TEXT    NOT NULL DEFAULT '[]',
+  target_id     INTEGER,
+  target_path   TEXT    NOT NULL DEFAULT '',
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_drafts_ws_kind ON drafts(workspace_id, kind, updated_at DESC);`
+
 // addClarificationStepIDColumn is the migration that adds step_id to the
 // clarifications table for databases created before this column existed.
 const addClarificationStepIDColumn = `ALTER TABLE clarifications ADD COLUMN step_id TEXT NOT NULL DEFAULT ''`
@@ -62,22 +88,11 @@ const createClarificationsSchema = `CREATE TABLE IF NOT EXISTS clarifications (
     answer      TEXT
 )`
 
-// createBrainVectorsSchema is the DDL for the brain_vectors table.
-const createBrainVectorsSchema = `CREATE TABLE IF NOT EXISTS brain_vectors (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  cwd         TEXT NOT NULL,
-  note_id     TEXT NOT NULL,
-  text        TEXT NOT NULL,
-  vector      BLOB NOT NULL,
-  hash        TEXT NOT NULL,
-  embed_id    TEXT NOT NULL DEFAULT '',
-  indexed_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(cwd, note_id)
-)`
-
-// addBrainVectorsEmbedIDColumn is the migration that adds embed_id to the
-// brain_vectors table for databases created before this column existed.
-const addBrainVectorsEmbedIDColumn = `ALTER TABLE brain_vectors ADD COLUMN embed_id TEXT NOT NULL DEFAULT ''`
+// dropBrainVectorsSchema removes the legacy SQLite vector store. As of
+// the brainrag → Elasticsearch migration, embeddings live in the
+// glitch-vectors index instead. The table is dropped (rather than left
+// dangling) so old gl1tch.db files don't carry stale BLOB data forever.
+const dropBrainVectorsSchema = `DROP TABLE IF EXISTS brain_vectors`
 
 // createStepCheckpointsSchema is the DDL for the step_checkpoints table.
 const createStepCheckpointsSchema = `CREATE TABLE IF NOT EXISTS step_checkpoints (
@@ -182,17 +197,11 @@ const createPersonalBestsSchema = `CREATE TABLE IF NOT EXISTS game_personal_best
   recorded_at INTEGER NOT NULL
 )`
 
-// createChatWorkflowsSchema is the DDL for saved chat workflows
-// (composable builder workflows authored from the desktop UI).
-const createChatWorkflowsSchema = `CREATE TABLE IF NOT EXISTS chat_workflows (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  workspace_id TEXT NOT NULL,
-  name         TEXT NOT NULL,
-  steps_json   TEXT NOT NULL,
-  created_at   INTEGER NOT NULL,
-  updated_at   INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_chat_workflows_ws ON chat_workflows(workspace_id);`
+// chat_workflows table was removed in the YAML unification. Existing
+// databases still carry the table; the one-shot
+// MigrateChatWorkflowsToYAML in pkg/glitchd reads it via raw SQL,
+// writes each row out as a .workflow.yaml file, and deletes the row.
+// Fresh databases never see the table.
 
 // createWorkflowCheckpointsSchema is the DDL for the workflow_checkpoints table.
 const createWorkflowCheckpointsSchema = `CREATE TABLE IF NOT EXISTS workflow_checkpoints (
@@ -204,23 +213,11 @@ const createWorkflowCheckpointsSchema = `CREATE TABLE IF NOT EXISTS workflow_che
   created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 )`
 
-// applyBrainVectorsEmbedIDMigration adds the embed_id column to brain_vectors
-// if it does not already exist, then back-fills '' rows with the legacy Ollama ID.
+// applyBrainVectorsEmbedIDMigration is a no-op since the brain_vectors
+// table no longer exists. Kept as a stub so the migration sequence in
+// applySchema doesn't change order — existing dbs still walk the same
+// list, they just hit a drop instead of a column add.
 func applyBrainVectorsEmbedIDMigration(db *sql.DB) error {
-	var count int
-	row := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('brain_vectors') WHERE name='embed_id'`)
-	if err := row.Scan(&count); err != nil {
-		return err
-	}
-	if count == 0 {
-		if _, err := db.Exec(addBrainVectorsEmbedIDColumn); err != nil {
-			return err
-		}
-		// Back-fill existing rows so they continue to work with the Ollama embedder.
-		if _, err := db.Exec(`UPDATE brain_vectors SET embed_id = 'ollama:nomic-embed-text' WHERE embed_id = ''`); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -283,12 +280,13 @@ func applySchema(db *sql.DB) error {
 	if err := applyWorkspacesTableMigration(db); err != nil {
 		return err
 	}
-	return applyChatWorkflowsTableMigration(db)
+	return applyDraftsTableMigration(db)
 }
 
-// applyChatWorkflowsTableMigration creates the chat_workflows table.
-func applyChatWorkflowsTableMigration(db *sql.DB) error {
-	_, err := db.Exec(createChatWorkflowsSchema)
+// applyDraftsTableMigration creates the drafts table and its index if
+// they do not already exist. Idempotent.
+func applyDraftsTableMigration(db *sql.DB) error {
+	_, err := db.Exec(createDraftsSchema)
 	return err
 }
 
@@ -299,10 +297,12 @@ func applyStepCheckpointsTableMigration(db *sql.DB) error {
 	return err
 }
 
-// applyBrainVectorsTableMigration creates the brain_vectors table if it does
-// not already exist. CREATE TABLE IF NOT EXISTS is idempotent.
+// applyBrainVectorsTableMigration drops the legacy brain_vectors
+// SQLite table. As of the brainrag → ES migration, embeddings live in
+// the glitch-vectors index. The drop is idempotent (DROP TABLE IF
+// EXISTS) so it's safe to run on every startup.
 func applyBrainVectorsTableMigration(db *sql.DB) error {
-	_, err := db.Exec(createBrainVectorsSchema)
+	_, err := db.Exec(dropBrainVectorsSchema)
 	return err
 }
 
