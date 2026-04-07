@@ -18,7 +18,7 @@
  * crossing wires. Subscriptions filter on the open draft's id.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { X, Save, Play, RotateCcw, FileText, Workflow, Sparkles, ArrowUp, Square } from "lucide-react";
+import { X, Save, Play, RotateCcw, FileText, Workflow, Sparkles, ArrowUp, Square, Bot, Lock, Copy, Settings } from "lucide-react";
 import CodeMirror from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { yaml } from "@codemirror/lang-yaml";
@@ -33,12 +33,13 @@ import {
   RefineDraft,
   StopDraftRefine,
   PromoteDraft,
+  PromoteDraftAs,
   UpdateDraftBody,
   DeleteDraft,
   RunWorkflow,
 } from "../../wailsjs/go/main/App";
 
-export type EditorKind = "prompt" | "workflow";
+export type EditorKind = "prompt" | "workflow" | "skill" | "agent" | "collectors";
 
 interface DraftJSON {
   id: number;
@@ -56,6 +57,10 @@ interface DraftJSON {
   }>;
   target_id?: number;
   target_path?: string;
+  /** Set by the backend when target_path lives outside the workspace
+   *  (i.e. ~/.claude/, ~/.stok/, etc.). The popup uses this to lock
+   *  out the save button and force the user through "save as new". */
+  read_only?: boolean;
   created_at: number;
   updated_at: number;
 }
@@ -115,6 +120,12 @@ export function EditorPopup({
 
   const kind: EditorKind = (draft?.kind as EditorKind) ?? "prompt";
   const isWorkflow = kind === "workflow";
+  const isSkill = kind === "skill";
+  const isAgent = kind === "agent";
+  const isCollectors = kind === "collectors";
+  // YAML for workflow + collectors; markdown for prompt/skill/agent.
+  const isMarkdown = !isWorkflow && !isCollectors;
+  const readOnly = !!draft?.read_only;
   const dirty = !!draft && liveBody !== draft.body;
   const titleDirty = !!draft && title !== draft.title;
 
@@ -249,6 +260,17 @@ export function EditorPopup({
 
   async function save(): Promise<boolean> {
     if (!draft || saving) return false;
+    if (readOnly) {
+      // Block the save path entirely on read-only drafts. The "save
+      // as new" button is the user's only way to commit changes to a
+      // global entity — it forks into a workspace copy.
+      toast.push({
+        title: "This entry is read-only",
+        detail: "Use “save as new” to fork it into a workspace copy.",
+        severity: "warn",
+      });
+      return false;
+    }
     if (!title.trim()) {
       toast.push({ title: "Give your draft a title", severity: "warn" });
       return false;
@@ -311,6 +333,58 @@ export function EditorPopup({
     } catch {}
   }
 
+  // saveAsNew is the "fork this into a workspace copy" path. Used
+  // primarily for read-only global entities (skills/agents from
+  // ~/.claude) but also works as a convenience "save under a
+  // different name" for any draft. Prompts the user for the new
+  // name first; if they cancel, nothing happens.
+  async function saveAsNew() {
+    if (!draft || saving) return;
+    // Persist any in-flight CodeMirror edits before forking so the
+    // new copy reflects the current editor state, not the stale
+    // SQLite snapshot.
+    const updateErr = await UpdateDraftBody(draftId, title, liveBody);
+    if (updateErr) {
+      toast.error("Couldn't fork draft", { detail: updateErr });
+      return;
+    }
+    // Suggest "<title>-copy" as the default new name so the user
+    // doesn't accidentally promote with the original name (which
+    // would either collide or write back to the same place).
+    const suggested = title.trim() ? `${title.trim()}-copy` : "";
+    const next = window.prompt("Save as new — name?", suggested);
+    if (!next || !next.trim()) return;
+
+    setSaving(true);
+    try {
+      const result = await PromoteDraftAs(draftId, next.trim());
+      const parsed = JSON.parse(result);
+      if (parsed?.error) {
+        toast.error("Couldn't save as new", {
+          detail: parsed.error,
+          actions: [{ label: "Retry", onClick: () => saveAsNew() }],
+        });
+        return;
+      }
+      toast.success(`Forked into workspace as "${next.trim()}"`, {
+        detail: parsed.target_path || undefined,
+      });
+      // Reload from the freshly promoted draft so the popup is now
+      // pointed at the new workspace target. Subsequent saves will
+      // overwrite the fork rather than re-prompting.
+      const fresh = await GetDraft(draftId);
+      try {
+        const d = JSON.parse(fresh) as DraftJSON;
+        setDraft(d);
+        setLiveBody(d.body ?? "");
+        setTitle(d.title ?? "");
+      } catch {}
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function discardAndClose() {
     // For brand-new drafts (no saved target) we delete the draft row
     // entirely so the next "new" click starts fresh instead of
@@ -325,11 +399,28 @@ export function EditorPopup({
   // CodeMirror extensions are an array; we memoize so the editor
   // doesn't churn its internal state on every parent rerender.
   const extensions = useMemo(() => {
-    return isWorkflow ? [yaml()] : [markdown()];
-  }, [isWorkflow]);
+    return isMarkdown ? [markdown()] : [yaml()];
+  }, [isMarkdown]);
 
-  const KindIcon = isWorkflow ? Workflow : FileText;
-  const kindColor = isWorkflow ? "var(--cyan)" : "var(--orange)";
+  // Per-kind icon + accent color so the header reads at a glance which
+  // entity type the popup is editing. Skills get green, agents get
+  // purple — same convention the sidebar uses. Collectors get the
+  // settings cog in cyan to match the brain popover that opens them.
+  let KindIcon = FileText;
+  let kindColor = "var(--orange)";
+  if (isWorkflow) {
+    KindIcon = Workflow;
+    kindColor = "var(--cyan)";
+  } else if (isSkill) {
+    KindIcon = FileText;
+    kindColor = "var(--green)";
+  } else if (isAgent) {
+    KindIcon = Bot;
+    kindColor = "var(--purple)";
+  } else if (isCollectors) {
+    KindIcon = Settings;
+    kindColor = "var(--cyan)";
+  }
 
   return (
     <div
@@ -393,16 +484,24 @@ export function EditorPopup({
           <span
             style={{
               fontSize: 9,
-              color: "var(--fg-dim)",
+              color: readOnly ? "var(--yellow)" : "var(--fg-dim)",
               textTransform: "uppercase",
               letterSpacing: "0.06em",
-              border: "1px solid var(--border)",
+              border: "1px solid " + (readOnly ? "var(--yellow)" : "var(--border)"),
               padding: "2px 6px",
               borderRadius: 4,
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
             }}
-            title="Workspace-scoped — saved under this workspace's primary directory"
+            title={
+              readOnly
+                ? "Read-only — global entry. Use “save as new” to fork into this workspace."
+                : "Workspace-scoped — saved under this workspace's primary directory"
+            }
           >
-            workspace
+            {readOnly && <Lock size={9} />}
+            {readOnly ? "global · read-only" : "workspace"}
           </span>
           <button
             onClick={discardAndClose}
@@ -468,6 +567,7 @@ export function EditorPopup({
                 onChange={(v) => setLiveBody(v)}
                 theme={oneDark}
                 extensions={extensions}
+                editable={!readOnly}
                 height="100%"
                 style={{
                   fontSize: 13,
@@ -602,7 +702,7 @@ export function EditorPopup({
               ? "saved"
               : ""}
           </div>
-          {(dirty || titleDirty) && (
+          {(dirty || titleDirty) && !readOnly && (
             <button
               onClick={revert}
               style={{
@@ -623,7 +723,32 @@ export function EditorPopup({
               revert
             </button>
           )}
-          {isWorkflow && (
+          {/* "Save as new" — always available; the canonical fork
+              path for global read-only entries and a convenience
+              under-a-different-name save for everything else. */}
+          <button
+            onClick={saveAsNew}
+            disabled={saving}
+            style={{
+              background: "transparent",
+              border: "1px solid var(--purple)",
+              color: "var(--purple)",
+              padding: "5px 12px",
+              borderRadius: 6,
+              cursor: saving ? "default" : "pointer",
+              fontSize: 11,
+              fontWeight: 600,
+              opacity: saving ? 0.5 : 1,
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+            title="Fork this draft into a new workspace entry under a different name"
+          >
+            <Copy size={10} />
+            save as new
+          </button>
+          {isWorkflow && !readOnly && (
             <button
               onClick={saveAndRun}
               disabled={saving || !title.trim()}
@@ -647,26 +772,28 @@ export function EditorPopup({
               save &amp; run
             </button>
           )}
-          <button
-            onClick={save}
-            disabled={saving || !title.trim()}
-            style={{
-              background: title.trim() ? "var(--cyan)" : "var(--bg-surface)",
-              color: title.trim() ? "var(--bg-dark)" : "var(--fg-dim)",
-              border: "1px solid " + (title.trim() ? "var(--cyan)" : "var(--border)"),
-              padding: "5px 14px",
-              borderRadius: 6,
-              cursor: saving || !title.trim() ? "default" : "pointer",
-              fontSize: 11,
-              fontWeight: 600,
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-            }}
-          >
-            <Save size={10} />
-            {saving ? "saving…" : "save"}
-          </button>
+          {!readOnly && (
+            <button
+              onClick={save}
+              disabled={saving || !title.trim()}
+              style={{
+                background: title.trim() ? "var(--cyan)" : "var(--bg-surface)",
+                color: title.trim() ? "var(--bg-dark)" : "var(--fg-dim)",
+                border: "1px solid " + (title.trim() ? "var(--cyan)" : "var(--border)"),
+                padding: "5px 14px",
+                borderRadius: 6,
+                cursor: saving || !title.trim() ? "default" : "pointer",
+                fontSize: 11,
+                fontWeight: 600,
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <Save size={10} />
+              {saving ? "saving…" : "save"}
+            </button>
+          )}
         </div>
       </div>
     </div>

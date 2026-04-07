@@ -11,6 +11,10 @@ interface Props {
   onMarkBrainRead: () => void;
   activeWorkspaceId: string | null;
   activeWorkspaceTitle: string;
+  /** Open the EditorPopup on the active workspace's collectors.yaml.
+   *  Plumbed through from App.tsx so the popup lives at the root and
+   *  the brain indicator just emits the request. */
+  onEditCollectors: () => void;
 }
 
 const LOGO_LINES = [
@@ -31,6 +35,7 @@ export function Titlebar({
   onMarkBrainRead,
   activeWorkspaceId,
   activeWorkspaceTitle,
+  onEditCollectors,
 }: Props) {
   return (
     <div
@@ -87,6 +92,7 @@ export function Titlebar({
         onMarkRead={onMarkBrainRead}
         activeWorkspaceId={activeWorkspaceId}
         activeWorkspaceTitle={activeWorkspaceTitle}
+        onEditCollectors={onEditCollectors}
       />
     </div>
   );

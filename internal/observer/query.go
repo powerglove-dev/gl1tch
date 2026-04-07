@@ -91,9 +91,27 @@ func (q *QueryEngine) Stream(ctx context.Context, question string, tokenCh chan<
 // Only ES documents matching the given repo names are included in the search.
 // If repos is empty, behaves like Stream (no filtering).
 func (q *QueryEngine) StreamScoped(ctx context.Context, question string, repos []string, tokenCh chan<- string) error {
+	return q.StreamScopedWorkspace(ctx, question, repos, "", tokenCh)
+}
+
+// StreamScopedWorkspace is the workspace-aware variant of
+// StreamScoped. When workspaceID is non-empty, the search query is
+// further filtered to documents whose workspace_id field matches —
+// guaranteeing that workspace A's brain queries can never see
+// workspace B's indexed data even if they share the same repo
+// names.
+//
+// repos and workspaceID stack rather than replacing each other:
+//   - workspaceID="" + repos=[] → no filtering (Stream)
+//   - workspaceID="" + repos=[…] → repo filter only (legacy StreamScoped)
+//   - workspaceID="ws-1" + repos=[] → workspace filter only
+//   - workspaceID="ws-1" + repos=[…] → both filters AND'd together
+//
+// Closes tokenCh when done.
+func (q *QueryEngine) StreamScopedWorkspace(ctx context.Context, question string, repos []string, workspaceID string, tokenCh chan<- string) error {
 	defer close(tokenCh)
 
-	results, err := q.searchScopedWithFallback(ctx, question, repos)
+	results, err := q.searchScopedWithFallback(ctx, question, repos, workspaceID)
 	if err != nil {
 		return fmt.Errorf("search: %w", err)
 	}
@@ -108,15 +126,16 @@ func (q *QueryEngine) StreamScoped(ctx context.Context, question string, repos [
 	return q.streamSynthesize(ctx, question, results, tokenCh)
 }
 
-// searchScopedWithFallback searches with a repo filter applied.
-func (q *QueryEngine) searchScopedWithFallback(ctx context.Context, question string, repos []string) (*esearch.SearchResponse, error) {
-	if len(repos) == 0 {
+// searchScopedWithFallback searches with optional repo and
+// workspace filters applied. Both filters are independently
+// optional and stack when both are set.
+func (q *QueryEngine) searchScopedWithFallback(ctx context.Context, question string, repos []string, workspaceID string) (*esearch.SearchResponse, error) {
+	if len(repos) == 0 && workspaceID == "" {
 		return q.searchWithFallback(ctx, question)
 	}
 
-	// Use the default query with repo filter injected.
 	query := defaultQuery(question)
-	injectRepoFilter(query, repos)
+	injectScopeFilters(query, repos, workspaceID)
 
 	results, err := q.es.Search(ctx, allIndices(), query)
 	if err != nil {
@@ -125,23 +144,36 @@ func (q *QueryEngine) searchScopedWithFallback(ctx context.Context, question str
 	return results, nil
 }
 
-// injectRepoFilter wraps the existing query in a bool filter that restricts
-// results to documents matching the given repo names.
-func injectRepoFilter(query map[string]any, repos []string) {
-	if len(repos) == 0 {
+// injectScopeFilters wraps the existing query in a bool filter that
+// restricts results by any combination of repo names and workspace
+// id. Empty filters are skipped so this is safe to call with either
+// or both fields unset.
+//
+// The filters are AND'd: a doc must match the repo terms AND the
+// workspace_id term to be returned.
+func injectScopeFilters(query map[string]any, repos []string, workspaceID string) {
+	if len(repos) == 0 && workspaceID == "" {
 		return
 	}
 
 	originalQuery := query["query"]
 
+	var filters []any
+	if len(repos) > 0 {
+		filters = append(filters, map[string]any{
+			"terms": map[string]any{"repo": repos},
+		})
+	}
+	if workspaceID != "" {
+		filters = append(filters, map[string]any{
+			"term": map[string]any{"workspace_id": workspaceID},
+		})
+	}
+
 	query["query"] = map[string]any{
 		"bool": map[string]any{
-			"must": []any{originalQuery},
-			"filter": []any{
-				map[string]any{
-					"terms": map[string]any{"repo": repos},
-				},
-			},
+			"must":   []any{originalQuery},
+			"filter": filters,
 		},
 	}
 }

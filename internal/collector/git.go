@@ -18,6 +18,10 @@ type GitCollector struct {
 	Repos []string
 	// Interval is how often to poll for new commits. Defaults to 60s.
 	Interval time.Duration
+	// WorkspaceID is stamped on every indexed event so brain queries
+	// can scope to one workspace's commits. Empty when the collector
+	// runs outside any workspace pod (legacy / always-on global).
+	WorkspaceID string
 }
 
 func (g *GitCollector) Name() string { return "git" }
@@ -99,6 +103,7 @@ func (g *GitCollector) poll(ctx context.Context, es *esearch.Client, repo string
 		docs = append(docs, esearch.Event{
 			Type:         "git.commit",
 			Source:       "git",
+			WorkspaceID:  g.WorkspaceID,
 			Repo:         repoName,
 			Branch:       gitCurrentBranch(repo),
 			Author:       c.author,
@@ -110,7 +115,7 @@ func (g *GitCollector) poll(ctx context.Context, es *esearch.Client, repo string
 		})
 	}
 
-	if err := es.BulkIndex(ctx, esearch.IndexEvents, docs); err != nil {
+	if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(g.WorkspaceID, docs)); err != nil {
 		return 0, fmt.Errorf("bulk index: %w", err)
 	}
 

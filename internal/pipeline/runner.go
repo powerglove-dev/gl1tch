@@ -70,6 +70,11 @@ type runConfig struct {
 	stepWriter           io.Writer // when set, executor output is teed here in real time
 	statusWriter         io.Writer // destination for [step:*] status lines; defaults to os.Stdout
 	disableClarification bool      // when true, skip GLITCH_CLARIFY injection (for internal pipelines)
+	literalPrompts       bool      // when true, leave {{ steps.X.Y }} markers in prompt text untouched
+	//                                instead of erroring on unresolved references. Used by synthetic
+	//                                single-step pipelines (e.g. RefineDraft, StreamPrompt) where the
+	//                                prompt body is user content that may legitimately contain
+	//                                unresolved template syntax (e.g. a workflow YAML being edited).
 
 	// Game scoring fields, protected by stepFailuresMu.
 	stepFailuresMu sync.Mutex
@@ -131,6 +136,19 @@ func WithSilentStatus() RunOption {
 // the LLM must return a structured response, not ask the user questions.
 func WithNoClarification() RunOption {
 	return func(c *runConfig) { c.disableClarification = true }
+}
+
+// WithLiteralPrompts tells the runner to leave {{ steps.X.Y }} markers in
+// step prompts as literal text instead of trying to resolve them against
+// prior step outputs. Without this, a synthetic single-step pipeline whose
+// prompt happens to contain workflow YAML (e.g. the EditorPopup's refine
+// loop) would error out the moment the YAML body referenced any step input.
+//
+// Use this for runs where the prompt is opaque user content rather than a
+// composed pipeline. Real chain runs should leave it off so missing step
+// references stay loud.
+func WithLiteralPrompts() RunOption {
+	return func(c *runConfig) { c.literalPrompts = true }
 }
 
 // WithPackLoader attaches a WorldPackLoader to the run. The active pack's
@@ -1717,20 +1735,26 @@ func resolveExecutor(ctx context.Context, step *Step, args map[string]any, snap 
 	promptOrInput := Interpolate(raw, snap)
 
 	// Resolve {{ steps.<id>.<key> }} patterns from accumulated step outputs.
+	// In literal-prompt mode (used by synthetic single-step pipelines like
+	// the EditorPopup refine loop) we skip resolution entirely so unresolved
+	// markers in the prompt body — typically workflow YAML the user is
+	// editing — stay verbatim instead of erroring out.
 	runIDStr := strconv.FormatInt(ec.RunID(), 10)
-	resolved, resolveErr := ResolveStepInputs(promptOrInput, ec, step.ID, runIDStr)
-	if resolveErr != nil {
-		return nil, resolveErr
-	}
-	promptOrInput = resolved
-
-	// Also resolve declared Inputs map values.
-	for _, tmpl := range step.Inputs {
-		resolvedInput, inputErr := ResolveStepInputs(tmpl, ec, step.ID, runIDStr)
-		if inputErr != nil {
-			return nil, inputErr
+	if !runCfg.literalPrompts {
+		resolved, resolveErr := ResolveStepInputs(promptOrInput, ec, step.ID, runIDStr)
+		if resolveErr != nil {
+			return nil, resolveErr
 		}
-		_ = resolvedInput // inputs are available via snap but we resolve them for validation
+		promptOrInput = resolved
+
+		// Also resolve declared Inputs map values.
+		for _, tmpl := range step.Inputs {
+			resolvedInput, inputErr := ResolveStepInputs(tmpl, ec, step.ID, runIDStr)
+			if inputErr != nil {
+				return nil, inputErr
+			}
+			_ = resolvedInput // inputs are available via snap but we resolve them for validation
+		}
 	}
 
 	// Prepend saved prompt body if prompt_id is set.
@@ -1835,12 +1859,15 @@ func executePluginStep(ctx context.Context, step *Step, ec *ExecutionContext, mg
 	promptOrInput := Interpolate(raw, snap)
 
 	// Resolve {{ steps.<id>.<key> }} patterns from accumulated step outputs.
+	// Same literal-prompts skip as the registered-executor path above.
 	runIDStr := strconv.FormatInt(ec.RunID(), 10)
-	resolvedPrompt, resolveErr := ResolveStepInputs(promptOrInput, ec, step.ID, runIDStr)
-	if resolveErr != nil {
-		return "", resolveErr
+	if !runCfg.literalPrompts {
+		resolvedPrompt, resolveErr := ResolveStepInputs(promptOrInput, ec, step.ID, runIDStr)
+		if resolveErr != nil {
+			return "", resolveErr
+		}
+		promptOrInput = resolvedPrompt
 	}
-	promptOrInput = resolvedPrompt
 
 	// Prepend saved prompt body if prompt_id is set.
 	if step.PromptID != "" {

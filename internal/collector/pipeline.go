@@ -11,8 +11,9 @@ import (
 
 // PipelineIndexer watches the store for completed runs and indexes them to ES.
 type PipelineIndexer struct {
-	Store    *store.Store
-	Interval time.Duration
+	Store       *store.Store
+	Interval    time.Duration
+	WorkspaceID string
 }
 
 func (p *PipelineIndexer) Name() string { return "pipeline" }
@@ -115,7 +116,7 @@ func (p *PipelineIndexer) poll(ctx context.Context, es *esearch.Client, afterID 
 
 	if len(docs) > 0 {
 		slog.Info("pipeline indexer: new runs", "count", len(docs))
-		if err := es.BulkIndex(ctx, esearch.IndexPipelines, docs); err != nil {
+		if err := es.BulkIndex(ctx, esearch.IndexPipelines, StampWorkspaceID(p.WorkspaceID, docs)); err != nil {
 			return afterID, err
 		}
 	}

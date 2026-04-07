@@ -158,12 +158,28 @@ func (a *App) startup(ctx context.Context) {
 		}
 	}()
 
+	// Initialize the per-workspace collector pod manager. Each
+	// workspace runs its own tree of collector goroutines so brain
+	// queries can be scoped to a single workspace's data and the
+	// "configure collectors" popup can edit per-workspace files
+	// without one workspace's mattermost watcher bleeding into
+	// another's. The manager is bound to the desktop ctx so its
+	// pods all tear down cleanly on shutdown.
+	glitchd.InitPodManager(a.ctx)
+	go glitchd.StartAllWorkspacePods(a.ctx)
+
 	a.startNotify()
 }
 
 func (a *App) domReady(_ context.Context) {}
 
 func (a *App) shutdown(_ context.Context) {
+	// Stop every workspace pod first so collectors exit cleanly
+	// before the parent contexts get torn down. StopAll waits on
+	// the goroutines, so callers downstream don't see partially-
+	// torn-down state.
+	glitchd.StopAllWorkspacePods()
+
 	if a.notifyProc != nil {
 		_ = a.notifyProc.Kill()
 	}
@@ -186,6 +202,10 @@ func (a *App) Ready() {
 // ── Workspace CRUD ─────────────────────────────────────────────────────────
 
 // CreateWorkspace creates a new workspace and returns it as JSON.
+// As a side effect, the new workspace gets its own collector pod
+// started so anything the user adds to it (directories, mattermost
+// channels, github repos) starts collecting immediately without an
+// app restart.
 func (a *App) CreateWorkspace(title string) string {
 	st, err := glitchd.OpenStore()
 	if err != nil {
@@ -194,6 +214,12 @@ func (a *App) CreateWorkspace(title string) string {
 	ws, err := st.CreateWorkspace(a.ctx, title, time.Now().UnixMilli())
 	if err != nil {
 		return "{}"
+	}
+	// Best-effort pod start. We don't fail workspace creation if
+	// the pod can't start — the user can fix collector config later
+	// and restart the pod via the editor popup save.
+	if perr := glitchd.StartWorkspacePod(ws.ID); perr != nil {
+		log.Printf("create workspace: start pod: %v", perr)
 	}
 	b, _ := json.Marshal(ws)
 	return string(b)
@@ -213,13 +239,32 @@ func (a *App) ListWorkspaces() string {
 	return string(b)
 }
 
-// DeleteWorkspace removes a workspace and all its data.
+// DeleteWorkspace removes a workspace and all its data, including
+// stopping its collector pod and removing its per-workspace
+// collectors.yaml from disk so the workspace leaves no residue.
 func (a *App) DeleteWorkspace(id string) {
+	// Stop the pod first so collector goroutines exit before we
+	// delete the config they were reading from.
+	if err := glitchd.StopWorkspacePod(id); err != nil {
+		log.Printf("delete workspace: stop pod: %v", err)
+	}
+	if err := collectorDeleteWorkspaceConfigBridge(id); err != nil {
+		log.Printf("delete workspace: remove config: %v", err)
+	}
+
 	st, err := glitchd.OpenStore()
 	if err != nil {
 		return
 	}
 	_ = st.DeleteWorkspace(a.ctx, id)
+}
+
+// collectorDeleteWorkspaceConfigBridge calls into the collector
+// package to remove a workspace's collectors.yaml. Wrapped here so
+// app.go doesn't have to import internal/collector directly (the
+// rest of the file goes through pkg/glitchd).
+func collectorDeleteWorkspaceConfigBridge(workspaceID string) error {
+	return glitchd.DeleteWorkspaceCollectorConfig(workspaceID)
 }
 
 // UpdateWorkspaceTitle sets the title of a workspace.
@@ -360,9 +405,13 @@ func (a *App) AskScoped(prompt, workspaceID string) {
 			}
 		}()
 
+		// Always go through the workspace-aware path so the brain
+		// answer is filtered to this workspace's indexed data, even
+		// when the repos slice is empty (e.g. workspace with no
+		// directories yet but other collectors active).
 		var err error
-		if len(repos) > 0 {
-			err = glitchd.StreamAnswerScoped(runCtx, prompt, repos, tokenCh)
+		if workspaceID != "" || len(repos) > 0 {
+			err = glitchd.StreamAnswerScopedWorkspace(runCtx, prompt, repos, workspaceID, tokenCh)
 		} else {
 			err = glitchd.StreamAnswer(runCtx, prompt, tokenCh)
 		}
@@ -789,6 +838,37 @@ func (a *App) WorkflowPathForName(workspaceID, name string) string {
 	return glitchd.WorkflowPathForName(a.ctx, workspaceID, name)
 }
 
+// ReadSkillOrAgentFile returns the markdown contents of a skill or
+// agent file as JSON {content: "..."} or {error: "..."}. The path
+// must live under one of the recognized skill/agent locations
+// (workspace .claude/, global ~/.claude/, etc.). Used by the editor
+// popup as a fallback when CreateDraftFromTarget hasn't already
+// loaded the body.
+func (a *App) ReadSkillOrAgentFile(path string) string {
+	return glitchd.ReadSkillOrAgentFile(path)
+}
+
+// SkillPathForName returns where a new workspace skill with the
+// given name would be written. Used as a preview in the editor
+// popup before the user commits to save.
+func (a *App) SkillPathForName(workspaceID, name string) string {
+	return glitchd.SkillPathForName(a.ctx, workspaceID, name)
+}
+
+// AgentPathForName returns where a new workspace agent with the
+// given name would be written.
+func (a *App) AgentPathForName(workspaceID, name string) string {
+	return glitchd.AgentPathForName(a.ctx, workspaceID, name)
+}
+
+// PromoteDraftAs is the "save as new" path. Detaches the draft from
+// its current target (so global entities don't get overwritten),
+// renames it to newName, and promotes. Always lands in the
+// workspace. Returns the same JSON shape as PromoteDraft.
+func (a *App) PromoteDraftAs(id int64, newName string) string {
+	return glitchd.PromoteDraftAs(a.ctx, id, newName)
+}
+
 // ── Clarification ──────────────────────────────────────────────────────
 
 // AnswerClarification writes the user's answer for a pending clarification.
@@ -1007,9 +1087,20 @@ func (a *App) ListCollectors(workspaceID string) string {
 }
 
 // CollectorsConfigPath returns the absolute path to observer.yaml.
-// The frontend shows this under the in-app editor so the user knows
-// where the file lives.
-func (a *App) CollectorsConfigPath() string {
+// CollectorsConfigPath returns the absolute path of a collectors
+// config file. When workspaceID is non-empty, returns the path of
+// that workspace's per-workspace collectors.yaml. When empty,
+// returns the global ~/.config/glitch/observer.yaml path (the
+// force-overwrite escape hatch — global is read-only by default
+// in the editor popup).
+func (a *App) CollectorsConfigPath(workspaceID string) string {
+	if workspaceID != "" {
+		p, err := glitchd.WorkspaceCollectorConfigPath(workspaceID)
+		if err != nil {
+			return ""
+		}
+		return p
+	}
 	p, err := glitchd.CollectorConfigPath()
 	if err != nil {
 		return ""
@@ -1017,11 +1108,19 @@ func (a *App) CollectorsConfigPath() string {
 	return p
 }
 
-// ReadCollectorsConfig returns the raw observer.yaml contents for the
-// in-app editor. Bound to the brain popover's "Edit collectors" modal.
-// Creates the file from defaults if it doesn't exist yet so the
-// editor always opens to a useful starting point.
-func (a *App) ReadCollectorsConfig() string {
+// ReadCollectorsConfig returns the raw YAML contents of a collectors
+// config file. workspaceID="" reads the global observer.yaml; non-
+// empty reads the per-workspace file. Both auto-create a starter
+// file from defaults if none exists, so the editor always opens to
+// a useful starting point.
+func (a *App) ReadCollectorsConfig(workspaceID string) string {
+	if workspaceID != "" {
+		s, err := glitchd.ReadWorkspaceCollectorConfig(workspaceID)
+		if err != nil {
+			return ""
+		}
+		return s
+	}
 	s, err := glitchd.ReadCollectorConfig()
 	if err != nil {
 		return ""
@@ -1029,15 +1128,21 @@ func (a *App) ReadCollectorsConfig() string {
 	return s
 }
 
-// WriteCollectorsConfig saves new observer.yaml content from the
-// in-app editor. Returns an empty string on success, or the
-// validation/IO error message on failure (the modal surfaces it
-// inline so the user can fix typos without losing their edits).
+// WriteCollectorsConfig validates and saves collectors config content.
+// workspaceID="" writes the global observer.yaml (force-overwrite
+// path); non-empty writes the per-workspace file AND restarts that
+// workspace's collector pod so the new config takes effect immediately.
 //
-// On successful write we kick off an immediate brain refresh so the
-// "Collectors" list and counts reflect the new config without the
-// user having to wait for the next collector tick.
-func (a *App) WriteCollectorsConfig(content string) string {
+// Returns "" on success, or the validation/IO error message so the
+// editor popup can render it inline.
+func (a *App) WriteCollectorsConfig(workspaceID, content string) string {
+	if workspaceID != "" {
+		if err := glitchd.WriteWorkspaceCollectorConfig(workspaceID, content); err != nil {
+			return err.Error()
+		}
+		go a.refreshCollectorActivity(false)
+		return ""
+	}
 	if err := glitchd.WriteCollectorConfig(content); err != nil {
 		return err.Error()
 	}

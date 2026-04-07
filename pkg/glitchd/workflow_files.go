@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/8op-org/gl1tch/internal/collector"
 	"github.com/8op-org/gl1tch/internal/store"
 )
 
@@ -157,13 +158,17 @@ func WorkflowPathForName(ctx context.Context, workspaceID, name string) string {
 }
 
 // CreateDraftFromTarget creates a new draft seeded from an existing
-// entity (prompt row or workflow file) so the editor popup can be
-// opened on something the user already has. The draft's target_id /
-// target_path is set so a later PromoteDraft writes back to the
-// original entity instead of creating a duplicate.
+// entity (prompt row, workflow file, skill SKILL.md, or agent .md)
+// so the editor popup can be opened on something the user already
+// has. The draft's target_id / target_path is set so a later
+// PromoteDraft writes back to the original entity instead of
+// creating a duplicate.
 //
-// kind ∈ {"prompt", "workflow"} for now. Skill/agent kinds will land
-// once their file layout is settled.
+// For file-backed kinds (workflow / skill / agent), the resolved
+// target_path stored on the draft is normalized so subsequent
+// promotes hit the exact same file. Skills are normalized to
+// <dir>/SKILL.md so the popup never has to worry about whether the
+// caller passed a directory or a file.
 //
 // Returns the created draft as JSON (same shape as CreateDraft) or
 // {error: "..."} on failure.
@@ -177,6 +182,8 @@ func CreateDraftFromTarget(ctx context.Context, workspaceID, kind string, target
 	}
 
 	var title, body string
+	resolvedPath := targetPath
+
 	switch kind {
 	case store.DraftKindPrompt:
 		if targetID == 0 {
@@ -204,6 +211,64 @@ func CreateDraftFromTarget(ctx context.Context, workspaceID, kind string, target
 		// Title is the file's basename without the .workflow.yaml suffix.
 		title = strings.TrimSuffix(filepath.Base(targetPath), ".workflow.yaml")
 
+	case store.DraftKindSkill:
+		if strings.TrimSpace(targetPath) == "" {
+			return errorJSON(fmt.Errorf("skill target requires a target_path"))
+		}
+		if !isSkillOrAgentPath(targetPath) {
+			return errorJSON(fmt.Errorf("refusing %q: not a recognized skill location", targetPath))
+		}
+		// Normalize to the SKILL.md inside the directory if a dir was passed.
+		resolvedPath = targetPath
+		if info, statErr := os.Stat(targetPath); statErr == nil && info.IsDir() {
+			resolvedPath = resolveSkillFilePath(targetPath)
+		}
+		raw, rerr := os.ReadFile(resolvedPath)
+		if rerr != nil {
+			return errorJSON(fmt.Errorf("read skill file: %w", rerr))
+		}
+		body = string(raw)
+		// Title is the parent directory name (skill name lives in the dir).
+		title = filepath.Base(filepath.Dir(resolvedPath))
+
+	case store.DraftKindAgent:
+		if strings.TrimSpace(targetPath) == "" {
+			return errorJSON(fmt.Errorf("agent target requires a target_path"))
+		}
+		if !isSkillOrAgentPath(targetPath) {
+			return errorJSON(fmt.Errorf("refusing %q: not a recognized agent location", targetPath))
+		}
+		raw, rerr := os.ReadFile(targetPath)
+		if rerr != nil {
+			return errorJSON(fmt.Errorf("read agent file: %w", rerr))
+		}
+		body = string(raw)
+		// Strip the extension; agents are <name>.md.
+		base := filepath.Base(targetPath)
+		ext := filepath.Ext(base)
+		title = strings.TrimSuffix(base, ext)
+
+	case store.DraftKindCollectors:
+		// Collectors drafts always edit the active workspace's
+		// collectors.yaml. We resolve the path from the workspace id
+		// rather than trusting whatever the caller passed, so a
+		// malformed Wails call can't redirect the write somewhere
+		// else. The starter file is created on demand.
+		if err := collector.EnsureWorkspaceConfig(workspaceID); err != nil {
+			return errorJSON(fmt.Errorf("ensure collectors config: %w", err))
+		}
+		path, perr := collector.WorkspaceConfigPath(workspaceID)
+		if perr != nil {
+			return errorJSON(perr)
+		}
+		raw, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return errorJSON(fmt.Errorf("read collectors config: %w", rerr))
+		}
+		body = string(raw)
+		title = "collectors"
+		resolvedPath = path
+
 	default:
 		return errorJSON(fmt.Errorf("unsupported draft kind %q", kind))
 	}
@@ -214,7 +279,7 @@ func CreateDraftFromTarget(ctx context.Context, workspaceID, kind string, target
 		Title:       title,
 		Body:        body,
 		TargetID:    targetID,
-		TargetPath:  targetPath,
+		TargetPath:  resolvedPath,
 	})
 	if err != nil {
 		return errorJSON(err)
@@ -223,7 +288,26 @@ func CreateDraftFromTarget(ctx context.Context, workspaceID, kind string, target
 	if err != nil {
 		return errorJSON(err)
 	}
-	return draftJSON(d)
+	return draftJSONWithReadOnly(ctx, st, d)
+}
+
+// draftJSONWithReadOnly serializes a draft and tags it with a
+// read_only flag when the target_path lives outside any of the
+// active workspace's directories. The popup uses this to disable
+// the save button on global entities and force the user through
+// the "save as new" path instead.
+func draftJSONWithReadOnly(ctx context.Context, st *store.Store, d store.Draft) string {
+	info := toDraftInfo(d)
+	type wire struct {
+		DraftInfo
+		ReadOnly bool `json:"read_only"`
+	}
+	out := wire{DraftInfo: info}
+	if d.TargetPath != "" && !isWorkspaceWritablePath(ctx, st, d.WorkspaceID, d.TargetPath) {
+		out.ReadOnly = true
+	}
+	b, _ := json.Marshal(out)
+	return string(b)
 }
 
 // primaryWorkspaceDir returns the first directory associated with a

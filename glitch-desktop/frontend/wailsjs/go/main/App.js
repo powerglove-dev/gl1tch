@@ -6,6 +6,10 @@ export function AddWorkspaceDirectory(arg1) {
   return window['go']['main']['App']['AddWorkspaceDirectory'](arg1);
 }
 
+export function AgentPathForName(arg1, arg2) {
+  return window['go']['main']['App']['AgentPathForName'](arg1, arg2);
+}
+
 export function AnswerClarification(arg1, arg2) {
   return window['go']['main']['App']['AnswerClarification'](arg1, arg2);
 }
@@ -18,8 +22,8 @@ export function AskScoped(arg1, arg2) {
   return window['go']['main']['App']['AskScoped'](arg1, arg2);
 }
 
-export function CollectorsConfigPath() {
-  return window['go']['main']['App']['CollectorsConfigPath']();
+export function CollectorsConfigPath(arg1) {
+  return window['go']['main']['App']['CollectorsConfigPath'](arg1);
 }
 
 export function CreateDraft(arg1, arg2, arg3, arg4) {
@@ -42,12 +46,12 @@ export function DeleteDraft(arg1) {
   return window['go']['main']['App']['DeleteDraft'](arg1);
 }
 
-export function DeleteWorkflowFile(arg1) {
-  return window['go']['main']['App']['DeleteWorkflowFile'](arg1);
-}
-
 export function DeletePrompt(arg1) {
   return window['go']['main']['App']['DeletePrompt'](arg1);
+}
+
+export function DeleteWorkflowFile(arg1) {
+  return window['go']['main']['App']['DeleteWorkflowFile'](arg1);
 }
 
 export function DeleteWorkspace(arg1) {
@@ -102,8 +106,16 @@ export function PromoteDraft(arg1, arg2) {
   return window['go']['main']['App']['PromoteDraft'](arg1, arg2);
 }
 
-export function ReadCollectorsConfig() {
-  return window['go']['main']['App']['ReadCollectorsConfig']();
+export function PromoteDraftAs(arg1, arg2) {
+  return window['go']['main']['App']['PromoteDraftAs'](arg1, arg2);
+}
+
+export function ReadCollectorsConfig(arg1) {
+  return window['go']['main']['App']['ReadCollectorsConfig'](arg1);
+}
+
+export function ReadSkillOrAgentFile(arg1) {
+  return window['go']['main']['App']['ReadSkillOrAgentFile'](arg1);
 }
 
 export function ReadWorkflowFile(arg1) {
@@ -146,6 +158,10 @@ export function SaveWorkflow(arg1, arg2, arg3) {
   return window['go']['main']['App']['SaveWorkflow'](arg1, arg2, arg3);
 }
 
+export function SkillPathForName(arg1, arg2) {
+  return window['go']['main']['App']['SkillPathForName'](arg1, arg2);
+}
+
 export function StopDraftRefine(arg1) {
   return window['go']['main']['App']['StopDraftRefine'](arg1);
 }
@@ -166,8 +182,8 @@ export function WorkflowPathForName(arg1, arg2) {
   return window['go']['main']['App']['WorkflowPathForName'](arg1, arg2);
 }
 
-export function WriteCollectorsConfig(arg1) {
-  return window['go']['main']['App']['WriteCollectorsConfig'](arg1);
+export function WriteCollectorsConfig(arg1, arg2) {
+  return window['go']['main']['App']['WriteCollectorsConfig'](arg1, arg2);
 }
 
 export function WriteWorkflowFile(arg1, arg2) {

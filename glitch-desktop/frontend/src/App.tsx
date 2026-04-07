@@ -507,6 +507,42 @@ export function App() {
     });
   }, [state.activeWorkspaceId, openEditor, toast]);
 
+  // Skills and agents share an edit handler — the kind comes from
+  // the AgentEntry, the path from a.path, and the popup figures out
+  // read_only based on whether the path is in workspace or global.
+  const handleEditAgent = useCallback((a: AgentEntry) => {
+    if (!state.activeWorkspaceId) return;
+    CreateDraftFromTarget(state.activeWorkspaceId, a.kind, 0, a.path).then((json) => {
+      try {
+        const d = JSON.parse(json);
+        if (d?.error) {
+          toast.error("Couldn't open " + a.kind, { detail: d.error });
+          return;
+        }
+        if (d?.id) openEditor(d.id);
+      } catch {}
+    });
+  }, [state.activeWorkspaceId, openEditor, toast]);
+
+  // Open the EditorPopup on the active workspace's collectors.yaml.
+  // Same draft primitive as everything else — the popup loads it as
+  // kind=collectors, refines via the chat strip, and saves back via
+  // PromoteDraft (which pipes through WriteWorkspaceCollectorConfig
+  // and triggers a pod restart).
+  const handleEditCollectors = useCallback(() => {
+    if (!state.activeWorkspaceId) return;
+    CreateDraftFromTarget(state.activeWorkspaceId, "collectors", 0, "").then((json) => {
+      try {
+        const d = JSON.parse(json);
+        if (d?.error) {
+          toast.error("Couldn't open collectors", { detail: d.error });
+          return;
+        }
+        if (d?.id) openEditor(d.id);
+      } catch {}
+    });
+  }, [state.activeWorkspaceId, openEditor, toast]);
+
   const closeEditor = useCallback(() => {
     setOpenDraftId(null);
   }, []);
@@ -654,6 +690,7 @@ export function App() {
         onMarkBrainRead={markBrainRead}
         activeWorkspaceId={state.activeWorkspaceId}
         activeWorkspaceTitle={activeWs?.title ?? ""}
+        onEditCollectors={handleEditCollectors}
       />
 
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
@@ -679,6 +716,7 @@ export function App() {
             onEditWorkflowFile={handleEditWorkflowFile}
             onNewWorkflow={handleNewWorkflow}
             onAddAgent={handleAddAgentToChain}
+            onEditAgent={handleEditAgent}
             onAddPrompt={handleAddPromptToChain}
             onDeletePrompt={handleDeletePrompt}
             onEditPrompt={handleEditPrompt}

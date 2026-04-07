@@ -5,8 +5,19 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+)
 
-	"gopkg.in/yaml.v3"
+// Default poll intervals shared by both the global LoadConfig path
+// and the per-workspace LoadWorkspaceConfig path. Centralised here
+// so the two loaders can never drift on what "default" means.
+const (
+	defaultGitInterval         = 60 * time.Second
+	defaultClaudeInterval      = 120 * time.Second
+	defaultCopilotInterval     = 120 * time.Second
+	defaultGitHubInterval      = 300 * time.Second
+	defaultMattermostInterval  = 60 * time.Second
+	defaultDirectoriesInterval = 120 * time.Second
+	defaultModel               = "llama3.2"
 )
 
 // Config holds the collector configuration, loaded from ~/.config/glitch/observer.yaml.
@@ -63,54 +74,15 @@ func DefaultConfigPath() (string, error) {
 	return filepath.Join(home, ".config", "glitch", "observer.yaml"), nil
 }
 
-// LoadConfig reads the observer config. If the file doesn't exist, returns defaults.
+// LoadConfig reads the global observer config. If the file doesn't
+// exist, returns defaults. Per-workspace configs use
+// LoadWorkspaceConfig instead.
 func LoadConfig() (*Config, error) {
 	path, err := DefaultConfigPath()
 	if err != nil {
 		return nil, err
 	}
-
-	cfg := &Config{}
-	cfg.Elasticsearch.Address = "http://localhost:9200"
-	cfg.Git.Interval = 60 * time.Second
-	cfg.Claude.Enabled = true
-	cfg.Claude.Interval = 120 * time.Second
-	cfg.Copilot.Enabled = true
-	cfg.Copilot.Interval = 120 * time.Second
-	cfg.GitHub.Interval = 300 * time.Second
-	cfg.Mattermost.Interval = 60 * time.Second
-	cfg.Directories.Interval = 120 * time.Second
-	cfg.Model = "llama3.2"
-
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return cfg, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read observer config: %w", err)
-	}
-
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("parse observer config: %w", err)
-	}
-
-	// Mattermost: fall back to env vars if not set in YAML.
-	if cfg.Mattermost.URL == "" {
-		cfg.Mattermost.URL = os.Getenv("GLITCH_MATTERMOST_URL")
-	}
-	if cfg.Mattermost.Token == "" {
-		cfg.Mattermost.Token = os.Getenv("GLITCH_MATTERMOST_TOKEN")
-	}
-
-	// Expand ~ in repo paths.
-	home, _ := os.UserHomeDir()
-	for i, r := range cfg.Git.Repos {
-		if len(r) > 0 && r[0] == '~' {
-			cfg.Git.Repos[i] = filepath.Join(home, r[1:])
-		}
-	}
-
-	return cfg, nil
+	return loadConfigFromPath(path)
 }
 
 // EnsureDefaultConfig writes a starter observer.yaml if none exists.

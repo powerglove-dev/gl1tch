@@ -11,10 +11,11 @@ import (
 // DraftKind enumerates the entity types a draft can target. Stored as
 // the literal string in the drafts.kind column.
 const (
-	DraftKindPrompt   = "prompt"
-	DraftKindWorkflow = "workflow"
-	DraftKindSkill    = "skill"
-	DraftKindAgent    = "agent"
+	DraftKindPrompt     = "prompt"
+	DraftKindWorkflow   = "workflow"
+	DraftKindSkill      = "skill"
+	DraftKindAgent      = "agent"
+	DraftKindCollectors = "collectors"
 )
 
 // DraftTurn is one entry in a draft's refinement history. The user

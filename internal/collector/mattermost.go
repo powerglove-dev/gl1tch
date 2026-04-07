@@ -17,10 +17,11 @@ import (
 // access to. It polls the REST API v4 for new posts, categorising them as
 // mentions, direct messages, or regular channel messages.
 type MattermostCollector struct {
-	URL      string        // Mattermost server URL (e.g. https://chat.example.com)
-	Token    string        // Bot or personal-access token
-	Channels []string      // channel names to auto-join and monitor (empty = all)
-	Interval time.Duration // poll interval (default 60s)
+	URL         string        // Mattermost server URL (e.g. https://chat.example.com)
+	Token       string        // Bot or personal-access token
+	Channels    []string      // channel names to auto-join and monitor (empty = all)
+	Interval    time.Duration // poll interval (default 60s)
+	WorkspaceID string        // stamped on every indexed event for brain query scoping
 
 	client *http.Client
 	userID string // authenticated user/bot ID
@@ -144,7 +145,7 @@ func (m *MattermostCollector) Start(ctx context.Context, es *esearch.Client) err
 
 			if len(docs) > 0 {
 				slog.Info("mattermost collector: new messages", "count", len(docs))
-				if err := es.BulkIndex(ctx, esearch.IndexEvents, docs); err != nil {
+				if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(m.WorkspaceID, docs)); err != nil {
 					slog.Warn("mattermost collector: bulk index", "err", err)
 					tickErr = err
 				}
@@ -468,7 +469,7 @@ func IngestMattermost(ctx context.Context, es *esearch.Client, cfg *Config) (int
 		}
 
 		if len(batch) > 0 {
-			if err := es.BulkIndex(ctx, esearch.IndexEvents, batch); err != nil {
+			if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(m.WorkspaceID, batch)); err != nil {
 				slog.Warn("ingest: mattermost bulk", "err", err)
 				continue
 			}

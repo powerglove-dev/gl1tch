@@ -17,7 +17,8 @@ import (
 
 // CopilotCollector indexes GitHub Copilot CLI history and log files.
 type CopilotCollector struct {
-	Interval time.Duration
+	Interval    time.Duration
+	WorkspaceID string
 }
 
 func (c *CopilotCollector) Name() string { return "copilot" }
@@ -102,7 +103,7 @@ func (c *CopilotCollector) pollCommands(ctx context.Context, es *esearch.Client,
 
 	if len(docs) > 0 {
 		slog.Info("copilot collector: new commands", "count", len(docs))
-		if err := es.BulkIndex(ctx, esearch.IndexEvents, docs); err != nil {
+		if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(c.WorkspaceID, docs)); err != nil {
 			slog.Warn("copilot collector: index error", "err", err)
 			return lastCount // don't advance cursor on error
 		}
@@ -129,7 +130,7 @@ func (c *CopilotCollector) pollLogs(ctx context.Context, es *esearch.Client, dir
 
 		docs := c.parseLogFile(path)
 		if len(docs) > 0 {
-			if err := es.BulkIndex(ctx, esearch.IndexEvents, docs); err != nil {
+			if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(c.WorkspaceID, docs)); err != nil {
 				slog.Warn("copilot collector: log index error", "file", filepath.Base(path), "err", err)
 				continue
 			}

@@ -2,6 +2,13 @@ package esearch
 
 // Index mappings for gl1tch's Elasticsearch indices.
 
+// eventsMapping is the schema for the glitch-events index.
+//
+// workspace_id ties each event to the workspace whose collector pod
+// produced it. The brain query engine filters on this so workspace A
+// never sees workspace B's commits/messages/etc. Empty workspace_id
+// means "global / unattributed" — used for legacy events from before
+// the workspace split and for collectors running outside any pod.
 const eventsMapping = `{
   "settings": {
     "number_of_shards": 1,
@@ -11,6 +18,7 @@ const eventsMapping = `{
     "properties": {
       "type":          { "type": "keyword" },
       "source":        { "type": "keyword" },
+      "workspace_id":  { "type": "keyword" },
       "repo":          { "type": "keyword" },
       "branch":        { "type": "keyword" },
       "author":        { "type": "keyword" },
@@ -51,6 +59,7 @@ const pipelinesMapping = `{
     "properties": {
       "name":         { "type": "keyword" },
       "status":       { "type": "keyword" },
+      "workspace_id": { "type": "keyword" },
       "exit_code":    { "type": "integer" },
       "steps":        { "type": "object", "enabled": false },
       "stdout":       { "type": "text" },

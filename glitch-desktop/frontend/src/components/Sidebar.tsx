@@ -99,6 +99,10 @@ export interface AgentEntry {
   name: string;
   kind: string;
   source: string;
+  /** "workspace" | "global", normalized by the backend. */
+  scope: string;
+  /** Absolute file path (or directory for skills) so the editor can open it. */
+  path: string;
   description: string;
   invoke: string;
 }
@@ -108,7 +112,88 @@ export interface PromptEntry {
   Title: string;
   Body: string;
   ModelSlug: string;
+  /** Empty string = global, non-empty = workspace cwd. */
+  CWD: string;
   UpdatedAt: number;
+}
+
+/** Tri-state segmented filter used by Prompts and Skills/Agents
+ *  sections. We default to "workspace" because gl1tch is
+ *  workspace-scoped by default — the user has to opt in to see global
+ *  entries. */
+type ScopeFilterValue = "workspace" | "global" | "all";
+
+function ScopeFilter({
+  value,
+  onChange,
+  workspaceCount,
+  globalCount,
+}: {
+  value: ScopeFilterValue;
+  onChange: (v: ScopeFilterValue) => void;
+  workspaceCount: number;
+  globalCount: number;
+}) {
+  const tabs: { id: ScopeFilterValue; label: string; count: number }[] = [
+    { id: "workspace", label: "workspace", count: workspaceCount },
+    { id: "global", label: "global", count: globalCount },
+    { id: "all", label: "all", count: workspaceCount + globalCount },
+  ];
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 2,
+        marginBottom: 4,
+        padding: 2,
+        background: "var(--bg)",
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+      }}
+    >
+      {tabs.map((t) => {
+        const active = value === t.id;
+        return (
+          <button
+            key={t.id}
+            onClick={() => onChange(t.id)}
+            style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 4,
+              padding: "3px 6px",
+              fontSize: 9,
+              fontWeight: 600,
+              textTransform: "uppercase",
+              letterSpacing: "0.04em",
+              borderRadius: 4,
+              border: "none",
+              background: active ? "var(--bg-surface)" : "transparent",
+              color: active ? "var(--cyan)" : "var(--fg-dim)",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+            title={`Show ${t.label} entries (${t.count})`}
+          >
+            {t.label}
+            {t.count > 0 && (
+              <span
+                style={{
+                  fontSize: 8,
+                  opacity: 0.7,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                {t.count}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 interface Props {
@@ -134,6 +219,9 @@ interface Props {
   /** Open the EditorPopup on a brand-new workflow draft. */
   onNewWorkflow: () => void;
   onAddAgent: (name: string) => void;
+  /** Open the EditorPopup with this skill or agent loaded. Global
+   *  entries open read-only and force the user through "save as new". */
+  onEditAgent: (a: AgentEntry) => void;
   onAddPrompt: (p: PromptEntry) => void;
   onDeletePrompt: (id: number) => void;
   /** Open the EditorPopup with this prompt loaded as a draft. */
@@ -218,12 +306,35 @@ export function Sidebar({
   brainActivity,
   onAddDirectory, onRemoveDirectory, onAddWorkflowFile,
   onRunWorkflowFile, onDeleteWorkflowFile, onEditWorkflowFile, onNewWorkflow,
-  onAddAgent, onAddPrompt, onDeletePrompt, onEditPrompt, onNewPrompt,
+  onAddAgent, onEditAgent,
+  onAddPrompt, onDeletePrompt, onEditPrompt, onNewPrompt,
 }: Props) {
   const totalWorkflows = workflowFiles.length;
   const activeWs = workspaces.find((w) => w.id === activeWorkspaceId);
   const contextLabel = activeWs?.title ?? "no workspace";
   const noWorkspace = !activeWorkspaceId;
+
+  // Default both filter sections to "workspace" — users opt in to
+  // global entries. State lives in the parent component so it
+  // survives section collapse/expand.
+  const [promptScope, setPromptScope] = useState<ScopeFilterValue>("workspace");
+  const [agentScope, setAgentScope] = useState<ScopeFilterValue>("workspace");
+
+  // Bucket prompts by scope. A prompt is "workspace" when its CWD
+  // matches one of the active workspace's directories. CWD = "" is
+  // always global. Computing this once per render keeps the filter
+  // logic colocated with the component.
+  const dirSet = new Set(directories);
+  const promptIsWorkspace = (p: PromptEntry) => p.CWD !== "" && dirSet.has(p.CWD);
+  const promptIsGlobal = (p: PromptEntry) => p.CWD === "";
+  const promptWorkspaceCount = prompts.filter(promptIsWorkspace).length;
+  const promptGlobalCount = prompts.filter(promptIsGlobal).length;
+
+  // Bucket agents by scope. The backend already tagged each entry as
+  // "workspace" or "global" via normalizeAgentScope, so this is just
+  // a count.
+  const agentWorkspaceCount = agents.filter((a) => a.scope === "workspace").length;
+  const agentGlobalCount = agents.filter((a) => a.scope === "global").length;
 
   return (
     <div style={{
@@ -449,11 +560,23 @@ export function Sidebar({
 
         <SidebarSection title="Prompts" icon={<FileText size={12} />} count={prompts.length} defaultOpen={prompts.length > 0} searchable>
           {(filter: string) => {
-            const filtered = prompts.filter((p) =>
+            // Apply scope filter first, then text search.
+            const scoped = prompts.filter((p) => {
+              if (promptScope === "all") return true;
+              if (promptScope === "workspace") return promptIsWorkspace(p);
+              return promptIsGlobal(p);
+            });
+            const filtered = scoped.filter((p) =>
               !filter || p.Title.toLowerCase().includes(filter.toLowerCase())
             );
             return (
               <>
+                <ScopeFilter
+                  value={promptScope}
+                  onChange={setPromptScope}
+                  workspaceCount={promptWorkspaceCount}
+                  globalCount={promptGlobalCount}
+                />
                 {activeWorkspaceId && (
                   <button
                     onClick={onNewPrompt}
@@ -511,32 +634,55 @@ export function Sidebar({
 
         <SidebarSection title="Skills & Agents" icon={<Bot size={12} />} count={agents.length} defaultOpen={agents.length > 0} searchable>
           {(filter: string) => {
-            const filtered = agents.filter((a) =>
+            const scoped = agents.filter((a) => {
+              if (agentScope === "all") return true;
+              return a.scope === agentScope;
+            });
+            const filtered = scoped.filter((a) =>
               !filter || a.name.toLowerCase().includes(filter.toLowerCase())
             );
-            if (filtered.length === 0) return <EmptyState text={agents.length ? "No matches" : "Add directories to discover"} />;
-            return filtered.map((a) => (
-              <div
-                key={a.kind + ":" + a.name}
-                onClick={() => onAddAgent(a.name)}
-                style={{
-                  display: "flex", alignItems: "center", gap: 8,
-                  padding: "5px 10px", borderRadius: 6, fontSize: 11,
-                  color: selectedAgent === a.name ? "var(--fg-bright)" : "var(--fg)",
-                  background: selectedAgent === a.name ? "var(--purple)" + "22" : "transparent",
-                  cursor: "pointer",
-                }}
-                title={a.description}
-              >
-                <span style={{ color: a.kind === "skill" ? "var(--green)" : "var(--purple)", fontSize: 10, fontWeight: 600, width: 12 }}>
-                  {a.kind === "skill" ? "/" : "@"}
-                </span>
-                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {a.name}
-                </span>
-                <span style={{ fontSize: 9, color: "var(--fg-dim)" }}>{a.source}</span>
-              </div>
-            ));
+            return (
+              <>
+                <ScopeFilter
+                  value={agentScope}
+                  onChange={setAgentScope}
+                  workspaceCount={agentWorkspaceCount}
+                  globalCount={agentGlobalCount}
+                />
+                {filtered.length === 0 && (
+                  <EmptyState text={agents.length ? "No matches" : "Add directories to discover"} />
+                )}
+                {filtered.map((a) => (
+                  <div
+                    key={a.kind + ":" + a.name}
+                    onClick={() => onAddAgent(a.name)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: "5px 10px", borderRadius: 6, fontSize: 11,
+                      color: selectedAgent === a.name ? "var(--fg-bright)" : "var(--fg)",
+                      background: selectedAgent === a.name ? "var(--purple)" + "22" : "transparent",
+                      cursor: "pointer",
+                    }}
+                    title={a.description}
+                  >
+                    <span style={{ color: a.kind === "skill" ? "var(--green)" : "var(--purple)", fontSize: 10, fontWeight: 600, width: 12 }}>
+                      {a.kind === "skill" ? "/" : "@"}
+                    </span>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {a.name}
+                    </span>
+                    <span style={{ fontSize: 9, color: "var(--fg-dim)" }}>{a.source}</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onEditAgent(a); }}
+                      style={{ background: "none", border: "none", color: "var(--purple)", cursor: "pointer", padding: 2, borderRadius: 4, display: "flex", opacity: 0.7 }}
+                      title={a.scope === "global" ? "Open (read-only — use save as new to fork)" : "Edit in popup"}
+                    >
+                      <Pencil size={9} />
+                    </button>
+                  </div>
+                ))}
+              </>
+            );
           }}
         </SidebarSection>
 

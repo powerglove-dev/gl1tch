@@ -281,9 +281,142 @@ func PromoteDraft(ctx context.Context, draftID int64, makeGlobal bool) string {
 		return promotePromptDraft(ctx, st, d, makeGlobal)
 	case store.DraftKindWorkflow:
 		return promoteWorkflowDraft(ctx, st, d)
+	case store.DraftKindSkill:
+		return promoteSkillDraft(ctx, st, d)
+	case store.DraftKindAgent:
+		return promoteAgentDraft(ctx, st, d)
+	case store.DraftKindCollectors:
+		return promoteCollectorsDraft(ctx, d)
 	default:
 		return errorJSON(fmt.Errorf("promote: kind %q not yet supported", d.Kind))
 	}
+}
+
+// promoteCollectorsDraft writes the draft body back to the workspace's
+// collectors.yaml via WriteWorkspaceCollectorConfig, which validates
+// the YAML before writing AND restarts the workspace's collector pod
+// so the new config takes effect immediately.
+//
+// The target_path on the draft is informational only — the actual
+// path is recomputed from the workspace id so a malformed draft
+// can't redirect the write to somewhere outside the workspace's
+// config dir.
+func promoteCollectorsDraft(_ context.Context, d store.Draft) string {
+	if strings.TrimSpace(d.WorkspaceID) == "" {
+		return errorJSON(fmt.Errorf("collectors draft requires workspace_id"))
+	}
+	if err := WriteWorkspaceCollectorConfig(d.WorkspaceID, d.Body); err != nil {
+		return errorJSON(err)
+	}
+	// Recompute the path so the response includes the canonical
+	// location even if the draft's target_path was empty.
+	path, _ := WorkspaceCollectorConfigPath(d.WorkspaceID)
+	return promotedJSON(0, path)
+}
+
+// PromoteDraftAs is the "save as new" path. It detaches the draft
+// from any existing target (clearing target_id and target_path),
+// renames it to newName, and promotes. Always lands in the
+// workspace — used when the user wants to fork a global entity into
+// a workspace copy without overwriting the original.
+//
+// Returns the same {target_id, target_path} JSON as PromoteDraft.
+func PromoteDraftAs(ctx context.Context, draftID int64, newName string) string {
+	st, err := OpenStore()
+	if err != nil {
+		return errorJSON(err)
+	}
+	d, err := st.GetDraft(ctx, draftID)
+	if err != nil {
+		return errorJSON(err)
+	}
+	newName = strings.TrimSpace(newName)
+	if newName == "" {
+		return errorJSON(fmt.Errorf("save as: name is required"))
+	}
+	// Detach from the original target so the next promote treats this
+	// as a brand-new entity. We persist the change before promoting
+	// so the existing promote codepath sees the cleared fields.
+	d.Title = newName
+	d.TargetID = 0
+	d.TargetPath = ""
+	if err := st.UpdateDraft(ctx, d); err != nil {
+		return errorJSON(err)
+	}
+	return PromoteDraft(ctx, draftID, false)
+}
+
+// promoteSkillDraft writes a skill draft to disk. Brand-new drafts
+// (no target_path) land at <workspace>/.claude/skills/<title>/SKILL.md.
+// Existing drafts overwrite their target_path, but only if it lives
+// inside one of the workspace's directories — global skills are
+// read-only and the popup is responsible for routing the user
+// through PromoteDraftAs instead.
+func promoteSkillDraft(ctx context.Context, st *store.Store, d store.Draft) string {
+	if strings.TrimSpace(d.Body) == "" {
+		return errorJSON(fmt.Errorf("skill draft body is empty"))
+	}
+
+	path := d.TargetPath
+	if path == "" {
+		title := strings.TrimSpace(d.Title)
+		if title == "" {
+			return errorJSON(fmt.Errorf("skill draft requires a title"))
+		}
+		path = SkillPathForName(ctx, d.WorkspaceID, title)
+		if path == "" {
+			return errorJSON(errWorkspaceHasNoDirs)
+		}
+	} else {
+		// Existing draft → must be writable (i.e. inside the workspace).
+		if !isWorkspaceWritablePath(ctx, st, d.WorkspaceID, path) {
+			return errorJSON(fmt.Errorf("skill at %q is read-only — use save as new to fork", path))
+		}
+	}
+
+	if err := writeSkillFile(path, d.Body); err != nil {
+		return errorJSON(err)
+	}
+	if d.TargetPath != path {
+		d.TargetPath = path
+		_ = st.UpdateDraft(ctx, d)
+	}
+	return promotedJSON(0, path)
+}
+
+// promoteAgentDraft is the agent counterpart to promoteSkillDraft.
+// New drafts land at <workspace>/.claude/commands/<title>.md;
+// existing workspace drafts overwrite in place; global drafts are
+// rejected (the popup must route through PromoteDraftAs).
+func promoteAgentDraft(ctx context.Context, st *store.Store, d store.Draft) string {
+	if strings.TrimSpace(d.Body) == "" {
+		return errorJSON(fmt.Errorf("agent draft body is empty"))
+	}
+
+	path := d.TargetPath
+	if path == "" {
+		title := strings.TrimSpace(d.Title)
+		if title == "" {
+			return errorJSON(fmt.Errorf("agent draft requires a title"))
+		}
+		path = AgentPathForName(ctx, d.WorkspaceID, title)
+		if path == "" {
+			return errorJSON(errWorkspaceHasNoDirs)
+		}
+	} else {
+		if !isWorkspaceWritablePath(ctx, st, d.WorkspaceID, path) {
+			return errorJSON(fmt.Errorf("agent at %q is read-only — use save as new to fork", path))
+		}
+	}
+
+	if err := writeAgentFile(path, d.Body); err != nil {
+		return errorJSON(err)
+	}
+	if d.TargetPath != path {
+		d.TargetPath = path
+		_ = st.UpdateDraft(ctx, d)
+	}
+	return promotedJSON(0, path)
 }
 
 // promotePromptDraft handles kind=prompt promotion. CWD column on
@@ -471,6 +604,8 @@ func buildDraftSystemPrompt(kind, currentBody, brainContext string) string {
 		b.WriteString("The draft is a SKILL definition (Markdown with frontmatter). Preserve the frontmatter format and keep the body actionable.\n")
 	case store.DraftKindAgent:
 		b.WriteString("The draft is an AGENT definition (Markdown). Keep persona and capabilities crisp; avoid generic AI boilerplate.\n")
+	case store.DraftKindCollectors:
+		b.WriteString("The draft is a gl1tch COLLECTORS YAML — it configures which sources (git, github, claude, copilot, mattermost, directories) the workspace's collector pod indexes. Output must be valid YAML matching the existing schema. Preserve unknown sections rather than dropping them. Default state for any newly added section should be opt-in (enabled flags off, repo lists empty) unless the user explicitly asked to enable something.\n")
 	default:
 		b.WriteString("The draft is a free-form text artifact. Improve it without changing its essential intent.\n")
 	}

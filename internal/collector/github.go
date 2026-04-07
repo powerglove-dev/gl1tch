@@ -21,6 +21,9 @@ type GitHubCollector struct {
 	// Repos in "owner/repo" format.
 	Repos    []string
 	Interval time.Duration
+	// WorkspaceID is stamped on every indexed event so brain queries
+	// can scope to one workspace's PRs/issues.
+	WorkspaceID string
 }
 
 func (g *GitHubCollector) Name() string { return "github" }
@@ -106,7 +109,7 @@ func (g *GitHubCollector) pollRepo(ctx context.Context, es *esearch.Client, repo
 
 	if len(docs) > 0 {
 		slog.Info("github collector: new activity", "repo", repo, "events", len(docs))
-		if err := es.BulkIndex(ctx, esearch.IndexEvents, docs); err != nil {
+		if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(g.WorkspaceID, docs)); err != nil {
 			return fmt.Errorf("bulk index: %w", err)
 		}
 	}

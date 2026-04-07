@@ -3,13 +3,15 @@
 
 export function AddWorkspaceDirectory(arg1:string):Promise<void>;
 
+export function AgentPathForName(arg1:string,arg2:string):Promise<string>;
+
 export function AnswerClarification(arg1:string,arg2:string):Promise<void>;
 
 export function AskProvider(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
 export function AskScoped(arg1:string,arg2:string):Promise<void>;
 
-export function CollectorsConfigPath():Promise<string>;
+export function CollectorsConfigPath(arg1:string):Promise<string>;
 
 export function CreateDraft(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
@@ -21,9 +23,9 @@ export function CreateWorkspace(arg1:string):Promise<string>;
 
 export function DeleteDraft(arg1:number):Promise<void>;
 
-export function DeleteWorkflowFile(arg1:string):Promise<string>;
-
 export function DeletePrompt(arg1:number):Promise<void>;
+
+export function DeleteWorkflowFile(arg1:string):Promise<string>;
 
 export function DeleteWorkspace(arg1:string):Promise<void>;
 
@@ -51,7 +53,11 @@ export function LoadMessages(arg1:string):Promise<string>;
 
 export function PromoteDraft(arg1:number,arg2:boolean):Promise<string>;
 
-export function ReadCollectorsConfig():Promise<string>;
+export function PromoteDraftAs(arg1:number,arg2:string):Promise<string>;
+
+export function ReadCollectorsConfig(arg1:string):Promise<string>;
+
+export function ReadSkillOrAgentFile(arg1:string):Promise<string>;
 
 export function ReadWorkflowFile(arg1:string):Promise<string>;
 
@@ -73,6 +79,8 @@ export function SaveMessage(arg1:string,arg2:string):Promise<void>;
 
 export function SaveWorkflow(arg1:string,arg2:string,arg3:string):Promise<string>;
 
+export function SkillPathForName(arg1:string,arg2:string):Promise<string>;
+
 export function StopDraftRefine(arg1:number):Promise<void>;
 
 export function StopRun(arg1:string):Promise<void>;
@@ -83,6 +91,6 @@ export function UpdateWorkspaceTitle(arg1:string,arg2:string):Promise<void>;
 
 export function WorkflowPathForName(arg1:string,arg2:string):Promise<string>;
 
-export function WriteCollectorsConfig(arg1:string):Promise<string>;
+export function WriteCollectorsConfig(arg1:string,arg2:string):Promise<string>;
 
 export function WriteWorkflowFile(arg1:string,arg2:string):Promise<string>;

@@ -70,25 +70,35 @@ type CollectorInfo struct {
 
 // ListCollectorsForWorkspace returns the flat set of collectors
 // scoped to a single workspace. Directories come from the workspace
-// row in SQLite (not observer.yaml), and git/github are derived from
-// those directories on the fly by inspecting each dir's .git state.
+// row in SQLite, and git/github/claude/copilot/mattermost intervals
+// + enablement come from that workspace's per-workspace
+// collectors.yaml.
 //
-// workspaceID == "" falls back to the old observer.yaml view so the
-// function is still usable before the desktop picks an active
+// workspaceID == "" falls back to the global observer.yaml view so
+// the function is still usable before the desktop picks an active
 // workspace (e.g. during startup).
 //
 // Every collector row is always included even when disabled so the
 // popover can show "you have 0 dirs, add one to start watching git"
 // on a fresh workspace instead of a blank list.
 func ListCollectorsForWorkspace(ctx context.Context, workspaceID string) ([]CollectorInfo, error) {
-	cfg, err := collector.LoadConfig()
+	// Load the per-workspace config when a workspace is specified;
+	// otherwise the global one. This is what makes "configure
+	// collectors" actually edit per-workspace files now — the
+	// brain popover and the editor see the same source of truth.
+	var cfg *collector.Config
+	var err error
+	if workspaceID != "" {
+		cfg, err = collector.LoadWorkspaceConfig(workspaceID)
+	} else {
+		cfg, err = collector.LoadConfig()
+	}
 	if err != nil {
 		return nil, err
 	}
 
-	// Resolve the workspace's directories. Fall back to observer.yaml
-	// when no workspace is specified so the function still returns
-	// something sensible during startup.
+	// Resolve the workspace's directories. Fall back to the loaded
+	// config's directories.paths when no workspace is specified.
 	var dirs []string
 	if workspaceID != "" {
 		st, err := OpenStore()

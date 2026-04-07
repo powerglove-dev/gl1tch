@@ -18,6 +18,9 @@ import (
 type ClaudeCollector struct {
 	// Interval is how often to poll for new entries. Defaults to 120s.
 	Interval time.Duration
+	// WorkspaceID is stamped on every indexed event so brain queries
+	// can scope to one workspace's claude history.
+	WorkspaceID string
 }
 
 func (c *ClaudeCollector) Name() string { return "claude" }
@@ -146,7 +149,7 @@ func (c *ClaudeCollector) poll(ctx context.Context, es *esearch.Client, path str
 
 	if len(docs) > 0 {
 		slog.Info("claude collector: new prompts", "count", len(docs))
-		if err := es.BulkIndex(ctx, esearch.IndexEvents, docs); err != nil {
+		if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(c.WorkspaceID, docs)); err != nil {
 			return offset, fmt.Errorf("bulk index: %w", err)
 		}
 	}
@@ -160,7 +163,8 @@ func (c *ClaudeCollector) poll(ctx context.Context, es *esearch.Client, path str
 // ~/.claude/projects/. Runs once on startup to backfill, then watches
 // for new files.
 type ClaudeProjectCollector struct {
-	Interval time.Duration
+	Interval    time.Duration
+	WorkspaceID string
 }
 
 func (c *ClaudeProjectCollector) Name() string { return "claude-projects" }
@@ -234,7 +238,7 @@ func (c *ClaudeProjectCollector) pollProjects(ctx context.Context, es *esearch.C
 
 			docs := c.parseSessionFile(f, projectName)
 			if len(docs) > 0 {
-				if err := es.BulkIndex(ctx, esearch.IndexEvents, docs); err != nil {
+				if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(c.WorkspaceID, docs)); err != nil {
 					slog.Warn("claude-projects: index error", "file", filepath.Base(f), "err", err)
 					continue
 				}

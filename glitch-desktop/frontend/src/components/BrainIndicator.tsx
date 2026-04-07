@@ -4,8 +4,6 @@ import type { BrainActivity, BrainState } from "@/lib/types";
 import { formatTime12 } from "@/lib/time";
 import {
   ListCollectors,
-  ReadCollectorsConfig,
-  WriteCollectorsConfig,
   CollectorsConfigPath,
   RecentCollectorLogs,
 } from "../../wailsjs/go/main/App";
@@ -54,6 +52,11 @@ interface Props {
   // observer.yaml when no workspace is active (fresh startup).
   activeWorkspaceId: string | null;
   activeWorkspaceTitle: string;
+  /** Open the EditorPopup on the active workspace's collectors.yaml.
+   *  Plumbed up to App.tsx so the popup lives at the root and can
+   *  share its CodeMirror + chat-refine surface with the rest of
+   *  the editor flows. */
+  onEditCollectors: () => void;
 }
 
 /**
@@ -77,6 +80,7 @@ export function BrainIndicator({
   onMarkRead,
   activeWorkspaceId,
   activeWorkspaceTitle,
+  onEditCollectors,
 }: Props) {
   const [open, setOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -88,7 +92,6 @@ export function BrainIndicator({
   const [collectors, setCollectors] = useState<CollectorInfo[]>([]);
   const [anchorMs, setAnchorMs] = useState<number>(0);
   const [configPath, setConfigPath] = useState<string>("");
-  const [editorOpen, setEditorOpen] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [, setNowTick] = useState(0);
 
@@ -140,7 +143,11 @@ export function BrainIndicator({
       });
     }
     refresh();
-    CollectorsConfigPath().then((p: string) => {
+    // Per the workspace-scoped collectors split: each workspace has
+    // its own collectors.yaml. Empty workspace id falls back to the
+    // global file (still useful at startup before a workspace is
+    // active).
+    CollectorsConfigPath(activeWorkspaceId ?? "").then((p: string) => {
       if (!cancelled) setConfigPath(p);
     });
     const tickId = window.setInterval(() => setNowTick((n) => n + 1), 1000);
@@ -173,12 +180,8 @@ export function BrainIndicator({
 
   return (
     <>
-    {editorOpen && (
-      <CollectorsConfigEditor
-        configPath={configPath}
-        onClose={() => setEditorOpen(false)}
-      />
-    )}
+    {/* Editor lives at the root in App.tsx now — the brain popover
+        only emits the request via onEditCollectors. */}
     <div
       style={{
         position: "relative",
@@ -284,7 +287,7 @@ export function BrainIndicator({
             }
             actionLabel="edit"
             actionTitle={configPath || "edit observer.yaml"}
-            onAction={() => setEditorOpen(true)}
+            onAction={onEditCollectors}
           />
           {collectors.length === 0 ? (
             <div
@@ -783,284 +786,3 @@ function formatRelative(ts: number): string {
   return `${Math.floor(diff / 86_400_000)}d`;
 }
 
-/**
- * In-app editor for observer.yaml. Loads the file via the Wails
- * bridge, lets the user edit it in a textarea, and writes it back —
- * no system text editor involved. The backend validates the YAML
- * before saving so a typo can never corrupt the running config.
- */
-function CollectorsConfigEditor({
-  configPath,
-  onClose,
-}: {
-  configPath: string;
-  onClose: () => void;
-}) {
-  const [content, setContent] = useState<string>("");
-  const [original, setOriginal] = useState<string>("");
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string>("");
-  const [savedAt, setSavedAt] = useState<number>(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    ReadCollectorsConfig().then((s: string) => {
-      if (cancelled) return;
-      setContent(s);
-      setOriginal(s);
-      setLoading(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Esc to close
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
-        e.preventDefault();
-        save();
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [content, saving]);
-
-  async function save() {
-    if (saving) return;
-    setSaving(true);
-    setError("");
-    const result: string = await WriteCollectorsConfig(content);
-    setSaving(false);
-    if (result) {
-      setError(result);
-      return;
-    }
-    setOriginal(content);
-    setSavedAt(Date.now());
-  }
-
-  function revert() {
-    setContent(original);
-    setError("");
-  }
-
-  const dirty = content !== original;
-
-  return (
-    <div
-      onClick={(e) => {
-        // Click on backdrop closes; clicks inside the modal don't
-        // bubble (handled by stopPropagation below).
-        if (e.target === e.currentTarget) onClose();
-      }}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.55)",
-        backdropFilter: "blur(3px)",
-        zIndex: 9999,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 24,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: "min(820px, 100%)",
-          maxHeight: "calc(100vh - 48px)",
-          background: "var(--bg-dark)",
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-        }}
-      >
-        {/* Header */}
-        <div
-          style={{
-            padding: "14px 18px",
-            borderBottom: "1px solid var(--border)",
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-          }}
-        >
-          <Brain size={14} style={{ color: "var(--cyan)" }} />
-          <div style={{ flex: 1 }}>
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-                color: "var(--fg)",
-              }}
-            >
-              configure collectors
-            </div>
-            {configPath && (
-              <div
-                style={{
-                  fontSize: 10,
-                  color: "var(--fg-dim)",
-                  marginTop: 2,
-                  fontFamily: "monospace",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-                title={configPath}
-              >
-                {configPath}
-              </div>
-            )}
-          </div>
-          <button
-            onClick={onClose}
-            style={{
-              background: "none",
-              border: "none",
-              color: "var(--fg-dim)",
-              cursor: "pointer",
-              fontSize: 18,
-              padding: "4px 8px",
-            }}
-            title="Close (Esc)"
-          >
-            ×
-          </button>
-        </div>
-
-        {/* Body */}
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            minHeight: 0,
-            padding: 14,
-            gap: 10,
-          }}
-        >
-          {loading ? (
-            <div
-              style={{
-                padding: 30,
-                textAlign: "center",
-                color: "var(--fg-dim)",
-                fontSize: 12,
-              }}
-            >
-              loading config…
-            </div>
-          ) : (
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              spellCheck={false}
-              style={{
-                flex: 1,
-                minHeight: 360,
-                fontFamily:
-                  "Berkeley Mono, JetBrains Mono, Fira Code, SF Mono, monospace",
-                fontSize: 12,
-                lineHeight: 1.5,
-                color: "var(--fg)",
-                background: "var(--bg)",
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-                padding: 12,
-                outline: "none",
-                resize: "none",
-                tabSize: 2,
-              }}
-            />
-          )}
-          {error && (
-            <div
-              style={{
-                padding: "8px 12px",
-                borderRadius: 6,
-                background: "rgba(247,118,142,0.12)",
-                border: "1px solid var(--red, #f7768e)",
-                color: "var(--red, #f7768e)",
-                fontSize: 11,
-                fontFamily: "monospace",
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              {error}
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div
-          style={{
-            padding: "12px 18px",
-            borderTop: "1px solid var(--border)",
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            background: "var(--bg-dark)",
-          }}
-        >
-          <div
-            style={{
-              flex: 1,
-              fontSize: 10,
-              color: "var(--fg-dim)",
-            }}
-          >
-            {dirty
-              ? "unsaved changes · ⌘S to save · esc to close"
-              : savedAt
-                ? `saved ${formatTime12(savedAt)}`
-                : "no changes"}
-          </div>
-          {dirty && (
-            <button
-              onClick={revert}
-              style={{
-                background: "none",
-                border: "1px solid var(--border)",
-                color: "var(--fg-dim)",
-                padding: "6px 12px",
-                borderRadius: 6,
-                cursor: "pointer",
-                fontSize: 11,
-              }}
-            >
-              revert
-            </button>
-          )}
-          <button
-            onClick={save}
-            disabled={!dirty || saving}
-            style={{
-              background: dirty ? "var(--cyan)" : "var(--bg-surface)",
-              color: dirty ? "var(--bg-dark)" : "var(--fg-dim)",
-              border: "1px solid " + (dirty ? "var(--cyan)" : "var(--border)"),
-              padding: "6px 14px",
-              borderRadius: 6,
-              cursor: dirty && !saving ? "pointer" : "default",
-              fontSize: 11,
-              fontWeight: 600,
-            }}
-          >
-            {saving ? "saving…" : "save"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}

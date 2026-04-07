@@ -51,12 +51,28 @@ func StreamAnswer(ctx context.Context, question string, tokenCh chan<- string) e
 
 // StreamAnswerScoped queries the observer scoped to specific repo names.
 // repos should be directory basenames (e.g. ["gl1tch", "ensemble"]).
+//
+// Equivalent to StreamAnswerScopedWorkspace with workspaceID="" —
+// kept as a convenience wrapper for callers that don't yet pass a
+// workspace id.
 func StreamAnswerScoped(ctx context.Context, question string, repos []string, tokenCh chan<- string) error {
+	return StreamAnswerScopedWorkspace(ctx, question, repos, "", tokenCh)
+}
+
+// StreamAnswerScopedWorkspace is the workspace-aware variant of
+// StreamAnswerScoped. When workspaceID is non-empty, the underlying
+// observer query filters on the workspace_id field so the answer
+// only draws from documents that workspace's collector pod produced.
+//
+// Use this for the desktop chat answer path so workspace A's brain
+// can never accidentally surface events from workspace B even if
+// they share repo names.
+func StreamAnswerScopedWorkspace(ctx context.Context, question string, repos []string, workspaceID string, tokenCh chan<- string) error {
 	qe, err := QueryEngine()
 	if err != nil {
 		return err
 	}
-	return qe.StreamScoped(ctx, question, repos, tokenCh)
+	return qe.StreamScopedWorkspace(ctx, question, repos, workspaceID, tokenCh)
 }
 
 // SaveMessage persists a workspace message via the store.
@@ -77,11 +93,16 @@ func SaveMessage(ctx context.Context, id, workspaceID, role, blocksJSON string, 
 // ── Prompts ───────────────────────────────────────────────────────────────
 
 // PromptInfo is a prompt exported for the desktop app.
+//
+// CWD is the workspace directory the prompt is scoped to (empty
+// string when the prompt is global). The sidebar uses this to bucket
+// prompts into workspace vs global views without an extra round trip.
 type PromptInfo struct {
 	ID        int64  `json:"ID"`
 	Title     string `json:"Title"`
 	Body      string `json:"Body"`
 	ModelSlug string `json:"ModelSlug"`
+	CWD       string `json:"CWD"`
 	UpdatedAt int64  `json:"UpdatedAt"`
 }
 
@@ -97,7 +118,14 @@ func ListAllPrompts(ctx context.Context) string {
 	}
 	out := make([]PromptInfo, len(prompts))
 	for i, p := range prompts {
-		out[i] = PromptInfo{ID: p.ID, Title: p.Title, Body: p.Body, ModelSlug: p.ModelSlug, UpdatedAt: p.UpdatedAt}
+		out[i] = PromptInfo{
+			ID:        p.ID,
+			Title:     p.Title,
+			Body:      p.Body,
+			ModelSlug: p.ModelSlug,
+			CWD:       p.CWD,
+			UpdatedAt: p.UpdatedAt,
+		}
 	}
 	b, _ := json.Marshal(out)
 	return string(b)

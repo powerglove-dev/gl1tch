@@ -26,10 +26,21 @@ type ModelInfo struct {
 }
 
 // AgentInfo is a discovered agent or skill.
+//
+// Scope is a normalized "workspace" or "global" tag derived from
+// chatui's IndexEntry.Source. The sidebar uses it to filter rows by
+// where they live, without callers needing to know the full set of
+// raw source labels (project, project:root, stok, cli:copilot, etc.).
+//
+// Path is the absolute on-disk location: a directory for skills (the
+// SKILL.md lives at <Path>/SKILL.md) or a file for agents. The
+// editor popup uses this when opening an entry as a draft.
 type AgentInfo struct {
 	Name        string `json:"name"`
 	Kind        string `json:"kind"`
 	Source      string `json:"source"`
+	Scope       string `json:"scope"` // "workspace" | "global"
+	Path        string `json:"path"`
 	Description string `json:"description"`
 	Invoke      string `json:"invoke"`
 }
@@ -54,6 +65,11 @@ func ListProviders() []ProviderInfo {
 }
 
 // ListAgents returns agents and skills for the given directories.
+//
+// Each entry is tagged with a normalized Scope ("workspace" or
+// "global") derived from chatui's raw source string. The sidebar's
+// scope filter reads this; it never has to parse source labels
+// directly.
 func ListAgents(dirs []string) []AgentInfo {
 	home, _ := os.UserHomeDir()
 	seen := map[string]bool{}
@@ -71,12 +87,31 @@ func ListAgents(dirs []string) []AgentInfo {
 				Name:        e.Name,
 				Kind:        e.Kind,
 				Source:      e.Source,
+				Scope:       normalizeAgentScope(e.Source),
+				Path:        e.Path,
 				Description: e.Description,
 				Invoke:      e.Inject,
 			})
 		}
 	}
 	return out
+}
+
+// normalizeAgentScope buckets chatui's raw source labels into the two
+// values the sidebar filter cares about.
+//
+// "project" and "project:root" come from <workspace_dir>/.claude/ or
+// AGENTS.md → workspace. Everything else (global ~/.claude, ~/.stok,
+// ~/.copilot, etc.) is global. We treat user-level CLI agents like
+// cli:copilot as global because they're discovered from $HOME, not
+// from the active workspace.
+func normalizeAgentScope(source string) string {
+	switch source {
+	case "project", "project:root":
+		return "workspace"
+	default:
+		return "global"
+	}
 }
 
 // StreamPromptOpts holds options for a provider call.
@@ -127,7 +162,16 @@ func StreamPrompt(ctx context.Context, opts StreamPromptOpts, tokenCh chan<- str
 	}
 
 	w := &chanWriter{ch: tokenCh, ctx: ctx}
-	runOpts := []pipeline.RunOption{pipeline.WithStepWriter(w)}
+	// Synthetic single-step pipelines must run with literal prompts —
+	// the prompt body is opaque user content (chat messages, refine
+	// system prompts, workflow YAML being edited) that may legitimately
+	// contain {{ steps.X.Y }} markers the runner would otherwise try
+	// to resolve and error on. Real chains call pipeline.Run directly
+	// without this option, so missing step references stay loud there.
+	runOpts := []pipeline.RunOption{
+		pipeline.WithStepWriter(w),
+		pipeline.WithLiteralPrompts(),
+	}
 
 	_, err := pipeline.Run(ctx, p, mgr, "", runOpts...)
 	return err

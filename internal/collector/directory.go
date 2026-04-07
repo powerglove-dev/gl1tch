@@ -24,6 +24,9 @@ type DirectoryCollector struct {
 	Dirs []string
 	// Interval between re-scans. Defaults to 120s.
 	Interval time.Duration
+	// WorkspaceID is stamped on every indexed event so brain queries
+	// can scope to one workspace's discovered skills/agents/etc.
+	WorkspaceID string
 }
 
 func (d *DirectoryCollector) Name() string { return "directory" }
@@ -143,7 +146,7 @@ func (d *DirectoryCollector) scanDirectory(ctx context.Context, es *esearch.Clie
 
 	if len(docs) > 0 {
 		slog.Info("directory collector: indexed artifacts", "dir", repoName, "count", len(docs))
-		if err := es.BulkIndex(ctx, esearch.IndexEvents, docs); err != nil {
+		if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(d.WorkspaceID, docs)); err != nil {
 			return fmt.Errorf("bulk index: %w", err)
 		}
 	}
