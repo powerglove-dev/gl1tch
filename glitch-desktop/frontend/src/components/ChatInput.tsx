@@ -60,6 +60,7 @@ function StepEditor({
   const [modelOverride, setModelOverride] = useState(
     step.type === "prompt" ? step.modelOverride ?? "" : "",
   );
+  const [body, setBody] = useState(step.type === "prompt" ? step.body : "");
   const [details, setDetails] = useState<WorkflowFileDetails | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
 
@@ -81,7 +82,13 @@ function StepEditor({
 
   function commit() {
     if (step.type === "prompt") {
-      onSave({ ...step, label, executorOverride: execOverride || undefined, modelOverride: modelOverride || undefined });
+      onSave({
+        ...step,
+        label,
+        body,
+        executorOverride: execOverride || undefined,
+        modelOverride: modelOverride || undefined,
+      });
     } else {
       onSave({ ...step, label });
     }
@@ -105,7 +112,7 @@ function StepEditor({
       style={{
         position: "absolute", bottom: "100%", left: 0, marginBottom: 6,
         background: "var(--bg-dark)", border: "1px solid var(--border-bright)",
-        borderRadius: 10, padding: 12, minWidth: 320, maxWidth: 420,
+        borderRadius: 10, padding: 12, minWidth: 360, maxWidth: 520,
         zIndex: 200, boxShadow: "0 6px 24px rgba(0,0,0,0.5)",
       }}
     >
@@ -128,6 +135,25 @@ function StepEditor({
 
       {step.type === "prompt" && (
         <>
+          <div style={{ fontSize: 10, color: "var(--fg-dim)", marginBottom: 4 }}>
+            Prompt
+          </div>
+          <textarea
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
+            rows={8}
+            placeholder="Prompt body..."
+            style={{
+              width: "100%", padding: "8px 10px", marginBottom: 8,
+              background: "var(--bg)", border: "1px solid var(--border)",
+              borderRadius: 6, color: "var(--fg)", fontSize: 12,
+              outline: "none", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+              resize: "vertical", minHeight: 80, maxHeight: 260,
+              lineHeight: 1.5, boxSizing: "border-box",
+            }}
+          />
+
           <div style={{ fontSize: 10, color: "var(--fg-dim)", marginBottom: 4 }}>
             Executor override (optional)
           </div>
@@ -466,8 +492,14 @@ export function ChatInput({
           <textarea
             ref={ref} rows={1}
             onKeyDown={handleKeyDown} onInput={handleInput}
-            disabled={disabled} autoFocus
-            placeholder={chain.length > 0 ? "Add context or just send the chain..." : "Ask about your repos, agents, and activity..."}
+            autoFocus
+            placeholder={
+              disabled
+                ? "Compose next message while this one runs..."
+                : chain.length > 0
+                ? "Add context or just send the chain..."
+                : "Ask about your repos, agents, and activity..."
+            }
             style={{
               flex: 1, background: "none", border: "none", color: "var(--fg)",
               fontSize: 13, fontFamily: "-apple-system, system-ui, sans-serif",

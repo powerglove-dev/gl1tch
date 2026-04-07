@@ -81,11 +81,15 @@ func ListAgents(dirs []string) []AgentInfo {
 
 // StreamPromptOpts holds options for a provider call.
 type StreamPromptOpts struct {
-	ProviderID   string
-	Model        string
-	Prompt       string
-	SystemCtx    string // glitch system context (injected)
-	AgentPath    string // agent .md file path (optional)
+	ProviderID string
+	Model      string
+	Prompt     string
+	SystemCtx  string // glitch system context (injected)
+	AgentPath  string // agent .md file path (optional)
+	// Cwd pins the provider CLI's working directory so tool use (file reads,
+	// grep, shell) happens inside the active workspace rather than
+	// glitch-desktop's own launch directory.
+	Cwd string
 }
 
 // StreamPrompt sends a prompt to a specific provider/model and streams the response.
@@ -107,17 +111,19 @@ func StreamPrompt(ctx context.Context, opts StreamPromptOpts, tokenCh chan<- str
 		fullPrompt = opts.SystemCtx + "\n\n---\n\n" + prompt
 	}
 
+	step := pipeline.Step{
+		ID:       "ask",
+		Executor: opts.ProviderID,
+		Model:    opts.Model,
+		Prompt:   fullPrompt,
+	}
+	if opts.Cwd != "" {
+		step.Vars = map[string]string{"cwd": opts.Cwd}
+	}
 	p := &pipeline.Pipeline{
 		Name:    "desktop-ask",
 		Version: "1",
-		Steps: []pipeline.Step{
-			{
-				ID:       "ask",
-				Executor: opts.ProviderID,
-				Model:    opts.Model,
-				Prompt:   fullPrompt,
-			},
-		},
+		Steps:   []pipeline.Step{step},
 	}
 
 	w := &chanWriter{ch: tokenCh, ctx: ctx}

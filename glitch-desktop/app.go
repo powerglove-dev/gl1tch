@@ -256,6 +256,11 @@ func (a *App) AskProvider(providerID, model, prompt, workspaceID, agentPath stri
 
 		systemCtx := glitchd.BuildSystemContext(dirs, agents, pipes)
 
+		var cwd string
+		if len(dirs) > 0 {
+			cwd = dirs[0]
+		}
+
 		tokenCh := make(chan string, 64)
 		go func() {
 			for token := range tokenCh {
@@ -269,6 +274,7 @@ func (a *App) AskProvider(providerID, model, prompt, workspaceID, agentPath stri
 			Prompt:     prompt,
 			SystemCtx:  systemCtx,
 			AgentPath:  agentPath,
+			Cwd:        cwd,
 		}, tokenCh)
 
 		if err != nil {
@@ -338,6 +344,15 @@ func (a *App) RunChain(stepsJSON, userText, workspaceID, defaultProvider, defaul
 			}
 		}()
 
+		// Primary workspace directory → step cwd. Without this, shell steps
+		// run from glitch-desktop's own cwd (usually the gl1tch repo), which
+		// is why a workflow launched from a different workspace would
+		// otherwise read files out of gl1tch instead of the intended project.
+		var cwd string
+		if len(dirs) > 0 {
+			cwd = dirs[0]
+		}
+
 		err := glitchd.RunChain(a.ctx, glitchd.RunChainOpts{
 			StepsJSON:       stepsJSON,
 			UserText:        userText,
@@ -345,6 +360,7 @@ func (a *App) RunChain(stepsJSON, userText, workspaceID, defaultProvider, defaul
 			DefaultProvider: defaultProvider,
 			DefaultModel:    defaultModel,
 			SystemCtx:       systemCtx,
+			Cwd:             cwd,
 		}, tokenCh)
 		clarifyCancel()
 

@@ -41,6 +41,13 @@ type RunChainOpts struct {
 	DefaultProvider string
 	DefaultModel    string
 	SystemCtx       string // glitch system context to inject
+	// Cwd is the working directory that shell steps and CLI-backed provider
+	// steps should execute in. When empty, executors fall back to the
+	// glitch-desktop process cwd — which is almost never what the user wants
+	// (it pins every workflow run to the directory the app was launched from,
+	// not the active workspace). Callers should set this to the workspace's
+	// primary directory.
+	Cwd string
 }
 
 // RunChain executes a desktop builder chain sequentially. Each step's output
@@ -233,6 +240,22 @@ func buildPipelineFromChain(steps []ChainStep, opts RunChainOpts) (*pipeline.Pip
 
 	if len(p.Steps) == 0 {
 		return nil, fmt.Errorf("chain: no executable steps after expansion")
+	}
+
+	// Pin every step to the workspace cwd unless the step already declares one.
+	// This is what makes "run workflow X from workspace Y" actually execute
+	// inside Y's directory rather than whatever cwd glitch-desktop happened to
+	// launch from. Applies to shell steps (relative paths like .github/...) and
+	// provider CLIs (claude, opencode, etc.) whose tool use is scoped to cwd.
+	if opts.Cwd != "" {
+		for i := range p.Steps {
+			if p.Steps[i].Vars == nil {
+				p.Steps[i].Vars = map[string]string{}
+			}
+			if _, ok := p.Steps[i].Vars["cwd"]; !ok {
+				p.Steps[i].Vars["cwd"] = opts.Cwd
+			}
+		}
 	}
 	return p, nil
 }
