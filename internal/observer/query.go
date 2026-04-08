@@ -34,12 +34,24 @@ func NewQueryEngine(es *esearch.Client, model string) *QueryEngine {
 }
 
 // allIndices returns the list of all observer indices.
+//
+// glitch-chat-history is included so follow-up questions like
+// "polish the draft for #1265" can find the injected assistant
+// message that produced the draft and feed it into synthesis.
+// glitch-analyses is included so the observer can answer
+// "what did you say about #1265 earlier?" by matching the
+// persisted artifact markdown. Together these two indices
+// bridge the gap between the daemon's proactive output and the
+// user's conversational follow-ups, without forcing the
+// frontend to thread chat history through every ask.
 func allIndices() []string {
 	return []string{
 		esearch.IndexEvents,
 		esearch.IndexSummaries,
 		esearch.IndexPipelines,
 		esearch.IndexInsights,
+		esearch.IndexAnalyses,
+		esearch.IndexChatHistory,
 	}
 }
 

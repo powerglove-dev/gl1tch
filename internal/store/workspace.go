@@ -223,6 +223,26 @@ func (s *Store) MarkEventAnalyzed(ctx context.Context, eventKey, source string, 
 	return err
 }
 
+// ClearAnalysisDedupe wipes every row in the analysis_dedupe table.
+// After this runs, the next collector tick will re-analyze every
+// event the user has kept in Elasticsearch even if it was analyzed
+// before — the intended use case is `glitch observe reset`, which
+// clears events out of ES too so the re-analysis lands on a fresh
+// slate.
+//
+// This function intentionally does NOT touch brain_notes or any
+// other table: the "brain learning" the user has accumulated across
+// pipeline runs is stored there and must be preserved.
+//
+// Returns the number of rows deleted so the caller can report it.
+func (s *Store) ClearAnalysisDedupe(ctx context.Context) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM analysis_dedupe`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // SetWorkspaceDirectoryEnabled flips the enable flag on one directory.
 // The collector pod must be restarted by the caller for the change to
 // take effect — toggling here only updates the persisted state.
@@ -264,4 +284,45 @@ func (s *Store) GetWorkspaceMessages(ctx context.Context, workspaceID string) ([
 		msgs = append(msgs, m)
 	}
 	return msgs, rows.Err()
+}
+
+// ListAllWorkspaceMessages returns every message across every
+// workspace, oldest first. Used by the chat-history backfill
+// command to walk the SQLite table and re-index everything into
+// glitch-chat-history without needing to enumerate workspaces
+// separately.
+//
+// Returns the slice in chronological order so the backfill can
+// stream into ES in the same sequence the user originally typed
+// the messages — useful when the ES timestamp ties or for
+// debugging "what came first".
+func (s *Store) ListAllWorkspaceMessages(ctx context.Context) ([]WorkspaceMessage, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, workspace_id, role, blocks_json, timestamp
+		   FROM workspace_messages
+		  ORDER BY timestamp ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var msgs []WorkspaceMessage
+	for rows.Next() {
+		var m WorkspaceMessage
+		if err := rows.Scan(&m.ID, &m.WorkspaceID, &m.Role, &m.BlocksJSON, &m.Timestamp); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, rows.Err()
+}
+
+// DeleteWorkspaceMessage removes one row by id. Used by the
+// prune-phantoms command after it identifies a stale injection
+// that the user wants gone retroactively. Idempotent: deleting a
+// non-existent id is not an error.
+func (s *Store) DeleteWorkspaceMessage(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM workspace_messages WHERE id = ?`, id)
+	return err
 }

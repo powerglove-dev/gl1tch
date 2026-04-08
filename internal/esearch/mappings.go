@@ -9,6 +9,77 @@ package esearch
 // never sees workspace B's commits/messages/etc. Empty workspace_id
 // means "global / unattributed" — used for legacy events from before
 // the workspace split and for collectors running outside any pod.
+// chatHistoryMapping is the schema for glitch-chat-history — the
+// persistent record of every workspace chat turn. Shape chosen to
+// support two distinct queries:
+//
+//  1. Observer RAG: "what did gl1tch say about #1265 earlier?" →
+//     text search on the `text` field scoped to workspace_id.
+//  2. Attention-event backlinks: "find the injected message for
+//     event_key X" → term filter on the `event_key` field.
+//
+// Injected assistant messages set event_key, event_type, event_repo,
+// and event_url so the observer can join them back to the original
+// glitch-events row. Plain user/assistant chat turns leave those
+// fields unset and only populate text + role + timestamp.
+//
+// message_id is used as the Elasticsearch _id on bulk index so
+// subsequent edits (e.g. streaming messages being finalized)
+// overwrite rather than duplicate. Keeping the index idempotent
+// across re-saves is the whole point — same lesson we learned
+// with glitch-events in bulkEventID.
+const chatHistoryMapping = `{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0
+  },
+  "mappings": {
+    "properties": {
+      "message_id":    { "type": "keyword" },
+      "workspace_id":  { "type": "keyword" },
+      "role":          { "type": "keyword" },
+      "text":          { "type": "text" },
+      "event_key":     { "type": "keyword" },
+      "event_type":    { "type": "keyword" },
+      "event_source":  { "type": "keyword" },
+      "event_repo":    { "type": "keyword" },
+      "event_url":     { "type": "keyword" },
+      "timestamp":     { "type": "date" }
+    }
+  }
+}`
+
+// agentHistoryMapping is the shared schema for the copilot and
+// claude history indices. It's deliberately a subset of
+// eventsMapping — same "type + source + workspace_id + author +
+// message/body + timestamp + metadata" columns — so observer
+// queries and the code-index can reach it with the same
+// field paths they already use on glitch-events. The only
+// omissions are git-specific fields (repo, branch, sha,
+// files_changed) that don't apply to agent chat history.
+//
+// Used for BOTH glitch-copilot-history and glitch-claude-history.
+// One mapping, two indices, because the data shape is identical
+// and maintaining two copies would just invite drift.
+const agentHistoryMapping = `{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0
+  },
+  "mappings": {
+    "properties": {
+      "type":         { "type": "keyword" },
+      "source":       { "type": "keyword" },
+      "workspace_id": { "type": "keyword" },
+      "author":       { "type": "keyword" },
+      "message":      { "type": "text" },
+      "body":         { "type": "text" },
+      "metadata":     { "type": "object", "enabled": false },
+      "timestamp":    { "type": "date" }
+    }
+  }
+}`
+
 const eventsMapping = `{
   "settings": {
     "number_of_shards": 1,

@@ -39,6 +39,13 @@ func (c *CopilotCapability) Manifest() Manifest {
 		Category:    "providers.copilot",
 		Trigger:     Trigger{Mode: TriggerInterval, Every: every},
 		Sink:        Sink{Index: true},
+		// Route every indexed doc to the dedicated copilot history
+		// index instead of glitch-events. Copilot backfill produces
+		// tens of thousands of rows that would otherwise drown the
+		// coordination feed and DOS the attention classifier. The
+		// data is still searchable via the observer and code index;
+		// it just doesn't clutter the activity sidebar.
+		Invocation: Invocation{Index: "glitch-copilot-history"},
 	}
 }
 

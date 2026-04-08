@@ -43,6 +43,11 @@ func (c *ClaudeProjectsCapability) Manifest() Manifest {
 		Category:    "providers.claude",
 		Trigger:     Trigger{Mode: TriggerInterval, Every: every},
 		Sink:        Sink{Index: true},
+		// Claude session turns go into the dedicated claude history
+		// index alongside the history-file capability, not into
+		// glitch-events. Same rationale: high-volume, search-worthy,
+		// but not a coordination signal.
+		Invocation: Invocation{Index: "glitch-claude-history"},
 	}
 }
 

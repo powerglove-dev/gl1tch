@@ -205,6 +205,7 @@ func (m *PodManager) startPodLocked(workspaceID string) error {
 	}
 	podCtx, cancel := context.WithCancel(m.parentCtx)
 	runner := NewRunner(reg, m.es)
+	runner.SetWorkspaceID(workspaceID)
 	runner.SetAfterInvoke(func(name string, dur time.Duration, indexed int, ierr error) {
 		RecordRun(name, time.Now().Add(-dur), indexed, ierr)
 	})
@@ -394,6 +395,7 @@ func (m *PodManager) StartToolPod() error {
 	}
 	podCtx, cancel := context.WithCancel(m.parentCtx)
 	runner := NewRunner(reg, m.es)
+	runner.SetWorkspaceID(WorkspaceIDTools)
 	runner.SetAfterInvoke(func(name string, dur time.Duration, indexed int, ierr error) {
 		RecordRun(name, time.Now().Add(-dur), indexed, ierr)
 	})

@@ -102,18 +102,35 @@ func StreamAnswerScopedWorkspace(ctx context.Context, question string, repos []s
 }
 
 // SaveMessage persists a workspace message via the store.
+//
+// Writes go to two places: SQLite (authoritative, synchronous)
+// and glitch-chat-history in Elasticsearch (advisory, background).
+// The ES index lets the observer RAG path search chat turns when
+// the user asks follow-up questions like "polish the draft for
+// #1265". Keeping the ES write fire-and-forget means chat latency
+// never sees the extra round-trip — if ES is down, the sqlite row
+// is still the source of truth and the observer just doesn't find
+// the message until the next restart backfills it.
 func SaveMessage(ctx context.Context, id, workspaceID, role, blocksJSON string, timestamp int64) error {
 	st, err := OpenStore()
 	if err != nil {
 		return err
 	}
-	return st.SaveWorkspaceMessage(ctx, store.WorkspaceMessage{
+	if err := st.SaveWorkspaceMessage(ctx, store.WorkspaceMessage{
 		ID:          id,
 		WorkspaceID: workspaceID,
 		Role:        role,
 		BlocksJSON:  blocksJSON,
 		Timestamp:   timestamp,
-	})
+	}); err != nil {
+		return err
+	}
+	// Fire-and-forget ES index. Uses context.Background() so a
+	// cancelled parent ctx doesn't abort the background write —
+	// the frontend's SaveMessage path frequently hands us a ctx
+	// that gets cancelled as soon as the UI event finishes.
+	go IndexChatMessage(context.Background(), id, workspaceID, role, blocksJSON, timestamp)
+	return nil
 }
 
 // ── Prompts ───────────────────────────────────────────────────────────────

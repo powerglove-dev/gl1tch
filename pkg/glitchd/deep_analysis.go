@@ -40,6 +40,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -81,6 +82,14 @@ func WireAnalyzerToCollectors(a *Analyzer) {
 			cfg, _ = capability.LoadConfig()
 		}
 		ctx := context.Background()
+
+		// Translate every typed event into the analyzer's shape up
+		// front so we can run the attention classifier across the
+		// whole batch in a single Ollama round-trip. Batching is
+		// important: each classifier call has a warm-start cost, so
+		// classifying 10 events in one call is dramatically cheaper
+		// than 10 sequential calls.
+		analyzable := make([]AnalyzableEvent, 0, len(docs))
 		for _, d := range docs {
 			ev, ok := d.(esearch.Event)
 			if !ok {
@@ -90,7 +99,61 @@ func WireAnalyzerToCollectors(a *Analyzer) {
 				// untyped data anyway.
 				continue
 			}
-			a.Enqueue(ctx, esearchEventToAnalyzable(workspaceID, source, ev), cfg)
+			analyzable = append(analyzable,
+				esearchEventToAnalyzable(workspaceID, source, ev))
+		}
+		if len(analyzable) == 0 {
+			return
+		}
+
+		// Run the local attention classifier — but only over events
+		// whose type is in the coordination allow-list (see
+		// ClassifierRelevant). Copilot history, directory scans,
+		// and code index artifacts would otherwise DOS the
+		// classifier during a cold backfill: a ~30k copilot.log
+		// tick would pin the sink for ~50 minutes on qwen2.5:7b
+		// and starve every real github event behind it.
+		//
+		// Build a parallel index slice so we can stamp verdicts
+		// back onto the original `analyzable` slice after the
+		// filtered-classify round-trip. The alternative (classify
+		// in-place on a subset) would either require us to mutate
+		// analyzable in two passes or track a side-channel map.
+		relevantIdx := make([]int, 0, len(analyzable))
+		relevantEvents := make([]AnalyzableEvent, 0, len(analyzable))
+		for i, ae := range analyzable {
+			if ClassifierRelevant(ae.Type) {
+				relevantIdx = append(relevantIdx, i)
+				relevantEvents = append(relevantEvents, ae)
+			}
+		}
+		if len(relevantEvents) > 0 {
+			verdicts, _ := ClassifyAttention(ctx, relevantEvents, workspaceID)
+			for j := range relevantEvents {
+				if j < len(verdicts) {
+					target := relevantIdx[j]
+					analyzable[target].Attention = verdicts[j].Level
+					analyzable[target].AttentionReason = verdicts[j].Reason
+				}
+			}
+		}
+
+		// Notify any registered attention observer for every
+		// classified event. The desktop uses this hook to surface
+		// high-attention events that the heavy analyzer is going
+		// to skip because the user hasn't enabled it — a "flagged
+		// high but deep analysis is off" nudge in the activity
+		// sidebar. Having the hook called on every event (not just
+		// high ones) keeps the contract flexible: a future observer
+		// could also badge normal/low rows without another hook.
+		if obs := getAttentionObserver(); obs != nil {
+			for _, ae := range analyzable {
+				obs(ae, isAnalysisEnabled(cfg))
+			}
+		}
+
+		for _, ae := range analyzable {
+			a.Enqueue(ctx, ae, cfg)
 		}
 	})
 }
@@ -192,6 +255,16 @@ type AnalyzableEvent struct {
 	// PR updated_at, etc.). Used to skip events older than the
 	// "fresh enough to act on" cutoff.
 	Timestamp time.Time
+	// Attention is the local classifier's verdict for this event —
+	// one of "high", "normal", "low" (see attention.go). Empty
+	// string means the classifier was skipped (analysis disabled in
+	// config) and callers should treat the event as normal.
+	Attention AttentionLevel
+	// AttentionReason is the one-sentence explanation the
+	// classifier attached to its verdict. Surfaced in the activity
+	// row so the user can see *why* gl1tch flagged (or didn't flag)
+	// an event. Empty when Attention is empty.
+	AttentionReason string
 }
 
 // EventKey returns a stable, source-agnostic dedupe key for this
@@ -227,6 +300,21 @@ type AnalysisResult struct {
 	Duration    time.Duration
 	WorkspaceID string
 	CreatedAt   time.Time
+	// URL is the canonical web URL for the underlying event — a
+	// github PR link, a commit URL, etc. Populated from the input
+	// AnalyzableEvent's URL field and surfaced in the chat header
+	// as a clickable link so the user can jump straight to the
+	// source from a proactive assistant message.
+	URL string
+	// Attention is the classifier verdict that drove this run — one
+	// of "high", "normal", "low", or empty for legacy callers that
+	// bypass the classifier. Persisted onto the analysis doc so the
+	// frontend can route `high` results to the chat/pinned lane and
+	// `normal` results to the expand-row lane.
+	Attention AttentionLevel
+	// AttentionReason is the classifier's one-sentence rationale.
+	// Surfaced next to the verdict badge in the activity row.
+	AttentionReason string
 }
 
 // AnalysisHandler is the callback invoked once a result is ready.
@@ -365,8 +453,18 @@ func (a *Analyzer) workerLoop(ctx context.Context) {
 		// per-process not per-event, so a long burst of new events
 		// still gets processed — just at a steady rate rather than
 		// all at once.
+		//
+		// Exception: high-attention events bypass the cooldown. The
+		// cooldown exists to keep a chatty collector from pinning
+		// the GPU on low-value events, but a high-attention event
+		// is precisely what the GPU is for — making the user wait
+		// 30s for a review-reply draft when the model is otherwise
+		// idle defeats the whole point of the classifier.
 		cfg, _ := capability.LoadConfig()
 		cooldown := analysisCooldown(cfg)
+		if ev.Attention == AttentionHigh {
+			cooldown = 0
+		}
 		if cooldown > 0 && !a.lastRun.IsZero() {
 			elapsed := time.Since(a.lastRun)
 			if elapsed < cooldown {
@@ -391,17 +489,19 @@ func (a *Analyzer) workerLoop(ctx context.Context) {
 
 		if result.Markdown != "" && a.es != nil {
 			doc := analysisDoc{
-				EventKey:    result.EventKey,
-				Source:      result.Source,
-				Type:        result.Type,
-				Repo:        result.Repo,
-				Title:       result.Title,
-				Model:       result.Model,
-				Markdown:    result.Markdown,
-				ExitCode:    result.ExitCode,
-				DurationMs:  result.Duration.Milliseconds(),
-				WorkspaceID: result.WorkspaceID,
-				CreatedAt:   result.CreatedAt,
+				EventKey:        result.EventKey,
+				Source:          result.Source,
+				Type:            result.Type,
+				Repo:            result.Repo,
+				Title:           result.Title,
+				Model:           result.Model,
+				Markdown:        result.Markdown,
+				ExitCode:        result.ExitCode,
+				DurationMs:      result.Duration.Milliseconds(),
+				WorkspaceID:     result.WorkspaceID,
+				CreatedAt:       result.CreatedAt,
+				Attention:       result.Attention,
+				AttentionReason: result.AttentionReason,
 			}
 			if err := a.es.BulkIndex(ctx, esearch.IndexAnalyses, []any{doc}); err != nil {
 				slog.Warn("analyzer: index result failed",
@@ -449,7 +549,32 @@ func (a *Analyzer) dequeue(ctx context.Context) (AnalyzableEvent, bool) {
 // resulting AnalysisResult. Failures are returned as results with an
 // empty Markdown so the caller can still emit an activity row that
 // surfaces the error.
+//
+// Thin wrapper around the package-level AnalyzeOne so the queue
+// worker and out-of-band callers (CLI, smoke tests) share one code
+// path. The receiver is retained for historical reasons and in case
+// per-analyzer state (rate limiters, progress counters) grows here
+// later.
 func (a *Analyzer) runOne(ctx context.Context, ev AnalyzableEvent, cfg *capability.Config) AnalysisResult {
+	return AnalyzeOne(ctx, ev, cfg)
+}
+
+// AnalyzeOne runs a single deep analysis synchronously and returns
+// the result. This is the lowest common denominator of the
+// analyzer: no queue, no cooldown, no dedupe table — just build the
+// prompt (artifact-mode for high-attention events, summary-mode
+// otherwise), shell out to opencode, parse the response.
+//
+// Used by the queue worker to process dequeued events and by the
+// `glitch attention analyze` CLI and `test/smoke` harness to drive
+// the full analysis pipeline on an ad-hoc event without needing a
+// running Analyzer, ES, or the collector loop.
+//
+// Failures return a result with empty Markdown and a non-zero
+// ExitCode so the caller can distinguish "ran but produced nothing"
+// from "ran and produced content". Callers that care about the
+// distinction should check ExitCode first.
+func AnalyzeOne(ctx context.Context, ev AnalyzableEvent, cfg *capability.Config) AnalysisResult {
 	model := analysisModel(cfg)
 	prompt := buildAnalysisPrompt(ev)
 	start := time.Now()
@@ -491,17 +616,20 @@ func (a *Analyzer) runOne(ctx context.Context, ev AnalyzableEvent, cfg *capabili
 	}
 
 	return AnalysisResult{
-		EventKey:    ev.EventKey(),
-		Source:      ev.Source,
-		Type:        ev.Type,
-		Repo:        ev.Repo,
-		Title:       ev.Title,
-		Model:       model,
-		Markdown:    markdown,
-		ExitCode:    exitCode,
-		Duration:    time.Since(start),
-		WorkspaceID: ev.WorkspaceID,
-		CreatedAt:   time.Now(),
+		EventKey:        ev.EventKey(),
+		Source:          ev.Source,
+		Type:            ev.Type,
+		Repo:            ev.Repo,
+		Title:           ev.Title,
+		Model:           model,
+		Markdown:        markdown,
+		ExitCode:        exitCode,
+		Duration:        time.Since(start),
+		WorkspaceID:     ev.WorkspaceID,
+		CreatedAt:       time.Now(),
+		URL:             ev.URL,
+		Attention:       ev.Attention,
+		AttentionReason: ev.AttentionReason,
 	}
 }
 
@@ -509,17 +637,19 @@ func (a *Analyzer) runOne(ctx context.Context, ev AnalyzableEvent, cfg *capabili
 // Mirrors the analysesMapping in internal/esearch/mappings.go field
 // for field — keep them in sync.
 type analysisDoc struct {
-	EventKey    string    `json:"event_key"`
-	Source      string    `json:"source"`
-	Type        string    `json:"type"`
-	Repo        string    `json:"repo,omitempty"`
-	Title       string    `json:"title,omitempty"`
-	Model       string    `json:"model"`
-	Markdown    string    `json:"markdown"`
-	ExitCode    int       `json:"exit_code"`
-	DurationMs  int64     `json:"duration_ms"`
-	WorkspaceID string    `json:"workspace_id,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	EventKey        string    `json:"event_key"`
+	Source          string    `json:"source"`
+	Type            string    `json:"type"`
+	Repo            string    `json:"repo,omitempty"`
+	Title           string    `json:"title,omitempty"`
+	Model           string    `json:"model"`
+	Markdown        string    `json:"markdown"`
+	ExitCode        int       `json:"exit_code"`
+	DurationMs      int64     `json:"duration_ms"`
+	WorkspaceID     string    `json:"workspace_id,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	Attention       string    `json:"attention,omitempty"`
+	AttentionReason string    `json:"attention_reason,omitempty"`
 }
 
 // ── Eligibility filter ─────────────────────────────────────────────
@@ -529,6 +659,17 @@ type analysisDoc struct {
 // reputation rather than dispatching on type. New collector types
 // automatically pass through the same filter.
 func eligibleForAnalysis(ev AnalyzableEvent) bool {
+	// Only coordination events get deep analysis. Directory scans,
+	// code-index updates, and other ambient workspace state
+	// shouldn't eat the 30-second cooldown slot that a real PR
+	// review is waiting in line for. The ClassifierRelevant allow
+	// list is the single source of truth for "what counts as a
+	// coordination signal" and we reuse it here so the analyzer
+	// and the classifier can't drift out of sync.
+	if !ClassifierRelevant(ev.Type) {
+		return false
+	}
+
 	// Empty title and body → nothing for the LLM to anchor on. The
 	// model would just hallucinate context.
 	if strings.TrimSpace(ev.Title) == "" && strings.TrimSpace(ev.Body) == "" {
@@ -609,12 +750,88 @@ func isTrivialTitle(title string) bool {
 // ── Prompt construction ────────────────────────────────────────────
 
 // buildAnalysisPrompt produces the opencode prompt for one event.
-// Source-agnostic: the prompt explains what we know about the event
-// in plain English and lets the model decide which tools to invoke
-// based on the source field. opencode's built-in shell tool gives it
-// access to gh / git / file system / curl — the prompt nudges it
-// toward the right one for each source via examples.
+//
+// Two modes, chosen by the event's classifier verdict:
+//
+//   - Artifact mode (ev.Attention == "high"): the prompt is loaded
+//     from pkg/glitchd/prompts/deep_analysis_artifact.md with the
+//     user's research prompt spliced in. The rubric tells opencode
+//     to produce the concrete artifact the user needs (a drafted
+//     reply, a patch, a command) rather than a summary. This is
+//     the "local does the work" path.
+//
+//   - Summary mode (everything else): the legacy inline prompt
+//     below, which asks for a What/Why/Next rubric. Used when the
+//     classifier says the event is normal or low, when the
+//     classifier was skipped, or when the artifact template fails
+//     to load.
+//
+// Artifact-mode failures fall through to summary mode silently —
+// we'd rather produce the old summary than no analysis at all.
 func buildAnalysisPrompt(ev AnalyzableEvent) string {
+	if ev.Attention == AttentionHigh {
+		if p, err := buildArtifactPrompt(ev); err == nil && p != "" {
+			return p
+		}
+		slog.Warn("analyzer: artifact prompt unavailable, falling back to summary",
+			"event_key", ev.EventKey())
+	}
+	return buildSummaryPrompt(ev)
+}
+
+// buildArtifactPrompt renders the high-attention artifact-mode
+// template. Splices in the workspace research prompt (the one the
+// classifier also read) so the model produces exactly the kind of
+// artifact the user declared they want for this event class.
+func buildArtifactPrompt(ev AnalyzableEvent) (string, error) {
+	research, err := LoadResearchPrompt(ev.WorkspaceID)
+	if err != nil {
+		return "", err
+	}
+	body := strings.TrimSpace(ev.Body)
+	if body == "" {
+		body = "(empty)"
+	} else if len(body) > 1500 {
+		body = body[:1500] + "…"
+	}
+	// Resolve the user's github handle the same way the classifier
+	// does: git config user.email → noreply parse → handle. Fall
+	// back to git config user.name if the email is not a github
+	// noreply, then to a placeholder if neither is set. The
+	// artifact template is emphatic that the model must write AS
+	// this identity, not about them — so an empty {{USER_GITHUB}}
+	// would break the whole rubric's instructions about
+	// first-person framing.
+	userName, userEmail := localGitIdentity()
+	userGithub := parseGitHubHandleFromEmail(userEmail)
+	if userGithub == "" {
+		userGithub = userName
+	}
+	if userGithub == "" {
+		userGithub = "the user"
+	}
+	return RenderPrompt("deep_analysis_artifact", map[string]string{
+		"RESEARCH_PROMPT":  research,
+		"USER_GITHUB":      userGithub,
+		"SOURCE":           ev.Source,
+		"TYPE":             ev.Type,
+		"REPO":             ev.Repo,
+		"AUTHOR":           ev.Author,
+		"IDENTIFIER":       ev.Identifier,
+		"URL":              ev.URL,
+		"TITLE":            ev.Title,
+		"ATTENTION_REASON": ev.AttentionReason,
+		"BODY":             body,
+	})
+}
+
+// buildSummaryPrompt is the legacy summary-mode prompt — the
+// What/Why/Next rubric used for normal and low attention events,
+// and as the artifact-mode fallback. Kept as inline strings (not a
+// template file) because this is the one prompt that must never
+// fail to load: if everything else is broken, this is what keeps
+// the analyzer producing *something* the user can read.
+func buildSummaryPrompt(ev AnalyzableEvent) string {
 	var b strings.Builder
 	b.WriteString("You are gl1tch's deep-analysis assistant. ")
 	b.WriteString("A new event landed in one of the user's collectors. ")
@@ -695,42 +912,43 @@ func extractTextFromOpencodeJSON(raw []byte) string {
 		return ""
 	}
 	var out strings.Builder
+	// Opencode emits one JSON object per line in --format json mode.
+	// Text deltas are shaped `{"type":"text","part":{"text":"..."}}`.
+	// We parse each candidate line with encoding/json instead of the
+	// earlier substring hack, which used `LastIndex('"')` and often
+	// caught a closing quote from a trailing field like `"time":{...}`
+	// on the same line — the result was that everything from the end
+	// of the real text up through the next closing quote anywhere on
+	// the line leaked into the final markdown. The symptom was chat
+	// messages that trailed off into a snippet like
+	// `…review again!","time":{"start":1775673438908,"end` in the
+	// user's screenshot. Proper parsing eliminates that failure mode
+	// and makes this function behave identically to the streaming
+	// extractor in activity_analyzer.go's extractTextDelta.
+	var evShape struct {
+		Type string `json:"type"`
+		Part struct {
+			Text string `json:"text"`
+		} `json:"part"`
+	}
 	for _, line := range strings.Split(string(raw), "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" {
+		if line == "" || !strings.Contains(line, `"type":"text"`) {
 			continue
 		}
-		// Lightweight match: opencode emits objects shaped
-		// `{"type":"text","part":{"text":"..."}}`. We don't want a
-		// full JSON parser dependency on every line, but we do need
-		// to find the text payload. Try a basic substring approach
-		// first, fall back to JSON if it gets weird.
-		if strings.Contains(line, `"type":"text"`) {
-			if i := strings.Index(line, `"text":"`); i >= 0 {
-				rest := line[i+len(`"text":"`):]
-				if j := strings.LastIndex(rest, `"`); j >= 0 {
-					out.WriteString(unescapeJSONString(rest[:j]))
-				}
-			}
+		// Reset between lines so a malformed event can't leak its
+		// half-parsed state into the next line's output.
+		evShape.Type = ""
+		evShape.Part.Text = ""
+		if err := json.Unmarshal([]byte(line), &evShape); err != nil {
 			continue
 		}
+		if evShape.Type != "text" || evShape.Part.Text == "" {
+			continue
+		}
+		out.WriteString(evShape.Part.Text)
 	}
 	return strings.TrimSpace(out.String())
-}
-
-// unescapeJSONString applies the minimal set of JSON escape
-// sequences opencode actually uses (newline, tab, backslash, quote)
-// without pulling in encoding/json for every line. Anything more
-// exotic falls through unchanged.
-func unescapeJSONString(s string) string {
-	r := strings.NewReplacer(
-		`\n`, "\n",
-		`\t`, "\t",
-		`\"`, `"`,
-		`\\`, `\`,
-		`\r`, "\r",
-	)
-	return r.Replace(s)
 }
 
 // ── Config helpers ─────────────────────────────────────────────────

@@ -56,6 +56,37 @@ const (
 	// "analysis" entry; future Kibana dashboards can chart "what's
 	// been analyzed today" without touching glitch-events.
 	IndexAnalyses = "glitch-analyses"
+	// IndexCopilotHistory is the dedicated home for GitHub Copilot
+	// CLI command history and interesting log entries. Pulled out
+	// of glitch-events in 2026-04 because the copilot capability
+	// produces tens of thousands of rows during a cold backfill and
+	// drowns the activity feed — the data is still valuable for
+	// search and observer queries, it just doesn't belong in the
+	// coordination feed. Written exclusively by the directory
+	// capability's copilot scan strategy.
+	IndexCopilotHistory = "glitch-copilot-history"
+	// IndexClaudeHistory is the dedicated home for Claude Code
+	// session transcripts. Same rationale as IndexCopilotHistory:
+	// the session stream is long-running, high-volume history, and
+	// the user rarely needs to see it in the brain activity feed.
+	// Searchable via the observer and code-index paths but hidden
+	// from the real-time coordination surface.
+	IndexClaudeHistory = "glitch-claude-history"
+	// IndexChatHistory is the persistent record of every workspace
+	// chat turn (user + assistant), including the daemon-injected
+	// attention messages. Scoped by workspace_id and keyed by
+	// message id so re-indexes overwrite instead of duplicating.
+	// The observer RAG path searches this index alongside
+	// glitch-events so a follow-up question like "polish the
+	// draft for #1265" finds the injected assistant message that
+	// produced the draft and uses it as synthesis context.
+	//
+	// Keeping chat history in its own index (not glitch-events)
+	// preserves the invariant that glitch-events is exclusively
+	// real-world dev activity — commits, PRs, reviews, checks —
+	// never synthesized conversation. The observer knows which
+	// index to blend based on the query shape.
+	IndexChatHistory = "glitch-chat-history"
 )
 
 // Client wraps the Elasticsearch client with gl1tch-specific operations.
@@ -107,6 +138,9 @@ func (c *Client) EnsureIndices(ctx context.Context) error {
 		IndexTraces:         tracesMapping,
 		IndexLogs:           logsMapping,
 		IndexAnalyses:       analysesMapping,
+		IndexCopilotHistory: agentHistoryMapping,
+		IndexClaudeHistory:  agentHistoryMapping,
+		IndexChatHistory:    chatHistoryMapping,
 	}
 	for name, mapping := range indices {
 		// Check if index exists.
@@ -263,16 +297,25 @@ func (c *Client) BulkIndex(ctx context.Context, index string, docs []any) error 
 //	git.commit          → "git.commit:" + sha
 //	git.push            → "git.push:" + sha (head of push)
 //	github.issue        → "github.issue:" + metadata.url
-//	github.pullrequest  → "github.pullrequest:" + metadata.url
+//	github.pr           → "github.pr:" + metadata.url
 //	github.issue_comment
 //	github.pr_comment
 //	github.pr_review
-//	github.pr_check     → "<type>:" + repo + ":" + parent_number +
+//	github.check        → "<type>:" + repo + ":" + parent_number +
 //	                      ":" + sha1(author+timestamp+body)[:16]
 //	                      (these events don't carry per-object urls
 //	                      in metadata, so we hash the fields that
 //	                      together uniquely identify a comment /
 //	                      review / check run)
+//
+// The type strings on the left MUST match what the collector
+// actually writes into esearch.Event.Type. We learned this the
+// hard way — a previous version of this switch matched
+// "github.pullrequest" and "github.pr_check" while the github
+// collector writes "github.pr" and "github.check", which meant
+// every poll cycle auto-generated a fresh _id for the same PR and
+// duplicated it in the activity feed. A regression test pins the
+// collector-to-id contract in events_bulkid_test.go.
 //
 // Anything else returns "" so BulkIndex falls back to the ES
 // auto-generated id. That's the right behaviour for novel event
@@ -325,7 +368,7 @@ func bulkEventID(doc []byte) string {
 		}
 		return typ + ":" + sha
 
-	case "github.issue", "github.pullrequest":
+	case "github.issue", "github.pr":
 		url := getMetaStr("url")
 		if url == "" {
 			return ""
@@ -335,7 +378,7 @@ func bulkEventID(doc []byte) string {
 	case "github.issue_comment",
 		"github.pr_comment",
 		"github.pr_review",
-		"github.pr_check":
+		"github.check":
 		repo := getStr("repo")
 		var parent int
 		if typ == "github.issue_comment" {

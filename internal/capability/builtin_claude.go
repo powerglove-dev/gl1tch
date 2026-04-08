@@ -54,6 +54,12 @@ func (c *ClaudeHistoryCapability) Manifest() Manifest {
 		Category:    "providers.claude",
 		Trigger:     Trigger{Mode: TriggerInterval, Every: every},
 		Sink:        Sink{Index: true},
+		// Route to the dedicated claude history index so session
+		// transcripts stay searchable via the observer without
+		// crowding the activity feed. See comment on
+		// CopilotCapability.Manifest for the rationale — same
+		// rationale, different collector.
+		Invocation: Invocation{Index: "glitch-claude-history"},
 	}
 }
 

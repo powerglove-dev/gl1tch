@@ -36,6 +36,14 @@ type Runner struct {
 	reg          *Registry
 	indexer      Indexer
 	defaultIndex string
+	// workspaceID is the id of the workspace this Runner belongs
+	// to. Populated by the PodManager at construction time; empty
+	// for the global tool pod and for tests that don't go through
+	// the pod manager. Used as the first argument to
+	// notifyEventSink so the process-wide sink (installed by
+	// pkg/glitchd) can route every indexed doc to the right
+	// workspace's analyzer queue.
+	workspaceID string
 
 	mu          sync.Mutex
 	cancels     []context.CancelFunc
@@ -52,6 +60,20 @@ func NewRunner(reg *Registry, indexer Indexer) *Runner {
 		indexer:      indexer,
 		defaultIndex: "glitch-events",
 	}
+}
+
+// SetWorkspaceID stamps this Runner with the id of the workspace
+// it belongs to. Called by the PodManager right after NewRunner.
+// Used only for the event sink fanout (notifyEventSink) — the
+// runner's scheduling and indexing paths don't branch on workspace.
+//
+// Empty workspaceID is legitimate (tool pod, tests). The sink
+// receiver is responsible for defaulting such events to the global
+// lane rather than treating the empty string as a bug.
+func (r *Runner) SetWorkspaceID(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.workspaceID = id
 }
 
 // SetDefaultIndex overrides the index used when a Doc event has no explicit
@@ -241,12 +263,38 @@ func (r *Runner) runOnce(ctx context.Context, c Capability, in Input, stream io.
 	if r.indexer == nil {
 		return nil
 	}
+	// Snapshot workspace id under the lock so the sink fanout
+	// below sees a stable value even if SetWorkspaceID runs
+	// concurrently (the pod manager only sets it once, but a
+	// future reconfigure path might not).
+	r.mu.Lock()
+	wsID := r.workspaceID
+	r.mu.Unlock()
+
 	for idx, docs := range docsByIndex {
 		if len(docs) == 0 {
 			continue
 		}
 		if err := r.indexer.BulkIndex(ctx, idx, docs); err != nil {
 			return err
+		}
+		// Fan out to the process-wide event sink ONLY when the
+		// destination is glitch-events. The sink feeds the
+		// attention classifier + deep-analysis queue, neither of
+		// which makes sense for high-volume history indices like
+		// glitch-copilot-history or glitch-claude-history (and
+		// running classification on those would bring back the
+		// DOS we just fixed). Capabilities that write to a
+		// non-default index are opting out of the activity feed
+		// on purpose; respect that at the fanout boundary.
+		//
+		// Source label is the capability name, which the glitchd
+		// sink uses to route by collector ("github", "git",
+		// "directory", …). idx is the destination index string,
+		// which happens to equal the source in most cases but is
+		// technically independent.
+		if idx == r.defaultIndex || idx == "glitch-events" {
+			notifyEventSink(wsID, m.Name, docs)
 		}
 	}
 	return nil
