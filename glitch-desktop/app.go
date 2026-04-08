@@ -113,6 +113,14 @@ type App struct {
 	// emits the brain:activity row. Keyed by streamID.
 	activityResultsMu sync.Mutex
 	activityResults   map[string]glitchd.AnalysisResult
+
+	// threads owns one chatui.ThreadStore + chatui.SlashRegistry per
+	// workspace. Lazily constructed on first access via ensureThreads()
+	// so the existing chat path pays no cost on workspaces that never
+	// open the threaded view. See threads.go for the Wails-binding glue
+	// and pkg/glitchd/threads.go for the data model.
+	threadsOnce sync.Once
+	threads     *glitchd.ThreadHosts
 }
 
 type runHandle struct {

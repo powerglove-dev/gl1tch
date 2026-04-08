@@ -1,0 +1,76 @@
+name: git-status
+version: "1"
+description: |
+  Reports the current branch, upstream tracking, and dirty file list for the
+  current git repository, and emits an Evidence JSON object the research loop
+  can ingest. The body summarises the working tree state; the refs array
+  carries the dirty paths so the drafter can cite them verbatim.
+
+  This workflow is the canonical git-status researcher used by the research
+  loop. It is also runnable standalone for debugging:
+
+      glitch pipeline run git-status ""
+
+  Prerequisites:
+    - git in PATH
+    - python3 in PATH (used to format the Evidence JSON)
+    - Run from inside a git repository
+
+trigger_phrases:
+  - "what branch am i on"
+  - "is my working tree clean"
+  - "git status"
+
+steps:
+  # 1. Snapshot the current branch. Runs in $GLITCH_CWD when set so a
+  #    threaded chat scoped to a different workspace can target that
+  #    workspace's repo instead of the desktop binary's own cwd.
+  - id: branch
+    executor: shell
+    vars:
+      cmd: git -C "${GLITCH_CWD:-.}" rev-parse --abbrev-ref HEAD
+
+  # 2. Snapshot the porcelain status. --porcelain=v1 keeps the output stable
+  #    so the wrapper does not have to fight git's human-facing formatter.
+  - id: status
+    executor: shell
+    vars:
+      cmd: git -C "${GLITCH_CWD:-.}" status --porcelain=v1
+
+  # 3. Wrap both into the Evidence schema (version 1).
+  - id: wrap
+    executor: shell
+    needs: [branch, status]
+    vars:
+      branch: '{{get "step.branch.data.value" .}}'
+      raw: '{{get "step.status.data.value" .}}'
+      cmd: |
+        python3 - <<'PY'
+        import json, os
+        branch = os.environ.get("GLITCH_BRANCH", "").strip() or "(detached)"
+        raw = os.environ.get("GLITCH_RAW", "")
+        dirty = []
+        for line in raw.splitlines():
+            line = line.rstrip()
+            if not line:
+                continue
+            # porcelain v1 lines: "XY path"
+            if len(line) > 3:
+                dirty.append(line[3:])
+
+        if not dirty:
+            body = f"Branch: {branch}\nWorking tree: clean"
+        else:
+            listing = "\n".join(f"- {p}" for p in dirty)
+            body = f"Branch: {branch}\nDirty paths ({len(dirty)}):\n{listing}"
+
+        evidence = {
+            "schema_version": 1,
+            "source": "git-status",
+            "title": f"branch={branch} dirty={len(dirty)}",
+            "body": body,
+            "refs": dirty,
+            "tags": ["git", "status"],
+        }
+        print(json.dumps(evidence))
+        PY

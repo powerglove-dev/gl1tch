@@ -177,6 +177,12 @@ func StreamPrompt(ctx context.Context, opts StreamPromptOpts, tokenCh chan<- str
 	return err
 }
 
+// BuildExecutorManager constructs an executor.Manager pre-loaded with
+// every CLI provider and any user wrappers in ~/.config/glitch/wrappers.
+// Exported so the desktop app's threaded chat host can build the same
+// manager the existing chat path uses without duplicating the wiring.
+func BuildExecutorManager() *executor.Manager { return buildManager() }
+
 func buildManager() *executor.Manager {
 	providers := picker.BuildProviders()
 	mgr := executor.NewManager()

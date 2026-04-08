@@ -14,6 +14,7 @@ import (
 
 	"github.com/8op-org/gl1tch/internal/capability"
 	"github.com/8op-org/gl1tch/internal/esearch"
+	"github.com/8op-org/gl1tch/internal/research"
 )
 
 var (
@@ -142,8 +143,43 @@ func loadAssistantRegistry(dir string) (*capability.Registry, error) {
 	// (Elasticsearch, local state) and don't fit the "markdown +
 	// subprocess" skill model.
 	registerSecurityAlertsCap(reg)
+	registerResearchLoopCap(reg)
 
 	return reg, nil
+}
+
+// registerResearchLoopCap wires the bounded research loop into the
+// assistant's on-demand registry as a single "research" capability. The
+// router pick model sees one entry — "answer this question with grounded
+// evidence" — instead of every researcher individually, which keeps the
+// pick prompt short enough for qwen2.5:7b. Silently skipped when no
+// researcher workflows are available.
+func registerResearchLoopCap(reg *capability.Registry) {
+	mgr := buildFullManager()
+	registry, err := research.DefaultRegistry(mgr, "")
+	if err != nil || registry == nil || len(registry.Names()) == 0 {
+		return
+	}
+	llm := research.NewOllamaLLM(mgr, research.DefaultLocalModel)
+	loop := research.NewLoop(registry, llm).
+		WithEventSink(research.NewFileEventSink("")).
+		WithScoreOptions(func() research.ScoreOptions {
+			// Self-consistency is N+1 LLM calls per iteration; gating
+			// it off keeps assistant calls under a few seconds. Brain
+			// stats can re-enable it via configuration once a learning
+			// loop is in place.
+			opts := research.DefaultScoreOptions()
+			opts.SkipSelfConsistency = true
+			return opts
+		}())
+	cap := &research.LoopCapability{Loop: loop}
+	if err := reg.Register(cap); err != nil {
+		// Duplicate-name conflict on "research" means a skill file
+		// already registered something under that name; let the user's
+		// skill win and silently skip the loop. The ask path still
+		// uses the loop directly via runAskResearch.
+		_ = err
+	}
 }
 
 // registerSecurityAlertsCap wires the built-in security_alerts

@@ -152,19 +152,35 @@ var askCmd = &cobra.Command{
 							return dispatchMatched(cmd, prompt, nearResult, inputVars)
 						}
 					}
-					// No match — try to generate a pipeline on the fly.
+					// No match — run the research loop against the canonical
+					// default registry. This is the daily-driver path: the
+					// loop picks researchers, gathers grounded evidence, and
+					// drafts an answer that cannot invent identifiers. The
+					// legacy "generate a pipeline on the fly" path is
+					// available behind --no-research for power users who
+					// would rather author a workflow than answer a question.
+					if askResearchEnabled {
+						return runAskResearch(cmd, prompt, providerID, resolvedModel, mgr, inputVars)
+					}
 					return dispatchGenerated(cmd, prompt, mgr, providerID, resolvedModel, inputVars)
 				}
 			}
 		}
 
-		// ── one-shot fallback ─────────────────────────────────────────────────────
+		// ── research / one-shot fallback ──────────────────────────────────────────
 		// Inject last_run.json context when the question is about a recent pipeline run.
 		if lastRunCtx := loadLastRunContext(prompt); lastRunCtx != "" {
 			if inputVars == nil {
 				inputVars = make(map[string]string)
 			}
 			inputVars["_last_run_context"] = lastRunCtx
+		}
+		// Default daily-driver path: research loop against the canonical
+		// default registry. runAskResearch internally falls back to one-shot
+		// when no researchers are available, so this is safe on a fresh
+		// checkout that has no .glitch/workflows directory.
+		if askResearchEnabled {
+			return runAskResearch(cmd, prompt, providerID, resolvedModel, mgr, inputVars)
 		}
 		return runOneShot(cmd, prompt, providerID, resolvedModel, mgr, inputVars)
 	},

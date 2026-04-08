@@ -21,9 +21,22 @@ interface Props {
   /** Transient status text rendered as a "gl1tch is thinking" pill while
    *  the latest assistant message is streaming. Empty string hides it. */
   thinking?: string;
+  /** Click-to-thread handler. Every message row gets a hover-revealed
+   *  thread button that calls this with the message ID. The host App
+   *  spawns a thread under that ID and opens its side pane. */
+  onOpenThread?: (messageID: string) => void;
+  /** ID of the message whose thread is currently open in the side pane,
+   *  if any. Used to highlight the row so the user can see which
+   *  message anchors the visible thread. */
+  activeThreadParentID?: string;
 }
 
-function BlockRenderer({
+// BlockRenderer is exported so the thread side pane can render the
+// parent chat message at the top of a thread using the exact same
+// block components the main chat uses. Keeping one renderer means a
+// drop-down code block, an activity row, or a brain note all look
+// identical inside a thread and outside it.
+export function BlockRenderer({
   block,
   isLast,
   streaming,
@@ -65,9 +78,13 @@ function BlockRenderer({
 function MessageRow({
   message,
   onAction,
+  onOpenThread,
+  isActiveThreadParent,
 }: {
   message: Message;
   onAction: (method: string, args?: unknown[]) => Promise<void>;
+  onOpenThread?: (messageID: string) => void;
+  isActiveThreadParent?: boolean;
 }) {
   const isUser = message.role === "user";
   const doneMeta = message.blocks.find((b) => b.type === "done");
@@ -86,8 +103,14 @@ function MessageRow({
 
   return (
     <div
-      className="fade-in"
-      style={{ display: "flex", gap: 10, maxWidth: 760, marginLeft: isUser ? "auto" : 0 }}
+      className={`fade-in glitch-message-row${isActiveThreadParent ? " glitch-message-row-active" : ""}`}
+      style={{
+        display: "flex",
+        gap: 10,
+        maxWidth: 760,
+        marginLeft: isUser ? "auto" : 0,
+        position: "relative",
+      }}
       data-event-key={injectedKey || undefined}
     >
       {/* Avatar */}
@@ -208,11 +231,27 @@ function MessageRow({
           <Terminal size={13} style={{ color: "var(--green)" }} />
         </div>
       )}
+
+      {/* Hover-revealed thread button. Every message in the chat is a
+          potential thread anchor — clicking opens a side pane with its
+          own input that runs research-grounded follow-ups against the
+          gl1tch loop. The handler is wired by App so the side pane is
+          a layout-level concern, not a per-row one. */}
+      {onOpenThread && message.id && (
+        <button
+          type="button"
+          className="glitch-thread-affordance"
+          onClick={() => onOpenThread(message.id)}
+          title="Open thread on this message"
+        >
+          💬
+        </button>
+      )}
     </div>
   );
 }
 
-export function MessageList({ messages, onAction, thinking }: Props) {
+export function MessageList({ messages, onAction, thinking, onOpenThread, activeThreadParentID }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -298,7 +337,12 @@ export function MessageList({ messages, onAction, thinking }: Props) {
               {showSeparator && msg.timestamp > 0 && (
                 <DaySeparator label={dayLabel(msg.timestamp)} />
               )}
-              <MessageRow message={msg} onAction={onAction} />
+              <MessageRow
+                message={msg}
+                onAction={onAction}
+                onOpenThread={onOpenThread}
+                isActiveThreadParent={activeThreadParentID === msg.id}
+              />
             </Fragment>
           );
         })}

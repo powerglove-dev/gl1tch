@@ -1,0 +1,81 @@
+name: git-log
+version: "1"
+description: |
+  Lists the most recent commits in the current git repository and emits an
+  Evidence JSON object the research loop can ingest. The body is one line per
+  commit (sha, author, date, subject); the refs array carries the short SHAs
+  so the drafter can cite them verbatim.
+
+  This workflow is the canonical git-log researcher used by the research loop.
+  It is also runnable standalone for debugging:
+
+      glitch pipeline run git-log ""
+
+  Prerequisites:
+    - git in PATH
+    - python3 in PATH (used to format the Evidence JSON)
+    - Run from inside a git repository
+
+trigger_phrases:
+  - "recent commits"
+  - "what changed recently"
+  - "git log"
+
+steps:
+  # 1. Fetch recent commits as a tab-separated record stream. Limit at 30 to
+  #    keep the bundle small — the loop budgets evidence size and 30 commits
+  #    is enough context for any "what changed recently" question.
+  - id: fetch
+    executor: shell
+    vars:
+      cmd: >-
+        git -C "${GLITCH_CWD:-.}" log -n 30
+        --pretty=format:'%h%x09%an%x09%aI%x09%s'
+        --no-color
+
+  # 2. Wrap the git output in the Evidence schema (version 1). The python
+  #    here is doing exactly one job — convert the tab-separated stream into
+  #    the schema the research loop expects — so it stays in the workflow
+  #    rather than living in a separate script.
+  - id: wrap
+    executor: shell
+    needs: [fetch]
+    vars:
+      raw: '{{get "step.fetch.data.value" .}}'
+      cmd: |
+        python3 - <<'PY'
+        import json, os
+        raw = os.environ.get("GLITCH_RAW", "").strip()
+        commits = []
+        for line in raw.splitlines():
+            parts = line.split("\t", 3)
+            if len(parts) < 4:
+                continue
+            sha, author, date, subject = parts
+            commits.append({
+                "sha": sha,
+                "author": author,
+                "date": date,
+                "subject": subject,
+            })
+
+        if not commits:
+            body = "No commits found in this repository."
+            refs = []
+        else:
+            body = "\n".join(
+                f"{c['sha']} {c['date']} {c['author']}: {c['subject']}"
+                for c in commits
+            )
+            refs = [c["sha"] for c in commits]
+
+        evidence = {
+            "schema_version": 1,
+            "source": "git-log",
+            "title": f"{len(commits)} most recent commit(s) in current repository",
+            "body": body,
+            "refs": refs,
+            "tags": ["git", "commits"],
+        }
+        print(json.dumps(evidence))
+        PY

@@ -7,6 +7,8 @@ import type { AgentEntry, WorkflowFileEntry, PromptEntry } from "./components/Si
 // See the comment above the (former) render site in the JSX below.
 import { MessageList } from "./components/MessageList";
 import { ChatInput } from "./components/ChatInput";
+import { ThreadSidePane } from "./components/ThreadSidePane";
+import { SpawnThreadOnMessage } from "../wailsjs/go/main/App";
 import type { ProviderOption, ChainStep } from "./components/ChatInput";
 import { EditorPopup } from "./components/EditorPopup";
 import { PausePanel } from "./components/PausePanel";
@@ -74,6 +76,32 @@ export function App() {
   const [selectedModel, setSelectedModel] = useState("");
   const [chain, setChain] = useState<ChainStep[]>([]);
   const [pendingClarify, setPendingClarify] = useState<{ workspace_id: string; run_id: string; question: string } | null>(null);
+  // chat-threads side pane: holds the (threadID, parentMessageID) of
+  // whichever message the user clicked the 💬 affordance on. null
+  // when no thread is open. The pane is part of the chat itself —
+  // every message is a potential thread anchor, and the pane lives
+  // in the right column of the chat layout. The full parent Message
+  // is looked up from active.messages by ID at render time so the
+  // side pane stays in sync with any in-place updates the parent
+  // receives (streaming chunks, etc.).
+  const [activeThread, setActiveThread] = useState<{ id: string; parentID: string } | null>(null);
+
+  // openThreadOnMessage is the click handler MessageList wires to its
+  // 💬 affordance. It calls into the backend to spawn (or fetch the
+  // existing) thread under the supplied message ID, then sets the
+  // side-pane state to render it.
+  const openThreadOnMessage = useCallback(async (messageID: string) => {
+    if (!state.activeWorkspaceId || !messageID) return;
+    try {
+      const json = await SpawnThreadOnMessage(state.activeWorkspaceId, messageID);
+      const thread = JSON.parse(json);
+      if (thread && thread.id) {
+        setActiveThread({ id: thread.id, parentID: messageID });
+      }
+    } catch (err) {
+      console.error("openThreadOnMessage failed", err);
+    }
+  }, [state.activeWorkspaceId]);
   // Active step-through sessions keyed by workspace id. Each entry holds
   // the session id plus (if paused) the step that's currently blocking
   // on a user decision. Sessions are per-workspace because StopRun and
@@ -1143,12 +1171,18 @@ export function App() {
           />
         )}
 
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, background: "var(--bg)" }}>
-          <MessageList
-            messages={active.messages}
-            onAction={handleAction}
-            thinking={active.streaming ? active.thinking : ""}
-          />
+        <div style={{ flex: 1, display: "flex", flexDirection: "row", minWidth: 0, background: "var(--bg)" }}>
+          {/* Main column: message list + chat input. Every message
+              row carries a 💬 affordance (in MessageList) so the
+              user can spawn a thread on any chat message. */}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+            <MessageList
+              messages={active.messages}
+              onAction={handleAction}
+              thinking={active.streaming ? active.thinking : ""}
+              onOpenThread={(id) => void openThreadOnMessage(id)}
+              activeThreadParentID={activeThread?.parentID}
+            />
           {activePaused && state.activeWorkspaceId && (
             <PausePanel
               stepId={activePaused.stepId}
@@ -1180,6 +1214,41 @@ export function App() {
             onSend={handleSend}
             onStop={handleStop}
           />
+          </div>
+          {/* Slack-style thread side pane. Mounts only when a message
+              has been clicked. Closing returns the layout to a single
+              column. Freezing closes the thread permanently. */}
+          {activeThread && state.activeWorkspaceId && (
+            <ThreadSidePane
+              workspaceID={state.activeWorkspaceId}
+              threadID={activeThread.id}
+              parentMessageID={activeThread.parentID}
+              parentMessage={active.messages.find((m) => m.id === activeThread.parentID)}
+              onAction={handleAction}
+              onClose={() => setActiveThread(null)}
+              onSwitchThread={(id) => setActiveThread({ id, parentID: activeThread.parentID })}
+              renderInput={(dispatchInThread, busy) => (
+                <ChatInput
+                  disabled={false}
+                  streaming={busy}
+                  providers={providers}
+                  selectedProvider={selectedProvider}
+                  selectedModel={selectedModel}
+                  observerDefaultProvider={observerDefaultProvider}
+                  observerDefaultModel={observerDefaultModel}
+                  chain={chain}
+                  onSelectProvider={handleSelectProvider}
+                  onSetObserverDefault={handleSetObserverDefault}
+                  onUpdateChainStep={handleUpdateChainStep}
+                  onRemoveChainStep={handleRemoveChainStep}
+                  onClearChain={handleClearChain}
+                  onSaveWorkflow={handleSaveWorkflow}
+                  onSend={(text) => void dispatchInThread(text)}
+                  onStop={() => {}}
+                />
+              )}
+            />
+          )}
         </div>
 
         {/* Right-side activity sidebar — mirrors the left

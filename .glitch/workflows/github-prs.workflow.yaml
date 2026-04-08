@@ -1,0 +1,84 @@
+name: github-prs
+version: "1"
+description: |
+  Lists open pull requests in the current git repository and emits an
+  Evidence JSON object the research loop can ingest. The body of the
+  evidence is a one-line-per-PR summary; the refs array contains the
+  HTML URL of every PR so the drafter can cite them verbatim.
+
+  This workflow is the canonical github-prs researcher used by the
+  research loop. It is also runnable standalone for debugging:
+
+      glitch pipeline run github-prs ""
+
+  Prerequisites:
+    - gh CLI installed and authenticated (`gh auth status`)
+    - python3 in PATH (used to format the Evidence JSON)
+    - Run from inside a git repository that has a configured GitHub remote
+
+trigger_phrases:
+  - "list open prs"
+  - "what prs are open"
+
+steps:
+  # 1. Fetch the open PRs as JSON. The --json fields list is intentionally
+  #    minimal: every field is something the drafter can quote in its answer.
+  - id: fetch
+    executor: shell
+    vars:
+      cmd: >-
+        cd "${GLITCH_CWD:-.}" && gh pr list
+        --state open
+        --limit 30
+        --json number,title,state,author,url,updatedAt,isDraft,mergeable
+
+  # 2. Wrap the gh output in the Evidence schema (version 1). The python here
+  #    is doing exactly one job — convert the gh JSON into the schema the
+  #    research loop expects — so it stays in the workflow rather than living
+  #    in a separate script.
+  - id: wrap
+    executor: shell
+    needs: [fetch]
+    vars:
+      raw: '{{get "step.fetch.data.value" .}}'
+      cmd: |
+        python3 - <<'PY'
+        import json, os, sys
+        raw = os.environ.get("GLITCH_RAW", "").strip()
+        try:
+            prs = json.loads(raw) if raw else []
+        except json.JSONDecodeError as e:
+            sys.stderr.write(f"github-prs: failed to parse gh output: {e}\n")
+            prs = []
+
+        lines, refs = [], []
+        for pr in prs:
+            number = pr.get("number")
+            title = pr.get("title", "").strip()
+            state = pr.get("state", "")
+            author = (pr.get("author") or {}).get("login", "?")
+            updated = pr.get("updatedAt", "")
+            draft = " [draft]" if pr.get("isDraft") else ""
+            mergeable = pr.get("mergeable", "")
+            lines.append(
+                f"#{number} {title} ({state}{draft}) by @{author} updated {updated} mergeable={mergeable}"
+            )
+            url = pr.get("url")
+            if url:
+                refs.append(url)
+
+        if not lines:
+            body = "No open pull requests in this repository."
+        else:
+            body = "\n".join(lines)
+
+        evidence = {
+            "schema_version": 1,
+            "source": "github-prs",
+            "title": f"{len(prs)} open PR(s) in current repository",
+            "body": body,
+            "refs": refs,
+            "tags": ["github", "prs"],
+        }
+        print(json.dumps(evidence))
+        PY

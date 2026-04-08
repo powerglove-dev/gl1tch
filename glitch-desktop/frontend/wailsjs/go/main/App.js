@@ -34,6 +34,10 @@ export function CancelActivityAnalysis(arg1) {
   return window['go']['main']['App']['CancelActivityAnalysis'](arg1);
 }
 
+export function CloseThread(arg1, arg2, arg3) {
+  return window['go']['main']['App']['CloseThread'](arg1, arg2, arg3);
+}
+
 export function CollectorsConfigPath(arg1) {
   return window['go']['main']['App']['CollectorsConfigPath'](arg1);
 }
@@ -70,6 +74,10 @@ export function DeleteWorkspace(arg1) {
   return window['go']['main']['App']['DeleteWorkspace'](arg1);
 }
 
+export function DispatchSlash(arg1, arg2, arg3) {
+  return window['go']['main']['App']['DispatchSlash'](arg1, arg2, arg3);
+}
+
 export function Doctor(arg1) {
   return window['go']['main']['App']['Doctor'](arg1);
 }
@@ -80,6 +88,14 @@ export function GetCollectorsConfigJSON(arg1) {
 
 export function GetDraft(arg1) {
   return window['go']['main']['App']['GetDraft'](arg1);
+}
+
+export function GetMainScrollback(arg1) {
+  return window['go']['main']['App']['GetMainScrollback'](arg1);
+}
+
+export function GetThreadMessages(arg1, arg2) {
+  return window['go']['main']['App']['GetThreadMessages'](arg1, arg2);
 }
 
 export function GetWorkflowFileDetails(arg1) {
@@ -108,6 +124,10 @@ export function ListPrompts() {
 
 export function ListProviders() {
   return window['go']['main']['App']['ListProviders']();
+}
+
+export function ListThreads(arg1) {
+  return window['go']['main']['App']['ListThreads'](arg1);
 }
 
 export function ListWorkflows(arg1) {
@@ -162,6 +182,10 @@ export function RemoveWorkspaceDirectory(arg1, arg2) {
   return window['go']['main']['App']['RemoveWorkspaceDirectory'](arg1, arg2);
 }
 
+export function ReopenThread(arg1, arg2) {
+  return window['go']['main']['App']['ReopenThread'](arg1, arg2);
+}
+
 export function RunChain(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['RunChain'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -192,6 +216,14 @@ export function SetWorkspaceDirectoryEnabled(arg1, arg2, arg3) {
 
 export function SkillPathForName(arg1, arg2) {
   return window['go']['main']['App']['SkillPathForName'](arg1, arg2);
+}
+
+export function SpawnDrillThreadFromEvidence(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SpawnDrillThreadFromEvidence'](arg1, arg2, arg3);
+}
+
+export function SpawnThreadOnMessage(arg1, arg2) {
+  return window['go']['main']['App']['SpawnThreadOnMessage'](arg1, arg2);
 }
 
 export function StepThroughAbort(arg1) {

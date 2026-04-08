@@ -17,6 +17,8 @@ export function BrainDecisions(arg1:string):Promise<string>;
 
 export function CancelActivityAnalysis(arg1:string):Promise<void>;
 
+export function CloseThread(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function CollectorsConfigPath(arg1:string):Promise<string>;
 
 export function CreateDraft(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
@@ -35,11 +37,17 @@ export function DeleteWorkflowFile(arg1:string):Promise<string>;
 
 export function DeleteWorkspace(arg1:string):Promise<void>;
 
+export function DispatchSlash(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function Doctor(arg1:string):Promise<void>;
 
 export function GetCollectorsConfigJSON(arg1:string):Promise<string>;
 
 export function GetDraft(arg1:number):Promise<string>;
+
+export function GetMainScrollback(arg1:string):Promise<string>;
+
+export function GetThreadMessages(arg1:string,arg2:string):Promise<string>;
 
 export function GetWorkflowFileDetails(arg1:string):Promise<string>;
 
@@ -54,6 +62,8 @@ export function ListIndexedDocs(arg1:string,arg2:number,arg3:number):Promise<str
 export function ListPrompts():Promise<string>;
 
 export function ListProviders():Promise<string>;
+
+export function ListThreads(arg1:string):Promise<string>;
 
 export function ListWorkflows(arg1:string):Promise<string>;
 
@@ -81,6 +91,8 @@ export function RefineDraft(arg1:number,arg2:string,arg3:string,arg4:string):Pro
 
 export function RemoveWorkspaceDirectory(arg1:string,arg2:string):Promise<void>;
 
+export function ReopenThread(arg1:string,arg2:string):Promise<string>;
+
 export function RunChain(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
 export function RunWorkflow(arg1:string,arg2:string,arg3:string):Promise<void>;
@@ -96,6 +108,10 @@ export function SetActiveWorkspace(arg1:string):Promise<void>;
 export function SetWorkspaceDirectoryEnabled(arg1:string,arg2:string,arg3:boolean):Promise<void>;
 
 export function SkillPathForName(arg1:string,arg2:string):Promise<string>;
+
+export function SpawnDrillThreadFromEvidence(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function SpawnThreadOnMessage(arg1:string,arg2:string):Promise<string>;
 
 export function StepThroughAbort(arg1:string):Promise<string>;
 

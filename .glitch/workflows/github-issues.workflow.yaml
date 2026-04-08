@@ -1,0 +1,81 @@
+name: github-issues
+version: "1"
+description: |
+  Lists open issues in the current git repository and emits an Evidence JSON
+  object the research loop can ingest. The body is a one-line-per-issue
+  summary; the refs array contains the HTML URL of every issue so the drafter
+  can cite them verbatim.
+
+  This workflow is the canonical github-issues researcher used by the research
+  loop. It is also runnable standalone for debugging:
+
+      glitch pipeline run github-issues ""
+
+  Prerequisites:
+    - gh CLI installed and authenticated (`gh auth status`)
+    - python3 in PATH (used to format the Evidence JSON)
+    - Run from inside a git repository that has a configured GitHub remote
+
+trigger_phrases:
+  - "list open issues"
+  - "what issues are open"
+
+steps:
+  # 1. Fetch the open issues as JSON. The --json fields list is intentionally
+  #    minimal: every field is something the drafter can quote in its answer.
+  - id: fetch
+    executor: shell
+    vars:
+      cmd: >-
+        cd "${GLITCH_CWD:-.}" && gh issue list
+        --state open
+        --limit 30
+        --json number,title,state,author,url,updatedAt,labels
+
+  # 2. Wrap the gh output in the Evidence schema (version 1).
+  - id: wrap
+    executor: shell
+    needs: [fetch]
+    vars:
+      raw: '{{get "step.fetch.data.value" .}}'
+      cmd: |
+        python3 - <<'PY'
+        import json, os, sys
+        raw = os.environ.get("GLITCH_RAW", "").strip()
+        try:
+            issues = json.loads(raw) if raw else []
+        except json.JSONDecodeError as e:
+            sys.stderr.write(f"github-issues: failed to parse gh output: {e}\n")
+            issues = []
+
+        lines, refs = [], []
+        for issue in issues:
+            number = issue.get("number")
+            title = issue.get("title", "").strip()
+            state = issue.get("state", "")
+            author = (issue.get("author") or {}).get("login", "?")
+            updated = issue.get("updatedAt", "")
+            labels = ",".join(l.get("name", "") for l in (issue.get("labels") or []))
+            label_part = f" [{labels}]" if labels else ""
+            lines.append(
+                f"#{number} {title} ({state}){label_part} by @{author} updated {updated}"
+            )
+            url = issue.get("url")
+            if url:
+                refs.append(url)
+
+        if not lines:
+            body = "No open issues in this repository."
+        else:
+            body = "\n".join(lines)
+
+        evidence = {
+            "schema_version": 1,
+            "source": "github-issues",
+            "title": f"{len(issues)} open issue(s) in current repository",
+            "body": body,
+            "refs": refs,
+            "tags": ["github", "issues"],
+        }
+        print(json.dumps(evidence))
+        PY
