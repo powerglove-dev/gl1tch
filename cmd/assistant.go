@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/8op-org/gl1tch/internal/capability"
+	"github.com/8op-org/gl1tch/internal/esearch"
 )
 
 var (
@@ -133,5 +136,53 @@ func loadAssistantRegistry(dir string) (*capability.Registry, error) {
 		// the registry from working.
 		return reg, fmt.Errorf("load skills from %s: %v", dir, errs[0])
 	}
+
+	// Register Go-native on-demand capabilities alongside the skill
+	// files. These are the built-ins that need live dependencies
+	// (Elasticsearch, local state) and don't fit the "markdown +
+	// subprocess" skill model.
+	registerSecurityAlertsCap(reg)
+
 	return reg, nil
+}
+
+// registerSecurityAlertsCap wires the built-in security_alerts
+// capability into the assistant registry, bound to the user's
+// configured Elasticsearch endpoint. Silently skipped when ES is not
+// reachable or not configured — the assistant will simply not have a
+// security tool to offer, which is better than refusing to start.
+func registerSecurityAlertsCap(reg *capability.Registry) {
+	cfg, err := capability.LoadConfig()
+	if err != nil {
+		return
+	}
+	addr := cfg.Elasticsearch.Address
+	if addr == "" {
+		addr = "http://localhost:9200"
+	}
+	es, err := esearch.New(addr)
+	if err != nil {
+		slog.Debug("security_alerts: ES client init failed", "err", err)
+		return
+	}
+	cap := &capability.SecurityAlertsCapability{
+		Searcher: func(ctx context.Context, query map[string]any) ([]map[string]any, error) {
+			resp, err := es.Search(ctx, []string{capability.IndexSecurity}, query)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]map[string]any, 0, len(resp.Results))
+			for _, h := range resp.Results {
+				var m map[string]any
+				if err := json.Unmarshal(h.Source, &m); err != nil {
+					continue
+				}
+				out = append(out, m)
+			}
+			return out, nil
+		},
+	}
+	if err := reg.Register(cap); err != nil {
+		slog.Debug("security_alerts: register failed", "err", err)
+	}
 }

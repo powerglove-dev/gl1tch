@@ -135,6 +135,35 @@ func (c *Client) EnsureIndices(ctx context.Context) error {
 	return nil
 }
 
+// EnsureCustomIndex creates a single index with the caller-supplied
+// mapping if it does not already exist. Used by subsystems (like the
+// security capability) that own an index outside the core gl1tch set
+// and don't want to touch the EnsureIndices map.
+func (c *Client) EnsureCustomIndex(ctx context.Context, name, mapping string) error {
+	res, err := c.es.Indices.Exists([]string{name}, c.es.Indices.Exists.WithContext(ctx))
+	if err != nil {
+		return fmt.Errorf("esearch: check index %s: %w", name, err)
+	}
+	res.Body.Close()
+	if res.StatusCode == 200 {
+		return nil
+	}
+	res, err = c.es.Indices.Create(
+		name,
+		c.es.Indices.Create.WithBody(strings.NewReader(mapping)),
+		c.es.Indices.Create.WithContext(ctx),
+	)
+	if err != nil {
+		return fmt.Errorf("esearch: create index %s: %w", name, err)
+	}
+	res.Body.Close()
+	if res.IsError() {
+		return fmt.Errorf("esearch: create index %s: %s", name, res.Status())
+	}
+	slog.Info("esearch: created custom index", "name", name)
+	return nil
+}
+
 // Index indexes a single document. If id is empty, ES auto-generates one.
 func (c *Client) Index(ctx context.Context, index string, id string, doc any) error {
 	body, err := json.Marshal(doc)
