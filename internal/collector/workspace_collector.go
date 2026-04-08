@@ -39,6 +39,52 @@ import (
 	"github.com/8op-org/gl1tch/internal/esearch"
 )
 
+// EventSink is a per-process callback the desktop App registers to
+// observe every event a collector successfully indexes. The desktop
+// uses it to feed events into the deep-analysis queue without the
+// collector package having to import pkg/glitchd. workspaceID is the
+// owning workspace; source is the collector source name ("git",
+// "github", "directory", "claude", …); docs is the slice of indexed
+// objects (typically esearch.Event values).
+//
+// Sinks must NOT block — they're called from the collector tick
+// goroutine and any latency here delays the next poll. The desktop's
+// implementation pushes onto a channel and returns immediately.
+type EventSink func(workspaceID, source string, docs []any)
+
+var (
+	eventSinkMu sync.RWMutex
+	eventSink   EventSink
+)
+
+// SetEventSink installs the process-wide event sink. Pass nil to
+// clear it. Safe to call before or after collectors have started.
+func SetEventSink(s EventSink) {
+	eventSinkMu.Lock()
+	eventSink = s
+	eventSinkMu.Unlock()
+}
+
+// notifyEventSink fans indexed docs out to the registered sink, if
+// any. Called by the WorkspaceCollector after every successful
+// BulkIndex. Recovers from panics in the sink so a buggy desktop
+// callback can never take down the collector goroutine.
+func notifyEventSink(workspaceID, source string, docs []any) {
+	eventSinkMu.RLock()
+	s := eventSink
+	eventSinkMu.RUnlock()
+	if s == nil || len(docs) == 0 {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Warn("event sink panicked",
+				"workspace", workspaceID, "source", source, "panic", r)
+		}
+	}()
+	s(workspaceID, source, docs)
+}
+
 // WorkspaceCollector is the unified per-workspace collector. One
 // instance is constructed per workspace pod with the workspace's
 // enabled directory list; it stays alive for the lifetime of the pod.
@@ -233,9 +279,11 @@ func (w *WorkspaceCollector) pollGit(ctx context.Context, es *esearch.Client, re
 	slog.Info("workspace collector: new commits",
 		"workspace", w.WorkspaceID, "repo", repoName, "count", len(commits))
 
-	if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(w.WorkspaceID, docs)); err != nil {
+	stamped := StampWorkspaceID(w.WorkspaceID, docs)
+	if err := es.BulkIndex(ctx, esearch.IndexEvents, stamped); err != nil {
 		return 0, fmt.Errorf("git bulk index: %w", err)
 	}
+	notifyEventSink(w.WorkspaceID, "git", stamped)
 
 	w.gitCursors[repo] = commits[0].sha
 	return len(commits), nil
@@ -271,9 +319,11 @@ func (w *WorkspaceCollector) pollGitHub(ctx context.Context, es *esearch.Client,
 	slog.Info("workspace collector: new github activity",
 		"workspace", w.WorkspaceID, "repo", slug, "events", len(docs))
 
-	if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(w.WorkspaceID, docs)); err != nil {
+	stamped := StampWorkspaceID(w.WorkspaceID, docs)
+	if err := es.BulkIndex(ctx, esearch.IndexEvents, stamped); err != nil {
 		return 0, fmt.Errorf("github bulk index: %w", err)
 	}
+	notifyEventSink(w.WorkspaceID, "github", stamped)
 
 	w.githubLastPoll[dir] = time.Now()
 	return len(docs), nil
@@ -292,9 +342,11 @@ func (w *WorkspaceCollector) scanDirectory(ctx context.Context, es *esearch.Clie
 	if len(docs) == 0 {
 		return 0, nil
 	}
-	if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(w.WorkspaceID, docs)); err != nil {
+	stamped := StampWorkspaceID(w.WorkspaceID, docs)
+	if err := es.BulkIndex(ctx, esearch.IndexEvents, stamped); err != nil {
 		return 0, fmt.Errorf("directory bulk index: %w", err)
 	}
+	notifyEventSink(w.WorkspaceID, "directory", stamped)
 	return len(docs), nil
 }
 

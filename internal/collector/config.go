@@ -18,6 +18,8 @@ const (
 	defaultDirectoriesInterval = 120 * time.Second
 	defaultCodeIndexInterval   = 30 * time.Minute
 	defaultModel               = "llama3.2"
+	defaultAnalysisModel       = "ollama/qwen2.5-coder:latest"
+	defaultAnalysisCooldown    = 30 * time.Second
 )
 
 // Config holds the collector configuration, loaded from ~/.config/glitch/observer.yaml.
@@ -83,6 +85,26 @@ type Config struct {
 		EmbedBaseURL  string        `yaml:"embed_base_url" json:"embed_base_url"` // ollama base URL override
 		EmbedAPIKey   string        `yaml:"embed_api_key" json:"embed_api_key"`   // literal or "$ENV_VAR"
 	} `yaml:"code_index" json:"code_index"`
+
+	// Analysis is the deep-analysis loop that runs a tool-using local
+	// LLM (via opencode) against significant indexed events — new PRs,
+	// issues, commits, failing checks. Where the triage loop produces
+	// terse "look at this" alerts from a stateless prompt, the
+	// analysis loop produces a richer "what is this and what should
+	// you do next" markdown overview by letting the LLM call gh / git
+	// / file-system tools through opencode's built-in agentic loop.
+	//
+	// Off by default. Enable it explicitly when you've installed
+	// opencode and pulled an instruct model big enough to follow tool
+	// calls (qwen2.5-coder works; tiny 1B models don't). Cooldown is
+	// the minimum gap between consecutive runs so the GPU doesn't
+	// spin continuously.
+	Analysis struct {
+		Enabled       bool          `yaml:"enabled" json:"enabled"`               // opt-in
+		Model         string        `yaml:"model" json:"model"`                   // passed straight to `opencode --model`
+		Cooldown      time.Duration `yaml:"cooldown" json:"cooldown"`             // min gap between runs (default 30s)
+		MaxConcurrent int           `yaml:"max_concurrent" json:"max_concurrent"` // currently always 1; reserved for future use
+	} `yaml:"analysis" json:"analysis"`
 
 	// Model is the Ollama model used for query generation and synthesis.
 	Model string `yaml:"model" json:"model"` // default: llama3.2

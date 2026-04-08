@@ -1,8 +1,6 @@
 import {
-  MessageSquare,
   Play,
   Bot,
-  Activity,
   FolderOpen,
   Plus,
   ChevronRight,
@@ -13,9 +11,8 @@ import {
   Workflow,
   Pencil,
 } from "lucide-react";
-import { useState, useRef, useEffect, useCallback } from "react";
-import type { Workspace, BrainActivity } from "@/lib/types";
-import { formatTime12 } from "@/lib/time";
+import { useState, useEffect, useCallback } from "react";
+import type { Workspace } from "@/lib/types";
 import {
   ListWorkspaceDirectoriesDetailed,
   SetWorkspaceDirectoryEnabled,
@@ -211,18 +208,13 @@ function ScopeFilter({
 }
 
 interface Props {
-  onNewWorkspace: () => void;
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
-  onSwitchWorkspace: (id: string) => void;
-  onDeleteWorkspace: (id: string) => void;
-  onRenameWorkspace: (id: string, title: string) => void;
   directories: string[];
   agents: AgentEntry[];
   workflowFiles: WorkflowFileEntry[];
   prompts: PromptEntry[];
   selectedAgent: string | null;
-  brainActivity: BrainActivity[];
   onAddDirectory: () => void;
   onRemoveDirectory: (dir: string) => void;
   onAddWorkflowFile: (p: WorkflowFileEntry) => void;
@@ -244,80 +236,9 @@ interface Props {
   onNewPrompt: () => void;
 }
 
-function WorkspaceItem({
-  ws, isActive, onSwitch, onDelete, onRename,
-}: {
-  ws: Workspace; isActive: boolean;
-  onSwitch: () => void; onDelete: () => void;
-  onRename: (title: string) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (editing && inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.select();
-    }
-  }, [editing]);
-
-  function commit() {
-    const val = inputRef.current?.value.trim();
-    if (val && val !== ws.title) onRename(val);
-    setEditing(false);
-  }
-
-  return (
-    <div
-      onClick={() => { if (!editing) onSwitch(); }}
-      onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
-      style={{
-        display: "flex", alignItems: "center", gap: 8,
-        padding: "6px 10px", borderRadius: 6, fontSize: 12,
-        color: isActive ? "var(--fg-bright)" : "var(--fg)",
-        background: isActive ? "var(--bg-surface)" : "transparent",
-        cursor: "pointer", transition: "background 0.1s",
-      }}
-    >
-      <MessageSquare size={11} style={{ flexShrink: 0, opacity: 0.5 }} />
-      {editing ? (
-        <input
-          ref={inputRef}
-          defaultValue={ws.title}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commit();
-            if (e.key === "Escape") setEditing(false);
-          }}
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            flex: 1, background: "var(--bg)", border: "1px solid var(--border-bright)",
-            borderRadius: 4, padding: "2px 6px", color: "var(--fg)", fontSize: 12,
-            fontFamily: "inherit", outline: "none",
-          }}
-        />
-      ) : (
-        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {ws.title}
-        </span>
-      )}
-      {!editing && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          style={{ background: "none", border: "none", color: "var(--fg-dim)", cursor: "pointer", padding: 2, borderRadius: 4, display: "flex", opacity: 0.2 }}
-        >
-          <Trash2 size={10} />
-        </button>
-      )}
-    </div>
-  );
-}
-
 export function Sidebar({
-  onNewWorkspace, workspaces, activeWorkspaceId,
-  onSwitchWorkspace, onDeleteWorkspace, onRenameWorkspace,
+  workspaces, activeWorkspaceId,
   directories, agents, workflowFiles, prompts, selectedAgent,
-  brainActivity,
   onAddDirectory, onRemoveDirectory, onAddWorkflowFile,
   onRunWorkflowFile, onDeleteWorkflowFile, onEditWorkflowFile, onNewWorkflow,
   onAddAgent, onEditAgent,
@@ -393,118 +314,37 @@ export function Sidebar({
   return (
     <div style={{
       height: "100%", background: "var(--bg-dark)", borderRight: "1px solid var(--border)",
-      display: "flex", flexDirection: "column", width: 240,
+      display: "flex", flexDirection: "column", width: 220, minWidth: 220, maxWidth: 220, overflow: "hidden",
     }}>
-      <div style={{ flex: 1, overflowY: "auto" }}>
-        {/* ── WORKSPACES (primary, top) ──────────────────────────────────
-           Workspaces are the anchor of everything below. Visually heavier
-           than the contextual sections so the user reads top-down:
-           "I'm in workspace X → here's what X has." */}
+      {/* Active workspace header */}
+      <div
+        style={{
+          padding: "14px 16px 10px",
+          borderBottom: "1px solid var(--border)",
+          background: "linear-gradient(180deg, rgba(125,207,255,0.04), transparent)",
+        }}
+      >
         <div
           style={{
-            padding: "20px 18px 14px",
-            borderBottom: "1px solid var(--border)",
-            background: "linear-gradient(180deg, rgba(125,207,255,0.04), transparent)",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "0 2px 10px",
-              fontSize: 11,
-              fontWeight: 700,
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              color: "var(--cyan)",
-            }}
-          >
-            <MessageSquare size={12} />
-            <span style={{ flex: 1 }}>workspaces</span>
-            <span
-              style={{
-                fontSize: 10,
-                background: "var(--bg-surface)",
-                padding: "1px 6px",
-                borderRadius: 8,
-                color: "var(--fg-dim)",
-              }}
-            >
-              {workspaces.length}
-            </span>
-          </div>
-
-          {workspaces.length === 0 ? (
-            <EmptyState text="No workspaces yet" />
-          ) : (
-            <div style={{ padding: "0 2px" }}>
-              {workspaces.map((ws) => (
-                <WorkspaceItem
-                  key={ws.id}
-                  ws={ws}
-                  isActive={ws.id === activeWorkspaceId}
-                  onSwitch={() => onSwitchWorkspace(ws.id)}
-                  onDelete={() => onDeleteWorkspace(ws.id)}
-                  onRename={(title) => onRenameWorkspace(ws.id, title)}
-                />
-              ))}
-            </div>
-          )}
-
-          <button
-            onClick={onNewWorkspace}
-            style={{
-              width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              padding: "8px 12px", marginTop: 12, borderRadius: 8,
-              background: "transparent",
-              border: "1px dashed var(--border)",
-              color: "var(--fg-dim)",
-              fontSize: 11, fontWeight: 500, cursor: "pointer",
-            }}
-          >
-            <Plus size={11} />
-            New workspace
-          </button>
-        </div>
-
-        {/* ── CONTEXT FOR ACTIVE WORKSPACE ────────────────────────────────
-           Everything below scopes to the active workspace. The contextual
-           header makes that dependency obvious so users don't wonder why
-           Directories/Workflows/etc. changed when they switched. */}
-        <div
-          style={{
-            padding: "14px 18px 6px",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 10,
+            fontSize: 11,
+            fontWeight: 700,
             textTransform: "uppercase",
             letterSpacing: "0.08em",
-            color: "var(--fg-dim)",
-            opacity: noWorkspace ? 0.5 : 0.85,
+            color: noWorkspace ? "var(--fg-dim)" : "var(--cyan)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
           }}
+          title={contextLabel}
         >
-          <span>context ·</span>
-          <span
-            style={{
-              color: noWorkspace ? "var(--fg-dim)" : "var(--fg)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              maxWidth: 160,
-            }}
-            title={contextLabel}
-          >
-            {contextLabel}
-          </span>
+          {contextLabel}
         </div>
+      </div>
 
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
         <div
           style={{
             paddingTop: 2,
-            // Subtle dim when no workspace selected — visually telegraphs
-            // that these sections require a workspace.
             opacity: noWorkspace ? 0.5 : 1,
             transition: "opacity 0.15s",
           }}
@@ -752,81 +592,8 @@ export function Sidebar({
             );
           }}
         </SidebarSection>
-
-        <SidebarSection
-          title="Activity"
-          icon={<Activity size={12} />}
-          count={brainActivity.length}
-          defaultOpen={brainActivity.some((e) => e.unread)}
-        >
-          {brainActivity.length === 0 ? (
-            <EmptyState text="brain is quiet" />
-          ) : (
-            brainActivity.slice(0, 30).map((e) => <ActivityRow key={e.id} entry={e} />)
-          )}
-        </SidebarSection>
         </div>
       </div>
-    </div>
-  );
-}
-
-function ActivityRow({ entry }: { entry: BrainActivity }) {
-  const sevColor =
-    entry.severity === "error"
-      ? "var(--red)"
-      : entry.severity === "warn"
-        ? "var(--yellow)"
-        : "var(--cyan)";
-  return (
-    <div
-      style={{
-        display: "flex",
-        gap: 8,
-        padding: "5px 10px",
-        fontSize: 11,
-        color: "var(--fg)",
-        alignItems: "flex-start",
-      }}
-      title={entry.detail}
-    >
-      <span
-        style={{
-          width: 5,
-          height: 5,
-          borderRadius: 999,
-          background: sevColor,
-          marginTop: 6,
-          flexShrink: 0,
-          boxShadow: entry.unread ? `0 0 5px ${sevColor}` : "none",
-        }}
-      />
-      <span
-        style={{
-          flex: 1,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          fontWeight: entry.unread ? 600 : 400,
-          opacity: entry.unread ? 1 : 0.85,
-        }}
-      >
-        {entry.title}
-      </span>
-      {entry.timestamp > 0 && (
-        <span
-          style={{
-            fontSize: 9,
-            color: "var(--fg-dim)",
-            opacity: 0.7,
-            fontVariantNumeric: "tabular-nums",
-            flexShrink: 0,
-          }}
-          title={new Date(entry.timestamp).toLocaleString()}
-        >
-          {formatTime12(entry.timestamp)}
-        </span>
-      )}
     </div>
   );
 }

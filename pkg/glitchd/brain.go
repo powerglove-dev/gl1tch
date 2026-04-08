@@ -513,3 +513,183 @@ func WriteCollectorConfig(content string) error {
 // brain alerts. Kept here so the desktop and the systray plugin agree
 // on the wire name without an import cycle.
 const BrainAlertTopic = "brain.alert.raised"
+
+// RecentEvent is one indexed glitch-events document, flattened to the
+// shape the desktop activity panel needs when the user clicks an
+// activity row to see "what was actually indexed". Powers the
+// expand-to-see-content view in ActivitySidebar.
+//
+// Fields are a curated subset of esearch.Event — enough to render a
+// useful one-liner per source ("repo · author · subject" for git,
+// "repo · message" for directory artifacts, "snippet" for chat
+// sessions) without dragging the full event body across the wire.
+type RecentEvent struct {
+	Type        string   `json:"type"`
+	Source      string   `json:"source"`
+	Repo        string   `json:"repo,omitempty"`
+	Branch      string   `json:"branch,omitempty"`
+	Author      string   `json:"author,omitempty"`
+	SHA         string   `json:"sha,omitempty"`
+	Message     string   `json:"message,omitempty"`
+	Body        string   `json:"body,omitempty"`
+	Files       []string `json:"files,omitempty"`
+	URL         string   `json:"url,omitempty"`
+	TimestampMs int64    `json:"timestamp_ms,omitempty"`
+}
+
+// QueryRecentCollectorEvents pulls the most recent N indexed events
+// for one source within a workspace, newest first. Used by the
+// activity panel's expand-to-see-content row.
+//
+// The query filters by `source` (the keyword field every collector
+// stamps on its events) AND by workspace_id using the same
+// "active workspace OR tools sentinel OR missing" bool-should the
+// QueryCollectorActivityScoped helper uses, so legacy unstamped docs
+// remain visible during the rollout. Limit is clamped to [1, 50] to
+// keep the JSON payload small enough to render inline.
+//
+// Returns a zero-length slice (not an error) when the index doesn't
+// exist yet so the activity panel can render "no recent docs" instead
+// of a scary error toast on a fresh install.
+func QueryRecentCollectorEvents(ctx context.Context, workspaceID, source string, limit int) ([]RecentEvent, error) {
+	if source == "" {
+		return nil, fmt.Errorf("source is required")
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	cfg, err := collector.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	addr := cfg.Elasticsearch.Address
+	if addr == "" {
+		addr = "http://localhost:9200"
+	}
+
+	// Workspace scoping: same OR-include used by
+	// QueryCollectorActivityScoped — active workspace, the tools
+	// sentinel for shared collectors (copilot), and missing-field
+	// docs from before workspace_id stamping landed.
+	var scopeFilter string
+	if workspaceID == "" {
+		scopeFilter = `{"match_all": {}}`
+	} else {
+		scopeFilter = fmt.Sprintf(`{
+			"bool": {
+				"should": [
+					{ "terms": { "workspace_id": [%q, %q] } },
+					{ "bool": { "must_not": { "exists": { "field": "workspace_id" } } } }
+				],
+				"minimum_should_match": 1
+			}
+		}`, workspaceID, collector.WorkspaceIDTools)
+	}
+
+	body := fmt.Sprintf(`{
+		"size": %d,
+		"sort": [{ "timestamp": "desc" }],
+		"query": {
+			"bool": {
+				"filter": [
+					{ "term": { "source": %q } },
+					%s
+				]
+			}
+		}
+	}`, limit, source, scopeFilter)
+
+	url := fmt.Sprintf("%s/glitch-events/_search", addr)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader([]byte(body)))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	hc := &http.Client{Timeout: 3 * time.Second}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		return []RecentEvent{}, nil
+	}
+	if resp.StatusCode >= 400 {
+		raw, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("elasticsearch %d: %s", resp.StatusCode, string(raw))
+	}
+
+	// Decode the hits into a loose map first so we can pluck the few
+	// fields we care about without dragging the full esearch.Event
+	// struct (and its tag of fields the activity panel never uses)
+	// into this package.
+	var parsed struct {
+		Hits struct {
+			Hits []struct {
+				Source map[string]any `json:"_source"`
+			} `json:"hits"`
+		} `json:"hits"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return nil, err
+	}
+
+	out := make([]RecentEvent, 0, len(parsed.Hits.Hits))
+	for _, h := range parsed.Hits.Hits {
+		src := h.Source
+		ev := RecentEvent{
+			Type:    asString(src["type"]),
+			Source:  asString(src["source"]),
+			Repo:    asString(src["repo"]),
+			Branch:  asString(src["branch"]),
+			Author:  asString(src["author"]),
+			SHA:     asString(src["sha"]),
+			Message: asString(src["message"]),
+			Body:    truncString(asString(src["body"]), 600),
+		}
+		// files_changed is an array of strings on git.commit events.
+		if raw, ok := src["files_changed"].([]any); ok {
+			for _, f := range raw {
+				if s, ok := f.(string); ok && s != "" {
+					ev.Files = append(ev.Files, s)
+				}
+			}
+		}
+		// metadata.url surfaces github PR/issue URLs without a separate
+		// top-level field on the Event struct.
+		if md, ok := src["metadata"].(map[string]any); ok {
+			if u, ok := md["url"].(string); ok {
+				ev.URL = u
+			}
+		}
+		// timestamp lands as ISO-8601 in ES; convert to ms-since-epoch
+		// so the frontend can format it without re-parsing.
+		if ts, ok := src["timestamp"].(string); ok {
+			if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+				ev.TimestampMs = t.UnixMilli()
+			}
+		}
+		out = append(out, ev)
+	}
+	return out, nil
+}
+
+func asString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+func truncString(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}

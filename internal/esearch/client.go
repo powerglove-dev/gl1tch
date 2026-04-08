@@ -46,6 +46,14 @@ const (
 	// "show me the last ten workspace-pod startups" Kibana query that
 	// makes screenshot round-trips unnecessary.
 	IndexLogs = "glitch-logs"
+	// IndexAnalyses is the destination for the deep-analysis loop's
+	// per-event LLM overviews. Each doc carries the originating
+	// event_key, source, repo, the model name used, the markdown the
+	// LLM produced, and a workspace_id for scoping. The activity
+	// sidebar fetches recent rows here when the user expands an
+	// "analysis" entry; future Kibana dashboards can chart "what's
+	// been analyzed today" without touching glitch-events.
+	IndexAnalyses = "glitch-analyses"
 )
 
 // Client wraps the Elasticsearch client with gl1tch-specific operations.
@@ -96,6 +104,7 @@ func (c *Client) EnsureIndices(ctx context.Context) error {
 		IndexBrainDecisions: brainDecisionsMapping,
 		IndexTraces:         tracesMapping,
 		IndexLogs:           logsMapping,
+		IndexAnalyses:       analysesMapping,
 	}
 	for name, mapping := range indices {
 		// Check if index exists.

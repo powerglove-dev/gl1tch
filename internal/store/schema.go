@@ -217,6 +217,18 @@ CREATE TABLE IF NOT EXISTS workspace_messages (
   timestamp     INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ws_messages_ws ON workspace_messages(workspace_id, timestamp);
+-- analysis_dedupe is the fast "have we already analyzed this event?"
+-- check used by the deep-analysis loop. event_key is a stable hash
+-- of the event identity (source + type + repo + sha-or-number-or-msg-hash)
+-- so re-indexing the same PR or commit after a poll cycle doesn't
+-- trigger a duplicate opencode run. analyzed_at is unix-millis. The
+-- analyzer is source-agnostic; this table holds keys for ANY collector
+-- type the user has enabled, not just github.
+CREATE TABLE IF NOT EXISTS analysis_dedupe (
+  event_key   TEXT PRIMARY KEY,
+  source      TEXT NOT NULL,
+  analyzed_at INTEGER NOT NULL
+);
 `
 
 // createPersonalBestsSchema is the DDL for the game_personal_bests table.

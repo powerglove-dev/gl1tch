@@ -228,9 +228,11 @@ func (c *ClaudeCollector) poll(ctx context.Context, es *esearch.Client, path str
 			"workspace", c.WorkspaceID,
 			"count", len(docs),
 			"skipped_out_of_scope", skippedScope)
-		if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(c.WorkspaceID, docs)); err != nil {
+		stamped := StampWorkspaceID(c.WorkspaceID, docs)
+		if err := es.BulkIndex(ctx, esearch.IndexEvents, stamped); err != nil {
 			return offset, fmt.Errorf("bulk index: %w", err)
 		}
+		notifyEventSink(c.WorkspaceID, "claude", stamped)
 	} else if skippedScope > 0 {
 		slog.Debug("claude collector: all entries out of scope",
 			"workspace", c.WorkspaceID, "skipped", skippedScope)
@@ -376,7 +378,8 @@ func (c *ClaudeProjectCollector) pollProjects(ctx context.Context, es *esearch.C
 
 			docs := c.parseSessionFile(f, projectName)
 			if len(docs) > 0 {
-				if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(c.WorkspaceID, docs)); err != nil {
+				stamped := StampWorkspaceID(c.WorkspaceID, docs)
+				if err := es.BulkIndex(ctx, esearch.IndexEvents, stamped); err != nil {
 					slog.Warn("claude-projects: index error",
 						"workspace", c.WorkspaceID,
 						"file", filepath.Base(f),
@@ -388,6 +391,7 @@ func (c *ClaudeProjectCollector) pollProjects(ctx context.Context, es *esearch.C
 					"project", projectName,
 					"file", filepath.Base(f),
 					"events", len(docs))
+				notifyEventSink(c.WorkspaceID, "claude", stamped)
 			}
 			indexed[f] = true
 		}

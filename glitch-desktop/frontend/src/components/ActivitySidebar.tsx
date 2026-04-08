@@ -21,7 +21,10 @@
  * same spacing — so users moving between surfaces don't see
  * style drift.
  */
-import { Activity, X, Trash2 } from "lucide-react";
+import { Activity, X, Trash2, Sparkles, ChevronRight } from "lucide-react";
+import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { BrainActivity } from "@/lib/types";
 import { formatRelative, formatTime12 } from "@/lib/time";
 
@@ -174,98 +177,186 @@ export function ActivitySidebar({
   );
 }
 
-// ActivityRow is a near-copy of the BrainIndicator popover's
-// ActivityRow — same severity dot, same title/timestamp/detail/
-// source layout. Lives here instead of being imported from the
-// BrainIndicator file so the popover and the sidebar can evolve
-// their item rendering independently if one needs richer affordances
-// (e.g. click-to-expand, click-to-jump-to-source) without dragging
-// the other along.
+// ActivityRow renders one entry in the activity stream. Three visual
+// modes based on entry.kind:
+//
+//   - "checkin" / "alert": same compact layout the popover used to
+//     have — severity dot, title, terse one-liner detail, source.
+//   - "analysis": same row chrome PLUS a click-to-expand markdown
+//     body. Collapsed by default; click anywhere on the row header
+//     to expand. The expanded state shows the full markdown the
+//     opencode-driven analyzer produced, plus a footer with the
+//     model name, repo, and run duration.
+//
+// Lives here instead of being imported from BrainIndicator so the
+// popover and the sidebar can evolve their item rendering
+// independently. The popover's row stays compact; the sidebar's row
+// can grow rich affordances like the analysis expand state without
+// dragging the popover along.
 function ActivityRow({ entry }: { entry: BrainActivity }) {
-  const sevColor =
-    entry.severity === "error"
+  const isAnalysis = entry.kind === "analysis";
+  // Analysis rows expand on click. Collapsed by default so the
+  // activity panel doesn't become a wall of text after a busy
+  // collector tick — the user opts into the deep view per row.
+  const [expanded, setExpanded] = useState(false);
+
+  const sevColor = isAnalysis
+    ? "var(--purple, #bd93f9)"
+    : entry.severity === "error"
       ? "var(--red, #ff5555)"
       : entry.severity === "warn"
         ? "var(--yellow)"
         : "var(--cyan)";
+
   return (
     <div
       style={{
         padding: "10px 14px",
         borderBottom: "1px solid var(--border)",
-        display: "flex",
-        gap: 10,
-        alignItems: "flex-start",
+        cursor: isAnalysis ? "pointer" : "default",
       }}
+      onClick={isAnalysis ? () => setExpanded((v) => !v) : undefined}
     >
-      <div
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: 999,
-          background: sevColor,
-          marginTop: 6,
-          flexShrink: 0,
-          boxShadow: entry.unread ? `0 0 6px ${sevColor}` : "none",
-        }}
-      />
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+        {/* Severity dot — purple for analysis, severity-color for others */}
         <div
           style={{
-            display: "flex",
-            alignItems: "baseline",
-            gap: 8,
-            color: "var(--fg)",
-            fontWeight: entry.unread ? 600 : 500,
-            fontSize: 12,
+            width: 6,
+            height: 6,
+            borderRadius: 999,
+            background: sevColor,
+            marginTop: 6,
+            flexShrink: 0,
+            boxShadow: entry.unread ? `0 0 6px ${sevColor}` : "none",
           }}
-        >
-          <span
+        />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
             style={{
-              flex: 1,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              display: "flex",
+              alignItems: "baseline",
+              gap: 8,
+              color: "var(--fg)",
+              fontWeight: entry.unread ? 600 : 500,
+              fontSize: 12,
             }}
           >
-            {entry.title}
-          </span>
-          <span
-            style={{ fontSize: 10, color: "var(--fg-dim)" }}
-            title={formatRelative(entry.timestamp)}
-          >
-            {formatTime12(entry.timestamp)}
-          </span>
+            {isAnalysis && (
+              <Sparkles
+                size={11}
+                style={{ color: "var(--purple, #bd93f9)", flexShrink: 0 }}
+              />
+            )}
+            <span
+              style={{
+                flex: 1,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {entry.title}
+            </span>
+            {isAnalysis && (
+              <ChevronRight
+                size={11}
+                style={{
+                  color: "var(--fg-dim)",
+                  transform: expanded ? "rotate(90deg)" : "rotate(0)",
+                  transition: "transform 0.15s",
+                  flexShrink: 0,
+                }}
+              />
+            )}
+            <span
+              style={{ fontSize: 10, color: "var(--fg-dim)" }}
+              title={formatRelative(entry.timestamp)}
+            >
+              {formatTime12(entry.timestamp)}
+            </span>
+          </div>
+
+          {/* Compact detail — only shown when NOT an expanded analysis.
+              For analysis rows, the markdown body lives in the expanded
+              section below; the collapsed state shows just the title +
+              source so the row stays scannable. */}
+          {!isAnalysis && entry.detail && (
+            <div
+              style={{
+                marginTop: 3,
+                color: "var(--fg-dim)",
+                fontSize: 11,
+                lineHeight: 1.4,
+              }}
+            >
+              {entry.detail}
+            </div>
+          )}
+
+          {(entry.source || entry.repo) && (
+            <div
+              style={{
+                marginTop: 4,
+                color: "var(--fg-dim)",
+                opacity: 0.7,
+                fontSize: 10,
+                fontFamily: "monospace",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {[entry.source, entry.repo].filter(Boolean).join(" · ")}
+            </div>
+          )}
         </div>
-        {entry.detail && (
-          <div
-            style={{
-              marginTop: 3,
-              color: "var(--fg-dim)",
-              fontSize: 11,
-              lineHeight: 1.4,
-            }}
-          >
-            {entry.detail}
-          </div>
-        )}
-        {entry.source && (
-          <div
-            style={{
-              marginTop: 4,
-              color: "var(--fg-dim)",
-              opacity: 0.7,
-              fontSize: 10,
-              fontFamily: "monospace",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {entry.source}
-          </div>
-        )}
       </div>
+
+      {/* Expanded markdown body for analysis rows. Indented to align
+          with the title text under the severity dot. Uses the same
+          ReactMarkdown + remark-gfm pipeline TextBlock uses so code
+          blocks, lists, headings all render consistently. */}
+      {isAnalysis && expanded && (
+        <div
+          style={{
+            marginTop: 8,
+            marginLeft: 16,
+            padding: "10px 12px",
+            background: "var(--bg)",
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            fontSize: 11,
+            lineHeight: 1.5,
+            color: "var(--fg)",
+          }}
+          // Stop click bubbling so clicking inside the expanded body
+          // (e.g. selecting text) doesn't collapse the row.
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {entry.detail}
+          </ReactMarkdown>
+          <div
+            style={{
+              marginTop: 8,
+              paddingTop: 6,
+              borderTop: "1px solid var(--border)",
+              fontSize: 9,
+              color: "var(--fg-dim)",
+              fontFamily: "monospace",
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
+            }}
+          >
+            {entry.model && <span>model: {entry.model}</span>}
+            {entry.event_type && <span>type: {entry.event_type}</span>}
+            {entry.duration_ms != null && (
+              <span>took: {(entry.duration_ms / 1000).toFixed(1)}s</span>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

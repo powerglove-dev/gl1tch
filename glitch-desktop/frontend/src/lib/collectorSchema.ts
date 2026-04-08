@@ -287,6 +287,33 @@ export const COLLECTOR_SCHEMA: CollectorSpec[] = [
       },
     ],
   },
+  {
+    id: "analysis",
+    name: "Deep Analysis",
+    icon: "Sparkles",
+    description:
+      "Runs a tool-using local LLM (via the opencode CLI) against significant collector events — new PRs, issues, commits, claude sessions — and produces a markdown overview the user can act on. Source-agnostic: any collector that emits indexable events can feed it. Off by default; needs opencode installed and an instruct model big enough to follow tool calls (qwen2.5-coder works, tiny 1B models don't).",
+    enabledKey: "analysis.enabled",
+    isEnabled: (v) => !!getField(v, "analysis.enabled"),
+    fields: [
+      {
+        key: "analysis.model",
+        label: "Model",
+        description:
+          "Passed straight to `opencode --model`. Provider/model format. Use a small instruct model that follows tool calls — qwen2.5-coder is a good default.",
+        type: "string",
+        placeholder: "ollama/qwen2.5-coder:latest",
+      },
+      {
+        key: "analysis.cooldown",
+        label: "Cooldown between runs",
+        description:
+          "Minimum gap between consecutive analysis runs so the local LLM doesn't spin continuously. Each run takes 30s–2min depending on how many tool calls the model makes.",
+        type: "duration",
+        placeholder: "30s",
+      },
+    ],
+  },
 ];
 
 export function findCollectorById(id: string): CollectorSpec | undefined {

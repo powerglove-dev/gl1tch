@@ -47,6 +47,7 @@ import {
   StopRun,
   SaveMessage,
   LoadMessages,
+  SetActiveWorkspace,
 } from "../wailsjs/go/main/App";
 import type { Message, Block, BrainActivity } from "./lib/types";
 
@@ -191,13 +192,26 @@ export function App() {
     if (!data || typeof data !== "object") return;
     const d = data as Partial<BrainActivity>;
     if (!d.title) return;
+    // Three event kinds: alert (systray-fanout), checkin (low-noise
+    // status), analysis (deep-analysis markdown from the opencode
+    // loop). Anything else falls back to checkin.
+    const kind: BrainActivity["kind"] =
+      d.kind === "alert" ? "alert" :
+      d.kind === "analysis" ? "analysis" :
+      "checkin";
     const entry: BrainActivity = {
       id: d.id ?? `brain-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      kind: d.kind === "alert" ? "alert" : "checkin",
+      kind,
       severity: d.severity === "warn" || d.severity === "error" ? d.severity : "info",
       title: d.title,
       detail: d.detail ?? "",
       source: d.source,
+      repo: d.repo,
+      event_type: d.event_type,
+      event_key: d.event_key,
+      model: d.model,
+      duration_ms: d.duration_ms,
+      workspace_id: d.workspace_id,
       timestamp: d.timestamp ?? Date.now(),
       unread: true,
     };
@@ -305,7 +319,11 @@ export function App() {
       try {
         const wss: Workspace[] = JSON.parse(json) ?? [];
         setWorkspaces(wss);
-        if (wss.length > 0) setActiveWorkspace(wss[0].id);
+        if (wss.length > 0) {
+          setActiveWorkspace(wss[0].id);
+          // Same scoping reason as handleSwitchWorkspace.
+          void SetActiveWorkspace(wss[0].id);
+        }
       } catch {}
     });
 
@@ -440,6 +458,11 @@ export function App() {
 
   const handleSwitchWorkspace = useCallback((id: string) => {
     setActiveWorkspace(id);
+    // Tell the backend so the brain loop's activity refresh scopes
+    // its ES query to this workspace's pod. Otherwise the activity
+    // panel would surface deltas from every workspace pod, making
+    // per-workspace poll intervals look like they're being ignored.
+    void SetActiveWorkspace(id);
   }, [setActiveWorkspace]);
 
   const handleDeleteWorkspace = useCallback((id: string) => {

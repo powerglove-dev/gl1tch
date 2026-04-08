@@ -123,11 +123,13 @@ func (c *CopilotCollector) pollCommands(ctx context.Context, es *esearch.Client,
 	if len(docs) > 0 {
 		slog.Info("copilot collector: new commands",
 			"workspace", c.WorkspaceID, "count", len(docs))
-		if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(c.WorkspaceID, docs)); err != nil {
+		stamped := StampWorkspaceID(c.WorkspaceID, docs)
+		if err := es.BulkIndex(ctx, esearch.IndexEvents, stamped); err != nil {
 			slog.Warn("copilot collector: index error",
 				"workspace", c.WorkspaceID, "err", err)
 			return lastCount // don't advance cursor on error
 		}
+		notifyEventSink(c.WorkspaceID, "copilot", stamped)
 	}
 
 	return len(state.CommandHistory)
@@ -151,13 +153,15 @@ func (c *CopilotCollector) pollLogs(ctx context.Context, es *esearch.Client, dir
 
 		docs := c.parseLogFile(path)
 		if len(docs) > 0 {
-			if err := es.BulkIndex(ctx, esearch.IndexEvents, StampWorkspaceID(c.WorkspaceID, docs)); err != nil {
+			stamped := StampWorkspaceID(c.WorkspaceID, docs)
+			if err := es.BulkIndex(ctx, esearch.IndexEvents, stamped); err != nil {
 				slog.Warn("copilot collector: log index error",
 					"workspace", c.WorkspaceID,
 					"file", filepath.Base(path),
 					"err", err)
 				continue
 			}
+			notifyEventSink(c.WorkspaceID, "copilot", stamped)
 			slog.Info("copilot collector: indexed log",
 				"workspace", c.WorkspaceID,
 				"file", filepath.Base(path),

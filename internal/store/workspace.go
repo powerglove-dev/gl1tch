@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"path/filepath"
 
@@ -183,6 +184,43 @@ func (s *Store) ListWorkspaceDirectories(ctx context.Context, workspaceID string
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// HasAnalyzedEvent reports whether the deep-analysis loop has already
+// produced an analysis for the given event_key. Used as the fast
+// pre-check before spending an opencode call on a duplicate.
+//
+// event_key is whatever the analyzer chose as a stable identifier
+// (e.g. "github.pr:owner/repo:#42:updated_at" or "git.commit:<sha>")
+// — the table is source-agnostic so any collector type can dedupe
+// through the same path.
+func (s *Store) HasAnalyzedEvent(ctx context.Context, eventKey string) (bool, error) {
+	var ts int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT analyzed_at FROM analysis_dedupe WHERE event_key = ?`, eventKey,
+	).Scan(&ts)
+	if err == nil {
+		return true, nil
+	}
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return false, err
+}
+
+// MarkEventAnalyzed records that the deep-analysis loop has produced
+// (or attempted to produce) an analysis for event_key. Subsequent
+// HasAnalyzedEvent calls return true so the same event isn't
+// re-analyzed on the next collector tick.
+//
+// source is stored alongside the key so future maintenance / cleanup
+// can scope by collector — e.g. clearing all github analyses without
+// touching git ones.
+func (s *Store) MarkEventAnalyzed(ctx context.Context, eventKey, source string, analyzedAt int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR REPLACE INTO analysis_dedupe (event_key, source, analyzed_at) VALUES (?, ?, ?)`,
+		eventKey, source, analyzedAt)
+	return err
 }
 
 // SetWorkspaceDirectoryEnabled flips the enable flag on one directory.

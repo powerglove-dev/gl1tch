@@ -117,6 +117,10 @@ func defaultConfig() *Config {
 	cfg.CodeIndex.EmbedModel = "nomic-embed-text"
 	cfg.CodeIndex.EmbedBaseURL = "http://localhost:11434"
 	cfg.CodeIndex.Extensions = []string{".go", ".ts", ".py", ".md"}
+	cfg.Analysis.Enabled = false
+	cfg.Analysis.Model = defaultAnalysisModel
+	cfg.Analysis.Cooldown = defaultAnalysisCooldown
+	cfg.Analysis.MaxConcurrent = 1
 	cfg.Model = defaultModel
 	return cfg
 }

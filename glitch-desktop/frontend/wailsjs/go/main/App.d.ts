@@ -51,6 +51,8 @@ export function ListProviders():Promise<string>;
 
 export function ListWorkflows(arg1:string):Promise<string>;
 
+export function ListWorkspaceDirectoriesDetailed(arg1:string):Promise<string>;
+
 export function ListWorkspaces():Promise<string>;
 
 export function LoadMessages(arg1:string):Promise<string>;
@@ -71,11 +73,7 @@ export function RecentCollectorLogs(arg1:number):Promise<string>;
 
 export function RefineDraft(arg1:number,arg2:string,arg3:string,arg4:string):Promise<void>;
 
-export function ListWorkspaceDirectoriesDetailed(arg1:string):Promise<string>;
-
 export function RemoveWorkspaceDirectory(arg1:string,arg2:string):Promise<void>;
-
-export function SetWorkspaceDirectoryEnabled(arg1:string,arg2:string,arg3:boolean):Promise<void>;
 
 export function RunChain(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
@@ -86,6 +84,10 @@ export function SaveChatWorkflow(arg1:string,arg2:string,arg3:string,arg4:string
 export function SaveMessage(arg1:string,arg2:string):Promise<void>;
 
 export function SaveWorkflow(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function SetActiveWorkspace(arg1:string):Promise<void>;
+
+export function SetWorkspaceDirectoryEnabled(arg1:string,arg2:string,arg3:boolean):Promise<void>;
 
 export function SkillPathForName(arg1:string,arg2:string):Promise<string>;
 

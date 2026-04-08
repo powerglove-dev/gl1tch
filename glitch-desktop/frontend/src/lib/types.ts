@@ -146,20 +146,29 @@ export type BrainState =
 export type BrainSeverity = "info" | "warn" | "error";
 
 /**
- * One entry in the Activity panel. The brain emits two flavors of these:
+ * One entry in the Activity panel. The brain emits three flavors:
  *  - "alert": something the user should look at (severity warn/error)
  *  - "checkin": low-noise periodic status ("watching", "stored 12 commits…")
+ *  - "analysis": a deep-analysis run from the opencode-driven analyzer.
+ *                detail is full markdown the renderer expands inline.
  */
 export interface BrainActivity {
   id: string;
-  /** "alert" surfaces in the systray; "checkin" stays in-app only. */
-  kind: "alert" | "checkin";
+  /** "alert" surfaces in the systray; "checkin" + "analysis" stay in-app only. */
+  kind: "alert" | "checkin" | "analysis";
   severity: BrainSeverity;
   title: string;
-  /** One-line reason / summary. */
+  /** One-line reason / summary, OR — for kind="analysis" — full markdown body. */
   detail: string;
-  /** Optional source pointer (workspace id, file path, run id, …). */
+  /** Optional source pointer (collector name, file path, run id, …). */
   source?: string;
+  /** kind="analysis" extras populated by the deep-analysis loop. */
+  repo?: string;
+  event_type?: string;
+  event_key?: string;
+  model?: string;
+  duration_ms?: number;
+  workspace_id?: string;
   timestamp: number;
   /** True until the user has opened the brain panel after this landed. */
   unread: boolean;

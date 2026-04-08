@@ -526,7 +526,10 @@ export function CollectorConfigModal({
             style={{
               ...footerSecondaryButtonStyle,
               opacity: dirty ? 1 : 0.4,
-              cursor: dirty ? "pointer" : "not-allowed",
+              // "default" not "not-allowed": there's nothing to revert,
+              // not "this action is forbidden". The forbidden symbol
+              // right after a successful save reads as an error.
+              cursor: dirty ? "pointer" : "default",
             }}
           >
             <RotateCcw size={11} />
@@ -540,7 +543,7 @@ export function CollectorConfigModal({
             style={{
               ...footerPrimaryButtonStyle,
               opacity: dirty && !saving ? 1 : 0.4,
-              cursor: dirty && !saving ? "pointer" : "not-allowed",
+              cursor: dirty && !saving ? "pointer" : "default",
             }}
           >
             <Save size={11} />

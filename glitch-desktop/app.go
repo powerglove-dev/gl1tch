@@ -39,8 +39,23 @@ type App struct {
 	// every collectorPollInterval and computes deltas between polls so
 	// the UI can show "got 12 new commits in the last 30s" instead of
 	// just a derived "next in" countdown.
-	collectorMu    sync.Mutex
-	collectorState map[string]glitchd.CollectorActivity
+	//
+	// activeWorkspaceID tracks which workspace the user is currently
+	// looking at. The brain loop's collector activity refresh scopes
+	// its ES query to this workspace so the activity panel only
+	// surfaces deltas from THIS workspace's pod, not from every
+	// workspace pod running in the background. The frontend updates
+	// it via SetActiveWorkspace on every workspace switch.
+	collectorMu       sync.Mutex
+	collectorState    map[string]glitchd.CollectorActivity
+	activeWorkspaceID string
+
+	// analyzer runs the deep-analysis loop that turns significant
+	// collector events into per-event LLM overviews via opencode. Set
+	// once during startup. Each collector tick that successfully
+	// indexes events feeds them into the analyzer's queue through
+	// the EventSink registered in collector.SetEventSink.
+	analyzer *glitchd.Analyzer
 
 	// triageMu guards triageLastMs (the high-water mark of the most
 	// recent event the triage loop has already analyzed). Used to ask
@@ -193,6 +208,19 @@ func (a *App) startup(ctx context.Context) {
 			slog.Error("backend", "err", err)
 		}
 	}()
+	// Deep-analysis loop. Constructed with the shared ES client (so
+	// completed analyses land in glitch-analyses) and a result
+	// handler that emits a brain:activity row with the markdown the
+	// LLM produced. WireAnalyzerToCollectors installs a process-wide
+	// event sink inside pkg/glitchd that translates every indexed
+	// esearch.Event into an AnalyzableEvent and enqueues it — the
+	// desktop binary can't import internal/collector directly since
+	// it's a separate Go module, so the wiring lives on the glitchd
+	// side.
+	a.analyzer = glitchd.NewAnalyzer(glitchd.EsClient(), a.handleAnalysisResult)
+	a.analyzer.Start(a.ctx)
+	glitchd.WireAnalyzerToCollectors(a.analyzer)
+
 	go glitchd.StartAllWorkspacePods(a.ctx)
 	// Tool pod runs copilot ONCE under glitchd.WorkspaceIDTools.
 	// Without it copilot either doesn't run at all (it's removed
@@ -213,6 +241,14 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) domReady(_ context.Context) {}
 
 func (a *App) shutdown(_ context.Context) {
+	// Tear down the analyzer first so any in-flight opencode call
+	// gets ctx-cancelled cleanly before the workspace pods stop
+	// pushing new events into its queue.
+	if a.analyzer != nil {
+		a.analyzer.Close()
+	}
+	glitchd.WireAnalyzerToCollectors(nil)
+
 	// Stop every workspace pod first so collectors exit cleanly
 	// before the parent contexts get torn down. StopAll waits on
 	// the goroutines, so callers downstream don't see partially-
@@ -1694,6 +1730,43 @@ func (a *App) emitBrainStatus(state, detail string) {
 	})
 }
 
+// handleAnalysisResult is the AnalysisHandler the analyzer calls
+// after each finished run. We turn the result into a brain:activity
+// entry with kind="analysis" so the frontend can render it as a
+// distinct row type (markdown body, expand-on-click).
+//
+// The frontend's ActivitySidebar reads the kind field and switches
+// rendering: "checkin" / "alert" stays terse; "analysis" gets the
+// full markdown surface. Routing the markdown through the same event
+// pipe instead of a separate channel keeps the activity panel as
+// the single feed for everything the brain produces.
+func (a *App) handleAnalysisResult(r glitchd.AnalysisResult) {
+	if r.Markdown == "" {
+		return
+	}
+	now := time.Now()
+	title := r.Title
+	if title == "" {
+		title = fmt.Sprintf("%s · analysis", r.Source)
+	}
+	payload := map[string]any{
+		"id":           now.UnixNano(),
+		"kind":         "analysis",
+		"severity":     "info",
+		"title":        title,
+		"detail":       r.Markdown,
+		"source":       r.Source,
+		"repo":         r.Repo,
+		"event_type":   r.Type,
+		"event_key":    r.EventKey,
+		"model":        r.Model,
+		"duration_ms":  r.Duration.Milliseconds(),
+		"workspace_id": r.WorkspaceID,
+		"timestamp":    now.UnixMilli(),
+	}
+	runtime.EventsEmit(a.ctx, "brain:activity", payload)
+}
+
 // emitBrainActivity surfaces a single entry into the in-app activity
 // panel and (for warn/error severity) the systray via busd. kind is
 // "alert" (something the user should look at) or "checkin" (low-noise
@@ -1941,6 +2014,36 @@ func (a *App) runTriageOnce() {
 	}
 }
 
+// SetActiveWorkspace tells the backend which workspace the user is
+// currently looking at, so the brain loop's activity refresh can
+// scope its ES queries to that workspace's data. Without this, the
+// activity panel surfaces deltas from every workspace pod running in
+// the background — which made users think their per-workspace poll
+// interval wasn't being honored, since they'd see 2-min entries from
+// other workspaces even after configuring their active one to 15m.
+//
+// Empty workspaceID falls back to the global view (used at startup
+// before any workspace is active).
+func (a *App) SetActiveWorkspace(workspaceID string) {
+	a.collectorMu.Lock()
+	changed := a.activeWorkspaceID != workspaceID
+	a.activeWorkspaceID = workspaceID
+	if changed {
+		// Wipe the snapshot so the next refresh tick computes deltas
+		// against the NEW workspace's baseline rather than spamming
+		// "+N new" entries that are really just the difference
+		// between two unrelated workspaces' totals.
+		a.collectorState = map[string]glitchd.CollectorActivity{}
+	}
+	a.collectorMu.Unlock()
+	if changed {
+		// Re-prime the snapshot immediately on switch so the user
+		// doesn't have to wait a full collectorInterval (15s) for
+		// the popover to populate with the new workspace's totals.
+		go a.refreshCollectorActivity(true)
+	}
+}
+
 // refreshCollectorActivity polls Elasticsearch for per-source doc
 // counts, computes deltas vs. the previous snapshot, and emits a
 // brain:activity entry for any source that picked up new docs since
@@ -1949,10 +2052,17 @@ func (a *App) runTriageOnce() {
 //
 // initial=true skips the delta emission (we don't want a flood of
 // "got 12 new commits" entries on every fresh launch).
+//
+// The query is scoped to the active workspace (set by the frontend via
+// SetActiveWorkspace) so deltas only reflect THIS workspace's pod,
+// not the global sum across every workspace.
 func (a *App) refreshCollectorActivity(initial bool) {
 	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
 	defer cancel()
-	rows, err := glitchd.QueryCollectorActivity(ctx)
+	a.collectorMu.Lock()
+	wsID := a.activeWorkspaceID
+	a.collectorMu.Unlock()
+	rows, err := glitchd.QueryCollectorActivityScoped(ctx, wsID)
 	if err != nil {
 		// ES probably not running. Don't spam alerts — the brain state
 		// already shows "error" via the ollama check, and ES is its own

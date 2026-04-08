@@ -259,6 +259,33 @@ const logsMapping = `{
   }
 }`
 
+// analysesMapping is the schema for the glitch-analyses index. Each
+// doc is one deep-analysis run produced by the analyzer service in
+// pkg/glitchd/deep_analysis.go. Source-agnostic — the same shape
+// works for github PRs, git commits, claude sessions, or any future
+// collector type that emits events the analyzer can chew on.
+const analysesMapping = `{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0
+  },
+  "mappings": {
+    "properties": {
+      "event_key":    { "type": "keyword" },
+      "source":       { "type": "keyword" },
+      "type":         { "type": "keyword" },
+      "repo":         { "type": "keyword" },
+      "title":        { "type": "text" },
+      "model":        { "type": "keyword" },
+      "markdown":     { "type": "text" },
+      "exit_code":    { "type": "integer" },
+      "duration_ms":  { "type": "long" },
+      "workspace_id": { "type": "keyword" },
+      "created_at":   { "type": "date" }
+    }
+  }
+}`
+
 const insightsMapping = `{
   "settings": {
     "number_of_shards": 1,
