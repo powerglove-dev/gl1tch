@@ -54,3 +54,9 @@ glitch_db/
 glitch-desktop/frontend/package-lock.json
 glitch-desktop/frontend/package.json.md5
 glitch-desktop/frontend/tsconfig.tsbuildinfo
+
+# Playwright artifacts
+glitch-desktop/frontend/test-results/
+glitch-desktop/frontend/playwright-report/
+glitch-desktop/frontend/blob-report/
+glitch-desktop/frontend/.playwright/
