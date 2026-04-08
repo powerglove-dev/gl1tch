@@ -13,75 +13,6 @@ import (
 	"github.com/8op-org/gl1tch/glitchctx"
 )
 
-// pullOllamaModel ensures the Ollama model is present, pulling it only when necessary.
-// It checks "ollama list" first; if the model is already installed it returns nil immediately.
-// Progress output is written to stderr. An error is returned only if the pull fails.
-func pullOllamaModel(model string, stderr io.Writer) error {
-	if !strings.HasPrefix(model, "ollama/") {
-		return nil // not an Ollama model; skip
-	}
-	// Strip the "ollama/" prefix to get the bare model name.
-	name := strings.TrimPrefix(model, "ollama/")
-
-	// Check whether the model is already installed via "ollama list".
-	listOut, err := exec.Command("ollama", "list").Output()
-	if err == nil {
-		for i, line := range strings.Split(string(listOut), "\n") {
-			// Skip the header line (starts with "NAME").
-			if i == 0 && strings.HasPrefix(strings.TrimSpace(line), "NAME") {
-				continue
-			}
-			fields := strings.Fields(line)
-			if len(fields) == 0 {
-				continue
-			}
-			listed := fields[0] // e.g. "llama3.2:latest"
-			// Exact match or base-name match (strip :<tag>).
-			if listed == name {
-				return nil
-			}
-			if idx := strings.Index(listed, ":"); idx >= 0 {
-				if listed[:idx] == name {
-					return nil
-				}
-			}
-		}
-	}
-
-	fmt.Fprintf(stderr, "Ensuring Ollama model %q is available — pulling if needed...\n", name)
-	cmd := exec.Command("ollama", "pull", name)
-	cmd.Stdout = stderr
-	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
-		// Pull failed. Check once more if the model is actually present — it may
-		// be a locally-created alias that has no registry entry (e.g. created via
-		// `orcai-ollama --create-model`). If it is present, the pull error is
-		// harmless and we can proceed.
-		if listOut2, listErr := exec.Command("ollama", "list").Output(); listErr == nil {
-			for i, line := range strings.Split(string(listOut2), "\n") {
-				if i == 0 {
-					continue
-				}
-				fields := strings.Fields(line)
-				if len(fields) == 0 {
-					continue
-				}
-				listed := fields[0]
-				if listed == name {
-					return nil
-				}
-				if idx := strings.Index(listed, ":"); idx >= 0 {
-					if listed[:idx] == name {
-						return nil
-					}
-				}
-			}
-		}
-		return err
-	}
-	return nil
-}
-
 func main() {
 	code, err := run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv, execOpencode)
 	if err != nil {
@@ -175,7 +106,7 @@ func run(
 	}
 
 	// For Ollama-backed models, pull the model if not already present.
-	if err := pullOllamaModel(model, stderr); err != nil {
+	if err := glitchctx.PullOllamaModel(model, stderr); err != nil {
 		return 1, fmt.Errorf("pulling Ollama model: %w", err)
 	}
 

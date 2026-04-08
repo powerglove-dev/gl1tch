@@ -8,9 +8,15 @@
 #
 # Calling convention:
 #   input  — the prompt text, passed as stdin to glitch-github-copilot
+#   model  — GLITCH_MODEL env var. Hosted catalog (claude-*, gpt-*, gemini-*)
+#            is routed through copilot's native --model flag. An "ollama/<name>"
+#            value switches on BYOK: the plugin exports COPILOT_PROVIDER_BASE_URL,
+#            COPILOT_MODEL, and COPILOT_OFFLINE so copilot CLI talks to the local
+#            Ollama daemon instead of github.com.
 #
-# GitHub Copilot does not expose model selection via the CLI; the model step
-# is skipped automatically when no models are declared.
+# Models are not listed below; the picker autodetects them by running
+# `glitch-github-copilot --list-models`, which merges the hosted catalog with
+# any locally-installed Ollama tags.
 
 name: github-copilot
 description: "GitHub Copilot suggestions via the gh CLI (https://cli.github.com)"
