@@ -3,14 +3,14 @@ package observer
 import (
 	"context"
 
-	"github.com/8op-org/gl1tch/internal/collector"
+	"github.com/8op-org/gl1tch/internal/capability"
 	"github.com/8op-org/gl1tch/internal/esearch"
 )
 
 // Ping checks ES connectivity and returns a connected client without starting
 // collectors. Used by status commands that just need to query.
 func Ping(ctx context.Context) (*esearch.Client, error) {
-	cfg, err := collector.LoadConfig()
+	cfg, err := capability.LoadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +30,7 @@ func Ping(ctx context.Context) (*esearch.Client, error) {
 // QueryOnly creates a query engine without starting collectors. For CLI
 // commands that just need to ask questions.
 func QueryOnly(ctx context.Context) (*QueryEngine, *esearch.Client, error) {
-	cfg, err := collector.LoadConfig()
+	cfg, err := capability.LoadConfig()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -50,7 +50,7 @@ func QueryOnly(ctx context.Context) (*QueryEngine, *esearch.Client, error) {
 
 	model := cfg.Model
 	if model == "" {
-		model = "llama3.2"
+		model = "qwen2.5:7b"
 	}
 
 	return NewQueryEngine(es, model), es, nil

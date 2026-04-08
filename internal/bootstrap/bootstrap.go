@@ -14,7 +14,7 @@ import (
 
 	"github.com/8op-org/gl1tch/internal/brain"
 	"github.com/8op-org/gl1tch/internal/busd"
-	"github.com/8op-org/gl1tch/internal/collector"
+	"github.com/8op-org/gl1tch/internal/capability"
 	"github.com/8op-org/gl1tch/internal/executor"
 	"github.com/8op-org/gl1tch/internal/supervisor"
 	suphandlers "github.com/8op-org/gl1tch/internal/supervisor/handlers"
@@ -127,7 +127,7 @@ func RunHeadlessWithOptions(ctx context.Context, opts Options) error {
 		fmt.Fprintf(os.Stderr, "glitch: warning: install system prompts: %v\n", err)
 	}
 
-	_ = collector.EnsureDefaultConfig()
+	_ = capability.EnsureDefaultConfig()
 
 	// ── BUSD event bus ─────────────────────────────────────────────────────
 	busdSrv := busd.New()
@@ -158,19 +158,30 @@ func RunHeadlessWithOptions(ctx context.Context, opts Options) error {
 	// ── Services ───────────────────────────────────────────────────────────
 	obsSvc := suphandlers.NewObserverService()
 	sup.RegisterService(obsSvc)
-	if !opts.SkipGlobalCollectors {
-		// In desktop mode the workspace pod manager owns collector
-		// lifecycle, so we skip global registration. Skipping is
-		// load-bearing: running both paths in parallel makes the
-		// global goroutines stamp every doc with workspace_id="" and
-		// the per-workspace pods just see the same files as already
-		// indexed and skip them, which is the root cause of the GUI
-		// brain popover showing TOTAL INDEXED 0.
-		suphandlers.RegisterCollectors(sup)
-	} else {
-		slog.Info("bootstrap: skipping global collector registration (caller owns workspace pods)")
-	}
 	sup.RegisterService(&suphandlers.CronService{})
+
+	// Capability runner — unified registry for the new-style capabilities.
+	// Owns claude, claude-projects, copilot, and pipeline. The matching
+	// legacy registrations in suphandlers.RegisterCollectors are gone so
+	// the same source is not indexed twice. Only runs on the global path;
+	// in desktop mode the workspace pod manager will get its own
+	// per-workspace runner once that side of the migration lands.
+	var capRunner *capability.Runner
+	if !opts.SkipGlobalCollectors {
+		cfg, cfgErr := capability.LoadConfig()
+		esAddr := ""
+		if cfgErr == nil {
+			esAddr = cfg.Elasticsearch.Address
+		} else {
+			slog.Warn("capability: load config failed", "err", cfgErr)
+		}
+		r, err := startCapabilityRunner(supCtx, cfgDir, esAddr)
+		if err != nil {
+			slog.Warn("capability: runner start failed", "err", err)
+		} else {
+			capRunner = r
+		}
+	}
 
 	// Brain — autonomous self-improvement loop.
 	sup.RegisterService(&brain.Service{})
@@ -182,6 +193,11 @@ func RunHeadlessWithOptions(ctx context.Context, opts Options) error {
 		}
 	}()
 	defer sup.Stop()
+	defer func() {
+		if capRunner != nil {
+			capRunner.Stop()
+		}
+	}()
 
 	slog.Info("glitch backend running (headless mode)")
 

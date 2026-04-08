@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/8op-org/gl1tch/internal/collector"
+	"github.com/8op-org/gl1tch/internal/capability"
 	"github.com/8op-org/gl1tch/internal/esearch"
 	"github.com/8op-org/gl1tch/internal/store"
 )
@@ -124,7 +124,7 @@ func checkGhCLI() DoctorCheck {
 }
 
 func checkConfig() DoctorCheck {
-	cfg, err := collector.LoadConfig()
+	cfg, err := capability.LoadConfig()
 	if err != nil {
 		return DoctorCheck{"Config", "fail", "could not load observer.yaml: " + err.Error()}
 	}
@@ -157,7 +157,7 @@ func checkStore() DoctorCheck {
 }
 
 func checkESIndices(ctx context.Context) DoctorCheck {
-	cfg, _ := collector.LoadConfig()
+	cfg, _ := capability.LoadConfig()
 	es, err := esearch.New(cfg.Elasticsearch.Address)
 	if err != nil {
 		return DoctorCheck{"ES Indices", "fail", "could not connect"}
@@ -201,7 +201,7 @@ func checkBrainNotes(ctx context.Context) DoctorCheck {
 }
 
 func checkDirectories() DoctorCheck {
-	cfg, _ := collector.LoadConfig()
+	cfg, _ := capability.LoadConfig()
 	if len(cfg.Directories.Paths) == 0 {
 		return DoctorCheck{"Directories", "warn", "no directories monitored — add some in the sidebar"}
 	}

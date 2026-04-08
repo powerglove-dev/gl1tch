@@ -48,7 +48,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/8op-org/gl1tch/internal/collector"
+	"github.com/8op-org/gl1tch/internal/capability"
 	"github.com/8op-org/gl1tch/internal/esearch"
 )
 
@@ -64,21 +64,21 @@ import (
 // calls replace earlier ones.
 func WireAnalyzerToCollectors(a *Analyzer) {
 	if a == nil {
-		collector.SetEventSink(nil)
+		capability.SetEventSink(nil)
 		return
 	}
-	collector.SetEventSink(func(workspaceID, source string, docs []any) {
+	capability.SetEventSink(func(workspaceID, source string, docs []any) {
 		if len(docs) == 0 {
 			return
 		}
 		// Load the config so the analyzer's enabled check has
 		// something to chew on. Enqueue short-circuits on a nil cfg,
 		// so load errors are benign here.
-		var cfg *collector.Config
+		var cfg *capability.Config
 		if workspaceID != "" {
-			cfg, _ = collector.LoadWorkspaceConfig(workspaceID)
+			cfg, _ = capability.LoadWorkspaceConfig(workspaceID)
 		} else {
-			cfg, _ = collector.LoadConfig()
+			cfg, _ = capability.LoadConfig()
 		}
 		ctx := context.Background()
 		for _, d := range docs {
@@ -287,7 +287,7 @@ func NewAnalyzer(es *esearch.Client, handler AnalysisHandler) *Analyzer {
 // Always returns quickly — Enqueue never blocks on the worker. The
 // collector tick goroutine that calls this is in the hot path of
 // every poll cycle, so blocking here would back up the entire pod.
-func (a *Analyzer) Enqueue(ctx context.Context, ev AnalyzableEvent, cfg *collector.Config) bool {
+func (a *Analyzer) Enqueue(ctx context.Context, ev AnalyzableEvent, cfg *capability.Config) bool {
 	if !isAnalysisEnabled(cfg) {
 		return false
 	}
@@ -365,7 +365,7 @@ func (a *Analyzer) workerLoop(ctx context.Context) {
 		// per-process not per-event, so a long burst of new events
 		// still gets processed — just at a steady rate rather than
 		// all at once.
-		cfg, _ := collector.LoadConfig()
+		cfg, _ := capability.LoadConfig()
 		cooldown := analysisCooldown(cfg)
 		if cooldown > 0 && !a.lastRun.IsZero() {
 			elapsed := time.Since(a.lastRun)
@@ -449,7 +449,7 @@ func (a *Analyzer) dequeue(ctx context.Context) (AnalyzableEvent, bool) {
 // resulting AnalysisResult. Failures are returned as results with an
 // empty Markdown so the caller can still emit an activity row that
 // surfaces the error.
-func (a *Analyzer) runOne(ctx context.Context, ev AnalyzableEvent, cfg *collector.Config) AnalysisResult {
+func (a *Analyzer) runOne(ctx context.Context, ev AnalyzableEvent, cfg *capability.Config) AnalysisResult {
 	model := analysisModel(cfg)
 	prompt := buildAnalysisPrompt(ev)
 	start := time.Now()
@@ -664,7 +664,7 @@ Pick the right tool for the source:
 Produce **markdown only** with these sections (omit any that don't apply):
 
 ### What it is
-One or two sentences. What changed, who changed it, why it appeared in the collector.
+One or two sentences. What changed, who changed it, why it appeared in the capability.
 
 ### Why it matters
 Why this is interesting / risky / blocking / boring. Be honest — "low signal, you can ignore" is a valid answer.
@@ -735,18 +735,18 @@ func unescapeJSONString(s string) string {
 
 // ── Config helpers ─────────────────────────────────────────────────
 
-func isAnalysisEnabled(cfg *collector.Config) bool {
+func isAnalysisEnabled(cfg *capability.Config) bool {
 	return cfg != nil && cfg.Analysis.Enabled
 }
 
-func analysisModel(cfg *collector.Config) string {
+func analysisModel(cfg *capability.Config) string {
 	if cfg != nil && cfg.Analysis.Model != "" {
 		return cfg.Analysis.Model
 	}
 	return "ollama/qwen2.5-coder:latest"
 }
 
-func analysisCooldown(cfg *collector.Config) time.Duration {
+func analysisCooldown(cfg *capability.Config) time.Duration {
 	if cfg != nil && cfg.Analysis.Cooldown > 0 {
 		return cfg.Analysis.Cooldown
 	}

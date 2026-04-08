@@ -16,7 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/8op-org/gl1tch/internal/collector"
+	"github.com/8op-org/gl1tch/internal/capability"
 	"github.com/8op-org/gl1tch/internal/store"
 )
 
@@ -259,7 +259,7 @@ func CreateDraftFromTarget(ctx context.Context, workspaceID, kind string, target
 		// structured GUI uses (YAML + SQLite directories +
 		// AutoDetectFromWorkspace) so the raw editor and the GUI
 		// always show the same effective configuration.
-		path, perr := collector.WorkspaceConfigPath(workspaceID)
+		path, perr := capability.WorkspaceConfigPath(workspaceID)
 		if perr != nil {
 			return errorJSON(perr)
 		}

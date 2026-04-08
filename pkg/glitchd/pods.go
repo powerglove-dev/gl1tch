@@ -1,4 +1,4 @@
-// pods.go is the desktop-facing wrapper around collector.PodManager.
+// pods.go is the desktop-facing wrapper around capability.PodManager.
 //
 // The pod manager runs the per-workspace collector goroutines for
 // the Phase 4 workspace-scoped collector split. The desktop app
@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/8op-org/gl1tch/internal/collector"
+	"github.com/8op-org/gl1tch/internal/capability"
 	"github.com/8op-org/gl1tch/internal/esearch"
 	"github.com/8op-org/gl1tch/internal/store"
 	"gopkg.in/yaml.v3"
@@ -37,7 +37,7 @@ var errPodManagerNotInitialized = errors.New("pod manager not initialized — ca
 
 var (
 	podOnce      sync.Once
-	podManager   *collector.PodManager
+	podManager   *capability.PodManager
 	podManagerEs *esearch.Client
 )
 
@@ -64,17 +64,17 @@ var (
 // Returns the manager so the caller can immediately drive it
 // (e.g. StartAllWorkspacePods). On repeat calls the existing
 // manager is returned unchanged.
-func InitPodManager(ctx context.Context) *collector.PodManager {
+func InitPodManager(ctx context.Context) *capability.PodManager {
 	podOnce.Do(func() {
 		// Build the elasticsearch client from the global config so all
 		// pods share one connection pool. If ES is unreachable we
 		// still create the manager — collectors fail their first poll
 		// and log it, but the desktop UI keeps working and the user
 		// can fix ES later via the doctor screen.
-		cfg, err := collector.LoadConfig()
+		cfg, err := capability.LoadConfig()
 		if err != nil {
 			slog.Warn("pod manager: load global config failed", "err", err)
-			cfg = &collector.Config{}
+			cfg = &capability.Config{}
 			cfg.Elasticsearch.Address = "http://localhost:9200"
 		}
 		es, err := esearch.New(cfg.Elasticsearch.Address)
@@ -96,7 +96,7 @@ func InitPodManager(ctx context.Context) *collector.PodManager {
 			cancel()
 		}
 		podManagerEs = es
-		podManager = collector.NewPodManager(ctx, es, nil)
+		podManager = capability.NewPodManager(ctx, es)
 		// Wire the workspace-dirs resolver so the auto-detect
 		// overlay can read each workspace's directories without
 		// the collector package having to import store directly.
@@ -119,7 +119,7 @@ func InitPodManager(ctx context.Context) *collector.PodManager {
 // been called yet. Most callers should use the package-level
 // Start/Stop/Restart helpers instead, which short-circuit gracefully
 // when the manager is missing.
-func PodManager() *collector.PodManager {
+func PodManager() *capability.PodManager {
 	return podManager
 }
 
@@ -143,7 +143,7 @@ func StartWorkspacePod(workspaceID string) error {
 	// Make sure the workspace has a starter config so the pod has
 	// something to load. EnsureWorkspaceConfig is a no-op when the
 	// file already exists.
-	if err := collector.EnsureWorkspaceConfig(workspaceID); err != nil {
+	if err := capability.EnsureWorkspaceConfig(workspaceID); err != nil {
 		slog.Warn("pod manager: ensure config failed", "workspace", workspaceID, "err", err)
 	}
 	return podManager.StartPod(workspaceID)
@@ -171,7 +171,7 @@ func RestartWorkspacePod(workspaceID string) error {
 // StartToolPod starts the global "tool collectors" pod. Currently
 // only copilot runs here — it reads a shared per-machine data
 // source (~/.copilot/...) and must run once with
-// workspace_id=collector.WorkspaceIDTools so the same data isn't
+// workspace_id=capability.WorkspaceIDTools so the same data isn't
 // re-indexed under every workspace.
 //
 // The brain popover OR-includes the tools bucket alongside the active
@@ -200,9 +200,9 @@ func StopToolPod() error {
 
 // WorkspaceIDTools re-exports the sentinel workspace_id for the
 // global tool pod so the desktop and query helpers don't have to
-// reach into internal/collector. Keep in sync with the underlying
+// reach into internal/capability. Keep in sync with the underlying
 // constant.
-const WorkspaceIDTools = collector.WorkspaceIDTools
+const WorkspaceIDTools = capability.WorkspaceIDTools
 
 // StartAllWorkspacePods enumerates every workspace in the store and
 // starts a pod for each. Called once at app startup so existing
@@ -250,7 +250,7 @@ func StopAllWorkspacePods() {
 // DeleteWorkspace path so deleted workspaces don't leave residual
 // config files in ~/.config/glitch/workspaces/.
 func DeleteWorkspaceCollectorConfig(workspaceID string) error {
-	return collector.DeleteWorkspaceConfig(workspaceID)
+	return capability.DeleteWorkspaceConfig(workspaceID)
 }
 
 // WorkspaceCollectorConfigPath returns the absolute path of a
@@ -258,7 +258,7 @@ func DeleteWorkspaceCollectorConfig(workspaceID string) error {
 // "this file lives at <path>" so the user knows what they're
 // editing.
 func WorkspaceCollectorConfigPath(workspaceID string) (string, error) {
-	return collector.WorkspaceConfigPath(workspaceID)
+	return capability.WorkspaceConfigPath(workspaceID)
 }
 
 // ReadWorkspaceCollectorConfig returns the raw YAML contents of a
@@ -266,10 +266,10 @@ func WorkspaceCollectorConfigPath(workspaceID string) (string, error) {
 // if none exists, so the editor always opens to a useful starting
 // point and the user never sees an empty file.
 func ReadWorkspaceCollectorConfig(workspaceID string) (string, error) {
-	if err := collector.EnsureWorkspaceConfig(workspaceID); err != nil {
+	if err := capability.EnsureWorkspaceConfig(workspaceID); err != nil {
 		return "", err
 	}
-	path, err := collector.WorkspaceConfigPath(workspaceID)
+	path, err := capability.WorkspaceConfigPath(workspaceID)
 	if err != nil {
 		return "", err
 	}
@@ -282,7 +282,7 @@ func ReadWorkspaceCollectorConfig(workspaceID string) (string, error) {
 
 // ReadWorkspaceCollectorConfigJSON returns the workspace's collectors
 // config parsed into a JSON object whose shape mirrors the typed
-// collector.Config struct. The schema-driven config modal uses this
+// capability.Config struct. The schema-driven config modal uses this
 // instead of the raw YAML so it never has to ship a YAML parser.
 //
 // The returned config is the SAME merged view that the brain popover
@@ -297,10 +297,10 @@ func ReadWorkspaceCollectorConfig(workspaceID string) (string, error) {
 // is the explicit trade-off for structured editing. Power users who
 // need comments should keep using the raw YAML EditorPopup path.
 func ReadWorkspaceCollectorConfigJSON(workspaceID string) (string, error) {
-	if err := collector.EnsureWorkspaceConfig(workspaceID); err != nil {
+	if err := capability.EnsureWorkspaceConfig(workspaceID); err != nil {
 		return "", err
 	}
-	cfg, err := collector.LoadWorkspaceConfig(workspaceID)
+	cfg, err := capability.LoadWorkspaceConfig(workspaceID)
 	if err != nil {
 		return "", err
 	}
@@ -322,7 +322,7 @@ func ReadWorkspaceCollectorConfigJSON(workspaceID string) (string, error) {
 	// Apply the same auto-detection overlay the pod manager and brain
 	// popover use, so git/github/claude/copilot enablement reflect
 	// what's actually running rather than the bare YAML state.
-	collector.AutoDetectFromWorkspace(cfg, dirs)
+	capability.AutoDetectFromWorkspace(cfg, dirs)
 
 	b, err := json.Marshal(cfg)
 	if err != nil {
@@ -337,10 +337,10 @@ func ReadWorkspaceCollectorConfigJSON(workspaceID string) (string, error) {
 // Used by the raw-YAML EditorPopup so it shows the same effective
 // config as the structured GUI instead of the sparse on-disk file.
 func ReadWorkspaceCollectorConfigYAML(workspaceID string) (string, error) {
-	if err := collector.EnsureWorkspaceConfig(workspaceID); err != nil {
+	if err := capability.EnsureWorkspaceConfig(workspaceID); err != nil {
 		return "", err
 	}
-	cfg, err := collector.LoadWorkspaceConfig(workspaceID)
+	cfg, err := capability.LoadWorkspaceConfig(workspaceID)
 	if err != nil {
 		return "", err
 	}
@@ -355,7 +355,7 @@ func ReadWorkspaceCollectorConfigYAML(workspaceID string) (string, error) {
 		cfg.Directories.Paths = dirs
 	}
 
-	collector.AutoDetectFromWorkspace(cfg, dirs)
+	capability.AutoDetectFromWorkspace(cfg, dirs)
 
 	b, err := yaml.Marshal(cfg)
 	if err != nil {
@@ -365,7 +365,7 @@ func ReadWorkspaceCollectorConfigYAML(workspaceID string) (string, error) {
 }
 
 // WriteWorkspaceCollectorConfigJSON parses jsonBody into the typed
-// collector.Config and persists it across two stores so the read-side
+// capability.Config and persists it across two stores so the read-side
 // merge stays consistent:
 //
 //  1. cfg.Directories.Paths is diffed against the workspace's SQLite
@@ -385,7 +385,7 @@ func ReadWorkspaceCollectorConfigYAML(workspaceID string) (string, error) {
 // Returns nil on success, or the parse/validation/IO error so the
 // modal can render it inline.
 func WriteWorkspaceCollectorConfigJSON(workspaceID, jsonBody string) error {
-	var cfg collector.Config
+	var cfg capability.Config
 	if err := json.Unmarshal([]byte(jsonBody), &cfg); err != nil {
 		return fmt.Errorf("invalid json: %w", err)
 	}
@@ -467,7 +467,7 @@ func WriteWorkspaceCollectorConfigJSON(workspaceID, jsonBody string) error {
 // Returns nil on success, or the validation/IO error so the editor
 // popup can render it inline.
 func WriteWorkspaceCollectorConfig(workspaceID, content string) error {
-	if err := collector.WriteWorkspaceConfig(workspaceID, content); err != nil {
+	if err := capability.WriteWorkspaceConfig(workspaceID, content); err != nil {
 		return err
 	}
 	// Background restart. Errors are logged but never surfaced — by

@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/8op-org/gl1tch/internal/collector"
 	"github.com/8op-org/gl1tch/internal/observer"
 )
 
@@ -16,7 +15,6 @@ func init() {
 	rootCmd.AddCommand(observeCmd)
 	observeCmd.AddCommand(observeDigestCmd)
 	observeCmd.AddCommand(observeStatusCmd)
-	observeCmd.AddCommand(observeIngestCmd)
 }
 
 var observeCmd = &cobra.Command{
@@ -124,28 +122,3 @@ var observeStatusCmd = &cobra.Command{
 	},
 }
 
-var observeIngestCmd = &cobra.Command{
-	Use:   "ingest",
-	Short: "Backfill all collector data into Elasticsearch",
-	Long: `One-shot ingest of all Claude Code history, Copilot CLI commands/logs,
-and git commits into Elasticsearch. Run this after first setup or whenever
-you want to catch up on missed data.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-
-		cfg, err := collector.LoadConfig()
-		if err != nil {
-			return fmt.Errorf("load config: %w", err)
-		}
-
-		es, err := observer.Ping(ctx)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "observer not available: %v\n", err)
-			os.Exit(1)
-		}
-
-		fmt.Println("ingesting all collector data...")
-		return collector.IngestAll(ctx, es, cfg)
-	},
-}

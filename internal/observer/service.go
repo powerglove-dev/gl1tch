@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/8op-org/gl1tch/internal/collector"
+	"github.com/8op-org/gl1tch/internal/capability"
 	"github.com/8op-org/gl1tch/internal/esearch"
 )
 
@@ -20,7 +20,7 @@ type Service struct {
 // Blocks until ctx is cancelled. If ES is not reachable, returns an error
 // (callers should treat this as non-fatal).
 func Start(ctx context.Context) (*Service, error) {
-	cfg, err := collector.LoadConfig()
+	cfg, err := capability.LoadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func Start(ctx context.Context) (*Service, error) {
 
 	model := cfg.Model
 	if model == "" {
-		model = "llama3.2"
+		model = "qwen2.5:7b"
 	}
 
 	svc := &Service{

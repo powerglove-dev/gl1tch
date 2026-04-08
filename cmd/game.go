@@ -36,7 +36,7 @@ var gameTuneCmd = &cobra.Command{
 	Short: "Manually trigger the self-evolving game pack tuner",
 	Long: `Calls local Ollama to analyze your usage patterns and generate an evolved
 game pack. Writes the result to ~/.local/share/glitch/agents/game-world-tuned.agent.md.
-The APMWorldPackLoader picks it up automatically on the next run.`,
+The TunedWorldPackLoader picks it up automatically on the next run.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		st, err := store.Open()
 		if err != nil {
@@ -45,7 +45,7 @@ The APMWorldPackLoader picks it up automatically on the next run.`,
 		defer st.Close()
 
 		engine := game.NewGameEngine()
-		loader := game.APMWorldPackLoader{}
+		loader := game.TunedWorldPackLoader{}
 		tuner := game.NewTuner(st, engine, loader)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -75,7 +75,7 @@ The APMWorldPackLoader picks it up automatically on the next run.`,
 		elapsed := time.Since(start).Round(time.Second)
 
 		// Read the new pack and print a summary of what changed.
-		newPack := game.APMWorldPackLoader{}.ActivePack()
+		newPack := game.TunedWorldPackLoader{}.ActivePack()
 		printTuneSummary(currentPack, newPack, elapsed)
 
 		return nil
@@ -249,7 +249,7 @@ var gameRecapCmd = &cobra.Command{
 			return nil
 		}
 
-		loader := game.APMWorldPackLoader{}
+		loader := game.TunedWorldPackLoader{}
 		pack := loader.ActivePack()
 		engine := game.NewGameEngine()
 

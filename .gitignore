@@ -29,9 +29,6 @@ assets/plugin.wasm
 .DS_Store
 .env
 
-# APM — Agent Package Manager
-apm_modules/
-
 # OTel traces
 traces.jsonl
 *.jsonl

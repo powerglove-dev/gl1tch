@@ -98,28 +98,6 @@ var askCmd = &cobra.Command{
 			if workflowsDir != "" {
 				refs, _ := pipeline.DiscoverPipelines(workflowsDir)
 
-				// Augment refs with synthetic entries for installed APM executors
-				// that don't already have a materialized pipeline file.
-				existingNames := make(map[string]bool, len(refs))
-				for _, r := range refs {
-					existingNames[r.Name] = true
-				}
-				for _, ex := range mgr.List() {
-					name := ex.Name()
-					if !strings.HasPrefix(name, "apm.") {
-						continue
-					}
-					// Derive canonical pipeline name: "apm.<base>" → same as executor ID.
-					if existingNames[name] {
-						continue
-					}
-					refs = append(refs, pipeline.PipelineRef{
-						Name:        name,
-						Description: "[apm] " + name + ": " + ex.Description(),
-						Path:        "", // synthetic — no file on disk
-					})
-				}
-
 				if len(refs) > 0 {
 					embedder := &router.OllamaEmbedder{Model: router.DefaultEmbeddingModel}
 					r := router.New(mgr, embedder, router.Config{
@@ -128,10 +106,6 @@ var askCmd = &cobra.Command{
 					})
 					result, _ := r.Route(cmd.Context(), prompt, refs)
 					if result != nil && result.Pipeline != nil {
-						// Synthetic APM ref (no pipeline file) — dispatch as one-shot.
-						if result.Pipeline.Path == "" && strings.HasPrefix(result.Pipeline.Name, "apm.") {
-							return dispatchAPMAgent(cmd, prompt, result.Pipeline.Name, mgr, inputVars)
-						}
 						return dispatchMatched(cmd, prompt, result, inputVars)
 					}
 					// Near-miss: close match that didn't meet the confidence bar — ask user.
@@ -260,41 +234,6 @@ func dispatchMatched(cmd *cobra.Command, prompt string, result *router.RouteResu
 }
 
 // dispatchGenerated generates a pipeline on the fly and presents it for confirmation.
-// dispatchAPMAgent builds and runs a synthetic single-step pipeline targeting
-// the named APM executor. Used when the router matches a synthetic APM ref
-// (one with no pipeline YAML file on disk).
-func dispatchAPMAgent(cmd *cobra.Command, prompt, executorID string, mgr *executor.Manager, inputVars map[string]string) error {
-	if askDryRun {
-		fmt.Printf("would dispatch apm agent: %s\n", executorID)
-		return nil
-	}
-	fmt.Fprintf(os.Stderr, "[route] → %s (apm agent)\n", executorID)
-
-	p := &pipeline.Pipeline{
-		Name:    executorID,
-		Version: "1",
-		Steps: []pipeline.Step{
-			{
-				ID:       "run",
-				Executor: executorID,
-				Prompt:   prompt,
-				Vars:     inputVars,
-			},
-		},
-	}
-
-	runOpts := buildRunOpts(inputVars)
-	output, err := pipeline.Run(cmd.Context(), p, mgr, prompt, runOpts...)
-	if err != nil {
-		return err
-	}
-	if askJSON {
-		return printJSON(output, "", executorID, "")
-	}
-	fmt.Println(output)
-	return nil
-}
-
 func dispatchGenerated(cmd *cobra.Command, prompt string, mgr *executor.Manager, providerID, model string, inputVars map[string]string) error {
 	yamlOutput, err := generatePipeline(cmd.Context(), prompt, model, mgr)
 	if err != nil || yamlOutput == "" {

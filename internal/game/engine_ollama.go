@@ -24,7 +24,7 @@ type GameEngine struct {
 func NewGameEngine() *GameEngine {
 	return &GameEngine{
 		baseURL: "http://localhost:11434",
-		model:   "llama3.2",
+		model:   "qwen2.5:7b",
 		client:  &http.Client{},
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/8op-org/gl1tch/internal/bootstrap"
-	"github.com/8op-org/gl1tch/internal/collector"
+	"github.com/8op-org/gl1tch/internal/capability"
 	"github.com/8op-org/gl1tch/internal/esearch"
 	"github.com/8op-org/gl1tch/internal/observer"
 	"github.com/8op-org/gl1tch/internal/store"
@@ -49,7 +49,7 @@ func RunBackendWithOptions(ctx context.Context, opts BackendOptions) error {
 
 // QueryEngine creates an observer query engine connected to Elasticsearch.
 func QueryEngine() (*observer.QueryEngine, error) {
-	cfg, err := collector.LoadConfig()
+	cfg, err := capability.LoadConfig()
 	if err != nil {
 		return nil, err
 	}

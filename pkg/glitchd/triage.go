@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/8op-org/gl1tch/internal/collector"
+	"github.com/8op-org/gl1tch/internal/capability"
 )
 
 // TriageEvent is a single observation passed into the triage prompt.
@@ -55,7 +55,7 @@ type TriageResult struct {
 // and returns up to limit of them, newest first. The triage loop
 // calls this on each tick to get the buffer of activity to analyze.
 func QueryRecentEvents(ctx context.Context, sinceMs int64, limit int) ([]TriageEvent, error) {
-	cfg, err := collector.LoadConfig()
+	cfg, err := capability.LoadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -132,13 +132,13 @@ func TriageEvents(ctx context.Context, events []TriageEvent, model string) (*Tri
 		return &TriageResult{}, nil
 	}
 	if model == "" {
-		cfg, _ := collector.LoadConfig()
+		cfg, _ := capability.LoadConfig()
 		if cfg != nil {
 			model = cfg.Model
 		}
 	}
 	if model == "" {
-		model = "llama3.2"
+		model = "qwen2.5:7b"
 	}
 
 	// Compact event list — one line per event so the model can hold

@@ -81,6 +81,11 @@ export function ProviderPicker({
     observerDefaultModel ||
     "auto";
 
+  // Model label shown in the button trigger.
+  const selectedModelLabel = selectedProvider
+    ? currentProvider?.models.find((m) => m.id === selectedModel)?.label || selectedModel || "default"
+    : observerDefaultModelLabel;
+
   const dropdownStyle: React.CSSProperties = {
     position: "absolute",
     bottom: "100%",
@@ -106,8 +111,8 @@ export function ProviderPicker({
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 3,
-          padding: "5px 7px",
+          gap: 4,
+          padding: "5px 8px",
           borderRadius: 8,
           fontSize: 10,
           background: "transparent",
@@ -115,12 +120,17 @@ export function ProviderPicker({
           color: "var(--fg-dim)",
           cursor: "pointer",
           whiteSpace: "nowrap",
+          minWidth: 160,
         }}
-        title={`${providerLabel} / ${selectedModel || "default"}`}
+        title={`${providerLabel} / ${selectedModelLabel}`}
       >
-        <Cpu size={10} style={{ color: "var(--cyan)" }} />
+        <Cpu size={10} style={{ color: "var(--cyan)", flexShrink: 0 }} />
         <span style={{ color: "var(--cyan)" }}>{providerLabel}</span>
-        <ChevronDown size={9} />
+        <span style={{ color: "var(--border-bright)" }}>/</span>
+        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", textAlign: "left" }}>
+          {selectedModelLabel}
+        </span>
+        <ChevronDown size={9} style={{ flexShrink: 0 }} />
       </button>
 
       {open && (

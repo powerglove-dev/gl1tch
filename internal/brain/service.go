@@ -17,7 +17,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/8op-org/gl1tch/internal/busd"
-	"github.com/8op-org/gl1tch/internal/collector"
+	"github.com/8op-org/gl1tch/internal/capability"
 	"github.com/8op-org/gl1tch/internal/esearch"
 	"github.com/8op-org/gl1tch/internal/observer"
 	"github.com/8op-org/gl1tch/internal/store"
@@ -54,7 +54,7 @@ func (s *Service) Start(ctx context.Context) error {
 		s.Interval = 30 * time.Minute
 	}
 
-	cfg, err := collector.LoadConfig()
+	cfg, err := capability.LoadConfig()
 	if err != nil {
 		slog.Warn("brain: config error", "err", err)
 		return nil
@@ -69,7 +69,7 @@ func (s *Service) Start(ctx context.Context) error {
 	return s.runLoop(ctx, cfg)
 }
 
-func (s *Service) runLoop(ctx context.Context, cfg *collector.Config) error {
+func (s *Service) runLoop(ctx context.Context, cfg *capability.Config) error {
 	// Run first cycle after a short warm-up so collectors have data.
 	warmup := time.NewTimer(2 * time.Minute)
 	defer warmup.Stop()
@@ -95,7 +95,7 @@ func (s *Service) runLoop(ctx context.Context, cfg *collector.Config) error {
 	}
 }
 
-func (s *Service) cycle(ctx context.Context, cfg *collector.Config) {
+func (s *Service) cycle(ctx context.Context, cfg *capability.Config) {
 	ctx, span := tracer.Start(ctx, "brain.cycle")
 	defer span.End()
 

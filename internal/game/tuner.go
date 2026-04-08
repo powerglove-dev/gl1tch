@@ -29,7 +29,7 @@ type TunerState struct {
 
 // Tuner drives the self-evolving game pack cycle. It reads behavioral stats
 // from SQLite, calls local Ollama twice (analyze → generate), validates the
-// output, and writes the evolved pack to the APM agents directory.
+// output, and writes the evolved pack to the tuned-pack directory.
 type Tuner struct {
 	st         *store.Store
 	engine     *GameEngine

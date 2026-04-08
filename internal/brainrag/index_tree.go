@@ -32,7 +32,6 @@ var SkipDirs = map[string]bool{
 	"Pods":             true, // Swift/ObjC CocoaPods
 	"Carthage":         true, // Swift/ObjC Carthage
 	"deps":             true, // Elixir mix deps
-	"apm_modules":      true, // glitch Agent Package Manager
 
 	// ── Build / compiled output ──────────────────────────────────────────────
 	"build":   true,

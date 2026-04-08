@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/8op-org/gl1tch/internal/collector"
+	"github.com/8op-org/gl1tch/internal/capability"
 	"github.com/8op-org/gl1tch/internal/esearch"
 	"github.com/8op-org/gl1tch/internal/pipeline"
 	"github.com/8op-org/gl1tch/pkg/glitchproto"
@@ -181,7 +181,7 @@ func emitBrainDecision(
 		return
 	}
 
-	cfg, cerr := collector.LoadConfig()
+	cfg, cerr := capability.LoadConfig()
 	if cerr != nil || cfg.Elasticsearch.Address == "" {
 		return
 	}

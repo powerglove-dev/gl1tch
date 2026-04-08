@@ -182,16 +182,16 @@ func OllamaAvailable() bool {
 }
 
 // BestOllamaModel queries /api/tags and returns the best available model from
-// the preference list. Falls back to "llama3.2" if nothing matches.
+// the preference list. Falls back to "qwen2.5:7b" if nothing matches.
 func BestOllamaModel() string {
 	preferred := []string{
-		"llama3.2", "llama3.2:3b", "llama3.1", "llama3", "mistral",
+		"qwen2.5:7b", "llama3.2:3b", "llama3.1", "llama3", "mistral",
 		"phi3", "phi3:mini", "gemma2", "gemma2:2b",
 	}
 	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get("http://localhost:11434/api/tags")
 	if err != nil {
-		return "llama3.2"
+		return "qwen2.5:7b"
 	}
 	defer resp.Body.Close()
 
@@ -201,7 +201,7 @@ func BestOllamaModel() string {
 		} `json:"models"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil || len(r.Models) == 0 {
-		return "llama3.2"
+		return "qwen2.5:7b"
 	}
 	available := make(map[string]bool, len(r.Models))
 	for _, m := range r.Models {

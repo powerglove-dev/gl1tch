@@ -23,10 +23,10 @@ type QueryEngine struct {
 }
 
 // NewQueryEngine creates a query engine backed by the given ES client.
-// model is the Ollama model to use (e.g. "llama3.2", "qwen2.5").
+// model is the Ollama model to use (e.g. "qwen2.5:7b", "qwen2.5").
 func NewQueryEngine(es *esearch.Client, model string) *QueryEngine {
 	if model == "" {
-		model = "llama3.2"
+		model = "qwen2.5:7b"
 	}
 	return &QueryEngine{es: es, model: model}
 }

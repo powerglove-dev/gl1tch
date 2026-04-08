@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/8op-org/gl1tch/internal/collector"
+	"github.com/8op-org/gl1tch/internal/capability"
 )
 
 // CollectorRun is a snapshot of one collector's most recent run cycle.
-// Mirrors collector.RunReport but exposes a wire-friendly shape (ms
+// Mirrors capability.RunReport but exposes a wire-friendly shape (ms
 // timestamps, error string) for the desktop frontend.
 type CollectorRun struct {
 	Name         string `json:"name"`
@@ -26,7 +26,7 @@ type CollectorRun struct {
 // desktop's brain popover to show "git ran 12s ago, indexed 3" even
 // when ES has nothing new for that source.
 func CollectorRuns() map[string]CollectorRun {
-	snap := collector.Runs.Snapshot()
+	snap := capability.Runs.Snapshot()
 	out := make(map[string]CollectorRun, len(snap))
 	for name, r := range snap {
 		var errStr string
@@ -85,12 +85,12 @@ func ListCollectorsForWorkspace(ctx context.Context, workspaceID string) ([]Coll
 	// otherwise the global one. This is what makes "configure
 	// collectors" actually edit per-workspace files now — the
 	// brain popover and the editor see the same source of truth.
-	var cfg *collector.Config
+	var cfg *capability.Config
 	var err error
 	if workspaceID != "" {
-		cfg, err = collector.LoadWorkspaceConfig(workspaceID)
+		cfg, err = capability.LoadWorkspaceConfig(workspaceID)
 	} else {
-		cfg, err = collector.LoadConfig()
+		cfg, err = capability.LoadConfig()
 	}
 	if err != nil {
 		return nil, err
@@ -116,7 +116,7 @@ func ListCollectorsForWorkspace(ctx context.Context, workspaceID string) ([]Coll
 	// github branches of the overlay are still used here as a derived
 	// view ONLY — for the unified workspace collector summary line —
 	// since the runtime no longer cares about Git.Repos / GitHub.Repos.
-	collector.AutoDetectFromWorkspace(cfg, dirs)
+	capability.AutoDetectFromWorkspace(cfg, dirs)
 
 	gitRepos := append([]string{}, cfg.Git.Repos...)
 	githubRepos := append([]string{}, cfg.GitHub.Repos...)
@@ -125,7 +125,7 @@ func ListCollectorsForWorkspace(ctx context.Context, workspaceID string) ([]Coll
 
 	// Single workspace row replaces the old directories / git /
 	// github trio. The runtime is one collector now (see
-	// internal/collector/workspace_collector.go); the popover shows
+	// internal/collector/workspace_capability.go); the popover shows
 	// one row that summarizes everything being watched for this
 	// workspace. The detail line still calls out git/github sub-counts
 	// so a user landing on the popover still understands what the

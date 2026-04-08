@@ -14,7 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/8op-org/gl1tch/internal/busd"
-	"github.com/8op-org/gl1tch/internal/collector"
+	"github.com/8op-org/gl1tch/internal/capability"
 )
 
 // PublishBusEvent publishes an event onto the gl1tch bus. Used by the
@@ -61,7 +61,7 @@ func QueryCollectorActivity(ctx context.Context) ([]CollectorActivity, error) {
 // with that workspace_id, so the brain popover for workspace `robots`
 // shows only `robots`-attributed activity instead of the global sum.
 //
-// The "tool pod" bucket (collector.WorkspaceIDTools) is OR-included
+// The "tool pod" bucket (capability.WorkspaceIDTools) is OR-included
 // alongside the active workspace so global tool collectors (copilot)
 // still surface in the popover. Their numbers are identical across
 // every workspace because the underlying data genuinely is shared —
@@ -72,7 +72,7 @@ func QueryCollectorActivity(ctx context.Context) ([]CollectorActivity, error) {
 // active and as the legacy entry-point for the headless `glitch
 // serve` path.
 func QueryCollectorActivityScoped(ctx context.Context, workspaceID string) ([]CollectorActivity, error) {
-	cfg, err := collector.LoadConfig()
+	cfg, err := capability.LoadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func QueryCollectorActivityScoped(ctx context.Context, workspaceID string) ([]Co
 	// matches THREE buckets, OR'd together:
 	//
 	//   1. workspace_id == active workspace
-	//   2. workspace_id == collector.WorkspaceIDTools (the global
+	//   2. workspace_id == capability.WorkspaceIDTools (the global
 	//      tool pod's sentinel for copilot — shared across every
 	//      workspace by design)
 	//   3. workspace_id field is MISSING ENTIRELY (legacy /
@@ -158,7 +158,7 @@ func QueryCollectorActivityScoped(ctx context.Context, workspaceID string) ([]Co
 					}
 				}
 			}
-		}`, workspaceID, collector.WorkspaceIDTools)
+		}`, workspaceID, capability.WorkspaceIDTools)
 	}
 
 	url := fmt.Sprintf("%s/glitch-events/_search", addr)
@@ -231,7 +231,7 @@ func QueryCodeIndexActivityScoped(ctx context.Context, dirs []string) (Collector
 		return out, nil
 	}
 
-	cfg, err := collector.LoadConfig()
+	cfg, err := capability.LoadConfig()
 	if err != nil {
 		return out, err
 	}
@@ -341,7 +341,7 @@ func QueryBrainDecisionsActivity(ctx context.Context) (*BrainDecisionsActivity, 
 // exist yet so the popover can render "0 decisions" instead of a
 // scary error toast on a fresh install.
 func QueryBrainDecisionsActivityScoped(ctx context.Context, workspaceID string) (*BrainDecisionsActivity, error) {
-	cfg, err := collector.LoadConfig()
+	cfg, err := capability.LoadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -450,14 +450,14 @@ func QueryBrainDecisionsActivityScoped(ctx context.Context, workspaceID string) 
 // desktop "Edit collectors" modal shows this so the user knows where
 // the file lives.
 func CollectorConfigPath() (string, error) {
-	return collector.DefaultConfigPath()
+	return capability.DefaultConfigPath()
 }
 
 // EnsureCollectorConfig writes the default observer.yaml if it doesn't
 // already exist. Called before "Read" so users always see the fully
 // commented starter file instead of a missing-file error.
 func EnsureCollectorConfig() error {
-	return collector.EnsureDefaultConfig()
+	return capability.EnsureDefaultConfig()
 }
 
 // ReadCollectorConfig returns the raw observer.yaml contents. If the
@@ -495,7 +495,7 @@ func ReadCollectorConfig() (string, error) {
 // Returns nil on success. On parse failure returns the underlying
 // yaml error so the modal can surface it to the user.
 func WriteCollectorConfig(content string) error {
-	var probe collector.Config
+	var probe capability.Config
 	if err := yaml.Unmarshal([]byte(content), &probe); err != nil {
 		return fmt.Errorf("invalid yaml: %w", err)
 	}
@@ -562,7 +562,7 @@ func QueryRecentCollectorEvents(ctx context.Context, workspaceID, source string,
 		limit = 50
 	}
 
-	cfg, err := collector.LoadConfig()
+	cfg, err := capability.LoadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -587,7 +587,7 @@ func QueryRecentCollectorEvents(ctx context.Context, workspaceID, source string,
 				],
 				"minimum_should_match": 1
 			}
-		}`, workspaceID, collector.WorkspaceIDTools)
+		}`, workspaceID, capability.WorkspaceIDTools)
 	}
 
 	body := fmt.Sprintf(`{

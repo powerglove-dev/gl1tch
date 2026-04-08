@@ -152,18 +152,19 @@ func (DefaultWorldPackLoader) ActivePack() GameWorldPack {
 	return pack
 }
 
-// APMWorldPackLoader scans the APM agent directory for a kind: game-world
-// agent. Falls back to DefaultWorldPackLoader if none is found.
-type APMWorldPackLoader struct{}
+// TunedWorldPackLoader scans the local tuned-pack directory for a
+// kind: game-world pack written by the tuner. Falls back to
+// DefaultWorldPackLoader if none is found.
+type TunedWorldPackLoader struct{}
 
-// ActivePack returns the first installed game-world pack, or the default.
-func (APMWorldPackLoader) ActivePack() GameWorldPack {
+// ActivePack returns the first tuned game-world pack on disk, or the default.
+func (TunedWorldPackLoader) ActivePack() GameWorldPack {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return DefaultWorldPackLoader{}.ActivePack()
 	}
-	agentDir := filepath.Join(home, ".local", "share", "glitch", "agents")
-	entries, err := os.ReadDir(agentDir)
+	packDir := filepath.Join(home, ".local", "share", "glitch", "agents")
+	entries, err := os.ReadDir(packDir)
 	if err != nil {
 		return DefaultWorldPackLoader{}.ActivePack()
 	}
@@ -171,11 +172,11 @@ func (APMWorldPackLoader) ActivePack() GameWorldPack {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".agent.md") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(agentDir, entry.Name()))
+		data, err := os.ReadFile(filepath.Join(packDir, entry.Name()))
 		if err != nil {
 			continue
 		}
-		pack, ok := parseGameWorldAgent(data)
+		pack, ok := parseGameWorldPack(data)
 		if ok {
 			return pack
 		}
@@ -183,9 +184,9 @@ func (APMWorldPackLoader) ActivePack() GameWorldPack {
 	return DefaultWorldPackLoader{}.ActivePack()
 }
 
-// parseGameWorldAgent extracts a GameWorldPack from an .agent.md file if its
+// parseGameWorldPack extracts a GameWorldPack from a tuned pack file if its
 // YAML frontmatter contains "kind: game-world".
-func parseGameWorldAgent(data []byte) (GameWorldPack, bool) {
+func parseGameWorldPack(data []byte) (GameWorldPack, bool) {
 	content := string(data)
 	// Strip leading BOM or whitespace.
 	content = strings.TrimSpace(content)

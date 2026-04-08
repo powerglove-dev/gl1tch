@@ -27,7 +27,7 @@ import (
 	"time"
 
 	"github.com/8op-org/gl1tch/internal/brainrag"
-	"github.com/8op-org/gl1tch/internal/collector"
+	"github.com/8op-org/gl1tch/internal/capability"
 	"github.com/8op-org/gl1tch/internal/esearch"
 	"github.com/8op-org/gl1tch/internal/store"
 	"github.com/8op-org/gl1tch/pkg/glitchproto"
@@ -165,7 +165,7 @@ func RefineDraft(ctx context.Context, opts RefineDraftOpts, tokenCh chan<- strin
 		provider = "ollama"
 	}
 	if provider == "ollama" && model == "" {
-		if cfg, cerr := collector.LoadConfig(); cerr == nil && cfg.Model != "" {
+		if cfg, cerr := capability.LoadConfig(); cerr == nil && cfg.Model != "" {
 			model = cfg.Model
 		}
 	}
@@ -575,7 +575,7 @@ func promoteWorkflowDraft(ctx context.Context, st *store.Store, d store.Draft) s
 // material that's relevant both to *what the user wants* and *what
 // they're already drafting*.
 func loadBrainContext(ctx context.Context, workspaceID, userTurn, currentBody string) string {
-	cfg, err := collector.LoadConfig()
+	cfg, err := capability.LoadConfig()
 	if err != nil || cfg.Elasticsearch.Address == "" {
 		return ""
 	}
@@ -600,7 +600,7 @@ func loadBrainContext(ctx context.Context, workspaceID, userTurn, currentBody st
 	// URL lets the embedder pick its own default.
 	embedModel := cfg.Model
 	if embedModel == "" {
-		embedModel = "llama3.2"
+		embedModel = "qwen2.5:7b"
 	}
 	embedder := brainrag.NewOllamaEmbedder("", embedModel)
 
