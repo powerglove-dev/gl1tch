@@ -76,6 +76,21 @@ export interface Message {
   blocks: Block[];
   timestamp: number;
   streaming?: boolean;
+  /**
+   * Optional daemon-origin metadata attached when the backend
+   * proactively injected this message (e.g. the attention classifier
+   * dropped a high-attention artifact into chat without the user
+   * typing first). Used by the activity sidebar's "↗ in chat" jump
+   * affordance to scroll to the right message by event_key.
+   */
+  injected?: {
+    event_key?: string;
+    source?: string;
+    repo?: string;
+    attention?: "high" | "normal" | "low";
+    reason?: string;
+    title?: string;
+  };
 }
 
 /** Workspace — a chat session with its own directories */
@@ -238,4 +253,24 @@ export interface BrainActivity {
    *  row refines an earlier analysis with this event_key. Used by
    *  the frontend to render threaded chains; purely informational. */
   parent_id?: string;
+  /** Attention classifier verdict for the underlying event.
+   *  Populated on kind="analysis" rows when the deep analyzer ran
+   *  and on kind="alert" rows emitted by the attention observer
+   *  nudge path ("flagged high but analysis disabled"). Drives the
+   *  small dot badge in the activity row. */
+  attention?: "high" | "normal" | "low";
+  attention_reason?: string;
+  /** True when this analysis row's full artifact was already
+   *  injected into the chat pane as an assistant message (the
+   *  proactive high-attention path). The row's header gets an
+   *  "↗ in chat" jump affordance that scrolls the chat to the
+   *  matching message by event_key. */
+  chat_injected?: boolean;
+  /** True on the "flagged high · analysis disabled" nudge row so
+   *  the frontend can render a distinct CTA inviting the user to
+   *  enable deep analysis in settings. */
+  needs_enable?: boolean;
+  /** Optional title of the underlying event the nudge refers to
+   *  (separate from the row's own title, which is generic). */
+  title_event?: string;
 }

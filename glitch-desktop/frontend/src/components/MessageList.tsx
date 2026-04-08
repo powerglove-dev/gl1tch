@@ -76,8 +76,20 @@ function MessageRow({
   const isChainOnly =
     isUser && message.blocks.length === 1 && message.blocks[0].type === "chain";
 
+  // Injected messages carry an event_key from the backend so the
+  // activity sidebar's "↗ in chat" affordance can find this row
+  // and scroll to it. We surface the key as a data attribute
+  // because that's the cheapest lookup from a window-level scroll
+  // event (no ref book-keeping, no store-level scroll target, just
+  // querySelectorAll by attribute).
+  const injectedKey = message.injected?.event_key;
+
   return (
-    <div className="fade-in" style={{ display: "flex", gap: 10, maxWidth: 760, marginLeft: isUser ? "auto" : 0 }}>
+    <div
+      className="fade-in"
+      style={{ display: "flex", gap: 10, maxWidth: 760, marginLeft: isUser ? "auto" : 0 }}
+      data-event-key={injectedKey || undefined}
+    >
       {/* Avatar */}
       {!isUser && (
         <div
@@ -202,10 +214,38 @@ function MessageRow({
 
 export function MessageList({ messages, onAction, thinking }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, thinking]);
+
+  // Listen for "jump to this injected message" requests from the
+  // activity sidebar's "↗ in chat" affordance. The dispatcher emits
+  // a window-level custom event with { event_key }; we look up the
+  // matching MessageRow by its data-event-key attribute and scroll
+  // it into view. Brief flash treatment so the user's eye lands on
+  // the right row rather than hunting up the scroll column.
+  useEffect(() => {
+    const onJump = (ev: Event) => {
+      const ce = ev as CustomEvent<{ event_key?: string }>;
+      const key = ce?.detail?.event_key;
+      if (!key || !scrollRef.current) return;
+      const target = scrollRef.current.querySelector<HTMLDivElement>(
+        `[data-event-key="${CSS.escape(key)}"]`,
+      );
+      if (!target) return;
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.style.transition = "outline 0.3s";
+      target.style.outline = "2px solid var(--purple, #bd93f9)";
+      target.style.outlineOffset = "4px";
+      setTimeout(() => {
+        target.style.outline = "none";
+      }, 1500);
+    };
+    window.addEventListener("glitch:scroll-to-chat", onJump as EventListener);
+    return () => window.removeEventListener("glitch:scroll-to-chat", onJump as EventListener);
+  }, []);
 
   if (messages.length === 0) {
     return (
@@ -245,7 +285,7 @@ export function MessageList({ messages, onAction, thinking }: Props) {
   }
 
   return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+    <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         {messages.map((msg, i) => {
           // Insert a day separator the first time we see a message

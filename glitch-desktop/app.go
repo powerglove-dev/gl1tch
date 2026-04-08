@@ -57,6 +57,18 @@ type App struct {
 	// the EventSink registered in collector.SetEventSink.
 	analyzer *glitchd.Analyzer
 
+	// attentionSeenMu guards attentionSeen, a process-lifetime set
+	// of event_keys we have already fanned out to the chat pane /
+	// activity sidebar as "high attention". Without this, a restart
+	// plus a quick re-ingest would re-inject the same artifact into
+	// chat, and any observer retrigger would double-announce the
+	// same disabled-warning row. SQLite's analysis_dedupe table
+	// covers the "have we run opencode on this" question, but it
+	// does NOT cover our UI-side fan-out, so we keep a separate
+	// process-local memory here.
+	attentionSeenMu sync.Mutex
+	attentionSeen   map[string]bool
+
 	// triageMu guards triageLastMs (the high-water mark of the most
 	// recent event the triage loop has already analyzed). Used to ask
 	// ES for "events newer than X" on each tick instead of re-feeding
@@ -114,6 +126,7 @@ func NewApp() *App {
 		collectorState:   map[string]glitchd.CollectorActivity{},
 		stepThrough:      map[string]*glitchd.StepThroughHandle{},
 		activityAnalyses: map[string]context.CancelFunc{},
+		attentionSeen:    map[string]bool{},
 	}
 }
 
@@ -179,6 +192,36 @@ func (a *App) emitError(workspaceID, msg string) {
 	})
 }
 
+// emitChatInject pushes a fully-formed assistant message into the
+// given workspace's chat pane without going through the
+// START_ASSISTANT → APPEND_CHUNK → FINISH_ASSISTANT streaming
+// lifecycle. Used by proactive daemon-originated messages (the
+// attention classifier's high-verdict artifact landing directly in
+// chat) where there is no user turn to anchor on.
+//
+// Why not re-use emitChunk? Because APPEND_CHUNK appends to the
+// last message in the slice — if the user has a running stream
+// from another provider, a chunk we emit here would silently
+// merge into *their* response. chat:inject is a discrete "here is
+// a complete assistant message, add it as its own item" signal so
+// injection never races with ongoing streams.
+//
+// extra carries optional metadata (event_key, attention, source,
+// repo, url, title) that the frontend uses to render a small
+// header banner above the markdown body and to wire up the
+// "↗ in chat" jump affordance from the activity sidebar's
+// announcement row.
+func (a *App) emitChatInject(workspaceID, text string, extra map[string]any) {
+	payload := map[string]any{
+		"workspace_id": workspaceID,
+		"text":         text,
+	}
+	for k, v := range extra {
+		payload[k] = v
+	}
+	runtime.EventsEmit(a.ctx, "chat:inject", payload)
+}
+
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
@@ -240,6 +283,14 @@ func (a *App) startup(ctx context.Context) {
 	a.analyzer.Start(a.ctx)
 	glitchd.WireAnalyzerToCollectors(a.analyzer)
 
+	// Attention observer: fires for every classified event,
+	// regardless of whether the heavy deep-analysis loop is going
+	// to pick it up. The handler below uses it to emit the
+	// "flagged high but analysis is off" nudge in the activity
+	// sidebar, so users who haven't enabled deep analysis still
+	// see a signal when the local classifier thinks they should.
+	glitchd.SetAttentionObserver(a.handleAttentionObservation)
+
 	go glitchd.StartAllWorkspacePods(a.ctx)
 	// Tool pod runs copilot ONCE under glitchd.WorkspaceIDTools.
 	// Without it copilot either doesn't run at all (it's removed
@@ -267,6 +318,7 @@ func (a *App) shutdown(_ context.Context) {
 		a.analyzer.Close()
 	}
 	glitchd.WireAnalyzerToCollectors(nil)
+	glitchd.SetAttentionObserver(nil)
 
 	// Stop every workspace pod first so collectors exit cleanly
 	// before the parent contexts get torn down. StopAll waits on
@@ -1755,22 +1807,190 @@ func (a *App) handleAnalysisResult(r glitchd.AnalysisResult) {
 	if title == "" {
 		title = fmt.Sprintf("%s · analysis", r.Source)
 	}
+
+	// High-attention results fan out to the chat pane as a fresh
+	// assistant message, not just an expand-row in the activity
+	// sidebar. The user is supposed to be able to *work* on the
+	// PR from here — reply, polish with a paid provider, open the
+	// PR — and chat is where those follow-up turns already live.
+	// Normal and low verdicts keep the legacy behavior: analysis
+	// row in the sidebar, no chat intrusion.
+	chatInjected := false
+	if r.Attention == glitchd.AttentionHigh && r.WorkspaceID != "" && a.markAttentionSeen(r.EventKey) {
+		a.emitChatInject(r.WorkspaceID, buildAttentionChatBody(r, r.URL), map[string]any{
+			"source":     r.Source,
+			"repo":       r.Repo,
+			"event_type": r.Type,
+			"event_key":  r.EventKey,
+			"attention":  r.Attention,
+			"reason":     r.AttentionReason,
+			"model":      r.Model,
+			"title":      r.Title,
+			"url":        r.URL,
+		})
+		chatInjected = true
+	}
+
 	payload := map[string]any{
-		"id":           now.UnixNano(),
-		"kind":         "analysis",
-		"severity":     "info",
-		"title":        title,
-		"detail":       r.Markdown,
-		"source":       r.Source,
-		"repo":         r.Repo,
-		"event_type":   r.Type,
-		"event_key":    r.EventKey,
-		"model":        r.Model,
-		"duration_ms":  r.Duration.Milliseconds(),
-		"workspace_id": r.WorkspaceID,
-		"timestamp":    now.UnixMilli(),
+		"id":               now.UnixNano(),
+		"kind":             "analysis",
+		"severity":         "info",
+		"title":            title,
+		"detail":           r.Markdown,
+		"source":           r.Source,
+		"repo":             r.Repo,
+		"event_type":       r.Type,
+		"event_key":        r.EventKey,
+		"model":            r.Model,
+		"duration_ms":      r.Duration.Milliseconds(),
+		"workspace_id":     r.WorkspaceID,
+		"timestamp":        now.UnixMilli(),
+		"attention":        r.Attention,
+		"attention_reason": r.AttentionReason,
+		"chat_injected":    chatInjected,
 	}
 	runtime.EventsEmit(a.ctx, "brain:activity", payload)
+}
+
+// handleAttentionObservation is the hook pkg/glitchd calls for
+// every classified event, before the deep-analysis queue even
+// sees it. When the classifier says high-attention but the heavy
+// analyzer is disabled, we inject a one-shot chat message telling
+// the user exactly how to turn it on — so the notification lands
+// in the same place every other proactive signal does (chat),
+// with nothing leaking through a separate UI surface.
+//
+// Dedupe: shares the same attentionSeen set as the chat-inject
+// path, so a single event can produce *either* a disabled nudge
+// or a chat injection, never both.
+func (a *App) handleAttentionObservation(ev glitchd.AnalyzableEvent, analysisEnabled bool) {
+	if ev.Attention != glitchd.AttentionHigh {
+		return
+	}
+	if analysisEnabled {
+		// The heavy analyzer will run and handleAnalysisResult
+		// will fan out to chat. Nothing to do here.
+		return
+	}
+	if ev.WorkspaceID == "" {
+		// Can't route a chat injection without a destination
+		// workspace. Fall through silently — the event still got
+		// indexed, just no nudge.
+		return
+	}
+	if !a.markAttentionSeen(ev.EventKey()) {
+		return
+	}
+	title := ev.Title
+	if title == "" {
+		title = fmt.Sprintf("%s · %s", ev.Source, ev.Type)
+	}
+
+	// Chat body: same blockquote header as the real analysis path,
+	// then a short instructional body telling the user how to
+	// enable the analyzer. Intentionally brief — the user doesn't
+	// need a full artifact here, they need one-line guidance.
+	body := fmt.Sprintf(
+		"> ⚙️ **deep analysis is off** · %s · %s\n> %s\n\n"+
+			"The local classifier flagged this as high attention, but the heavy "+
+			"analyzer that drafts the artifact is currently disabled for this "+
+			"workspace. To turn it on, open your workspace's `collectors.yaml` "+
+			"and set:\n\n"+
+			"```yaml\nanalysis:\n  enabled: true\n  model: ollama/qwen2.5-coder:latest\n```\n\n"+
+			"Then restart gl1tch and this event will flow through the artifact "+
+			"pipeline automatically. You can also run `glitch observe status` "+
+			"to see every workspace's current analysis state.",
+		ev.Source, title, ev.AttentionReason,
+	)
+	a.emitChatInject(ev.WorkspaceID, body, map[string]any{
+		"source":     ev.Source,
+		"repo":       ev.Repo,
+		"event_type": ev.Type,
+		"event_key":  ev.EventKey(),
+		"attention":  ev.Attention,
+		"reason":     ev.AttentionReason,
+		"title":      ev.Title,
+	})
+}
+
+// markAttentionSeen returns true the first time eventKey is seen
+// in this process and false thereafter. Used by both the chat
+// injection path and the disabled-nudge path so neither can
+// double-fire on the same event_key.
+func (a *App) markAttentionSeen(eventKey string) bool {
+	if eventKey == "" {
+		// Empty keys would collapse every keyless event into one
+		// bucket — safer to let those through every time than to
+		// silently suppress all of them.
+		return true
+	}
+	a.attentionSeenMu.Lock()
+	defer a.attentionSeenMu.Unlock()
+	if a.attentionSeen[eventKey] {
+		return false
+	}
+	a.attentionSeen[eventKey] = true
+	return true
+}
+
+// buildAttentionChatBody renders a high-attention AnalysisResult
+// into the markdown body we inject into the chat pane. Shape:
+//
+//	> 📬 new attention event · <source> · [<title>](url)
+//	> <attention reason>
+//	> `<repo>`  ·  [open on github](url)
+//
+//	<full artifact markdown>
+//
+// The title and URL are formatted as a markdown link so
+// ReactMarkdown renders a clickable anchor that opens in the
+// user's browser. The separate "open on github" link at the end
+// of the header gives a redundant but unmissable affordance —
+// the user asked for clickable context and both paths serve
+// different impulses (scanning the title vs. clicking a button).
+//
+// When the event has no URL (happens for some event types like
+// git.commit when metadata.url is absent), we fall back to the
+// old plain-text title header so the message still renders.
+func buildAttentionChatBody(r glitchd.AnalysisResult, eventURL string) string {
+	var b strings.Builder
+	b.WriteString("> 📬 **new attention event** · ")
+	b.WriteString(r.Source)
+	if r.Title != "" {
+		b.WriteString(" · ")
+		if eventURL != "" {
+			// Escape closing square brackets in the title so the
+			// markdown link parser doesn't truncate the label.
+			safeTitle := strings.ReplaceAll(r.Title, "]", "\\]")
+			fmt.Fprintf(&b, "[%s](%s)", safeTitle, eventURL)
+		} else {
+			b.WriteString(r.Title)
+		}
+	}
+	b.WriteString("\n")
+	if r.AttentionReason != "" {
+		b.WriteString("> ")
+		b.WriteString(r.AttentionReason)
+		b.WriteString("\n")
+	}
+	if r.Repo != "" || eventURL != "" {
+		b.WriteString("> ")
+		if r.Repo != "" {
+			b.WriteString("`")
+			b.WriteString(r.Repo)
+			b.WriteString("`")
+		}
+		if eventURL != "" {
+			if r.Repo != "" {
+				b.WriteString("  ·  ")
+			}
+			fmt.Fprintf(&b, "[open on github ↗](%s)", eventURL)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(r.Markdown)
+	return b.String()
 }
 
 // emitBrainActivity surfaces a single entry into the in-app activity

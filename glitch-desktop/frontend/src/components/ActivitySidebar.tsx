@@ -70,7 +70,28 @@ export function ActivitySidebar({
   onClear,
   onOpenIndexedDocs,
 }: Props) {
-  const unreadCount = activity.filter((a) => a.unread).length;
+  // Attention-only filter: the activity sidebar is for things that
+  // need the user's attention RIGHT NOW, not for polling heartbeats.
+  // We drop every row that is not either:
+  //
+  //   - a high-attention analysis (the classifier's verdict drove a
+  //     deep-analysis run in artifact mode)
+  //   - a "needs_enable" alert (classifier flagged high but analysis
+  //     is off — the user needs to flip a flag)
+  //   - any alert-kind row (triage + disabled nudges)
+  //
+  // kind=checkin rows (git·N new, directory·N new, brain online)
+  // and kind=analysis rows with normal/low attention verdicts are
+  // hidden. They still land in ES for search and the brain popover,
+  // they just don't clutter the sidebar.
+  const visibleActivity = activity.filter((entry) => {
+    if (entry.kind === "alert") return true;
+    if (entry.kind === "analysis") {
+      return entry.attention === "high" || entry.chat_injected === true;
+    }
+    return false;
+  });
+  const unreadCount = visibleActivity.filter((a) => a.unread).length;
 
   return (
     <div
@@ -173,7 +194,7 @@ export function ActivitySidebar({
           if (unreadCount > 0) onMarkRead();
         }}
       >
-        {activity.length === 0 ? (
+        {visibleActivity.length === 0 ? (
           <div
             style={{
               padding: "20px 14px",
@@ -183,12 +204,13 @@ export function ActivitySidebar({
               lineHeight: 1.5,
             }}
           >
-            No activity yet — the brain will speak up when collectors
-            index something new or triage finds something worth
-            flagging.
+            Nothing needs your attention right now. Gl1tch is
+            watching — this panel will light up when a review lands
+            on one of your PRs, a check breaks, or someone pings
+            you.
           </div>
         ) : (
-          activity.map((entry) => (
+          visibleActivity.map((entry) => (
             <ActivityRow
               key={entry.id}
               entry={entry}
@@ -251,6 +273,28 @@ function ActivityRow({
         ? "var(--yellow)"
         : "var(--cyan)";
 
+  // Attention verdict styling. Empty string means no verdict
+  // (classifier skipped or the row pre-dates the classifier being
+  // wired). We render the badge only when the verdict is high,
+  // because normal/low dots would just add visual noise without
+  // telling the user anything useful.
+  const attentionHigh = entry.attention === "high";
+
+  // Jump-to-chat affordance: dispatch a window-level custom event
+  // that MessageList listens for. Lives here (and not on the store)
+  // so the chat pane doesn't have to import anything — all the
+  // coordination is one CustomEvent + one querySelector by
+  // data-event-key on the message row.
+  const jumpToChat = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!entry.event_key) return;
+    window.dispatchEvent(
+      new CustomEvent("glitch:scroll-to-chat", {
+        detail: { event_key: entry.event_key },
+      }),
+    );
+  };
+
   return (
     <div
       style={{
@@ -290,6 +334,32 @@ function ActivityRow({
                 style={{ color: "var(--purple, #bd93f9)", flexShrink: 0 }}
               />
             )}
+            {attentionHigh && (
+              <span
+                title={
+                  entry.attention_reason
+                    ? `high attention · ${entry.attention_reason}`
+                    : "high attention"
+                }
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "1px 6px",
+                  borderRadius: 999,
+                  background: "rgba(255, 85, 85, 0.12)",
+                  border: "1px solid var(--red, #ff5555)",
+                  color: "var(--red, #ff5555)",
+                  fontSize: 9,
+                  fontWeight: 700,
+                  letterSpacing: "0.05em",
+                  textTransform: "uppercase",
+                  flexShrink: 0,
+                }}
+              >
+                📬 attention
+              </span>
+            )}
             <span
               style={{
                 flex: 1,
@@ -300,6 +370,28 @@ function ActivityRow({
             >
               {entry.title}
             </span>
+            {entry.chat_injected && entry.event_key && (
+              <button
+                type="button"
+                onClick={jumpToChat}
+                title="scroll chat to the drafted artifact"
+                style={{
+                  background: "transparent",
+                  border: "1px solid var(--purple, #bd93f9)",
+                  color: "var(--purple, #bd93f9)",
+                  padding: "1px 6px",
+                  borderRadius: 4,
+                  fontSize: 9,
+                  fontWeight: 600,
+                  letterSpacing: "0.05em",
+                  textTransform: "uppercase",
+                  cursor: "pointer",
+                  flexShrink: 0,
+                }}
+              >
+                ↗ in chat
+              </button>
+            )}
             {isClickable && (
               <ChevronRight
                 size={11}
@@ -350,6 +442,25 @@ function ActivityRow({
               }}
             >
               {[entry.source, entry.repo].filter(Boolean).join(" · ")}
+            </div>
+          )}
+          {entry.needs_enable && (
+            <div
+              style={{
+                marginTop: 6,
+                padding: "4px 8px",
+                background: "rgba(241, 250, 140, 0.08)",
+                border: "1px dashed var(--yellow, #f1fa8c)",
+                borderRadius: 4,
+                color: "var(--yellow, #f1fa8c)",
+                fontSize: 10,
+                lineHeight: 1.4,
+              }}
+            >
+              Deep analysis is <strong>off</strong> for this workspace. Flip{" "}
+              <code style={{ fontFamily: "monospace" }}>analysis.enabled: true</code>{" "}
+              in its <code style={{ fontFamily: "monospace" }}>collectors.yaml</code> to have
+              gl1tch draft the artifact automatically.
             </div>
           )}
         </div>

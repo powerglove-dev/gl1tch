@@ -68,6 +68,7 @@ type Action =
   | { type: "START_ASSISTANT"; workspaceId: string }
   | { type: "APPEND_CHUNK"; workspaceId: string; text: string }
   | { type: "APPEND_BLOCK"; workspaceId: string; block: Block }
+  | { type: "INJECT_ASSISTANT"; workspaceId: string; text: string; meta?: Record<string, unknown> }
   | { type: "FINISH_ASSISTANT"; workspaceId: string; meta?: { model?: string; tokens?: number; latency_ms?: number } }
   | { type: "STREAM_ERROR"; workspaceId: string; message: string }
   | { type: "SET_STATUS"; status: Partial<SystemStatus> }
@@ -219,7 +220,11 @@ const initialState: ChatState = {
   byWorkspace: {},
   status: { ollama: false, elasticsearch: false, busd: false, brain: "idle", brainDetail: "" },
   sidebarOpen: true,
-  activitySidebarOpen: true,
+  // activitySidebarOpen kept in state for compatibility but
+  // defaults to false — the sidebar itself was retired 2026-04-08
+  // and the render call-site in App.tsx no longer uses this flag.
+  // If the sidebar ever comes back, flip to true.
+  activitySidebarOpen: false,
   workspaces: [],
   activeWorkspaceId: null,
   brainActivity: [],
@@ -298,6 +303,43 @@ function reducer(state: ChatState, action: Action): ChatState {
         last.blocks = [...last.blocks, action.block];
         msgs[msgs.length - 1] = last;
         return { ...s, messages: msgs };
+      });
+
+    case "INJECT_ASSISTANT":
+      return withSlice(state, action.workspaceId, (s) => {
+        // Injected messages are complete in one shot: they do NOT
+        // go through the APPEND_CHUNK lifecycle and MUST NOT touch
+        // s.streaming, because a concurrent user-initiated stream
+        // in another workspace might still be running. The injected
+        // message is a standalone assistant item appended to the
+        // end of the history — ordering-wise it behaves like any
+        // past message, not like the in-flight one.
+        const meta = (action.meta ?? {}) as Record<string, unknown>;
+        const injected = {
+          event_key: typeof meta.event_key === "string" ? meta.event_key : undefined,
+          source: typeof meta.source === "string" ? meta.source : undefined,
+          repo: typeof meta.repo === "string" ? meta.repo : undefined,
+          attention:
+            meta.attention === "high" || meta.attention === "normal" || meta.attention === "low"
+              ? (meta.attention as "high" | "normal" | "low")
+              : undefined,
+          reason: typeof meta.reason === "string" ? meta.reason : undefined,
+          title: typeof meta.title === "string" ? meta.title : undefined,
+        };
+        return {
+          ...s,
+          messages: [
+            ...s.messages,
+            {
+              id: makeId(),
+              role: "assistant" as const,
+              blocks: [{ type: "text", content: action.text }],
+              timestamp: Date.now(),
+              streaming: false,
+              injected,
+            },
+          ],
+        };
       });
 
     case "FINISH_ASSISTANT":
@@ -448,6 +490,11 @@ export function useChatStore() {
     ),
     appendBlock: useCallback(
       (workspaceId: string, block: Block) => dispatch({ type: "APPEND_BLOCK", workspaceId, block }),
+      [],
+    ),
+    injectAssistant: useCallback(
+      (workspaceId: string, text: string, meta?: Record<string, unknown>) =>
+        dispatch({ type: "INJECT_ASSISTANT", workspaceId, text, meta }),
       [],
     ),
     finishAssistant: useCallback(

@@ -3,7 +3,8 @@ import { Titlebar } from "./components/Titlebar";
 import { Sidebar } from "./components/Sidebar";
 import { WorkspaceTabs } from "./components/WorkspaceTabs";
 import type { AgentEntry, WorkflowFileEntry, PromptEntry } from "./components/Sidebar";
-import { ActivitySidebar } from "./components/ActivitySidebar";
+// ActivitySidebar import removed — component retired 2026-04-08.
+// See the comment above the (former) render site in the JSX below.
 import { MessageList } from "./components/MessageList";
 import { ChatInput } from "./components/ChatInput";
 import type { ProviderOption, ChainStep } from "./components/ChatInput";
@@ -56,7 +57,7 @@ import { appendAnalysisStream } from "./lib/analysisStreams";
 export function App() {
   const {
     state, active,
-    addUserMessage, addUserChain, startAssistant, appendChunk, finishAssistant, streamError,
+    addUserMessage, addUserChain, startAssistant, appendChunk, injectAssistant, finishAssistant, streamError,
     applyBlockEvent,
     setStatus, toggleSidebar, toggleActivitySidebar, setMessages,
     setWorkspaces, setActiveWorkspace, addWorkspace, removeWorkspace, updateWorkspace,
@@ -152,6 +153,19 @@ export function App() {
   useWailsEvent("chat:chunk", (data: unknown) => {
     const d = data as { workspace_id?: string; text?: string };
     if (d?.workspace_id && d?.text != null) appendChunk(d.workspace_id, d.text);
+  });
+
+  // chat:inject carries a *complete* assistant message for the
+  // given workspace. Unlike chat:chunk, it doesn't merge into the
+  // active stream — it gets pushed as a standalone history item
+  // so proactive daemon messages (attention classifier dropping a
+  // high-attention artifact) can't race with a user-initiated
+  // stream running in a different provider/workspace.
+  useWailsEvent("chat:inject", (data: unknown) => {
+    const d = data as { workspace_id?: string; text?: string } & Record<string, unknown>;
+    if (!d?.workspace_id || d?.text == null) return;
+    const { workspace_id, text, ...meta } = d;
+    injectAssistant(workspace_id, text, meta);
   });
 
   useWailsEvent("chat:done", (data: unknown) => {
@@ -1170,20 +1184,19 @@ export function App() {
 
         {/* Right-side activity sidebar — mirrors the left
             workspace sidebar's hide/show pattern. The brain
-            popover used to render this list as a buried dropdown;
-            it's now an ambient panel that's visible by default
-            so users immediately see what the brain is up to
-            without clicking the brain icon. */}
-        {state.activitySidebarOpen && (
-          <ActivitySidebar
-            activity={state.brainActivity}
-            onMarkRead={markBrainRead}
-            onClose={toggleActivitySidebar}
-            onOpenIndexedDocs={(source, sinceMs, initialPrompt, preselectRefs) =>
-              setIndexedDocs({ source, sinceMs, initialPrompt, preselectRefs })
-            }
-          />
-        )}
+            popover used to render this list as a buried dropdown.
+            As of 2026-04-08 it is RETIRED — all proactive signals
+            from the daemon (high-attention analyses, classifier
+            disabled nudges, triage alerts) now land as assistant
+            messages in the chat pane via emitChatInject. The
+            sidebar added a second UI surface the user had to look
+            at separately, which defeated the "chat IS the
+            interface" principle. The ActivitySidebar component
+            and the store's brainActivity slice remain for the
+            systray integration path, but they are no longer
+            rendered. If the user ever wants an ambient feed back,
+            flip activitySidebarOpen default to true in store.ts
+            and re-enable the render below. */}
       </div>
 
       {/* Editor popup — modal overlay for editing prompts and

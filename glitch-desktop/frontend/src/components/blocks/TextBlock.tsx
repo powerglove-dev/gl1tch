@@ -6,6 +6,31 @@ import { Collapsible } from "./Collapsible";
 import { ActivityBlock } from "./ActivityBlock";
 import { BrainBlock } from "./BrainBlock";
 import { parseAgentOutput } from "@/lib/parseAgentOutput";
+import { BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
+
+// ExternalLink renders markdown anchors as clickable spans that
+// route through Wails' BrowserOpenURL, so links in chat messages
+// (including the clickable "open on github" affordance on injected
+// attention rows) open in the user's default browser instead of
+// navigating the Wails webview. Plain <a href> would either do
+// nothing or blow up the app shell depending on the URL scheme.
+function ExternalLink(props: React.ComponentPropsWithoutRef<"a">) {
+  const { href, children, ...rest } = props;
+  const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!href) return;
+    e.preventDefault();
+    // Only forward http(s) — avoid handing Wails a `javascript:`
+    // or other local-scheme URL by accident.
+    if (href.startsWith("http://") || href.startsWith("https://")) {
+      BrowserOpenURL(href);
+    }
+  };
+  return (
+    <a href={href} onClick={handleClick} {...rest}>
+      {children}
+    </a>
+  );
+}
 
 interface Props {
   content: string;
@@ -41,6 +66,7 @@ export function TextBlock({ content, streaming }: Props) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
         rehypePlugins={[rehypeHighlight]}
+        components={{ a: ExternalLink }}
       >
         {parsed.body}
       </ReactMarkdown>

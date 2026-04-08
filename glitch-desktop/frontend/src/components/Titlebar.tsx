@@ -1,4 +1,4 @@
-import { PanelLeft, PanelRight } from "lucide-react";
+import { PanelLeft } from "lucide-react";
 import { BrainIndicator } from "./BrainIndicator";
 import type { BrainActivity, BrainState } from "@/lib/types";
 
@@ -107,31 +107,12 @@ export function Titlebar({
         onConfigureCollector={onConfigureCollector}
       />
 
-      {/* Right-side activity sidebar toggle. Mirrors the left
-          PanelLeft button at the start of the titlebar so the
-          user has matching hide/show controls on both sides. */}
-      <button
-        onClick={onToggleActivitySidebar}
-        style={{
-          WebkitAppRegion: "no-drag",
-          background: "none",
-          border: "none",
-          color: "var(--fg-dim)",
-          cursor: "pointer",
-          padding: 4,
-          borderRadius: 6,
-          display: "flex",
-          alignItems: "center",
-          marginLeft: 8,
-        } as React.CSSProperties}
-        title={
-          activitySidebarOpen
-            ? "Hide activity sidebar"
-            : "Show activity sidebar"
-        }
-      >
-        <PanelRight size={15} />
-      </button>
+      {/* Activity sidebar toggle retired 2026-04-08 — proactive
+          signals now land as chat messages via emitChatInject,
+          not in a separate panel. The props (activitySidebarOpen,
+          onToggleActivitySidebar) are still accepted so App.tsx
+          doesn't need to drop them in lockstep, but no button is
+          rendered here. */}
     </div>
   );
 }
