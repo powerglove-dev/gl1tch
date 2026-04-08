@@ -179,13 +179,19 @@ func run(
 		return 1, fmt.Errorf("pulling Ollama model: %w", err)
 	}
 
-	// opencode is an agentic CLI with native tool access, so we don't need
-	// the input protocol (GLITCH_WRITE/RUN). We DO need the output protocol
-	// so its replies land in the chat as structured blocks instead of raw
-	// stdout the splitter has to guess at.
-	fullPrompt := glitchctx.OutputProtocolInstructions +
-		glitchctx.BuildShellContext() +
-		"\n## User Request\n" + prompt
+	// opencode is an agentic CLI with native tool access: it can read
+	// files, run commands, and inspect the working directory by itself.
+	// We deliberately do NOT inject a hardcoded shell-context preamble
+	// (cwd, directory listing, git status) here — if the model needs any
+	// of that it can call its own tools, and baking it into every prompt
+	// is exactly the kind of "hardcoded pre-context" the AI-first
+	// redesign removed.
+	//
+	// The output protocol instructions remain because they're a
+	// rendering contract (how the desktop chat parses replies into
+	// structured blocks), not a context manual. Drop this if/when we
+	// switch opencode's output to a native structured format.
+	fullPrompt := glitchctx.OutputProtocolInstructions + "\n## User Request\n" + prompt
 	code := executor(model, fullPrompt, stdout, stderr)
 	return code, nil
 }

@@ -56,7 +56,6 @@ type RunChainOpts struct {
 	WorkspaceID     string
 	DefaultProvider string
 	DefaultModel    string
-	SystemCtx       string // glitch system context to inject
 	// Cwd is the working directory that shell steps and CLI-backed provider
 	// steps should execute in. When empty, executors fall back to the
 	// glitch-desktop process cwd — which is almost never what the user wants
@@ -306,11 +305,6 @@ func buildPipelineFromChain(steps []ChainStep, opts RunChainOpts) (*pipeline.Pip
 			if pendingAgent != "" {
 				body = BuildAgentPrompt(pendingAgent, body)
 				pendingAgent = ""
-			}
-
-			// Inject system context on the first executable step only.
-			if stepIndex == 0 && opts.SystemCtx != "" {
-				body = opts.SystemCtx + "\n\n---\n\n" + body
 			}
 
 			// If there's a previous step, append its output as context.

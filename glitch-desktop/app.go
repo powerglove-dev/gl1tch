@@ -628,20 +628,13 @@ func (a *App) AskProvider(providerID, model, prompt, workspaceID, agentPath stri
 
 		// Build context from workspace
 		var dirs []string
-		var agents []glitchd.AgentInfo
-		var pipes []glitchd.WorkflowInfo
-
 		if workspaceID != "" {
 			if st, err := glitchd.OpenStore(); err == nil {
 				if ws, err := st.GetWorkspace(a.ctx, workspaceID); err == nil {
 					dirs = ws.Directories
 				}
 			}
-			agents = glitchd.ListAgents(dirs)
-			pipes = glitchd.DiscoverWorkspaceWorkflows(dirs)
 		}
-
-		systemCtx := glitchd.BuildSystemContext(dirs, agents, pipes)
 
 		var cwd string
 		if len(dirs) > 0 {
@@ -655,11 +648,14 @@ func (a *App) AskProvider(providerID, model, prompt, workspaceID, agentPath stri
 			}
 		}()
 
+		// No SystemCtx — the AI-first redesign removed the hardcoded
+		// glitch manual that used to be prepended here. The model
+		// discovers its context via tool-using capabilities, or via
+		// a persona file the user explicitly loads.
 		err := glitchd.StreamPrompt(runCtx, glitchd.StreamPromptOpts{
 			ProviderID: providerID,
 			Model:      model,
 			Prompt:     prompt,
-			SystemCtx:  systemCtx,
 			AgentPath:  agentPath,
 			Cwd:        cwd,
 		}, tokenCh)
@@ -849,20 +845,17 @@ func (a *App) RunChain(stepsJSON, userText, workspaceID, defaultProvider, defaul
 		runCtx, release := a.registerRun(workspaceID)
 		defer release()
 
-		// Build system context from workspace.
+		// Resolve workspace directories for step cwd. We no longer
+		// pre-build a hardcoded system context — see the AI-first
+		// redesign notes on context.go.
 		var dirs []string
-		var agents []glitchd.AgentInfo
-		var pipes []glitchd.WorkflowInfo
 		if workspaceID != "" {
 			if st, err := glitchd.OpenStore(); err == nil {
 				if ws, err := st.GetWorkspace(a.ctx, workspaceID); err == nil {
 					dirs = ws.Directories
 				}
 			}
-			agents = glitchd.ListAgents(dirs)
-			pipes = glitchd.DiscoverWorkspaceWorkflows(dirs)
 		}
-		systemCtx := glitchd.BuildSystemContext(dirs, agents, pipes)
 
 		// Start clarification poller for the duration of the run. The poller
 		// is scoped to runCtx so it dies on stop along with everything else.
@@ -894,7 +887,6 @@ func (a *App) RunChain(stepsJSON, userText, workspaceID, defaultProvider, defaul
 			WorkspaceID:     workspaceID,
 			DefaultProvider: defaultProvider,
 			DefaultModel:    defaultModel,
-			SystemCtx:       systemCtx,
 			Cwd:             cwd,
 			EventCh:         eventCh,
 		}, nil)
@@ -975,22 +967,18 @@ func (a *App) SaveChatWorkflow(workspaceID, name, stepsJSON, defaultProvider, de
 func (a *App) StepThroughStartFromChain(
 	stepsJSON, userText, workspaceID, defaultProvider, defaultModel string,
 ) string {
-	// Build system context from workspace — mirrors RunChain so chain
-	// steps see the same agents/workflows/dirs regardless of which path
-	// the chat bar took.
+	// Resolve the workspace's primary directory for step cwd. We no
+	// longer pre-build a hardcoded system context prose blob — the
+	// model handles its own context discovery via tool-using
+	// capabilities, not via a prepended manual.
 	var dirs []string
-	var agents []glitchd.AgentInfo
-	var pipes []glitchd.WorkflowInfo
 	if workspaceID != "" {
 		if st, err := glitchd.OpenStore(); err == nil {
 			if ws, err := st.GetWorkspace(a.ctx, workspaceID); err == nil {
 				dirs = ws.Directories
 			}
 		}
-		agents = glitchd.ListAgents(dirs)
-		pipes = glitchd.DiscoverWorkspaceWorkflows(dirs)
 	}
-	systemCtx := glitchd.BuildSystemContext(dirs, agents, pipes)
 	var cwd string
 	if len(dirs) > 0 {
 		cwd = dirs[0]
@@ -1020,7 +1008,6 @@ func (a *App) StepThroughStartFromChain(
 		UserText:        userText,
 		DefaultProvider: defaultProvider,
 		DefaultModel:    defaultModel,
-		SystemCtx:       systemCtx,
 		Cwd:             cwd,
 		EventCh:         eventCh,
 	})

@@ -170,27 +170,26 @@ func TestBuildPipelineFromChain_NoExecutorErrors(t *testing.T) {
 	}
 }
 
-// TestBuildPipelineFromChain_SystemContextOnFirstStepOnly verifies that
-// SystemCtx is prepended only to the first executable step.
-func TestBuildPipelineFromChain_SystemContextOnFirstStepOnly(t *testing.T) {
+// TestBuildPipelineFromChain_NoSystemContextInjection guardrails the
+// AI-first redesign: chain runs must not prepend any hardcoded system
+// prompt to the first executable step. The old SystemCtx plumbing has
+// been removed; this test catches any regression that re-introduces a
+// preamble in buildPipelineFromChain.
+func TestBuildPipelineFromChain_NoSystemContextInjection(t *testing.T) {
 	steps := []ChainStep{
 		{Type: "prompt", Label: "a", Body: "first"},
 		{Type: "prompt", Label: "b", Body: "second"},
 	}
-	opts := RunChainOpts{
-		DefaultProvider: "ollama",
-		SystemCtx:       "GLITCH-SYSCTX-MARKER",
-	}
+	opts := RunChainOpts{DefaultProvider: "ollama"}
 
 	p, err := buildPipelineFromChain(steps, opts)
 	if err != nil {
 		t.Fatalf("buildPipelineFromChain: %v", err)
 	}
-	if !strings.Contains(p.Steps[0].Prompt, "GLITCH-SYSCTX-MARKER") {
-		t.Errorf("step 0 should contain system context, got: %q", p.Steps[0].Prompt)
-	}
-	if strings.Contains(p.Steps[1].Prompt, "GLITCH-SYSCTX-MARKER") {
-		t.Errorf("step 1 should NOT contain system context, got: %q", p.Steps[1].Prompt)
+	// The first step's prompt should start with the raw body — no
+	// system preamble glued on.
+	if !strings.HasPrefix(p.Steps[0].Prompt, "first") {
+		t.Errorf("step 0 must start with its body, got: %q", p.Steps[0].Prompt)
 	}
 }
 

@@ -101,7 +101,6 @@ type StepThroughChainOpts struct {
 	UserText        string
 	DefaultProvider string
 	DefaultModel    string
-	SystemCtx       string
 	Cwd             string
 	TokenCh         chan<- string
 	EventCh         chan<- BlockEvent
@@ -143,7 +142,6 @@ func StartStepThroughFromChain(ctx context.Context, opts StepThroughChainOpts) (
 		WorkspaceID:     opts.WorkspaceID,
 		DefaultProvider: opts.DefaultProvider,
 		DefaultModel:    opts.DefaultModel,
-		SystemCtx:       opts.SystemCtx,
 		Cwd:             opts.Cwd,
 	})
 	if err != nil {
