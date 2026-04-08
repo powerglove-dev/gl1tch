@@ -5,6 +5,8 @@ export function AddWorkspaceDirectory(arg1:string):Promise<void>;
 
 export function AgentPathForName(arg1:string,arg2:string):Promise<string>;
 
+export function AnalyzeActivityChunks(arg1:string):Promise<string>;
+
 export function AnswerClarification(arg1:string,arg2:string):Promise<void>;
 
 export function AskProvider(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
@@ -12,6 +14,8 @@ export function AskProvider(arg1:string,arg2:string,arg3:string,arg4:string,arg5
 export function AskScoped(arg1:string,arg2:string):Promise<void>;
 
 export function BrainDecisions(arg1:string):Promise<string>;
+
+export function CancelActivityAnalysis(arg1:string):Promise<void>;
 
 export function CollectorsConfigPath(arg1:string):Promise<string>;
 
@@ -44,6 +48,8 @@ export function ListAgents(arg1:string):Promise<string>;
 export function ListCollectors(arg1:string):Promise<string>;
 
 export function ListDrafts(arg1:string,arg2:string):Promise<string>;
+
+export function ListIndexedDocs(arg1:string,arg2:number,arg3:number):Promise<string>;
 
 export function ListPrompts():Promise<string>;
 

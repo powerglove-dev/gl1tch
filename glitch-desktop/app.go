@@ -83,6 +83,24 @@ type App struct {
 	// map is cleaned up when the session terminates.
 	stepThroughMu sync.Mutex
 	stepThrough   map[string]*glitchd.StepThroughHandle
+
+	// activityAnalysesMu guards activityAnalyses — the map of
+	// in-flight ad-hoc activity analyses keyed by stream id. Each
+	// value is the cancel func for the per-run context so the
+	// frontend's "Cancel" button can stop a long-running opencode
+	// invocation without waiting for its natural timeout. The
+	// entry is deleted when the run finishes or is cancelled.
+	activityAnalysesMu sync.Mutex
+	activityAnalyses   map[string]context.CancelFunc
+
+	// activityResults is the handoff slot between the run
+	// goroutine in AnalyzeActivityChunks and the stream-forwarder
+	// goroutine. The run writes its final AnalysisResult here
+	// before the stream channel closes; the forwarder picks it
+	// up after draining the channel, persists it to ES, and
+	// emits the brain:activity row. Keyed by streamID.
+	activityResultsMu sync.Mutex
+	activityResults   map[string]glitchd.AnalysisResult
 }
 
 type runHandle struct {
@@ -92,9 +110,10 @@ type runHandle struct {
 
 func NewApp() *App {
 	return &App{
-		runs:           map[string]runHandle{},
-		collectorState: map[string]glitchd.CollectorActivity{},
-		stepThrough:    map[string]*glitchd.StepThroughHandle{},
+		runs:             map[string]runHandle{},
+		collectorState:   map[string]glitchd.CollectorActivity{},
+		stepThrough:      map[string]*glitchd.StepThroughHandle{},
+		activityAnalyses: map[string]context.CancelFunc{},
 	}
 }
 
@@ -1759,6 +1778,20 @@ func (a *App) handleAnalysisResult(r glitchd.AnalysisResult) {
 // "alert" (something the user should look at) or "checkin" (low-noise
 // status).
 func (a *App) emitBrainActivity(kind, severity, title, detail, source string) {
+	a.emitBrainActivityExtra(kind, severity, title, detail, source, nil)
+}
+
+// emitBrainActivityExtra is the same as emitBrainActivity but lets
+// the caller attach optional extra fields (preview items, a parent
+// id, an event_refs list, a since_ms lower bound, …). Used by the
+// collector activity refresh to attach a preview of newly-indexed
+// docs so the sidebar row can render "N new + top 5 titles" inline
+// and open the drill-in modal scoped to the right time window.
+//
+// Unknown-to-the-frontend fields are safe: the React side spreads
+// the payload into the BrainActivity shape and only reads fields it
+// knows about. Extra keys flow through unharmed.
+func (a *App) emitBrainActivityExtra(kind, severity, title, detail, source string, extra map[string]any) {
 	now := time.Now()
 	payload := map[string]any{
 		"id":        now.UnixNano(),
@@ -1768,6 +1801,9 @@ func (a *App) emitBrainActivity(kind, severity, title, detail, source string) {
 		"detail":    detail,
 		"source":    source,
 		"timestamp": now.UnixMilli(),
+	}
+	for k, v := range extra {
+		payload[k] = v
 	}
 	runtime.EventsEmit(a.ctx, "brain:activity", payload)
 
@@ -2087,8 +2123,353 @@ func (a *App) refreshCollectorActivity(initial bool) {
 			severity = "warn"
 			kind = "alert"
 		}
-		a.emitBrainActivity(kind, severity, title, detail, r.Source)
+
+		// Fetch a small preview of the new docs so the sidebar row
+		// can render "5 most recent titles" inline and the drill-in
+		// modal opens scoped to the right time window when the user
+		// clicks through.
+		//
+		// Lower bound: the previous poll's LastSeenMs for this
+		// source. Empty prev (first poll since startup) means we
+		// ask for the most recent N without a time filter — there's
+		// no "delta window" to scope to on the first tick.
+		//
+		// Preview is best-effort: if ES is slow or returns an
+		// error we just emit the activity row without items. The
+		// user still sees the count and can click through to the
+		// modal, which re-queries on open.
+		extra := map[string]any{
+			"source_total":   r.TotalDocs,
+			"delta":          delta,
+			"last_seen_ms":   r.LastSeenMs,
+			"window_from_ms": old.LastSeenMs, // 0 on first poll
+		}
+		previewCtx, previewCancel := context.WithTimeout(a.ctx, 2*time.Second)
+		previewDocs, perr := glitchd.QueryIndexedDocsForActivity(
+			previewCtx, wsID, r.Source, old.LastSeenMs, 5)
+		previewCancel()
+		if perr == nil && len(previewDocs) > 0 {
+			items := make([]map[string]any, 0, len(previewDocs))
+			for _, d := range previewDocs {
+				items = append(items, map[string]any{
+					"source":       d.Source,
+					"type":         d.Type,
+					"repo":         d.Repo,
+					"author":       d.Author,
+					"sha":          d.SHA,
+					"title":        activityItemTitle(d),
+					"url":          d.URL,
+					"timestamp_ms": d.TimestampMs,
+				})
+			}
+			extra["items"] = items
+		}
+
+		a.emitBrainActivityExtra(kind, severity, title, detail, r.Source, extra)
 	}
+}
+
+// activityItemTitle builds a compact one-line title for a preview
+// item in the activity sidebar. Prefers the event's message
+// (commit subject, PR title, session name); falls back through
+// type/sha/"(untitled)" so every row still shows something.
+func activityItemTitle(d glitchd.RecentEvent) string {
+	if t := strings.TrimSpace(d.Message); t != "" {
+		if len(t) > 120 {
+			t = t[:117] + "…"
+		}
+		return t
+	}
+	if d.SHA != "" {
+		return "commit " + shortSHA(d.SHA)
+	}
+	if d.Type != "" {
+		return d.Type
+	}
+	return "(untitled)"
+}
+
+func shortSHA(sha string) string {
+	if len(sha) >= 8 {
+		return sha[:8]
+	}
+	return sha
+}
+
+// ── Activity drill-in + ad-hoc analysis ────────────────────────────────────
+//
+// These three bindings power the indexed-docs modal in the activity
+// sidebar. The frontend opens the modal when the user clicks an
+// indexing-kind activity row; the modal calls ListIndexedDocs to
+// populate its list, AnalyzeActivityChunks to run an on-demand
+// analysis over the user's selection, and CancelActivityAnalysis to
+// abort a long-running opencode invocation.
+//
+// Analysis always goes through opencode + qwen2.5:7b (or whatever
+// model capability.Config.Analysis.Model points at). No second model
+// path. Detection/classification lives in the editable rubric under
+// pkg/glitchd/prompts/activity_analyzer.md — no Go-side heuristics
+// inspect document content here.
+
+// ListIndexedDocs returns the set of indexed documents for one
+// collector source, scoped to the active workspace and optionally
+// windowed by a `sinceMs` timestamp lower bound. Used by the drill-in
+// modal to render the full list the user can select from.
+//
+// sinceMs == 0 returns the most recent `limit` docs without a time
+// filter. limit is clamped backend-side to [1, 500].
+//
+// Returns a JSON-encoded string (not a struct) so Wails' binding
+// layer doesn't have to encode every RecentEvent field individually
+// — the frontend parses it once into a typed array.
+func (a *App) ListIndexedDocs(source string, sinceMs int64, limit int) string {
+	if source == "" {
+		return `{"error":"source is required"}`
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+
+	a.collectorMu.Lock()
+	wsID := a.activeWorkspaceID
+	a.collectorMu.Unlock()
+
+	docs, err := glitchd.QueryIndexedDocsForActivity(ctx, wsID, source, sinceMs, limit)
+	if err != nil {
+		// Surface a JSON error object so the frontend can show it
+		// inline in the modal without a second failure path.
+		msg := strings.ReplaceAll(err.Error(), `"`, `\"`)
+		return fmt.Sprintf(`{"error":%q}`, msg)
+	}
+	b, merr := json.Marshal(map[string]any{
+		"docs": docs,
+	})
+	if merr != nil {
+		return `{"error":"encode failed"}`
+	}
+	return string(b)
+}
+
+// AnalyzeActivityChunks kicks off an ad-hoc opencode run over the
+// documents identified by the request's SHAs (or URLs for sources
+// without SHAs). Returns a streamID the frontend can use to correlate
+// brain:analysis:stream events back to the invoking modal.
+//
+// The call is non-blocking: this function returns as soon as the
+// run goroutine has been spawned. Token events flow back over the
+// brain:analysis:stream Wails event keyed by streamID. The final
+// event is either Kind=="done" or Kind=="error"; after that no more
+// events will be emitted for this streamID.
+//
+// Request JSON shape:
+//
+//	{
+//	  "source":               "git",             // required
+//	  "sinceMs":              1712345600000,     // optional time window for the doc query
+//	  "eventRefs":            ["sha1","sha2"],   // optional selection subset (SHA or URL)
+//	  "userPrompt":           "focus on tests",  // optional free-form prompt
+//	  "parentAnalysisId":     "activity:abc…",   // optional refinement parent
+//	  "model":                "ollama/qwen2.5:7b"// optional override
+//	}
+//
+// When eventRefs is empty or missing, the analysis runs over the
+// full result of ListIndexedDocs for the given source and window.
+func (a *App) AnalyzeActivityChunks(requestJSON string) string {
+	var req struct {
+		Source           string   `json:"source"`
+		SinceMs          int64    `json:"sinceMs"`
+		EventRefs        []string `json:"eventRefs"`
+		UserPrompt       string   `json:"userPrompt"`
+		ParentAnalysisID string   `json:"parentAnalysisId"`
+		Model            string   `json:"model"`
+	}
+	if err := json.Unmarshal([]byte(requestJSON), &req); err != nil {
+		return `{"error":"bad request json"}`
+	}
+	if req.Source == "" {
+		return `{"error":"source is required"}`
+	}
+
+	a.collectorMu.Lock()
+	wsID := a.activeWorkspaceID
+	a.collectorMu.Unlock()
+
+	// Fetch the candidate docs synchronously so the frontend gets
+	// immediate feedback if the query itself fails. We ask for up
+	// to 100 docs — enough for any practical "analyze N selected"
+	// flow without exploding the opencode prompt.
+	fetchCtx, fetchCancel := context.WithTimeout(a.ctx, 5*time.Second)
+	docs, err := glitchd.QueryIndexedDocsForActivity(fetchCtx, wsID, req.Source, req.SinceMs, 100)
+	fetchCancel()
+	if err != nil {
+		msg := strings.ReplaceAll(err.Error(), `"`, `\"`)
+		return fmt.Sprintf(`{"error":%q}`, msg)
+	}
+
+	// Narrow to the user's selection if eventRefs was provided.
+	// We match against each doc's SHA first, then its URL — the
+	// two stable ids the frontend's doc rows expose.
+	if len(req.EventRefs) > 0 {
+		want := make(map[string]bool, len(req.EventRefs))
+		for _, r := range req.EventRefs {
+			if r != "" {
+				want[r] = true
+			}
+		}
+		narrowed := docs[:0]
+		for _, d := range docs {
+			if (d.SHA != "" && want[d.SHA]) || (d.URL != "" && want[d.URL]) {
+				narrowed = append(narrowed, d)
+			}
+		}
+		docs = narrowed
+	}
+
+	if len(docs) == 0 {
+		return `{"error":"no documents matched the selection"}`
+	}
+
+	// Build the run and stream id. Stream id is opaque to the
+	// frontend — it just needs something unique per invocation so
+	// events can be routed back to the right modal surface.
+	streamID := fmt.Sprintf("act-%d", time.Now().UnixNano())
+
+	runCtx, cancel := context.WithCancel(a.ctx)
+	a.activityAnalysesMu.Lock()
+	a.activityAnalyses[streamID] = cancel
+	a.activityAnalysesMu.Unlock()
+
+	analyzeReq := glitchd.ActivityAnalyzeRequest{
+		Source:           req.Source,
+		WorkspaceID:      wsID,
+		Docs:             docs,
+		UserPrompt:       req.UserPrompt,
+		ParentAnalysisID: req.ParentAnalysisID,
+		Model:            req.Model,
+	}
+
+	// Kick off the run in its own goroutine. The analyzer writes
+	// stream events to `events`; we drain that channel and fan
+	// them out as Wails events on brain:analysis:stream keyed by
+	// streamID. When the channel closes, we persist the final
+	// AnalysisResult and emit a kind=analysis brain:activity row
+	// so the sidebar gets a permanent record of the run.
+	events := make(chan glitchd.ActivityAnalysisStreamEvent, 32)
+	go func() {
+		result := glitchd.RunActivityAnalysis(runCtx, analyzeReq, events)
+		// Persist + emit happen after the channel has been drained
+		// below; the goroutine that reads `events` waits on it.
+		// Stash the result on the streamID so that reader can pick
+		// it up. We use a tiny per-id bucket to avoid a global
+		// result map.
+		a.activityResultsMu.Lock()
+		if a.activityResults == nil {
+			a.activityResults = map[string]glitchd.AnalysisResult{}
+		}
+		a.activityResults[streamID] = result
+		a.activityResultsMu.Unlock()
+	}()
+
+	go func() {
+		// Forward stream events. The run goroutine closes `events`
+		// on termination; ranging stops cleanly after that.
+		for ev := range events {
+			runtime.EventsEmit(a.ctx, "brain:analysis:stream", map[string]any{
+				"streamId": streamID,
+				"kind":     ev.Kind,
+				"data":     ev.Data,
+				"error":    ev.Error,
+			})
+		}
+		// The run goroutine may still be finalizing the result
+		// map entry when the channel closes — it does the close
+		// BEFORE writing the result. Wait briefly for the result
+		// to land so we can persist + emit a complete analysis
+		// row. If it doesn't land inside the small grace window
+		// the run must have panicked; we skip persistence.
+		var result glitchd.AnalysisResult
+		for i := 0; i < 20; i++ {
+			a.activityResultsMu.Lock()
+			r, ok := a.activityResults[streamID]
+			if ok {
+				result = r
+				delete(a.activityResults, streamID)
+			}
+			a.activityResultsMu.Unlock()
+			if ok {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+
+		a.activityAnalysesMu.Lock()
+		delete(a.activityAnalyses, streamID)
+		a.activityAnalysesMu.Unlock()
+		cancel()
+
+		if result.Markdown != "" {
+			glitchd.PersistActivityAnalysis(a.ctx, glitchd.EsClient(), result, req.ParentAnalysisID)
+			// Emit a kind=analysis brain:activity row so the
+			// sidebar gets a permanent entry the user can
+			// reopen later. Include parent_id so the frontend
+			// can render threaded chains when it wants to.
+			a.handleAnalysisResultWithParent(result, req.ParentAnalysisID)
+		}
+	}()
+
+	b, _ := json.Marshal(map[string]any{"streamId": streamID})
+	return string(b)
+}
+
+// CancelActivityAnalysis aborts an in-flight ad-hoc activity
+// analysis by its streamID. No-op when the stream id doesn't
+// match a running analysis. Safe to call repeatedly.
+func (a *App) CancelActivityAnalysis(streamID string) {
+	if streamID == "" {
+		return
+	}
+	a.activityAnalysesMu.Lock()
+	cancel, ok := a.activityAnalyses[streamID]
+	if ok {
+		delete(a.activityAnalyses, streamID)
+	}
+	a.activityAnalysesMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// handleAnalysisResultWithParent is the extra-carrying variant of
+// handleAnalysisResult used by the ad-hoc activity analysis path.
+// Identical payload plus an optional parent_id so the frontend can
+// thread refinements under their base analysis.
+func (a *App) handleAnalysisResultWithParent(r glitchd.AnalysisResult, parentID string) {
+	if r.Markdown == "" {
+		return
+	}
+	now := time.Now()
+	title := r.Title
+	if title == "" {
+		title = fmt.Sprintf("%s · analysis", r.Source)
+	}
+	payload := map[string]any{
+		"id":           now.UnixNano(),
+		"kind":         "analysis",
+		"severity":     "info",
+		"title":        title,
+		"detail":       r.Markdown,
+		"source":       r.Source,
+		"repo":         r.Repo,
+		"event_type":   r.Type,
+		"event_key":    r.EventKey,
+		"model":        r.Model,
+		"duration_ms":  r.Duration.Milliseconds(),
+		"workspace_id": r.WorkspaceID,
+		"timestamp":    now.UnixMilli(),
+	}
+	if parentID != "" {
+		payload["parent_id"] = parentID
+	}
+	runtime.EventsEmit(a.ctx, "brain:activity", payload)
 }
 
 // ── Notify ──────────────────────────────────────────────────────────────────

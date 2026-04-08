@@ -21,11 +21,11 @@
  * same spacing — so users moving between surfaces don't see
  * style drift.
  */
-import { Activity, X, Trash2, Sparkles, ChevronRight } from "lucide-react";
+import { Activity, X, Trash2, Sparkles, ChevronRight, ExternalLink } from "lucide-react";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { BrainActivity } from "@/lib/types";
+import type { BrainActivity, ActivityItem } from "@/lib/types";
 import { formatRelative, formatTime12 } from "@/lib/time";
 
 interface Props {
@@ -44,6 +44,12 @@ interface Props {
    *  so users with a long-running session can wipe noise without
    *  restarting. Wired iff the parent passes a handler. */
   onClear?: () => void;
+  /** Open the indexed-docs drill-in modal scoped to a source and
+   *  optional time window. Called when the user clicks an
+   *  indexing-kind row's "View all" affordance or an alert-kind
+   *  row. The parent owns the modal so its state survives
+   *  sidebar toggles. */
+  onOpenIndexedDocs?: (source: string, sinceMs?: number, initialPrompt?: string) => void;
 }
 
 export function ActivitySidebar({
@@ -51,6 +57,7 @@ export function ActivitySidebar({
   onMarkRead,
   onClose,
   onClear,
+  onOpenIndexedDocs,
 }: Props) {
   const unreadCount = activity.filter((a) => a.unread).length;
 
@@ -170,7 +177,13 @@ export function ActivitySidebar({
             flagging.
           </div>
         ) : (
-          activity.map((entry) => <ActivityRow key={entry.id} entry={entry} />)
+          activity.map((entry) => (
+            <ActivityRow
+              key={entry.id}
+              entry={entry}
+              onOpenIndexedDocs={onOpenIndexedDocs}
+            />
+          ))
         )}
       </div>
     </div>
@@ -193,11 +206,25 @@ export function ActivitySidebar({
 // independently. The popover's row stays compact; the sidebar's row
 // can grow rich affordances like the analysis expand state without
 // dragging the popover along.
-function ActivityRow({ entry }: { entry: BrainActivity }) {
+function ActivityRow({
+  entry,
+  onOpenIndexedDocs,
+}: {
+  entry: BrainActivity;
+  onOpenIndexedDocs?: (source: string, sinceMs?: number, initialPrompt?: string) => void;
+}) {
   const isAnalysis = entry.kind === "analysis";
-  // Analysis rows expand on click. Collapsed by default so the
-  // activity panel doesn't become a wall of text after a busy
-  // collector tick — the user opts into the deep view per row.
+  // Indexing rows are checkin-kind (or alert-kind for large
+  // deltas) that carry an `items` preview. They behave like
+  // analysis rows — expandable on click — but reveal a list of
+  // preview docs instead of a markdown body.
+  const hasIndexingPreview =
+    !isAnalysis && (entry.items?.length ?? 0) > 0 && !!entry.source;
+  const isClickable = isAnalysis || hasIndexingPreview;
+  // Analysis and indexing rows both expand on click. Collapsed
+  // by default so the activity panel doesn't become a wall of
+  // text after a busy collector tick — the user opts into the
+  // deep view per row.
   const [expanded, setExpanded] = useState(false);
 
   const sevColor = isAnalysis
@@ -213,9 +240,9 @@ function ActivityRow({ entry }: { entry: BrainActivity }) {
       style={{
         padding: "10px 14px",
         borderBottom: "1px solid var(--border)",
-        cursor: isAnalysis ? "pointer" : "default",
+        cursor: isClickable ? "pointer" : "default",
       }}
-      onClick={isAnalysis ? () => setExpanded((v) => !v) : undefined}
+      onClick={isClickable ? () => setExpanded((v) => !v) : undefined}
     >
       <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
         {/* Severity dot — purple for analysis, severity-color for others */}
@@ -257,7 +284,7 @@ function ActivityRow({ entry }: { entry: BrainActivity }) {
             >
               {entry.title}
             </span>
-            {isAnalysis && (
+            {isClickable && (
               <ChevronRight
                 size={11}
                 style={{
@@ -312,12 +339,68 @@ function ActivityRow({ entry }: { entry: BrainActivity }) {
         </div>
       </div>
 
+      {/* Expanded preview for indexing rows — shows the items
+          array the backend attaches to collector check-in events.
+          Each item is one recently-indexed doc: title + source
+          badge + timestamp. A "View all" / "Analyze" action row
+          opens the drill-in modal scoped to this row's source and
+          time window. */}
+      {hasIndexingPreview && expanded && (
+        <div
+          style={{
+            marginTop: 8,
+            marginLeft: 16,
+            padding: "6px 0",
+            borderTop: "1px dashed var(--border)",
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {(entry.items ?? []).map((it, i) => (
+            <IndexingPreviewItem key={`${it.sha || it.url || i}`} item={it} />
+          ))}
+          {onOpenIndexedDocs && entry.source && (
+            <button
+              type="button"
+              onClick={() =>
+                onOpenIndexedDocs(
+                  entry.source!,
+                  entry.window_from_ms && entry.window_from_ms > 0
+                    ? entry.window_from_ms
+                    : undefined,
+                )
+              }
+              style={{
+                marginTop: 6,
+                width: "100%",
+                background: "transparent",
+                border: "1px solid var(--border)",
+                color: "var(--cyan)",
+                padding: "6px 10px",
+                borderRadius: 6,
+                fontSize: 10,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                fontWeight: 600,
+              }}
+            >
+              <ExternalLink size={10} /> View all &amp; analyze
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Expanded markdown body for analysis rows. Indented to align
           with the title text under the severity dot. Uses the same
           ReactMarkdown + remark-gfm pipeline TextBlock uses so code
           blocks, lists, headings all render consistently. */}
       {isAnalysis && expanded && (
         <div
+          key="analysis-body"
           style={{
             marginTop: 8,
             marginLeft: 16,
@@ -357,6 +440,53 @@ function ActivityRow({ entry }: { entry: BrainActivity }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * IndexingPreviewItem renders one doc from the preview list the
+ * backend attaches to collector indexing events. Tight one-line
+ * layout so 5 of them fit comfortably under an expanded row
+ * without the sidebar feeling crowded.
+ */
+function IndexingPreviewItem({ item }: { item: ActivityItem }) {
+  return (
+    <div
+      style={{
+        padding: "4px 6px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 2,
+      }}
+    >
+      <div
+        style={{
+          color: "var(--fg)",
+          fontSize: 11,
+          lineHeight: 1.35,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+        title={item.title}
+      >
+        {item.title}
+      </div>
+      <div
+        style={{
+          color: "var(--fg-dim)",
+          fontSize: 9,
+          fontFamily: "monospace",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {[item.type, item.repo, item.author && `@${item.author}`]
+          .filter(Boolean)
+          .join(" · ")}
+      </div>
     </div>
   );
 }

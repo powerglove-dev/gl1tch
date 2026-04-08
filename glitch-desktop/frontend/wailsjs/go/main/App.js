@@ -10,6 +10,10 @@ export function AgentPathForName(arg1, arg2) {
   return window['go']['main']['App']['AgentPathForName'](arg1, arg2);
 }
 
+export function AnalyzeActivityChunks(arg1) {
+  return window['go']['main']['App']['AnalyzeActivityChunks'](arg1);
+}
+
 export function AnswerClarification(arg1, arg2) {
   return window['go']['main']['App']['AnswerClarification'](arg1, arg2);
 }
@@ -24,6 +28,10 @@ export function AskScoped(arg1, arg2) {
 
 export function BrainDecisions(arg1) {
   return window['go']['main']['App']['BrainDecisions'](arg1);
+}
+
+export function CancelActivityAnalysis(arg1) {
+  return window['go']['main']['App']['CancelActivityAnalysis'](arg1);
 }
 
 export function CollectorsConfigPath(arg1) {
@@ -88,6 +96,10 @@ export function ListCollectors(arg1) {
 
 export function ListDrafts(arg1, arg2) {
   return window['go']['main']['App']['ListDrafts'](arg1, arg2);
+}
+
+export function ListIndexedDocs(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ListIndexedDocs'](arg1, arg2, arg3);
 }
 
 export function ListPrompts() {

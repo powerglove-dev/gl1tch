@@ -46,6 +46,10 @@ tuishot
 plugins/*/github-copilot
 plugins/*/ollama
 plugins/*/opencode
+plugins/claude/claude
+plugins/codex/codex
+plugins/codex/glitch-codex
+plugins/gemini/gemini
 
 # Runtime brain dir + scratch
 glitch_db/

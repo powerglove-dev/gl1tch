@@ -11,6 +11,7 @@ import { EditorPopup } from "./components/EditorPopup";
 import { PausePanel } from "./components/PausePanel";
 import { parseAgentOutput } from "./lib/parseAgentOutput";
 import { CollectorConfigModal } from "./components/collectors/CollectorConfigModal";
+import { IndexedDocsModal } from "./components/IndexedDocsModal";
 import { useToast } from "./components/Toast";
 
 import { useChatStore } from "./lib/store";
@@ -50,6 +51,7 @@ import {
   SetActiveWorkspace,
 } from "../wailsjs/go/main/App";
 import type { Message, Block, BrainActivity } from "./lib/types";
+import { appendAnalysisStream } from "./lib/analysisStreams";
 
 export function App() {
   const {
@@ -104,6 +106,15 @@ export function App() {
   // BrainIndicator emits the request, App owns the modal lifecycle.
   const [collectorConfig, setCollectorConfig] = useState<
     { initialCollectorId?: string } | null
+  >(null);
+  // Indexed-docs drill-in modal state. Opened when the user clicks
+  // "View all & analyze" under an indexing-kind activity row, or
+  // an alert-kind row with referenced docs. Null means closed; the
+  // object carries the target source, an optional lower-bound ms
+  // timestamp for the doc query, and an optional pre-filled prompt
+  // (used by alert-kind rows that carry the LLM judge's hook).
+  const [indexedDocs, setIndexedDocs] = useState<
+    { source: string; sinceMs?: number; initialPrompt?: string } | null
   >(null);
 
   // Observer default model — what "observer" mode delegates to when a chain
@@ -214,8 +225,40 @@ export function App() {
       workspace_id: d.workspace_id,
       timestamp: d.timestamp ?? Date.now(),
       unread: true,
+      // Optional indexing/preview + refinement fields. Older backend
+      // builds don't set these; the row renderer handles undefined
+      // gracefully. Cast through `any` because the Wails payload
+      // doesn't carry them on Partial<BrainActivity>.
+      items: (d as any).items,
+      delta: (d as any).delta,
+      source_total: (d as any).source_total,
+      last_seen_ms: (d as any).last_seen_ms,
+      window_from_ms: (d as any).window_from_ms,
+      parent_id: (d as any).parent_id,
     };
     addBrainActivity(entry);
+  });
+
+  // brain:analysis:stream — token/done/error events from an in-flight
+  // ad-hoc activity analysis (AnalyzeActivityChunks on the backend).
+  // We pipe each event into the store slice keyed by streamId; the
+  // IndexedDocsModal subscribes to its own streamId and renders the
+  // accumulated tokens as they arrive.
+  useWailsEvent("brain:analysis:stream", (data: unknown) => {
+    if (!data || typeof data !== "object") return;
+    const d = data as {
+      streamId?: string;
+      kind?: "token" | "done" | "error";
+      data?: string;
+      error?: string;
+    };
+    if (!d.streamId || !d.kind) return;
+    appendAnalysisStream(d.streamId, {
+      streamId: d.streamId,
+      kind: d.kind,
+      data: d.data,
+      error: d.error,
+    });
   });
 
   useWailsEvent("workspace:updated", (data: unknown) => {
@@ -1127,6 +1170,9 @@ export function App() {
             activity={state.brainActivity}
             onMarkRead={markBrainRead}
             onClose={toggleActivitySidebar}
+            onOpenIndexedDocs={(source, sinceMs, initialPrompt) =>
+              setIndexedDocs({ source, sinceMs, initialPrompt })
+            }
           />
         )}
       </div>
@@ -1158,6 +1204,19 @@ export function App() {
           onClose={closeCollectorConfig}
           onSaved={refreshSidebarData}
           onEditRawYAML={handleEditCollectors}
+        />
+      )}
+
+      {/* Indexed-docs drill-in modal — opened from the activity
+          sidebar's indexing-kind rows. Streams opencode + qwen2.5:7b
+          output over brain:analysis:stream as the user runs or
+          refines analyses. */}
+      {indexedDocs && (
+        <IndexedDocsModal
+          source={indexedDocs.source}
+          sinceMs={indexedDocs.sinceMs}
+          initialPrompt={indexedDocs.initialPrompt}
+          onClose={() => setIndexedDocs(null)}
         />
       )}
     </div>

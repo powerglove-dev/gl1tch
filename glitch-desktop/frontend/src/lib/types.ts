@@ -146,6 +146,59 @@ export type BrainState =
 export type BrainSeverity = "info" | "warn" | "error";
 
 /**
+ * One preview item attached to an indexing-kind activity row. The
+ * backend's collector refresh query fetches the top 5 most recent
+ * newly-indexed docs per source and serializes them on the event
+ * payload so the sidebar can render "N new + top 5 titles" inline
+ * without a separate fetch. The drill-in modal re-queries for the
+ * full set when the user clicks "View all".
+ */
+export interface ActivityItem {
+  source: string;
+  type?: string;
+  repo?: string;
+  author?: string;
+  sha?: string;
+  title: string;
+  url?: string;
+  timestamp_ms?: number;
+}
+
+/**
+ * One indexed document in the drill-in modal's list pane. Shape
+ * matches pkg/glitchd RecentEvent (serialized through the
+ * ListIndexedDocs Wails binding). Files is optional because some
+ * sources don't track file-level changes.
+ */
+export interface IndexedDoc {
+  type?: string;
+  source: string;
+  repo?: string;
+  branch?: string;
+  author?: string;
+  sha?: string;
+  message?: string;
+  body?: string;
+  files?: string[];
+  url?: string;
+  timestamp_ms?: number;
+}
+
+/**
+ * Stream event delivered over the brain:analysis:stream Wails event
+ * from AnalyzeActivityChunks. Tokens arrive as kind="token" with
+ * the delta text; the stream terminates with kind="done" (success)
+ * or kind="error" (failure). Error carries the human-readable
+ * reason.
+ */
+export interface AnalysisStreamEvent {
+  streamId: string;
+  kind: "token" | "done" | "error";
+  data?: string;
+  error?: string;
+}
+
+/**
  * One entry in the Activity panel. The brain emits three flavors:
  *  - "alert": something the user should look at (severity warn/error)
  *  - "checkin": low-noise periodic status ("watching", "stored 12 commits…")
@@ -172,4 +225,17 @@ export interface BrainActivity {
   timestamp: number;
   /** True until the user has opened the brain panel after this landed. */
   unread: boolean;
+  /** Indexing-kind extras: preview items + delta bookkeeping so the
+   *  row can render inline previews and the drill-in modal can open
+   *  scoped to the right time window. All optional — older-shape
+   *  activity events without these fields still render. */
+  items?: ActivityItem[];
+  delta?: number;
+  source_total?: number;
+  last_seen_ms?: number;
+  window_from_ms?: number;
+  /** Analysis refinement chain pointer. When present, the analysis
+   *  row refines an earlier analysis with this event_key. Used by
+   *  the frontend to render threaded chains; purely informational. */
+  parent_id?: string;
 }

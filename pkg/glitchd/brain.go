@@ -680,6 +680,155 @@ func QueryRecentCollectorEvents(ctx context.Context, workspaceID, source string,
 	return out, nil
 }
 
+// QueryIndexedDocsForActivity is the time-windowed variant of
+// QueryRecentCollectorEvents used by the activity sidebar's
+// drill-in modal. Same workspace-scoped bool-should as the
+// collector activity query, same `source` keyword filter, same
+// RecentEvent shape — but with an optional `sinceMs` lower bound
+// so the modal can open scoped to "docs indexed in the last 30s"
+// when the user clicks an indexing-kind activity row.
+//
+// sinceMs == 0 means "no lower bound" (return the most recent
+// `limit` docs regardless of age). limit is clamped to [1, 500]
+// so a malicious or buggy caller can't accidentally pull the
+// whole index.
+//
+// Errors when the index doesn't exist yet are translated to an
+// empty slice (not an error) so the modal can render "no docs
+// yet" cleanly on fresh installs.
+func QueryIndexedDocsForActivity(ctx context.Context, workspaceID, source string, sinceMs int64, limit int) ([]RecentEvent, error) {
+	if source == "" {
+		return nil, fmt.Errorf("source is required")
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	cfg, err := capability.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	addr := cfg.Elasticsearch.Address
+	if addr == "" {
+		addr = "http://localhost:9200"
+	}
+
+	// Same workspace-scoping bool-should QueryCollectorActivityScoped
+	// and QueryRecentCollectorEvents use: active workspace, the
+	// tools sentinel, OR missing workspace_id (pre-stamping legacy
+	// docs). Keeps the three query paths consistent so users don't
+	// see different subsets of the same data across the popover,
+	// the expand-to-see-content path, and the drill-in modal.
+	var scopeFilter string
+	if workspaceID == "" {
+		scopeFilter = `{"match_all": {}}`
+	} else {
+		scopeFilter = fmt.Sprintf(`{
+			"bool": {
+				"should": [
+					{ "terms": { "workspace_id": [%q, %q] } },
+					{ "bool": { "must_not": { "exists": { "field": "workspace_id" } } } }
+				],
+				"minimum_should_match": 1
+			}
+		}`, workspaceID, capability.WorkspaceIDTools)
+	}
+
+	// Optional timestamp range. ES filters are AND'd by default in
+	// a filter context, so we just tack the range on the end. When
+	// sinceMs is zero we omit the range entirely — the modal's
+	// "view all recent docs for this source" path doesn't want a
+	// lower bound.
+	var timeRange string
+	if sinceMs > 0 {
+		timeRange = fmt.Sprintf(`, { "range": { "timestamp": { "gte": %d, "format": "epoch_millis" } } }`, sinceMs)
+	}
+
+	body := fmt.Sprintf(`{
+		"size": %d,
+		"sort": [{ "timestamp": "desc" }],
+		"query": {
+			"bool": {
+				"filter": [
+					{ "term": { "source": %q } },
+					%s
+					%s
+				]
+			}
+		}
+	}`, limit, source, scopeFilter, timeRange)
+
+	url := fmt.Sprintf("%s/glitch-events/_search", addr)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader([]byte(body)))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	hc := &http.Client{Timeout: 5 * time.Second}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		return []RecentEvent{}, nil
+	}
+	if resp.StatusCode >= 400 {
+		raw, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("elasticsearch %d: %s", resp.StatusCode, string(raw))
+	}
+
+	var parsed struct {
+		Hits struct {
+			Hits []struct {
+				Source map[string]any `json:"_source"`
+			} `json:"hits"`
+		} `json:"hits"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return nil, err
+	}
+
+	out := make([]RecentEvent, 0, len(parsed.Hits.Hits))
+	for _, h := range parsed.Hits.Hits {
+		src := h.Source
+		ev := RecentEvent{
+			Type:    asString(src["type"]),
+			Source:  asString(src["source"]),
+			Repo:    asString(src["repo"]),
+			Branch:  asString(src["branch"]),
+			Author:  asString(src["author"]),
+			SHA:     asString(src["sha"]),
+			Message: asString(src["message"]),
+			Body:    truncString(asString(src["body"]), 2000),
+		}
+		if raw, ok := src["files_changed"].([]any); ok {
+			for _, f := range raw {
+				if s, ok := f.(string); ok && s != "" {
+					ev.Files = append(ev.Files, s)
+				}
+			}
+		}
+		if md, ok := src["metadata"].(map[string]any); ok {
+			if u, ok := md["url"].(string); ok {
+				ev.URL = u
+			}
+		}
+		if ts, ok := src["timestamp"].(string); ok {
+			if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+				ev.TimestampMs = t.UnixMilli()
+			}
+		}
+		out = append(out, ev)
+	}
+	return out, nil
+}
+
 func asString(v any) string {
 	if s, ok := v.(string); ok {
 		return s
