@@ -94,6 +94,15 @@ type ActivityAnalyzeRequest struct {
 	// keeps this function free of ES coupling and lets the
 	// caller decide how much of each doc to include.
 	Docs []RecentEvent
+	// EntryKeys identifies which docs in Docs the user actually
+	// selected in the modal, versus which were pulled in by
+	// thread expansion. Values are dedupeKey(doc) for each
+	// entry-point doc. The prompt formatter uses this to mark
+	// entry points distinctly so the model knows what the user
+	// cares about and what is supporting context. Empty map or
+	// nil treats every doc as an entry point (pre-expansion
+	// behaviour).
+	EntryKeys map[string]bool
 	// UserPrompt is the optional free-form question the user
 	// typed into the analysis pane. Empty is fine — the rubric
 	// handles the no-prompt case.
@@ -165,7 +174,7 @@ func RunActivityAnalysis(
 	prompt, err := RenderPrompt("activity_analyzer", map[string]string{
 		"USER_PROMPT": userPromptOrPlaceholder(req.UserPrompt),
 		"DOC_COUNT":   fmt.Sprintf("%d", len(req.Docs)),
-		"DOCUMENTS":   formatDocsForPrompt(req.Docs),
+		"DOCUMENTS":   formatDocsForPromptWithEntries(req.Docs, req.EntryKeys),
 	})
 	if err != nil {
 		sendStreamError(out, fmt.Sprintf("analyzer prompt missing: %v", err))
@@ -411,15 +420,43 @@ func userPromptOrPlaceholder(p string) string {
 // makes the prompt fragile. The curated fields here are the ones
 // the rubric actually asks the model to reason about.
 func formatDocsForPrompt(docs []RecentEvent) string {
+	return formatDocsForPromptWithEntries(docs, nil)
+}
+
+// formatDocsForPromptWithEntries is the entry-aware variant. When
+// entryKeys is non-empty, each doc header is tagged as either
+// [ENTRY POINT] (the user selected this in the modal) or
+// [CONTEXT] (thread expansion pulled it in). This lets the rubric
+// tell the model what the user actually cares about versus what
+// is there for conversation grounding.
+//
+// Body truncation is adaptive: for small selections (≤ 8 docs)
+// the full body passes through, because the whole point of
+// selecting a handful of docs is to dive deep on them. For larger
+// selections we fall back to the 1500-char cap to keep the total
+// prompt bounded.
+func formatDocsForPromptWithEntries(docs []RecentEvent, entryKeys map[string]bool) string {
 	if len(docs) == 0 {
 		return "(no documents)"
+	}
+	bodyCap := 1500
+	if len(docs) <= 8 {
+		bodyCap = 0 // no truncation
 	}
 	var b strings.Builder
 	for i, d := range docs {
 		if i > 0 {
 			b.WriteString("\n\n")
 		}
-		fmt.Fprintf(&b, "— Document %d —\n", i+1)
+		tag := ""
+		if len(entryKeys) > 0 {
+			if entryKeys[dedupeKey(d)] {
+				tag = " [ENTRY POINT]"
+			} else {
+				tag = " [CONTEXT]"
+			}
+		}
+		fmt.Fprintf(&b, "— Document %d%s —\n", i+1, tag)
 		fmt.Fprintf(&b, "source: %s\n", d.Source)
 		if d.Type != "" {
 			fmt.Fprintf(&b, "type: %s\n", d.Type)
@@ -439,6 +476,12 @@ func formatDocsForPrompt(docs []RecentEvent) string {
 		if d.URL != "" {
 			fmt.Fprintf(&b, "url: %s\n", d.URL)
 		}
+		if d.IssueNumber > 0 {
+			fmt.Fprintf(&b, "issue: #%d\n", d.IssueNumber)
+		}
+		if d.PRNumber > 0 {
+			fmt.Fprintf(&b, "pr: #%d\n", d.PRNumber)
+		}
 		if d.TimestampMs > 0 {
 			t := time.UnixMilli(d.TimestampMs).UTC().Format(time.RFC3339)
 			fmt.Fprintf(&b, "timestamp: %s\n", t)
@@ -447,8 +490,8 @@ func formatDocsForPrompt(docs []RecentEvent) string {
 			fmt.Fprintf(&b, "message: %s\n", msg)
 		}
 		if body := strings.TrimSpace(d.Body); body != "" {
-			if len(body) > 1500 {
-				body = body[:1500] + "…"
+			if bodyCap > 0 && len(body) > bodyCap {
+				body = body[:bodyCap] + "…"
 			}
 			fmt.Fprintf(&b, "body:\n%s\n", body)
 		}

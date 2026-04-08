@@ -535,6 +535,17 @@ type RecentEvent struct {
 	Files       []string `json:"files,omitempty"`
 	URL         string   `json:"url,omitempty"`
 	TimestampMs int64    `json:"timestamp_ms,omitempty"`
+	// IssueNumber is the parent issue number for github.issue_comment
+	// docs and the issue's own number for github.issue docs. Zero when
+	// the doc isn't part of an issue thread. Populated from ES metadata
+	// so downstream callers (thread expansion) can join without
+	// re-parsing message strings.
+	IssueNumber int `json:"issue_number,omitempty"`
+	// PRNumber is the parent PR number for github.pr_comment,
+	// github.pr_review, and github.pr_check docs, and the PR's own
+	// number for github.pullrequest docs. Zero when the doc isn't
+	// part of a PR thread.
+	PRNumber int `json:"pr_number,omitempty"`
 }
 
 // QueryRecentCollectorEvents pulls the most recent N indexed events
@@ -675,6 +686,7 @@ func QueryRecentCollectorEvents(ctx context.Context, workspaceID, source string,
 				ev.TimestampMs = t.UnixMilli()
 			}
 		}
+		populateRefNumbers(&ev, src)
 		out = append(out, ev)
 	}
 	return out, nil
@@ -824,9 +836,62 @@ func QueryIndexedDocsForActivity(ctx context.Context, workspaceID, source string
 				ev.TimestampMs = t.UnixMilli()
 			}
 		}
+		populateRefNumbers(&ev, src)
 		out = append(out, ev)
 	}
 	return out, nil
+}
+
+// populateRefNumbers fills IssueNumber / PRNumber from an ES
+// _source's metadata map. The github collector stores these under
+// different field names depending on the event type:
+//
+//	github.issue         → metadata.number
+//	github.issue_comment → metadata.issue_number
+//	github.pullrequest   → metadata.number
+//	github.pr_comment    → metadata.pr_number
+//	github.pr_review     → metadata.pr_number
+//	github.pr_check      → metadata.pr_number
+//
+// Non-github docs have no ref numbers and this is a no-op. We check
+// the doc type first so an unrelated "number" metadata field on some
+// future collector can't accidentally get interpreted as an issue
+// number.
+func populateRefNumbers(ev *RecentEvent, src map[string]any) {
+	md, ok := src["metadata"].(map[string]any)
+	if !ok {
+		return
+	}
+	switch ev.Type {
+	case "github.issue":
+		ev.IssueNumber = asInt(md["number"])
+	case "github.issue_comment":
+		ev.IssueNumber = asInt(md["issue_number"])
+	case "github.pullrequest":
+		ev.PRNumber = asInt(md["number"])
+	case "github.pr_comment", "github.pr_review", "github.pr_check":
+		ev.PRNumber = asInt(md["pr_number"])
+	}
+}
+
+// asInt best-effort coerces a JSON-decoded value into an int. ES
+// numeric fields arrive as float64 from encoding/json; strings that
+// happen to hold digits are also accepted for robustness against
+// collector drift. Returns 0 for anything unrecognised.
+func asInt(v any) int {
+	switch x := v.(type) {
+	case float64:
+		return int(x)
+	case int:
+		return x
+	case int64:
+		return int(x)
+	case string:
+		var n int
+		_, _ = fmt.Sscanf(x, "%d", &n)
+		return n
+	}
+	return 0
 }
 
 func asString(v any) string {

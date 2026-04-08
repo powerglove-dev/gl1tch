@@ -14,9 +14,21 @@ The user's question (may be empty):
 
 {{USER_PROMPT}}
 
-The {{DOC_COUNT}} document(s) they selected:
+The {{DOC_COUNT}} document(s) in scope:
 
 {{DOCUMENTS}}
+
+Documents are tagged **[ENTRY POINT]** or **[CONTEXT]**. Entry points
+are what the user actually selected — your answer should ground on
+those. Context documents are the rest of the thread (parent issue,
+sibling comments, the PR the comment lives on) pulled in by gl1tch
+automatically so you have the full conversation. Use context docs to
+understand what the entry points mean, but don't let them steer the
+answer away from what the user picked.
+
+If a selected comment references `#1234`, a SHA, or another doc that
+isn't in the list, use your shell tools (`gh issue view`, `git show`,
+`gh pr view`) to look it up instead of guessing what it said.
 
 ## How to respond
 

@@ -114,7 +114,16 @@ export function App() {
   // timestamp for the doc query, and an optional pre-filled prompt
   // (used by alert-kind rows that carry the LLM judge's hook).
   const [indexedDocs, setIndexedDocs] = useState<
-    { source: string; sinceMs?: number; initialPrompt?: string } | null
+    {
+      source: string;
+      sinceMs?: number;
+      initialPrompt?: string;
+      // preselectRefs pre-ticks docs in the drill-in modal by sha
+      // or url. Used by the per-card Analyze buttons on activity
+      // items so one click opens the modal primed on exactly that
+      // doc and runs analysis against it.
+      preselectRefs?: string[];
+    } | null
   >(null);
 
   // Observer default model — what "observer" mode delegates to when a chain
@@ -1170,8 +1179,8 @@ export function App() {
             activity={state.brainActivity}
             onMarkRead={markBrainRead}
             onClose={toggleActivitySidebar}
-            onOpenIndexedDocs={(source, sinceMs, initialPrompt) =>
-              setIndexedDocs({ source, sinceMs, initialPrompt })
+            onOpenIndexedDocs={(source, sinceMs, initialPrompt, preselectRefs) =>
+              setIndexedDocs({ source, sinceMs, initialPrompt, preselectRefs })
             }
           />
         )}
@@ -1216,6 +1225,7 @@ export function App() {
           source={indexedDocs.source}
           sinceMs={indexedDocs.sinceMs}
           initialPrompt={indexedDocs.initialPrompt}
+          preselectRefs={indexedDocs.preselectRefs}
           onClose={() => setIndexedDocs(null)}
         />
       )}

@@ -127,20 +127,25 @@ function WorkspaceTab({
           title={`Delete ${ws.title}`}
           style={{
             position: "absolute",
-            top: 4,
-            right: 4,
-            background: "none",
-            border: "none",
-            color: "var(--fg-dim)",
+            top: 2,
+            right: 2,
+            width: 16,
+            height: 16,
+            background: "var(--bg-dark)",
+            border: "1px solid var(--border)",
+            color: "var(--red, #ff5555)",
             cursor: "pointer",
-            padding: 2,
-            borderRadius: 3,
+            padding: 0,
+            borderRadius: 4,
             display: "flex",
-            opacity: 0.5,
+            alignItems: "center",
+            justifyContent: "center",
+            opacity: 1,
             lineHeight: 1,
+            boxShadow: "0 1px 3px rgba(0,0,0,0.4)",
           }}
         >
-          <Trash2 size={8} />
+          <Trash2 size={11} />
         </button>
       )}
     </div>

@@ -314,7 +314,7 @@ export function Sidebar({
   return (
     <div style={{
       height: "100%", background: "var(--bg-dark)", borderRight: "1px solid var(--border)",
-      display: "flex", flexDirection: "column", width: 220, minWidth: 220, maxWidth: 220, overflow: "hidden",
+      display: "flex", flexDirection: "column", width: 280, minWidth: 280, maxWidth: 280, overflow: "hidden",
     }}>
       {/* Active workspace header */}
       <div

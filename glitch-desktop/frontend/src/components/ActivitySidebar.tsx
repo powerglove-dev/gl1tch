@@ -48,8 +48,19 @@ interface Props {
    *  optional time window. Called when the user clicks an
    *  indexing-kind row's "View all" affordance or an alert-kind
    *  row. The parent owns the modal so its state survives
-   *  sidebar toggles. */
-  onOpenIndexedDocs?: (source: string, sinceMs?: number, initialPrompt?: string) => void;
+   *  sidebar toggles.
+   *
+   *  preselectRefs is an optional list of sha/url strings the
+   *  modal should mark as selected on load — used by the per-card
+   *  Analyze button so clicking the button on a single item
+   *  opens the modal with exactly that item already ticked and
+   *  the analyzer primed on it. */
+  onOpenIndexedDocs?: (
+    source: string,
+    sinceMs?: number,
+    initialPrompt?: string,
+    preselectRefs?: string[],
+  ) => void;
 }
 
 export function ActivitySidebar({
@@ -64,7 +75,7 @@ export function ActivitySidebar({
   return (
     <div
       style={{
-        width: 320,
+        width: 260,
         flexShrink: 0,
         background: "var(--bg-dark)",
         borderLeft: "1px solid var(--border)",
@@ -211,7 +222,12 @@ function ActivityRow({
   onOpenIndexedDocs,
 }: {
   entry: BrainActivity;
-  onOpenIndexedDocs?: (source: string, sinceMs?: number, initialPrompt?: string) => void;
+  onOpenIndexedDocs?: (
+    source: string,
+    sinceMs?: number,
+    initialPrompt?: string,
+    preselectRefs?: string[],
+  ) => void;
 }) {
   const isAnalysis = entry.kind === "analysis";
   // Indexing rows are checkin-kind (or alert-kind for large
@@ -356,7 +372,26 @@ function ActivityRow({
           onClick={(e) => e.stopPropagation()}
         >
           {(entry.items ?? []).map((it, i) => (
-            <IndexingPreviewItem key={`${it.sha || it.url || i}`} item={it} />
+            <IndexingPreviewItem
+              key={`${it.sha || it.url || i}`}
+              item={it}
+              onAnalyze={
+                onOpenIndexedDocs && entry.source
+                  ? () => {
+                      const ref = it.sha || it.url;
+                      if (!ref) return;
+                      onOpenIndexedDocs(
+                        entry.source!,
+                        entry.window_from_ms && entry.window_from_ms > 0
+                          ? entry.window_from_ms
+                          : undefined,
+                        undefined,
+                        [ref],
+                      );
+                    }
+                  : undefined
+              }
+            />
           ))}
           {onOpenIndexedDocs && entry.source && (
             <button
@@ -450,43 +485,93 @@ function ActivityRow({
  * layout so 5 of them fit comfortably under an expanded row
  * without the sidebar feeling crowded.
  */
-function IndexingPreviewItem({ item }: { item: ActivityItem }) {
+function IndexingPreviewItem({
+  item,
+  onAnalyze,
+}: {
+  item: ActivityItem;
+  /** Opens the drill-in modal with this one card pre-selected and
+   *  the analyzer primed to run on it. When omitted, the Analyze
+   *  affordance is hidden — used for items with no sha/url that
+   *  can't be stably identified on the modal side. */
+  onAnalyze?: () => void;
+}) {
   return (
     <div
       style={{
         padding: "4px 6px",
         display: "flex",
-        flexDirection: "column",
-        gap: 2,
+        alignItems: "flex-start",
+        gap: 6,
       }}
     >
-      <div
-        style={{
-          color: "var(--fg)",
-          fontSize: 11,
-          lineHeight: 1.35,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-        title={item.title}
-      >
-        {item.title}
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+        <div
+          style={{
+            color: "var(--fg)",
+            fontSize: 11,
+            lineHeight: 1.35,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+          title={item.title}
+        >
+          {item.title}
+        </div>
+        <div
+          style={{
+            color: "var(--fg-dim)",
+            fontSize: 9,
+            fontFamily: "monospace",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {[item.type, item.repo, item.author && `@${item.author}`]
+            .filter(Boolean)
+            .join(" · ")}
+        </div>
       </div>
-      <div
-        style={{
-          color: "var(--fg-dim)",
-          fontSize: 9,
-          fontFamily: "monospace",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {[item.type, item.repo, item.author && `@${item.author}`]
-          .filter(Boolean)
-          .join(" · ")}
-      </div>
+      {/* Per-card Analyze button. Clicking opens the drill-in modal
+          with this single doc pre-selected and the analyzer primed
+          to run on it — a one-click path from "I see this in the
+          feed" to "tell me what it means" without making the user
+          open the full list and hunt the row down. */}
+      {onAnalyze && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onAnalyze();
+          }}
+          title="Analyze this document"
+          style={{
+            background: "transparent",
+            border: "1px solid var(--border)",
+            color: "var(--cyan)",
+            padding: "3px 6px",
+            borderRadius: 4,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 3,
+            fontSize: 9,
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background =
+              "rgba(139, 233, 253, 0.08)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+          }}
+        >
+          <Sparkles size={9} />
+          analyze
+        </button>
+      )}
     </div>
   );
 }

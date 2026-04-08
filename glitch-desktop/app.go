@@ -2328,6 +2328,22 @@ func (a *App) AnalyzeActivityChunks(requestJSON string) string {
 		return `{"error":"no documents matched the selection"}`
 	}
 
+	// Thread expansion. For github issue/PR docs, pull the parent
+	// issue/PR and sibling comments so the analyzer has the full
+	// conversation instead of a single orphan comment. Non-github
+	// docs pass through unchanged. Entry-point tracking preserves
+	// which rows the user actually selected so the prompt can tell
+	// them apart from the supporting context.
+	expandCtx, expandCancel := context.WithTimeout(a.ctx, 8*time.Second)
+	expansion := glitchd.ExpandThreads(expandCtx, wsID, docs)
+	expandCancel()
+	expandedDocs := expansion.AllDocs
+	if len(expandedDocs) == 0 {
+		// Expansion bailed on everything — fall back to the raw
+		// selection rather than leaving the analyzer with nothing.
+		expandedDocs = docs
+	}
+
 	// Build the run and stream id. Stream id is opaque to the
 	// frontend — it just needs something unique per invocation so
 	// events can be routed back to the right modal surface.
@@ -2341,7 +2357,8 @@ func (a *App) AnalyzeActivityChunks(requestJSON string) string {
 	analyzeReq := glitchd.ActivityAnalyzeRequest{
 		Source:           req.Source,
 		WorkspaceID:      wsID,
-		Docs:             docs,
+		Docs:             expandedDocs,
+		EntryKeys:        expansion.EntryKeys,
 		UserPrompt:       req.UserPrompt,
 		ParentAnalysisID: req.ParentAnalysisID,
 		Model:            req.Model,

@@ -6,6 +6,8 @@ package esearch
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -192,6 +194,19 @@ func (c *Client) Index(ctx context.Context, index string, id string, doc any) er
 }
 
 // BulkIndex indexes multiple documents in a single bulk request.
+//
+// For glitch-events the action line carries a deterministic _id
+// derived from the doc's natural key (commit sha, issue/PR url,
+// comment hash). That makes the index idempotent across collector
+// re-runs — a git collector polling every 30s would otherwise
+// pile up a fresh ES doc per tick for the same commit, which is
+// exactly the "52 duplicates" bug we saw in the drill-in modal.
+// See bulkEventID for the per-type key scheme.
+//
+// Other indices (analyses, summaries, pipelines, …) still rely on
+// auto-generated ids because their natural key is already encoded
+// in a payload field the caller wants versioned, not overwritten
+// (e.g. each new analysis is its own historical record).
 func (c *Client) BulkIndex(ctx context.Context, index string, docs []any) error {
 	if len(docs) == 0 {
 		return nil
@@ -199,14 +214,23 @@ func (c *Client) BulkIndex(ctx context.Context, index string, docs []any) error 
 
 	var buf bytes.Buffer
 	for _, doc := range docs {
-		// Action line.
-		buf.WriteString(`{"index":{"_index":"` + index + `"}}`)
-		buf.WriteByte('\n')
-		// Document line.
 		b, err := json.Marshal(doc)
 		if err != nil {
 			return fmt.Errorf("esearch: bulk marshal: %w", err)
 		}
+		// Action line. For glitch-events we look up a deterministic
+		// id; everything else falls through to auto-generated ids.
+		if index == IndexEvents {
+			if id := bulkEventID(b); id != "" {
+				action := fmt.Sprintf(`{"index":{"_index":%q,"_id":%q}}`, index, id)
+				buf.WriteString(action)
+			} else {
+				buf.WriteString(`{"index":{"_index":"` + index + `"}}`)
+			}
+		} else {
+			buf.WriteString(`{"index":{"_index":"` + index + `"}}`)
+		}
+		buf.WriteByte('\n')
 		buf.Write(b)
 		buf.WriteByte('\n')
 	}
@@ -225,6 +249,116 @@ func (c *Client) BulkIndex(ctx context.Context, index string, docs []any) error 
 		return fmt.Errorf("esearch: bulk: %s: %s", res.Status(), b)
 	}
 	return nil
+}
+
+// bulkEventID derives a deterministic Elasticsearch document id
+// for a glitch-events doc based on its type and natural key. The
+// goal is idempotent re-indexing: the same underlying observation
+// (a git commit, a github issue, a github PR comment) should land
+// on the same _id every time, so collector re-runs overwrite the
+// existing doc instead of creating a duplicate row.
+//
+// Key scheme, by type:
+//
+//	git.commit          → "git.commit:" + sha
+//	git.push            → "git.push:" + sha (head of push)
+//	github.issue        → "github.issue:" + metadata.url
+//	github.pullrequest  → "github.pullrequest:" + metadata.url
+//	github.issue_comment
+//	github.pr_comment
+//	github.pr_review
+//	github.pr_check     → "<type>:" + repo + ":" + parent_number +
+//	                      ":" + sha1(author+timestamp+body)[:16]
+//	                      (these events don't carry per-object urls
+//	                      in metadata, so we hash the fields that
+//	                      together uniquely identify a comment /
+//	                      review / check run)
+//
+// Anything else returns "" so BulkIndex falls back to the ES
+// auto-generated id. That's the right behaviour for novel event
+// types the collector adds later — they stay visible, and we add
+// a specific id rule when the duplication actually hurts.
+//
+// doc is the already-marshalled JSON body so we only pay the
+// json.Unmarshal cost when we actually need to look inside.
+func bulkEventID(doc []byte) string {
+	var m map[string]any
+	if err := json.Unmarshal(doc, &m); err != nil {
+		return ""
+	}
+	typ, _ := m["type"].(string)
+	if typ == "" {
+		return ""
+	}
+
+	getStr := func(k string) string {
+		s, _ := m[k].(string)
+		return s
+	}
+	getMetaStr := func(k string) string {
+		md, ok := m["metadata"].(map[string]any)
+		if !ok {
+			return ""
+		}
+		s, _ := md[k].(string)
+		return s
+	}
+	getMetaInt := func(k string) int {
+		md, ok := m["metadata"].(map[string]any)
+		if !ok {
+			return 0
+		}
+		switch v := md[k].(type) {
+		case float64:
+			return int(v)
+		case int:
+			return v
+		}
+		return 0
+	}
+
+	switch typ {
+	case "git.commit", "git.push":
+		sha := getStr("sha")
+		if sha == "" {
+			return ""
+		}
+		return typ + ":" + sha
+
+	case "github.issue", "github.pullrequest":
+		url := getMetaStr("url")
+		if url == "" {
+			return ""
+		}
+		return typ + ":" + url
+
+	case "github.issue_comment",
+		"github.pr_comment",
+		"github.pr_review",
+		"github.pr_check":
+		repo := getStr("repo")
+		var parent int
+		if typ == "github.issue_comment" {
+			parent = getMetaInt("issue_number")
+		} else {
+			parent = getMetaInt("pr_number")
+		}
+		if repo == "" || parent == 0 {
+			return ""
+		}
+		h := sha1.New()
+		fmt.Fprintln(h, getStr("author"))
+		fmt.Fprintln(h, getStr("message"))
+		fmt.Fprintln(h, getStr("body"))
+		// timestamp is a JSON string (RFC3339) when marshalled from
+		// esearch.Event, or a time.Time value for tests; Fprintln
+		// handles both via default formatting.
+		fmt.Fprintln(h, m["timestamp"])
+		sum := hex.EncodeToString(h.Sum(nil))[:16]
+		return fmt.Sprintf("%s:%s:%d:%s", typ, repo, parent, sum)
+	}
+
+	return ""
 }
 
 // SearchResult holds one hit from a search query.

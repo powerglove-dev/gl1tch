@@ -55,10 +55,23 @@ interface Props {
   /** Optional initial prompt — set when the modal opens from an
    *  alert row so the alert's hook pre-populates the prompt box. */
   initialPrompt?: string;
+  /** Optional list of doc refs (sha or url) to pre-select when the
+   *  list finishes loading. Used by per-card Analyze buttons on
+   *  activity items: one click opens the modal with exactly that
+   *  doc ticked and the analysis auto-kicks off so the user sees
+   *  results immediately instead of re-picking the card they just
+   *  clicked. */
+  preselectRefs?: string[];
   onClose: () => void;
 }
 
-export function IndexedDocsModal({ source, sinceMs, initialPrompt, onClose }: Props) {
+export function IndexedDocsModal({
+  source,
+  sinceMs,
+  initialPrompt,
+  preselectRefs,
+  onClose,
+}: Props) {
   // ── Doc list state ─────────────────────────────────────────────────
   const [docs, setDocs] = useState<IndexedDoc[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,6 +86,13 @@ export function IndexedDocsModal({ source, sinceMs, initialPrompt, onClose }: Pr
   const [followupPrompt, setFollowupPrompt] = useState("");
   const stream = useAnalysisStream(streamId);
   const analysisScrollRef = useRef<HTMLDivElement | null>(null);
+  // Flag that tracks whether the one-shot preselect+auto-run hook
+  // has already fired for this modal instance. We only want the
+  // per-card "open and analyze" flow to run ONCE when the modal
+  // first opens with preselectRefs, not every time the doc list
+  // refreshes afterwards (refresh shouldn't silently re-kick a
+  // paid LLM run).
+  const didAutoRunRef = useRef(false);
 
   // ── Load documents ─────────────────────────────────────────────────
   const loadDocs = useCallback(() => {
@@ -162,15 +182,22 @@ export function IndexedDocsModal({ source, sinceMs, initialPrompt, onClose }: Pr
   }, []);
 
   // ── Analysis invocation ────────────────────────────────────────────
+  // scope is "all" (no eventRefs filter) or "selected" (build
+  // eventRefs from the current selection state). explicitRefs
+  // bypasses both and sends exactly the refs the caller provides —
+  // used by the per-card auto-run path which can't rely on
+  // selection state being flushed before the call.
   const runAnalysis = useCallback(
-    (scope: "all" | "selected", userPrompt: string) => {
+    (scope: "all" | "selected", userPrompt: string, explicitRefs?: string[]) => {
       if (docs.length === 0) return;
       // Map the selection (or everything) to the eventRefs the
       // backend expects. Only SHAs and URLs are accepted refs —
       // if a selected doc has neither, it silently falls back to
       // "analyze all" because the backend can't filter to it.
-      const refs: string[] = [];
-      if (scope === "selected") {
+      let refs: string[] = [];
+      if (explicitRefs && explicitRefs.length > 0) {
+        refs = explicitRefs;
+      } else if (scope === "selected") {
         docs.forEach((d) => {
           const id = docId(d);
           if (selection.has(id)) {
@@ -232,6 +259,46 @@ export function IndexedDocsModal({ source, sinceMs, initialPrompt, onClose }: Pr
     },
     [docs, docId, selection, source, sinceMs, parentAnalysisId],
   );
+
+  // Per-card Analyze entry point: when the modal opens with
+  // preselectRefs, tick the matched docs and kick off the
+  // analyzer once they've loaded. Guarded by didAutoRunRef so a
+  // later refresh doesn't re-fire the analyzer — the user can
+  // re-trigger explicitly via the Analyze selected button if
+  // they want a re-run. Placed after runAnalysis so the closure
+  // it captures is the current one.
+  useEffect(() => {
+    if (didAutoRunRef.current) return;
+    if (!preselectRefs || preselectRefs.length === 0) return;
+    if (docs.length === 0) return;
+
+    // Match preselectRefs against loaded docs by sha first, url
+    // second. Silently ignore refs that don't resolve to a loaded
+    // doc — they were probably for a doc outside the current
+    // time window and we'd rather open a half-functional modal
+    // than error the user out.
+    const wanted = new Set(preselectRefs);
+    const matched = new Set<string>();
+    const resolvedRefs: string[] = [];
+    docs.forEach((d) => {
+      if (d.sha && wanted.has(d.sha)) {
+        matched.add(docId(d));
+        resolvedRefs.push(d.sha);
+      } else if (d.url && wanted.has(d.url)) {
+        matched.add(docId(d));
+        resolvedRefs.push(d.url);
+      }
+    });
+    if (resolvedRefs.length === 0) return;
+
+    didAutoRunRef.current = true;
+    // Visually tick the matched docs so the list pane reflects
+    // what the analyzer is working over. The auto-run itself
+    // passes explicit refs so it can't race the setSelection
+    // commit — the checkboxes are purely cosmetic here.
+    setSelection(matched);
+    runAnalysis("selected", prompt, resolvedRefs);
+  }, [docs, preselectRefs, docId, prompt, runAnalysis]);
 
   const runFollowup = useCallback(() => {
     if (!followupPrompt.trim() || stream.status !== "done") return;
