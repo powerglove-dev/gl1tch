@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/8op-org/gl1tch/internal/clarify"
 	"github.com/8op-org/gl1tch/internal/cron"
 	"github.com/8op-org/gl1tch/internal/executor"
 	"github.com/8op-org/gl1tch/internal/picker"
@@ -39,6 +40,7 @@ var (
 	askAuto            bool
 	askDryRun          bool
 	askRoute           bool
+	askClarify         bool
 )
 
 func init() {
@@ -55,7 +57,32 @@ func init() {
 	askCmd.Flags().BoolVarP(&askAuto, "auto", "y", false, "skip confirmation for generated workflows")
 	askCmd.Flags().BoolVar(&askDryRun, "dry-run", false, "show what would run without executing")
 	askCmd.Flags().BoolVar(&askRoute, "route", true, "route prompt through intent classifier to find a matching workflow")
+	askCmd.Flags().BoolVar(&askClarify, "clarify", true, "allow the model to ask sharpening questions via GLITCH_CLARIFY (same mechanism the desktop chat uses)")
 }
+
+// startCLIClarifier spins up a stdin-backed answerer for any GLITCH_CLARIFY
+// questions emitted by pipeline steps during this ask. It is the CLI mirror of
+// glitch-desktop/app.go:pollClarifications. Returns a stop func that cancels
+// the poll goroutine and closes the backing store handle; stop is safe to call
+// even if startup failed (it is always non-nil).
+func startCLIClarifier(ctx context.Context) (context.Context, func()) {
+	if !askClarify {
+		return ctx, func() {}
+	}
+	st, err := store.Open()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "clarify: disabled (store open: %v)\n", err)
+		return ctx, func() {}
+	}
+	clarifyCtx, cancel := context.WithCancel(ctx)
+	ans := clarify.NewCLIAnswerer(st, os.Stdin, os.Stderr)
+	go ans.Run(clarifyCtx)
+	return ctx, func() {
+		cancel()
+		_ = st.Close()
+	}
+}
+
 
 var askCmd = &cobra.Command{
 	Use:   "ask [prompt]",
@@ -87,6 +114,12 @@ var askCmd = &cobra.Command{
 				return fmt.Errorf("--synthesize requires a claude provider; none found")
 			}
 		}
+
+		// ── clarification answerer ────────────────────────────────────────────────
+		// Runs for the full lifetime of this ask invocation and covers every
+		// dispatch path below (matched, near-miss, generated, one-shot).
+		_, stopClarify := startCLIClarifier(cmd.Context())
+		defer stopClarify()
 
 		// ── intent routing ────────────────────────────────────────────────────────
 		// `glitch ask` is scoped to improving glitch itself: it routes against
