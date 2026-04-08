@@ -183,6 +183,7 @@ func (r *RAGStore) Query(ctx context.Context, embedder Embedder, q string, topK 
 	if r == nil || r.es == nil {
 		return nil, nil
 	}
+	recordQueryHit()
 	qVec, err := embedder.Embed(ctx, q)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[brainrag] warn: query embed failed: %v\n", err)
@@ -206,6 +207,7 @@ func (r *RAGStore) QueryWithText(ctx context.Context, embedder Embedder, q strin
 	if r == nil || r.es == nil {
 		return nil, nil
 	}
+	recordQueryHit()
 	qVec, err := embedder.Embed(ctx, q)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[brainrag] warn: query embed failed: %v\n", err)
