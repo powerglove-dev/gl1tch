@@ -17,7 +17,7 @@ const (
 	defaultGitHubInterval      = 300 * time.Second
 	defaultDirectoriesInterval = 120 * time.Second
 	defaultCodeIndexInterval   = 30 * time.Minute
-	defaultModel               = "qwen2.5:7b"
+	defaultModel               = DefaultLocalModel
 	defaultAnalysisModel       = "ollama/qwen2.5-coder:latest"
 	defaultAnalysisCooldown    = 30 * time.Second
 )

@@ -57,7 +57,7 @@ func Start(ctx context.Context) (*Service, error) {
 
 	model := cfg.Model
 	if model == "" {
-		model = "qwen2.5:7b"
+		model = capability.DefaultLocalModel
 	}
 
 	svc := &Service{

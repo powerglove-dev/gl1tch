@@ -11,6 +11,8 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/8op-org/gl1tch/internal/capability"
 )
 
 // GameEngine calls Ollama to evaluate run data and narrate the result.
@@ -24,7 +26,7 @@ type GameEngine struct {
 func NewGameEngine() *GameEngine {
 	return &GameEngine{
 		baseURL: "http://localhost:11434",
-		model:   "qwen2.5:7b",
+		model:   capability.DefaultLocalModel,
 		client:  &http.Client{},
 	}
 }

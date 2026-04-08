@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/8op-org/gl1tch/internal/capability"
 	"github.com/8op-org/gl1tch/internal/esearch"
 )
 
@@ -23,10 +24,11 @@ type QueryEngine struct {
 }
 
 // NewQueryEngine creates a query engine backed by the given ES client.
-// model is the Ollama model to use (e.g. "qwen2.5:7b", "qwen2.5").
+// model is the Ollama model to use; when empty, falls back to
+// capability.DefaultLocalModel.
 func NewQueryEngine(es *esearch.Client, model string) *QueryEngine {
 	if model == "" {
-		model = "qwen2.5:7b"
+		model = capability.DefaultLocalModel
 	}
 	return &QueryEngine{es: es, model: model}
 }
@@ -129,17 +131,32 @@ func (q *QueryEngine) StreamScopedWorkspace(ctx context.Context, question string
 // searchScopedWithFallback searches with optional repo and
 // workspace filters applied. Both filters are independently
 // optional and stack when both are set.
+//
+// The scoped path uses the same LLM-generated query as the unscoped
+// path (generateQuery), then stacks scope filters on top. This keeps
+// relevance high for workspace-scoped questions instead of falling
+// back to the blunt defaultQuery.
 func (q *QueryEngine) searchScopedWithFallback(ctx context.Context, question string, repos []string, workspaceID string) (*esearch.SearchResponse, error) {
 	if len(repos) == 0 && workspaceID == "" {
 		return q.searchWithFallback(ctx, question)
 	}
 
-	query := defaultQuery(question)
-	injectScopeFilters(query, repos, workspaceID)
-
-	results, err := q.es.Search(ctx, allIndices(), query)
+	esQuery, err := q.generateQuery(ctx, question)
 	if err != nil {
-		return nil, err
+		esQuery = defaultQuery(question)
+	}
+	injectScopeFilters(esQuery, repos, workspaceID)
+
+	results, err := q.es.Search(ctx, allIndices(), esQuery)
+	if err != nil {
+		// LLM-generated query failed to execute — retry with the
+		// safe default query, still scope-filtered.
+		fallback := defaultQuery(question)
+		injectScopeFilters(fallback, repos, workspaceID)
+		results, err = q.es.Search(ctx, allIndices(), fallback)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return results, nil
 }

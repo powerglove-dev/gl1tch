@@ -12,10 +12,16 @@ import (
 	"time"
 )
 
-// DefaultRouterModel is the local LLM used by Router to pick capabilities.
-// Pinned to qwen2.5:7b for its stronger tool-use / function-calling
-// behaviour compared to llama3.2. Change via Router.Model.
-const DefaultRouterModel = "qwen2.5:7b"
+// DefaultLocalModel is the single source of truth for the default local
+// Ollama model used anywhere inside gl1tch for generation, routing, query
+// synthesis, and game evaluation. Pinned to qwen2.5:7b for its stronger
+// tool-use / function-calling behaviour compared to llama3.2. To swap the
+// default for the entire project, change this one constant.
+const DefaultLocalModel = "qwen2.5:7b"
+
+// DefaultRouterModel is an alias kept for clarity at the router call site.
+// Prefer DefaultLocalModel in new code.
+const DefaultRouterModel = DefaultLocalModel
 
 // DefaultRouterBaseURL is the Ollama endpoint Router talks to. Overridable
 // via Router.BaseURL for tests (the test suite stands up a fake server and

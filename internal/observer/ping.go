@@ -50,7 +50,7 @@ func QueryOnly(ctx context.Context) (*QueryEngine, *esearch.Client, error) {
 
 	model := cfg.Model
 	if model == "" {
-		model = "qwen2.5:7b"
+		model = capability.DefaultLocalModel
 	}
 
 	return NewQueryEngine(es, model), es, nil
