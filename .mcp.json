@@ -14,6 +14,18 @@
     "tmux": {
       "command": "npx",
       "args": ["-y", "tmux-mcp"]
+    },
+    "elasticsearch": {
+      "command": "npx",
+      "args": ["-y", "@elastic/mcp-server-elasticsearch"],
+      "env": {
+        "ES_URL": "${ES_URL:-http://localhost:9200}",
+        "ES_API_KEY": "${ES_API_KEY}"
+      }
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
     }
   }
 }
