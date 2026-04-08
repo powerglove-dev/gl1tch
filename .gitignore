@@ -54,6 +54,9 @@ plugins/gemini/gemini
 # Runtime brain dir + scratch
 glitch_db/
 
+# Smoke test output reports
+test/smoke/out/
+
 # Desktop frontend build cache
 glitch-desktop/frontend/package-lock.json
 glitch-desktop/frontend/package.json.md5
