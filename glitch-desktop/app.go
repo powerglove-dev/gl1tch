@@ -682,39 +682,30 @@ func (a *App) Execute(optsJSON string) string {
 		return result
 	}
 
-	// Freeform text with an explicit provider → provider call.
-	// This is the "I picked Claude/GPT and just want to talk" path.
-	if opts.Provider != "" {
-		a.askProvider(opts.Provider, opts.Model, input, opts.WorkspaceID, opts.AgentPath)
-		return okJSONStr("provider started")
-	}
-
-	// Freeform text, no provider → research loop → thread.
-	// Thread follow-ups carry the existing thread_id so the research
-	// result appends to the same thread instead of spawning a new one.
-	scope := "main"
-	if opts.ThreadID != "" {
-		scope = "thread:" + opts.ThreadID
-	}
-	// DispatchSlash is synchronous (blocks until research completes),
-	// so run it in a goroutine to avoid freezing the Wails call.
+	// Freeform text → research loop → thread.
+	// RunResearch handles the loop, provider wiring, thread creation,
+	// and parent context enrichment. We stream the draft as a chunk
+	// and emit thread_ready so the frontend auto-opens the pane.
 	go func() {
-		result := a.ensureThreads().DispatchSlash(opts.WorkspaceID, input, scope)
-		// Parse the result to check for thread_id and emit an event
-		// so the frontend can auto-open the thread side-pane.
-		var envelope map[string]any
-		if err := json.Unmarshal([]byte(result), &envelope); err == nil {
-			if threadID, ok := envelope["thread_id"].(string); ok && threadID != "" {
-				runtime.EventsEmit(a.ctx, "chat:thread_ready", map[string]any{
-					"workspace_id": opts.WorkspaceID,
-					"thread_id":    threadID,
-					"parent_id":    envelope["parent_id"],
-				})
-			}
-			if errMsg, ok := envelope["error"].(string); ok && errMsg != "" {
-				a.emitError(opts.WorkspaceID, errMsg)
-				return
-			}
+		res := a.ensureThreads().RunResearch(
+			opts.WorkspaceID, input, opts.ThreadID,
+			opts.Provider, opts.Model,
+		)
+		if res.Error != "" {
+			a.emitError(opts.WorkspaceID, res.Error)
+			return
+		}
+		// Stream the draft so the user sees the answer in the chat.
+		if res.Draft != "" {
+			a.emitChunk(opts.WorkspaceID, res.Draft)
+		}
+		// Auto-open the thread pane for new main-scope threads.
+		if res.ParentID != "" && res.ThreadID != "" {
+			runtime.EventsEmit(a.ctx, "chat:thread_ready", map[string]any{
+				"workspace_id": opts.WorkspaceID,
+				"thread_id":    res.ThreadID,
+				"parent_id":    res.ParentID,
+			})
 		}
 		a.emitDone(opts.WorkspaceID)
 	}()

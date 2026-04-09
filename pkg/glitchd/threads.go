@@ -227,46 +227,17 @@ func (h *ThreadHosts) DispatchSlash(workspaceID, line, scopeRaw string) string {
 		return jsonEnvelopeError(err.Error())
 	}
 
-	// Threads-first routing rules:
-	//
-	//   - In the main chat scope, freeform text and /research both
-	//     produce a Slack-style parent summary card + an auto-spawned
-	//     thread containing the full detail. There is no "legacy
-	//     freeform → no reply" path; every question becomes a thread.
-	//
-	//   - In a thread scope, freeform text and /research run the same
-	//     loop but the result is appended to the existing thread
-	//     instead of spawning a new one. Follow-ups in a thread stay
-	//     in that thread.
-	//
-	//   - All other /commands route through the slash registry as
-	//     plain widgets (one-shot, no thread). /help, /status, etc.
-	//     stay flat — chat-threads says only multi-step interactions
-	//     become threads.
-	if scope == chatui.SlashScopeMain {
-		isResearch := line == "/research" || strings.HasPrefix(line, "/research ")
-		isFreeform := !strings.HasPrefix(line, "/")
-		if isResearch || isFreeform {
-			question := line
-			if isResearch {
-				question = strings.TrimSpace(strings.TrimPrefix(line, "/research"))
-			}
-			// The user's typed line was already appended above as a
-			// user message; remove it to avoid double-rendering,
-			// since the parent card already echoes the question.
-			host.store.RemoveLastMain()
-			return host.runResearchAsParentThread(question)
-		}
-	} else if scope.IsThreadScope() {
-		isResearch := line == "/research" || strings.HasPrefix(line, "/research ")
-		isFreeform := !strings.HasPrefix(line, "/")
-		if isResearch || isFreeform {
-			question := line
-			if isResearch {
-				question = strings.TrimSpace(strings.TrimPrefix(line, "/research"))
-			}
-			return host.runResearchInExistingThread(scope.ThreadID(), question)
-		}
+	// DispatchSlash is slash-commands-only. Freeform text and /research
+	// are handled by Execute → RunResearch, which streams results and
+	// wires the user's provider choice. If freeform text arrives here
+	// (shouldn't happen, but defensive), return an error.
+	if !strings.HasPrefix(line, "/") {
+		return jsonEnvelopeError("freeform text should route through Execute, not DispatchSlash")
+	}
+
+	// /research is also handled by Execute now. Redirect with a hint.
+	if line == "/research" || strings.HasPrefix(line, "/research ") {
+		return jsonEnvelopeError("/research is handled by the research loop — type your question directly")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -325,11 +296,11 @@ func (h *ThreadHost) queryContext() map[string]string {
 	return out
 }
 
-// extractParentContext pulls a text summary from the parent ChatMessage so
+// ExtractParentContext pulls a text summary from the parent ChatMessage so
 // thread follow-ups carry the context that spawned the thread. Handles all
 // payload types the attention feed / chat surface produces: widget_card
 // (attention events), text (user questions), evidence bundles, etc.
-func extractParentContext(msg chatui.ChatMessage) string {
+func ExtractParentContext(msg chatui.ChatMessage) string {
 	var b strings.Builder
 	switch p := msg.Payload.(type) {
 	case chatui.TextPayload:
@@ -384,194 +355,6 @@ func extractParentContext(msg chatui.ChatMessage) string {
 		}
 	}
 	return strings.TrimSpace(b.String())
-}
-
-// runResearchAsParentThread runs the research loop and emits one parent
-// summary widget_card in main + an auto-spawned thread carrying the full
-// detail (draft text, evidence bundle). The Slack-style UX hangs off this
-// shape: the main scrollback shows the question + a one-line answer + a
-// "X replies" link, and clicking the link opens the side pane with the
-// thread messages.
-//
-// The function returns the JSON envelope DispatchSlash returns to the
-// frontend; on success, the envelope's `detail` field is the spawned
-// thread's ID so the frontend can immediately auto-open the side pane.
-func (h *ThreadHost) runResearchAsParentThread(question string) string {
-	if h.loop == nil {
-		// No researchers configured. Surface an honest error in main.
-		_, _ = h.store.Append(chatui.ChatMessage{
-			Role:      chatui.RoleAssistant,
-			Type:      chatui.MessageTypeText,
-			Payload:   chatui.TextPayload{Body: "research is not configured for this workspace (no .glitch/workflows directory found)"},
-			CreatedAt: time.Now(),
-		})
-		return jsonEnvelopeError("research not configured")
-	}
-	question = strings.TrimSpace(question)
-	if question == "" {
-		_, _ = h.store.Append(chatui.ChatMessage{
-			Role:      chatui.RoleAssistant,
-			Type:      chatui.MessageTypeText,
-			Payload:   chatui.TextPayload{Body: "Usage: /research <question>"},
-			CreatedAt: time.Now(),
-		})
-		return jsonEnvelopeError("missing question")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	result, err := h.loop.Run(ctx, research.ResearchQuery{
-		Question: question,
-		Context:  h.queryContext(),
-	}, research.DefaultBudget())
-	if err != nil {
-		errMsg := chatui.ChatMessage{
-			Role:      chatui.RoleAssistant,
-			Type:      chatui.MessageTypeText,
-			Payload:   chatui.TextPayload{Body: fmt.Sprintf("research loop failed: %v", err)},
-			CreatedAt: time.Now(),
-		}
-		_, _ = h.store.Append(errMsg)
-		return jsonEnvelopeError(err.Error())
-	}
-
-	// Build the one-line summary the parent card shows. We strip
-	// newlines and clamp to ~140 chars so the card stays the same
-	// height regardless of how chatty the model was. Full draft lives
-	// in the spawned thread for users who want the long form.
-	oneLine := strings.TrimSpace(result.Draft)
-	oneLine = strings.ReplaceAll(oneLine, "\n", " ")
-	if len(oneLine) > 140 {
-		oneLine = oneLine[:137] + "…"
-	}
-	if oneLine == "" {
-		oneLine = "(no answer)"
-	}
-
-	// Parent: a widget_card the renderer can show as one row in main.
-	parentCard := chatui.ChatMessage{
-		Role: chatui.RoleAssistant,
-		Type: chatui.MessageTypeWidgetCard,
-		Payload: chatui.WidgetCardPayload{
-			Title:    "research: " + question,
-			Subtitle: fmt.Sprintf("%d evidence source(s) · confidence %.2f · click to open thread", result.Bundle.Len(), result.Score.Composite),
-			Rows: []chatui.WidgetRow{
-				{Key: "answer", Value: oneLine},
-			},
-		},
-		CreatedAt: time.Now(),
-	}
-	parent, err := h.store.Append(parentCard)
-	if err != nil {
-		return jsonEnvelopeError(err.Error())
-	}
-
-	// Spawn the thread under that parent and append the detail
-	// messages (text answer + evidence bundle). The bundle items are
-	// drillable from inside the thread; we don't render the score
-	// card as a separate message because the bundle header already
-	// shows the composite confidence.
-	thread, err := h.store.Spawn(parent.ID, chatui.ExpandSidePane)
-	if err != nil {
-		return jsonEnvelopeError(err.Error())
-	}
-
-	detail := chatui.ResearchResultToMessages(result)
-	for _, m := range detail {
-		// Drop the score_card from the thread — it's redundant with
-		// the bundle header which already carries the composite.
-		if m.Type == chatui.MessageTypeScoreCard {
-			continue
-		}
-		m.ThreadID = thread.ID
-		if _, err := h.store.Append(m); err != nil {
-			return jsonEnvelopeError(err.Error())
-		}
-	}
-	// Return the thread ID in the envelope so the frontend can open
-	// the side pane immediately without an extra ListThreads call.
-	b, _ := json.Marshal(map[string]any{
-		"ok":        true,
-		"thread_id": thread.ID,
-		"parent_id": parent.ID,
-	})
-	return string(b)
-}
-
-// runResearchInExistingThread runs the loop and appends the resulting
-// detail messages to the existing thread. Used for follow-up questions
-// inside an open thread — every follow-up stays in the same thread
-// instead of spawning a new top-level summary card.
-//
-// The user's question is also appended (as a user role message) to the
-// thread before the loop runs so the side-pane scrollback shows the
-// turn-by-turn conversation.
-func (h *ThreadHost) runResearchInExistingThread(threadID, question string) string {
-	if h.loop == nil {
-		return jsonEnvelopeError("research not configured")
-	}
-	question = strings.TrimSpace(question)
-	if question == "" {
-		return jsonEnvelopeError("missing question")
-	}
-	// User turn (the line we removed from main needs to land in the
-	// thread instead — DispatchSlash already appended it to the
-	// thread before delegating here, so we don't double-append).
-
-	// Enrich the question with the parent message's context so the
-	// research loop knows what this thread is about. Without this,
-	// a follow-up like "verify?" arrives as a bare question with no
-	// knowledge of the PR, repo, or event that spawned the thread.
-	qCtx := h.queryContext()
-	if thread, ok := h.store.LookupByID(threadID); ok {
-		if parent, ok := h.store.LookupMessage(thread.ParentMessageID); ok {
-			parentText := extractParentContext(parent)
-			if parentText != "" {
-				if qCtx == nil {
-					qCtx = make(map[string]string)
-				}
-				qCtx["thread_parent_context"] = parentText
-				// Prepend the parent context to the question so the
-				// LLM sees the full picture even when the question is
-				// terse ("verify?", "details?", "what changed?").
-				question = "Context from the parent message in this thread:\n" + parentText + "\n\nUser question: " + question
-			}
-		}
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	result, err := h.loop.Run(ctx, research.ResearchQuery{
-		Question: question,
-		Context:  qCtx,
-	}, research.DefaultBudget())
-	if err != nil {
-		_, _ = h.store.Append(chatui.ChatMessage{
-			ThreadID:  threadID,
-			Role:      chatui.RoleAssistant,
-			Type:      chatui.MessageTypeText,
-			Payload:   chatui.TextPayload{Body: fmt.Sprintf("research loop failed: %v", err)},
-			CreatedAt: time.Now(),
-		})
-		return jsonEnvelopeError(err.Error())
-	}
-
-	for _, m := range chatui.ResearchResultToMessages(result) {
-		// Drop the score_card from the thread — the bundle header
-		// already shows the composite confidence.
-		if m.Type == chatui.MessageTypeScoreCard {
-			continue
-		}
-		m.ThreadID = threadID
-		if _, err := h.store.Append(m); err != nil {
-			return jsonEnvelopeError(err.Error())
-		}
-	}
-	b, _ := json.Marshal(map[string]any{
-		"ok":        true,
-		"thread_id": threadID,
-	})
-	return string(b)
 }
 
 // MainScrollback returns the workspace's main-chat messages as JSON.
@@ -668,6 +451,115 @@ func (h *ThreadHosts) RecordResearchFeedback(workspaceID, threadID, queryID, que
 		verdict = "👍"
 	}
 	return jsonEnvelopeOK("recorded " + verdict + " for thread " + threadID)
+}
+
+// ResearchResult is the result of a RunResearch call, carrying everything
+// the caller needs to stream the answer and open the thread.
+type ResearchResult struct {
+	Draft    string // the answer text to stream as chat:chunk
+	ThreadID string // the thread containing full evidence detail
+	ParentID string // the parent card in main scrollback (empty for follow-ups)
+	Error    string // non-empty on failure
+}
+
+// RunResearch runs the research loop directly and stores the result in the
+// thread system. For main-scope questions (threadID empty) it creates a
+// parent card + thread. For thread follow-ups it appends to the existing
+// thread. Provider/model, when non-empty, override the draft stage LLM.
+//
+// This is the canonical research execution path for Execute. It replaces
+// the old DispatchSlash→runResearchAsParentThread indirection.
+func (h *ThreadHosts) RunResearch(workspaceID, question, threadID, provider, model string) ResearchResult {
+	host := h.EnsureHost(workspaceID)
+	loop := host.loop
+	if loop == nil {
+		return ResearchResult{Error: "research not configured (no .glitch/workflows found)"}
+	}
+
+	// Wire user's provider into the draft stage. Intelligence ops
+	// (plan, score, critique) stay on local Ollama.
+	if provider != "" {
+		mgr := BuildExecutorManager()
+		draftLLM := research.NewProviderLLM(mgr, provider, model)
+		loop = loop.WithDraftLLM(draftLLM)
+	}
+
+	// Build query context, enriched with parent context for follow-ups.
+	qCtx := host.queryContext()
+	if threadID != "" {
+		if thread, ok := host.store.LookupByID(threadID); ok {
+			if parent, ok := host.store.LookupMessage(thread.ParentMessageID); ok {
+				parentText := ExtractParentContext(parent)
+				if parentText != "" {
+					if qCtx == nil {
+						qCtx = make(map[string]string)
+					}
+					qCtx["thread_parent_context"] = parentText
+					question = "Context from the parent message in this thread:\n" + parentText + "\n\nUser question: " + question
+				}
+			}
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	result, err := loop.Run(ctx, research.ResearchQuery{
+		Question: question,
+		Context:  qCtx,
+	}, research.DefaultBudget())
+	if err != nil {
+		return ResearchResult{Error: "research loop failed: " + err.Error()}
+	}
+
+	// Thread follow-up: append to existing thread.
+	if threadID != "" {
+		for _, m := range chatui.ResearchResultToMessages(result) {
+			if m.Type == chatui.MessageTypeScoreCard {
+				continue
+			}
+			m.ThreadID = threadID
+			_, _ = host.store.Append(m)
+		}
+		return ResearchResult{Draft: result.Draft, ThreadID: threadID}
+	}
+
+	// Main scope: create parent card + thread.
+	oneLine := strings.TrimSpace(result.Draft)
+	oneLine = strings.ReplaceAll(oneLine, "\n", " ")
+	if len(oneLine) > 140 {
+		oneLine = oneLine[:137] + "…"
+	}
+	if oneLine == "" {
+		oneLine = "(no answer)"
+	}
+	parentCard := chatui.ChatMessage{
+		Role: chatui.RoleAssistant,
+		Type: chatui.MessageTypeWidgetCard,
+		Payload: chatui.WidgetCardPayload{
+			Title:    "research: " + question,
+			Subtitle: fmt.Sprintf("%d evidence source(s) · confidence %.2f · click to open thread", result.Bundle.Len(), result.Score.Composite),
+			Rows: []chatui.WidgetRow{
+				{Key: "answer", Value: oneLine},
+			},
+		},
+		CreatedAt: time.Now(),
+	}
+	parent, err := host.store.Append(parentCard)
+	if err != nil {
+		return ResearchResult{Draft: result.Draft, Error: err.Error()}
+	}
+	thread, err := host.store.Spawn(parent.ID, chatui.ExpandSidePane)
+	if err != nil {
+		return ResearchResult{Draft: result.Draft, Error: err.Error()}
+	}
+	for _, m := range chatui.ResearchResultToMessages(result) {
+		if m.Type == chatui.MessageTypeScoreCard {
+			continue
+		}
+		m.ThreadID = thread.ID
+		_, _ = host.store.Append(m)
+	}
+	return ResearchResult{Draft: result.Draft, ThreadID: thread.ID, ParentID: parent.ID}
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────

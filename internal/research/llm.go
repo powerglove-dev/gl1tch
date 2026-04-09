@@ -78,6 +78,49 @@ func NewOllamaLLM(mgr *executor.Manager, model string) LLMFn {
 	}
 }
 
+// NewProviderLLM returns an LLMFn that runs through any registered provider
+// (ollama, claude, openai, etc.) using the same pipeline.Run path as
+// NewOllamaLLM but with the caller's executor/model choice. Used by
+// Execute to wire the user's provider pick into the research loop's
+// draft stage.
+func NewProviderLLM(mgr *executor.Manager, providerID, model string) LLMFn {
+	return func(ctx context.Context, prompt string) (string, error) {
+		p := &pipeline.Pipeline{
+			Name: "research-draft-provider",
+			Steps: []pipeline.Step{
+				{
+					ID:        "in",
+					Type:      "input",
+					NoBrain:   true,
+					NoClarify: true,
+				},
+				{
+					ID:        "ask",
+					Executor:  providerID,
+					Model:     model,
+					Prompt:    prompt,
+					Needs:     []string{"in"},
+					NoBrain:   true,
+					NoClarify: true,
+				},
+				{
+					ID:    "out",
+					Type:  "output",
+					Needs: []string{"ask"},
+				},
+			},
+		}
+		out, err := pipeline.Run(ctx, p, mgr, "",
+			pipeline.WithSilentStatus(),
+			pipeline.WithNoClarification(),
+		)
+		if err != nil {
+			return "", fmt.Errorf("%s %s: %w", providerID, model, err)
+		}
+		return cleanLLMOutput(out), nil
+	}
+}
+
 // cleanLLMOutput strips the gl1tch-stats sentinel JSON, brain blocks, and
 // other sidecar markers the executor appends to model output. Without this
 // the planner and drafter would see the stats line as part of the model's

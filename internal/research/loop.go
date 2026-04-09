@@ -33,6 +33,7 @@ var cryptoRandReader = cryptoRand.Reader
 type Loop struct {
 	registry     *Registry
 	llm          LLMFn
+	draftLLM     LLMFn // if set, used for draft stage only; plan/score/critique stay on llm
 	model        string
 	logger       *slog.Logger
 	scoreOptions ScoreOptions
@@ -54,6 +55,17 @@ func NewLoop(registry *Registry, llm LLMFn) *Loop {
 		events:       nopSink{},
 		hints:        nopHintsProvider{},
 	}
+}
+
+// WithDraftLLM returns a shallow copy of the loop with a separate LLM
+// for the draft stage. Plan, critique, and score stages continue using
+// the default (local) LLM; only the draft — the answer the user reads
+// — uses fn. Returns a copy so the caller's provider choice doesn't
+// mutate the shared loop instance.
+func (l *Loop) WithDraftLLM(fn LLMFn) *Loop {
+	cp := *l
+	cp.draftLLM = fn
+	return &cp
 }
 
 // WithHintsProvider wires a brain-event hint provider the loop calls
@@ -567,7 +579,11 @@ func (l *Loop) gather(ctx context.Context, q ResearchQuery, picks []string) Evid
 // draft prompt is the second half of the lie-prevention contract.
 func (l *Loop) draft(ctx context.Context, q ResearchQuery, bundle EvidenceBundle) (string, error) {
 	prompt := DraftPrompt(q.Question, bundle)
-	out, err := l.llm(ctx, prompt)
+	llm := l.llm
+	if l.draftLLM != nil {
+		llm = l.draftLLM
+	}
+	out, err := llm(ctx, prompt)
 	if err != nil {
 		return "", fmt.Errorf("llm: %w", err)
 	}
