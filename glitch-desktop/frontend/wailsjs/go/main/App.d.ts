@@ -87,6 +87,8 @@ export function Ready():Promise<void>;
 
 export function RecentCollectorLogs(arg1:number):Promise<string>;
 
+export function RecordResearchFeedback(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean):Promise<string>;
+
 export function RefineDraft(arg1:number,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function RemoveWorkspaceDirectory(arg1:string,arg2:string):Promise<void>;

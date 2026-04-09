@@ -167,6 +167,84 @@ func TestFileEventHintsProvider_HonoursMaxAge(t *testing.T) {
 	}
 }
 
+// TestFileEventHintsProvider_FeedbackOverride covers the explicit-
+// label path: a thumbs-up boosts a low-composite past attempt above
+// a high-composite proxy-only attempt for similar questions, and a
+// thumbs-down filters its picks out entirely. This is the contract
+// the side pane's 👍/👎 affordance relies on — the brain's job is
+// to listen to the user's actual judgment over its own confidence.
+func TestFileEventHintsProvider_FeedbackOverride(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	now := time.Now().Format(time.RFC3339)
+
+	events := []Event{
+		// Past attempt A: high composite, no feedback. Picks
+		// github-prs alone.
+		{
+			Type:      EventTypeAttempt,
+			Timestamp: now,
+			QueryID:   "q-A",
+			Question:  "what prs are open right now",
+			Score:     Score{Composite: 0.92},
+			Bundle:    bundleFromSources("github-prs"),
+		},
+		// Past attempt B: low composite, but the user explicitly
+		// thumbs-upped it. The hint should rank B above A.
+		{
+			Type:      EventTypeAttempt,
+			Timestamp: now,
+			QueryID:   "q-B",
+			Question:  "did this pr get updated",
+			Score:     Score{Composite: 0.30},
+			Bundle:    bundleFromSources("github-prs", "git-log"),
+		},
+		// Explicit accept on B.
+		{
+			Type:      EventTypeFeedback,
+			Timestamp: now,
+			QueryID:   "q-B",
+			Accepted:  true,
+		},
+		// Past attempt C: high composite, but the user explicitly
+		// thumbs-downed it. The hint must NOT mention its picks.
+		{
+			Type:      EventTypeAttempt,
+			Timestamp: now,
+			QueryID:   "q-C",
+			Question:  "are prs blocked on review",
+			Score:     Score{Composite: 0.95},
+			Bundle:    bundleFromSources("github-prs", "git-status"),
+		},
+		// Explicit reject on C.
+		{
+			Type:      EventTypeFeedback,
+			Timestamp: now,
+			QueryID:   "q-C",
+			Accepted:  false,
+		},
+	}
+	writeEvents(t, path, events)
+
+	provider := NewFileEventHintsProvider(path)
+	hint := provider.Hints(context.Background(), "is this pr updated")
+	if hint == "" {
+		t.Fatalf("expected hint, got empty")
+	}
+	// B's picks (github-prs + git-log) should be in the hint.
+	if !strings.Contains(hint, "github-prs, git-log") && !strings.Contains(hint, "git-log, github-prs") {
+		t.Errorf("hint should mention B's picks (github-prs+git-log), got: %s", hint)
+	}
+	// B's row should carry the 👍 marker since it had explicit accept.
+	if !strings.Contains(hint, "👍") {
+		t.Errorf("hint should mark explicit-accept group with 👍, got: %s", hint)
+	}
+	// C's git-status pick must NOT appear (explicit reject filters it).
+	if strings.Contains(hint, "git-status") {
+		t.Errorf("hint should NOT mention git-status from rejected event, got: %s", hint)
+	}
+}
+
 // TestFileEventHintsProvider_GroupsByPickCombination verifies the
 // grouping logic: two events with the same pick set average their
 // composites; events with different pick sets land in separate groups.

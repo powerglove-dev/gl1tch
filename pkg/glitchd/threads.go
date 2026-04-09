@@ -40,10 +40,11 @@ import (
 // against the desktop binary's own cwd — which is the gl1tch repo
 // regardless of which workspace the user is looking at.
 type ThreadHost struct {
-	store    *chatui.ThreadStore
-	registry *chatui.SlashRegistry
-	loop     *research.Loop
-	cwd      string
+	store        *chatui.ThreadStore
+	registry     *chatui.SlashRegistry
+	loop         *research.Loop
+	feedbackSink research.EventSink
+	cwd          string
 }
 
 // ThreadHosts is the lazy registry of per-workspace hosts. Held in its
@@ -98,12 +99,22 @@ func (h *ThreadHosts) EnsureHost(workspaceID string) *ThreadHost {
 		// seconds in the desktop UI; the brain stats engine can
 		// re-enable it later.
 		opts.SkipSelfConsistency = true
+		// One sink for both attempt/score writes (loop) and
+		// feedback writes (frontend 👍/👎). Sharing the file means
+		// the hints reader sees a single coherent timeline.
+		sink := research.NewFileEventSink("")
 		loop := research.NewLoop(researchReg, llm).
-			WithEventSink(research.NewFileEventSink("")).
+			WithEventSink(sink).
 			WithHintsProvider(research.NewFileEventHintsProvider("")).
 			WithScoreOptions(opts)
 		_ = registry.Register(chatui.ResearchSlashHandler(loop))
-		host := &ThreadHost{store: store, registry: registry, loop: loop, cwd: cwd}
+		host := &ThreadHost{
+			store:        store,
+			registry:     registry,
+			loop:         loop,
+			feedbackSink: sink,
+			cwd:          cwd,
+		}
 		h.hosts[workspaceID] = host
 		return host
 	}
@@ -464,6 +475,31 @@ func (h *ThreadHosts) ReopenThread(workspaceID, threadID string) string {
 		return jsonEnvelopeError(err.Error())
 	}
 	return jsonEnvelopeOK("reopened")
+}
+
+// RecordResearchFeedback writes one EventTypeFeedback record tagged
+// to the supplied thread. accepted=true is a thumbs-up; false is a
+// thumbs-down. The brain hints reader weights this above any
+// composite proxy: explicit accepts boost the picks; explicit
+// rejects filter the picks out of future hints entirely.
+//
+// queryID and question are looked up from the thread's most recent
+// assistant message metadata when available; the desktop frontend
+// passes them in directly so we don't have to round-trip through
+// store reads.
+func (h *ThreadHosts) RecordResearchFeedback(workspaceID, threadID, queryID, question string, accepted bool) string {
+	host := h.EnsureHost(workspaceID)
+	if host.feedbackSink == nil {
+		// No sink wired (only happens when the host was constructed
+		// without a research loop because no workflows exist).
+		return jsonEnvelopeError("no event sink available — research loop not configured")
+	}
+	research.EmitFeedback(host.feedbackSink, queryID, question, accepted, nil)
+	verdict := "👎"
+	if accepted {
+		verdict = "👍"
+	}
+	return jsonEnvelopeOK("recorded " + verdict + " for thread " + threadID)
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────

@@ -102,6 +102,18 @@ func NewFileEventHintsProvider(path string) *FileEventHintsProvider {
 // question. Errors (file missing, parse failure, etc.) collapse to
 // empty so the loop never fails over a missing brain — the planner
 // just falls back to its default behavior.
+//
+// Two passes over the event log:
+//
+//   Pass 1: build a feedback index keyed by query_id. Each
+//   research_feedback event upgrades or downgrades the corresponding
+//   attempt's effective composite (or filters it out entirely on a
+//   reject). This is the explicit-label override that beats the
+//   composite proxy.
+//
+//   Pass 2: collect attempt-event samples for similar questions,
+//   apply the feedback index, group by pick combination, rank by
+//   weighted average composite, render the top 2 groups.
 func (f *FileEventHintsProvider) Hints(_ context.Context, question string) string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -124,10 +136,37 @@ func (f *FileEventHintsProvider) Hints(_ context.Context, question string) strin
 		cutoff = time.Now().Add(-f.MaxAge)
 	}
 
+	// Pass 1: build the feedback index. Maps query_id to the user's
+	// most recent verdict. When a query has multiple feedback events
+	// (e.g. user toggled their mind), the last-write-wins matches the
+	// scrollback's "you clicked 👎 last so it stays 👎" intuition.
+	type verdict struct {
+		accepted bool
+		seen     bool
+	}
+	verdicts := make(map[string]verdict)
+	for _, line := range splitLines(data) {
+		if len(line) == 0 {
+			continue
+		}
+		var ev Event
+		if err := json.Unmarshal(line, &ev); err != nil {
+			continue
+		}
+		if ev.Type != EventTypeFeedback || ev.QueryID == "" {
+			continue
+		}
+		verdicts[ev.QueryID] = verdict{accepted: ev.Accepted, seen: true}
+	}
+
 	type sample struct {
 		similarity float64
 		composite  float64
 		picks      []string
+		// explicit is true when the user gave a thumbs-up; the
+		// renderer marks these in the hint so the model knows
+		// it's a labelled judgment, not a composite proxy.
+		explicit bool
 	}
 	var samples []sample
 
@@ -164,10 +203,24 @@ func (f *FileEventHintsProvider) Hints(_ context.Context, question string) strin
 			continue
 		}
 
+		// Apply feedback overrides. A 👎 filters the sample out
+		// entirely; a 👍 boosts its composite to 1.0 so it
+		// outranks proxy-only samples in the same group.
+		composite := ev.Score.Composite
+		explicit := false
+		if v, ok := verdicts[ev.QueryID]; ok && v.seen {
+			if !v.accepted {
+				continue
+			}
+			composite = 1.0
+			explicit = true
+		}
+
 		samples = append(samples, sample{
 			similarity: sim,
-			composite:  ev.Score.Composite,
+			composite:  composite,
 			picks:      ev.Bundle.Sources(),
+			explicit:   explicit,
 		})
 	}
 
@@ -177,10 +230,15 @@ func (f *FileEventHintsProvider) Hints(_ context.Context, question string) strin
 
 	// Group by sorted-pick tuple. The hint shows the top 2 groups by
 	// average composite weighted by similarity, broken by min-samples.
+	// explicitCount is the subset of count that came from
+	// thumbs-up feedback events; the renderer prepends a "👍" tag
+	// to those rows so the model can see which picks the user
+	// actually validated vs which are composite-only proxies.
 	type key string
 	type group struct {
 		picks         []string
 		count         int
+		explicitCount int
 		weightedScore float64
 		weightSum     float64
 	}
@@ -195,14 +253,18 @@ func (f *FileEventHintsProvider) Hints(_ context.Context, question string) strin
 			groups[k] = g
 		}
 		g.count++
+		if s.explicit {
+			g.explicitCount++
+		}
 		g.weightedScore += s.composite * s.similarity
 		g.weightSum += s.similarity
 	}
 
 	type ranked struct {
-		picks []string
-		count int
-		avg   float64
+		picks         []string
+		count         int
+		explicitCount int
+		avg           float64
 	}
 	var ranks []ranked
 	for _, g := range groups {
@@ -213,12 +275,24 @@ func (f *FileEventHintsProvider) Hints(_ context.Context, question string) strin
 		if g.weightSum > 0 {
 			avg = g.weightedScore / g.weightSum
 		}
-		ranks = append(ranks, ranked{picks: g.picks, count: g.count, avg: avg})
+		ranks = append(ranks, ranked{
+			picks:         g.picks,
+			count:         g.count,
+			explicitCount: g.explicitCount,
+			avg:           avg,
+		})
 	}
 	if len(ranks) == 0 {
 		return ""
 	}
+	// Rank: explicit-feedback groups outrank proxy-only groups even
+	// at lower averages — a single thumbs-up beats a high composite
+	// score every time. Within each tier, sort by avg then count.
 	sort.Slice(ranks, func(i, j int) bool {
+		ie, je := ranks[i].explicitCount > 0, ranks[j].explicitCount > 0
+		if ie != je {
+			return ie
+		}
 		if ranks[i].avg != ranks[j].avg {
 			return ranks[i].avg > ranks[j].avg
 		}
@@ -227,15 +301,20 @@ func (f *FileEventHintsProvider) Hints(_ context.Context, question string) strin
 
 	// Render the top 2 groups as a compact bullet list. Keeping it
 	// short avoids burying the planner's actual menu under a wall of
-	// historical noise.
+	// historical noise. Explicit groups get a 👍 marker so the
+	// model knows the row is a labelled judgment, not a proxy.
 	const maxRows = 2
 	if len(ranks) > maxRows {
 		ranks = ranks[:maxRows]
 	}
 	var b strings.Builder
 	for _, r := range ranks {
-		fmt.Fprintf(&b, "- picks=[%s] avg_composite=%.2f n=%d\n",
-			strings.Join(r.picks, ", "), r.avg, r.count)
+		marker := ""
+		if r.explicitCount > 0 {
+			marker = " 👍"
+		}
+		fmt.Fprintf(&b, "- picks=[%s] avg_composite=%.2f n=%d%s\n",
+			strings.Join(r.picks, ", "), r.avg, r.count, marker)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

@@ -174,6 +174,10 @@ export function RecentCollectorLogs(arg1) {
   return window['go']['main']['App']['RecentCollectorLogs'](arg1);
 }
 
+export function RecordResearchFeedback(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['RecordResearchFeedback'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function RefineDraft(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['RefineDraft'](arg1, arg2, arg3, arg4);
 }

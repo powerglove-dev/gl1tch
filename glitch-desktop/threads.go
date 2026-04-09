@@ -68,3 +68,13 @@ func (a *App) CloseThread(workspaceID, threadID, summary string) string {
 func (a *App) ReopenThread(workspaceID, threadID string) string {
 	return a.ensureThreads().ReopenThread(workspaceID, threadID)
 }
+
+// RecordResearchFeedback writes one EventTypeFeedback record tagged
+// to the supplied thread. accepted=true is a thumbs-up; false is a
+// thumbs-down. The frontend's 👍/👎 affordance on each assistant
+// message in the thread side pane calls this; the brain hints
+// reader uses the explicit label above the composite proxy when
+// building hints for the next research call.
+func (a *App) RecordResearchFeedback(workspaceID, threadID, queryID, question string, accepted bool) string {
+	return a.ensureThreads().RecordResearchFeedback(workspaceID, threadID, queryID, question, accepted)
+}

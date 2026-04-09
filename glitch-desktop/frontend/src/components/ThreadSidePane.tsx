@@ -19,6 +19,7 @@ import {
   DispatchSlash,
   GetThreadMessages,
   SpawnDrillThreadFromEvidence,
+  RecordResearchFeedback,
 } from "../../wailsjs/go/main/App";
 import { BlockRenderer } from "./MessageList";
 import type { Message } from "@/lib/types";
@@ -313,12 +314,28 @@ export function ThreadSidePane({
             <span className="threaded-chat-thinking-label">preparing thread…</span>
           </div>
         )}
-        {messages.map((msg) => (
-          <div key={msg.id} className={`threaded-chat-message threaded-chat-${msg.role}`}>
-            <div className="threaded-chat-message-meta">{roleLabel(msg.role)}</div>
-            {renderPayload(msg)}
-          </div>
-        ))}
+        {messages.map((msg) => {
+          // Find the most recent user message above this assistant
+          // turn so the feedback event can carry the question text
+          // for the brain hints reader. The reader uses jaccard
+          // overlap on the question to decide which past hints to
+          // surface for the next call.
+          const recentQuestion = recentUserQuestion(messages, msg.id);
+          return (
+            <div key={msg.id} className={`threaded-chat-message threaded-chat-${msg.role}`}>
+              <div className="threaded-chat-message-meta">{roleLabel(msg.role)}</div>
+              {renderPayload(msg)}
+              {msg.role === "assistant" && (
+                <FeedbackButtons
+                  workspaceID={workspaceID}
+                  threadID={threadID}
+                  messageID={msg.id}
+                  question={recentQuestion}
+                />
+              )}
+            </div>
+          );
+        })}
         {/* Optimistic pending row: user's typed line + thinking pill.
             Rendered immediately on submit so the pane never feels
             unresponsive while the loop is doing its plan→draft work. */}
@@ -356,6 +373,87 @@ function clamp(s: string, n: number): string {
   const flat = s.replace(/\s+/g, " ").trim();
   if (flat.length <= n) return flat;
   return flat.slice(0, n - 1) + "…";
+}
+
+// FeedbackButtons renders the 👍/👎 affordance below every assistant
+// message in a thread. Clicking either writes a research_feedback
+// event to the same JSONL log the loop's brain hints reader scans on
+// every plan call, so a thumbs-up biases future similar questions
+// toward the picks that produced this answer, and a thumbs-down
+// filters them out entirely. Once you click, the buttons stay
+// highlighted in their chosen state — toggling is a deliberate
+// re-click, and the brain takes the most recent verdict.
+function FeedbackButtons({
+  workspaceID,
+  threadID,
+  messageID,
+  question,
+}: {
+  workspaceID: string;
+  threadID: string;
+  messageID: string;
+  question: string;
+}) {
+  const [verdict, setVerdict] = useState<"accepted" | "rejected" | null>(null);
+  const submit = async (accepted: boolean) => {
+    try {
+      // queryID is the assistant message's id — the loop's QueryID
+      // field is per-research-call, but the brain hints reader
+      // joins by query_id, so the safest cross-walk is to send the
+      // assistant message id and let the reader treat it as a
+      // unique key for the verdict. (When the loop's per-call
+      // query_id stabilises in chat, this becomes the message's
+      // metadata.queryID instead.)
+      await RecordResearchFeedback(workspaceID, threadID, messageID, question, accepted);
+      setVerdict(accepted ? "accepted" : "rejected");
+    } catch (err) {
+      console.error("RecordResearchFeedback failed", err);
+    }
+  };
+  return (
+    <div className="threaded-chat-feedback">
+      <button
+        type="button"
+        className={`threaded-chat-feedback-btn${verdict === "accepted" ? " threaded-chat-feedback-on" : ""}`}
+        onClick={() => void submit(true)}
+        title="Thumbs up — bias future similar questions toward this pick"
+      >
+        👍
+      </button>
+      <button
+        type="button"
+        className={`threaded-chat-feedback-btn${verdict === "rejected" ? " threaded-chat-feedback-on" : ""}`}
+        onClick={() => void submit(false)}
+        title="Thumbs down — filter this pick out of future hints"
+      >
+        👎
+      </button>
+    </div>
+  );
+}
+
+// recentUserQuestion walks backwards from the supplied assistant
+// message id and returns the body of the nearest preceding user
+// text message — i.e. the question this assistant turn answered.
+// Used by FeedbackButtons to tag the feedback event with the right
+// question so the brain hints reader can match future similar
+// questions.
+function recentUserQuestion(messages: ChatMessage[], assistantID: string): string {
+  let idx = -1;
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].id === assistantID) {
+      idx = i;
+      break;
+    }
+  }
+  if (idx <= 0) return "";
+  for (let i = idx - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === "user" && m.type === "text" && m.payload?.body) {
+      return String(m.payload.body);
+    }
+  }
+  return "";
 }
 
 // roleLabel maps the wire role values onto the gl1tch voice. We never

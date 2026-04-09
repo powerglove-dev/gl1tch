@@ -94,11 +94,75 @@ func init() {
 	threadsCmd.AddCommand(threadsListCmd)
 	threadsCmd.AddCommand(threadsShowCmd)
 	threadsCmd.AddCommand(threadsSmokeCmd)
+	threadsCmd.AddCommand(threadsFeedbackCmd)
 
 	threadsAskCmd.Flags().StringVarP(&threadsThreadID, "thread", "t", "",
 		"thread id (printed by `glitch threads new`)")
 	threadsShowCmd.Flags().StringVarP(&threadsThreadID, "thread", "t", "",
 		"thread id (printed by `glitch threads new`)")
+	threadsFeedbackCmd.Flags().StringVarP(&threadsThreadID, "thread", "t", "",
+		"thread id (printed by `glitch threads new`)")
+	threadsFeedbackCmd.Flags().BoolVar(&threadsFeedbackAccept, "accept", false,
+		"thumbs-up — explicit accept of the most recent research result in the thread")
+	threadsFeedbackCmd.Flags().BoolVar(&threadsFeedbackReject, "reject", false,
+		"thumbs-down — explicit reject of the most recent research result in the thread")
+	threadsFeedbackCmd.Flags().StringVar(&threadsFeedbackQueryID, "query-id", "",
+		"override the query id the feedback applies to (defaults to the thread's last research call)")
+	threadsFeedbackCmd.Flags().StringVar(&threadsFeedbackQuestion, "question", "",
+		"the question the feedback applies to (used by the brain hints reader to bias future similar questions)")
+}
+
+var (
+	threadsFeedbackAccept   bool
+	threadsFeedbackReject   bool
+	threadsFeedbackQueryID  string
+	threadsFeedbackQuestion string
+)
+
+// ── threads feedback ────────────────────────────────────────────────────────
+
+var threadsFeedbackCmd = &cobra.Command{
+	Use:   "feedback",
+	Short: "Record an explicit accept/reject for the most recent research result in a thread",
+	Long: `Writes one research_feedback event tagged to the supplied thread.
+The brain hints reader weights this above the composite proxy:
+
+  --accept boosts the picks for future similar questions
+  --reject filters the picks out of future hints entirely
+
+This is the explicit label the loop has been missing — composites
+are a useful proxy but the user's actual judgment is the ground
+truth. Pipe accept/reject calls into a CI cron and the brain learns
+from real outcomes.
+
+Smoke recipe (the canonical "teach me you learned this" sequence):
+
+  glitch threads new -w <ws> "what prs are open"
+  # → emits thread_id and the loop picks github-prs
+  glitch threads feedback -w <ws> -t <thread-id> --accept \\
+    --question "what prs are open"
+  # next time you ask anything pr-shaped, the planner will see
+  # 👍 picks=[github-prs] in its hint block and bias toward it.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ws, err := resolveWorkspaceID()
+		if err != nil {
+			return err
+		}
+		if threadsThreadID == "" {
+			return fmt.Errorf("thread id is required (-t)")
+		}
+		if threadsFeedbackAccept == threadsFeedbackReject {
+			return fmt.Errorf("exactly one of --accept or --reject is required")
+		}
+		envelope := ensureThreadsHosts().RecordResearchFeedback(
+			ws, threadsThreadID, threadsFeedbackQueryID, threadsFeedbackQuestion, threadsFeedbackAccept,
+		)
+		if threadsJSONOut {
+			fmt.Println(envelope)
+			return nil
+		}
+		return prettyPrintEnvelope(envelope, "feedback")
+	},
 }
 
 // resolveWorkspaceID resolves the workspace id the user wants the

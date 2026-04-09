@@ -49,6 +49,14 @@ const (
 	// paid verifier. Carries the paid model name, paid token count, and
 	// the verifier's verdict.
 	EventTypeEscalation EventType = "research_escalation"
+	// EventTypeFeedback is emitted when the user explicitly accepts
+	// or rejects a research result via the desktop's 👍/👎 affordance
+	// or the `glitch threads feedback` CLI. This is the EXPLICIT
+	// label the brain hints reader weights above the composite
+	// proxy: a thumbs-up makes the picks productive regardless of
+	// score; a thumbs-down filters them out of future hints
+	// regardless of how confident the loop felt.
+	EventTypeFeedback EventType = "research_feedback"
 )
 
 // Event is one record on the research event stream.
@@ -62,9 +70,15 @@ type Event struct {
 	Score     Score          `json:"score,omitempty"`
 	Bundle    *EvidenceBundle `json:"bundle,omitempty"`
 	// Escalation-only fields below.
-	PaidModel  string  `json:"paid_model,omitempty"`
-	PaidTokens int     `json:"paid_tokens,omitempty"`
-	Verdict    string  `json:"verdict,omitempty"`
+	PaidModel  string `json:"paid_model,omitempty"`
+	PaidTokens int    `json:"paid_tokens,omitempty"`
+	Verdict    string `json:"verdict,omitempty"`
+	// Feedback-only fields below. The hints reader uses these to
+	// label past attempts as explicit-accept or explicit-reject so
+	// the planner sees the user's actual judgment, not just the
+	// loop's self-confidence proxy.
+	Accepted        bool     `json:"accepted,omitempty"`
+	FeedbackSources []string `json:"feedback_sources,omitempty"`
 }
 
 // EventSink is what the loop emits to. It is the only seam research code
@@ -271,6 +285,31 @@ func decideRotation(line []byte, cutoff time.Time) (keep bool, rewritten []byte,
 		return false, nil, false
 	}
 	return true, nil, false
+}
+
+// EmitFeedback writes one EventTypeFeedback record to the supplied
+// sink. queryID identifies which research call the feedback applies
+// to (so the brain can join feedback events back to the original
+// attempt by query_id at hint-build time). sources is the list of
+// researcher names whose evidence the user was reacting to —
+// supplied so a thumbs-up that was actually meant for the github-prs
+// part of a multi-pick result doesn't accidentally bias git-log too.
+//
+// Best-effort: a sink failure does NOT propagate to the caller. The
+// feedback path is "fire and forget" — the user clicks 👍 and moves
+// on; we never want a sink hiccup to block the UI.
+func EmitFeedback(sink EventSink, queryID, question string, accepted bool, sources []string) {
+	if sink == nil {
+		return
+	}
+	_ = sink.Emit(Event{
+		Type:            EventTypeFeedback,
+		Timestamp:       time.Now().Format(time.RFC3339),
+		QueryID:         queryID,
+		Question:        question,
+		Accepted:        accepted,
+		FeedbackSources: append([]string(nil), sources...),
+	})
 }
 
 // emitAttempt emits the per-iteration EventTypeAttempt + EventTypeScore

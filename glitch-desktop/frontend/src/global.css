@@ -195,6 +195,24 @@ html, body, #root {
   border-radius: 4px;
 }
 
+/* Feedback affordance: 👍/👎 below every assistant message in a
+   thread side pane. Clicking writes a research_feedback event the
+   brain hints reader weights above the composite proxy. */
+.threaded-chat-feedback { display: flex; gap: 4px; margin-top: 6px; }
+.threaded-chat-feedback-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+  padding: 2px 8px;
+  font-size: 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.threaded-chat-feedback-btn:hover { border-color: var(--purple); color: var(--fg); }
+.threaded-chat-feedback-on { background: var(--purple); color: var(--bg); border-color: var(--purple); }
+
 /* ── ThreadSidePane payload renderers (chat-first-ui + chat-threads) ─── */
 .threaded-chat-layout { flex: 1; display: flex; flex-direction: row; min-height: 0; background: var(--bg); }
 .threaded-chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
