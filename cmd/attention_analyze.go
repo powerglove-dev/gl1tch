@@ -83,32 +83,39 @@ func init() {
 }
 
 func runAnalyze(ctx context.Context) error {
-	ev, err := gatherAnalyzeEvent(ctx)
+	events, err := gatherAnalyzeEvents(ctx)
 	if err != nil {
 		return err
 	}
 
-	// Stage 1: classify (unless bypassed).
+	// Stage 1: classify all events (unless bypassed), then pick the
+	// most interesting one to analyze. Priority: high > normal > low.
+	// Within a tier, prefer non-PR events (reviews, comments) over
+	// the bare PR event since those carry the actionable signal.
 	switch {
 	case analyzeForceHigh:
-		ev.Attention = glitchd.AttentionHigh
-		if ev.AttentionReason == "" {
-			ev.AttentionReason = "forced via --force-high"
+		for i := range events {
+			events[i].Attention = glitchd.AttentionHigh
+			if events[i].AttentionReason == "" {
+				events[i].AttentionReason = "forced via --force-high"
+			}
 		}
 	case analyzeSkipClass:
-		// Honour whatever the caller put on the event (empty →
-		// summary mode inside buildAnalysisPrompt).
+		// Honour whatever the caller put on the events.
 	default:
-		verdicts, err := glitchd.ClassifyAttention(ctx,
-			[]glitchd.AnalyzableEvent{ev}, attentionWorkspace)
+		verdicts, err := glitchd.ClassifyAttention(ctx, events, attentionWorkspace)
 		if err != nil {
 			return fmt.Errorf("classify: %w", err)
 		}
-		if len(verdicts) > 0 {
-			ev.Attention = verdicts[0].Level
-			ev.AttentionReason = verdicts[0].Reason
+		for i := range events {
+			if i < len(verdicts) {
+				events[i].Attention = verdicts[i].Level
+				events[i].AttentionReason = verdicts[i].Reason
+			}
 		}
 	}
+
+	ev := pickBestEvent(events)
 
 	// Stage 2: deep analyze. We load the global config here so the
 	// analyzer picks up the operator's preferred coder model; the
@@ -123,41 +130,75 @@ func runAnalyze(ctx context.Context) error {
 	return printAnalyzeHuman(ev, result)
 }
 
-// gatherAnalyzeEvent resolves the input flags into a single event.
-// Analyze is intentionally one-event-only — it runs a real
-// tool-using opencode loop per call, and batching multiple of those
-// at the CLI layer would be confusing when one of them fails.
-func gatherAnalyzeEvent(ctx context.Context) (glitchd.AnalyzableEvent, error) {
+// pickBestEvent selects the event most worth analyzing from a batch.
+// High > normal > low. Within a tier, prefer review/comment events
+// over bare PR events since those carry the actionable signal.
+func pickBestEvent(events []glitchd.AnalyzableEvent) glitchd.AnalyzableEvent {
+	if len(events) == 0 {
+		return glitchd.AnalyzableEvent{}
+	}
+	tierRank := func(level glitchd.AttentionLevel) int {
+		switch level {
+		case glitchd.AttentionHigh:
+			return 3
+		case glitchd.AttentionNormal:
+			return 2
+		case glitchd.AttentionLow:
+			return 1
+		default:
+			return 0
+		}
+	}
+	typeRank := func(t string) int {
+		switch t {
+		case "github.pr_review":
+			return 3
+		case "github.pr_comment", "github.issue_comment":
+			return 2
+		case "github.pr", "github.issue":
+			return 1
+		default:
+			return 0
+		}
+	}
+	best := events[0]
+	for _, ev := range events[1:] {
+		if tierRank(ev.Attention) > tierRank(best.Attention) {
+			best = ev
+			continue
+		}
+		if tierRank(ev.Attention) == tierRank(best.Attention) && typeRank(ev.Type) > typeRank(best.Type) {
+			best = ev
+			continue
+		}
+		// Within same tier and type, prefer the most recent.
+		if tierRank(ev.Attention) == tierRank(best.Attention) && typeRank(ev.Type) == typeRank(best.Type) && ev.Timestamp.After(best.Timestamp) {
+			best = ev
+		}
+	}
+	return best
+}
+
+// gatherAnalyzeEvents resolves the input flags into a slice of
+// events. With --from-pr, this is the PR event plus each review and
+// comment as separate events (matching the real collector). The
+// caller classifies all of them and picks the most interesting one
+// to feed into deep analysis.
+func gatherAnalyzeEvents(ctx context.Context) ([]glitchd.AnalyzableEvent, error) {
 	owner, repo, number, hasPR, err := parseFromPR(analyzeFromPR.raw)
 	if err != nil {
-		return glitchd.AnalyzableEvent{}, err
+		return nil, err
 	}
 	if hasPR && analyzeStdin {
-		return glitchd.AnalyzableEvent{},
-			fmt.Errorf("--from-pr and --stdin are mutually exclusive")
+		return nil, fmt.Errorf("--from-pr and --stdin are mutually exclusive")
 	}
 	if !hasPR && !analyzeStdin {
-		return glitchd.AnalyzableEvent{},
-			fmt.Errorf("no event input — pass --from-pr or --stdin")
+		return nil, fmt.Errorf("no event input — pass --from-pr or --stdin")
 	}
 	if hasPR {
-		return eventFromPR(ctx, owner, repo, number, attentionWorkspace)
+		return eventsFromPR(ctx, owner, repo, number, attentionWorkspace)
 	}
-	// --stdin for analyze accepts either a JSON object (one event)
-	// or a single-element JSON array, so tests can reuse the same
-	// payload shape they feed to `classify --stdin`.
-	events, err := eventsFromStdin()
-	if err != nil {
-		// Retry as a single object — eventsFromStdin's decoder
-		// expected an array, but the object form is more natural
-		// when you're handing in one event.
-		return glitchd.AnalyzableEvent{}, fmt.Errorf("decode stdin event: %w", err)
-	}
-	if len(events) != 1 {
-		return glitchd.AnalyzableEvent{},
-			fmt.Errorf("--stdin for analyze expects exactly one event, got %d", len(events))
-	}
-	return events[0], nil
+	return eventsFromStdin()
 }
 
 // printAnalyzeHuman writes the human-readable report to stdout:

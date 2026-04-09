@@ -18,7 +18,7 @@ const (
 	defaultDirectoriesInterval = 120 * time.Second
 	defaultCodeIndexInterval   = 30 * time.Minute
 	defaultModel               = DefaultLocalModel
-	defaultAnalysisModel       = "ollama/qwen2.5-coder:latest"
+	defaultAnalysisModel       = "ollama/qwen3-coder:30b"
 	defaultAnalysisCooldown    = 30 * time.Second
 )
 

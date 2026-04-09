@@ -14,9 +14,9 @@ import (
 
 // DefaultLocalModel is the single source of truth for the default local
 // Ollama model used anywhere inside gl1tch for generation, routing, query
-// synthesis, and game evaluation. Pinned to qwen2.5:7b for its stronger
-// tool-use / function-calling behaviour compared to llama3.2. To swap the
-// default for the entire project, change this one constant.
+// synthesis, and classification. Pinned to qwen2.5:7b — fast, reliable
+// JSON output, no thinking-mode overhead. Heavier models (qwen3-coder,
+// qwen3.5) are used for deep analysis where latency is acceptable.
 const DefaultLocalModel = "qwen2.5:7b"
 
 // DefaultRouterModel is an alias kept for clarity at the router call site.

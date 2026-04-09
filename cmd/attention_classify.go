@@ -99,11 +99,7 @@ func gatherClassifyEvents(ctx context.Context) ([]glitchd.AnalyzableEvent, error
 
 	switch {
 	case hasPR:
-		ev, err := eventFromPR(ctx, owner, repo, number, attentionWorkspace)
-		if err != nil {
-			return nil, err
-		}
-		return []glitchd.AnalyzableEvent{ev}, nil
+		return eventsFromPR(ctx, owner, repo, number, attentionWorkspace)
 	case classifyStdin:
 		return eventsFromStdin()
 	}

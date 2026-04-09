@@ -1,30 +1,14 @@
-// attention.go runs the local attention classifier — a qwen2.5:7b
-// call that decides, for each incoming AnalyzableEvent, whether the
-// event should interrupt the user right now (`high`), belongs in
-// the normal activity feed (`normal`), or is pure noise (`low`).
-//
-// This is stage 2 of the five-stage analysis ladder:
-//
-//	1. triage (triage.go)       — "anything here?"       → qwen2.5:7b
-//	2. attention (this file)    — "does this touch me?"  → qwen2.5:7b
-//	3. research (deep_analysis) — "gather context"       → opencode + coder
-//	4. draft    (deep_analysis) — "produce the artifact" → opencode + coder
-//	5. polish   (escalate, TBD) — "refine the draft"     → paid provider
-//
-// Why a separate classifier call and not a heuristic ladder in Go?
-// Because the *rules* for what counts as high attention live in the
-// user's workspace research prompt (see research_prompt.go), which
-// is free-form markdown the user edits. No `if author == me` table,
-// no severity map, no keyword list — the judgement is pushed to the
-// local LLM which reads the research prompt alongside each batch.
-// This is the AI-first rule applied to routing, not just generation.
+// attention.go runs the local attention classifier. The LLM decides
+// everything — what's high attention, what's noise, what's own
+// activity. No hardcoded rules, no Go-level filtering, no type→level
+// tables. The user's research prompt provides the domain knowledge;
+// the model applies judgement; feedback (thumbs up/down) teaches it
+// over time via brain hints.
 //
 // Failure mode: if Ollama is unreachable, the research prompt is
 // missing, or the model returns garbage JSON, every event in the
-// batch is stamped `normal` with an explanatory reason. That keeps
-// the downstream deep-analysis path on its pre-classifier behaviour
-// (plain summary rubric, cooldown enforced) rather than blocking
-// the whole pipeline on a best-effort stage.
+// batch is stamped `normal`. That keeps the downstream deep-analysis
+// path working rather than blocking on a best-effort stage.
 package glitchd
 
 import (
@@ -82,65 +66,21 @@ type AttentionVerdict struct {
 	Reason string         `json:"reason"`
 }
 
-// ClassifierRelevant reports whether an event type is worth
-// spending a classifier call on. The classifier is cheap per call
-// (~1-5s on qwen2.5:7b in JSON mode) but becomes catastrophic at
-// scale: a copilot.log backfill easily produces 30k events in a
-// few ticks, and classifying all of them would pin the collector
-// path for ~50 minutes.
-//
-// The allow-list here is deliberately narrow: only events that
-// represent *external coordination signals directed at the user*.
-// Container events (PRs, issues) are intentionally excluded —
-// they describe state but aren't actionable on their own. What's
-// actionable is what happens ON them: reviews, comments, checks.
-//
-// Why github.pr and github.issue are NOT in this list:
-//
-//   A PR existing isn't a coordination signal to its author —
-//   they already know, they opened it. It isn't a signal to
-//   anyone else either, until someone acts on it (reviews,
-//   comments, check results). Classifying the bare PR event was
-//   generating a second chat injection per PR that duplicated
-//   the derived-event injection a few seconds later, because
-//   qwen2.5:7b couldn't reliably follow the "my own activity →
-//   normal" rule and kept hallucinating a reviewer on the
-//   container event. Dropping the container types solves both
-//   the duplicate-notification UX AND the classifier-accuracy
-//   problem in one move.
-//
-//   The PRs and issues themselves still land in glitch-events
-//   and are searchable via the observer. They just don't trigger
-//   the attention funnel.
-//
-// Events rejected here still flow through the deep-analysis
-// queue if they pass eligibleForAnalysis; they just get no
-// Attention verdict stamped on them, which the downstream prompt
-// logic treats as "summary mode" per buildAnalysisPrompt. In
-// practice eligibleForAnalysis *also* gates on ClassifierRelevant,
-// so rejection here cleanly removes them from the whole pipeline.
-//
-// When you add a new coordination source (e.g. gitlab MRs or
-// slack mentions), add its type string here so classification
-// starts firing against it automatically.
-func ClassifierRelevant(eventType string) bool {
-	switch eventType {
-	case
-		// External actions ON github PRs/issues — these are the
-		// real coordination signals. A review, comment, or failing
-		// check is someone asking the user for something.
-		"github.pr_review",
-		"github.pr_comment",
-		"github.pr_check",
-		"github.check",
-		"github.issue_comment",
-		// git commits land here so the classifier can flag
-		// "someone pushed to main on a branch I'm working on".
-		"git.commit",
-		"git.push":
-		return true
+// ClassifierRelevant returns true for any event worth classifying.
+// No type allow-list — every event type is eligible. The LLM decides
+// what's noise and what matters. The only gate is structural: empty
+// events and stale events (>24h) are skipped to avoid wasting model
+// calls on content the LLM can't reason about.
+func ClassifierRelevant(ev AnalyzableEvent) bool {
+	// Nothing to reason about — empty title and body.
+	if strings.TrimSpace(ev.Title) == "" && strings.TrimSpace(ev.Body) == "" {
+		return false
 	}
-	return false
+	// Stale events aren't actionable.
+	if !ev.Timestamp.IsZero() && time.Since(ev.Timestamp) > 24*time.Hour {
+		return false
+	}
+	return true
 }
 
 // AttentionObserver is the callback fired once per classified
@@ -186,28 +126,21 @@ func getAttentionObserver() AttentionObserver {
 	return attentionObserver
 }
 
-// attentionHTTPTimeout bounds a single classifier call. 90 seconds
-// is generous by design: qwen2.5:7b on a freshly-booted Ollama
-// (no keep-alive, cold VRAM) can take 20-40 seconds just to load
-// the model before it even starts generating, and a batch of 5
-// events then needs another 5-15s to actually classify. Production
-// steady-state calls finish in well under 5s, so the 90s ceiling
-// only bites on the first call after a restart — which is exactly
-// when failing closed would hurt most, because every event defaults
-// to `normal` and the user's first real interaction gets missed.
-const attentionHTTPTimeout = 90 * time.Second
+// attentionHTTPTimeout bounds a single classifier call. 3 minutes
+// accommodates cold-start loading of MoE models (qwen3.5:35b-a3b
+// needs ~30-60s to load 23GB into Metal on first call). Steady-state
+// calls finish in under 10s; the generous ceiling ensures the first
+// call after a restart doesn't silently default everything to normal.
+const attentionHTTPTimeout = 180 * time.Second
 
 // attentionMaxBatch caps the number of events per classifier call.
 // Set to 1 after batch=5 was proven to cause cross-event contamination:
 // qwen2.5:7b on a 2-event batch would hallucinate fields from event 2
 // onto event 1's verdict (e.g. "review from @amannocci" on an event
-// where amannocci's name never appeared) and sometimes return fewer
-// verdicts than events, leaving tail items with default-normal.
-// One-event batches eliminate both failure modes, at the cost of N
-// sequential ollama calls. At ~1-2s per warm call, a burst of 12
-// github events takes under 30s — acceptable given the reliability
-// gain. The "small local model can't multitask" lesson is load-bearing
-// and worth the perf cost.
+// attentionMaxBatch caps the number of events per classifier call.
+// Kept at 1 — even qwen3.5 9B can't reliably process multi-event
+// batches with full PR bodies within the timeout. Sequential calls
+// are fast once the model is warm (~5-10s each).
 const attentionMaxBatch = 1
 
 // ClassifyAttention runs the attention classifier against a batch
@@ -258,13 +191,12 @@ func ClassifyAttention(
 	}
 
 	// Resolve the user identity. Both values are injected into the
-	// classifier prompt so it can match against event authors and
-	// mention strings. Best-effort — empty values are fine.
+	// classifier prompt so the LLM knows who "me" is.
 	userName, userEmail := localGitIdentity()
 
-	// Process in chunks. Each chunk is a fresh ollama call; the
-	// first chunk's warm-start cost dominates, subsequent chunks
-	// are cheap.
+	// All events go to the LLM — no Go-level pre-filtering. The
+	// model decides everything: own activity, bot noise, attention
+	// level. The research prompt provides the domain rules.
 	for start := 0; start < len(events); start += attentionMaxBatch {
 		end := start + attentionMaxBatch
 		if end > len(events) {
@@ -277,12 +209,8 @@ func ClassifyAttention(
 		if err != nil {
 			slog.Warn("attention: batch classify failed, defaulting to normal",
 				"err", err, "batch_size", len(batch))
-			// Leave this chunk's pre-filled `normal` verdicts in
-			// place and continue to the next chunk.
 			continue
 		}
-		// Re-base the returned indices onto the parent slice's
-		// coordinate system and copy into the final result.
 		for _, bv := range batchVerdicts {
 			if bv.Index < 0 || bv.Index >= len(batch) {
 				continue
@@ -368,10 +296,7 @@ func classifyAttentionBatch(
 		Format: "json",
 		Options: map[string]any{
 			"temperature": 0.1,
-			// Larger context than triage because the research
-			// prompt alone can easily run 500+ tokens and we're
-			// also carrying up to 20 events.
-			"num_ctx": 8192,
+			"num_ctx":     8192,
 		},
 	})
 	if err != nil {
@@ -471,6 +396,12 @@ func parseClassifierResponse(raw string, expectedLen int) ([]AttentionVerdict, e
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, fmt.Errorf("empty classifier response")
+	}
+
+	// Strip thinking tags — qwen3/3.5 models wrap output in
+	// <think>...</think> before the actual JSON response.
+	if idx := strings.Index(raw, "</think>"); idx >= 0 {
+		raw = strings.TrimSpace(raw[idx+len("</think>"):])
 	}
 
 	var parsed struct {

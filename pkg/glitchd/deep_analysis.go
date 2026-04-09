@@ -106,23 +106,12 @@ func WireAnalyzerToCollectors(a *Analyzer) {
 			return
 		}
 
-		// Run the local attention classifier — but only over events
-		// whose type is in the coordination allow-list (see
-		// ClassifierRelevant). Copilot history, directory scans,
-		// and code index artifacts would otherwise DOS the
-		// classifier during a cold backfill: a ~30k copilot.log
-		// tick would pin the sink for ~50 minutes on qwen2.5:7b
-		// and starve every real github event behind it.
-		//
-		// Build a parallel index slice so we can stamp verdicts
-		// back onto the original `analyzable` slice after the
-		// filtered-classify round-trip. The alternative (classify
-		// in-place on a subset) would either require us to mutate
-		// analyzable in two passes or track a side-channel map.
+		// Filter to events worth classifying (non-empty, non-stale),
+		// then let the LLM decide everything — no type allow-list.
 		relevantIdx := make([]int, 0, len(analyzable))
 		relevantEvents := make([]AnalyzableEvent, 0, len(analyzable))
 		for i, ae := range analyzable {
-			if ClassifierRelevant(ae.Type) {
+			if ClassifierRelevant(ae) {
 				relevantIdx = append(relevantIdx, i)
 				relevantEvents = append(relevantEvents, ae)
 			}
@@ -179,13 +168,25 @@ func esearchEventToAnalyzable(workspaceID, source string, ev esearch.Event) Anal
 
 // esearchEventIdentifier extracts the most stable id we can find on
 // an esearch.Event for the analyzer's dedupe key. Falls back through
-// SHA → metadata.number → metadata.url → empty string. Empty is OK:
-// AnalyzableEvent.EventKey hashes title+body in that case.
+// SHA → review_id → comment_id → pr_number → url → empty. Empty is
+// OK: AnalyzableEvent.EventKey hashes title+body in that case.
+//
+// review_id and comment_id are per-event identifiers set by the
+// GitHub collector, so two different reviews on the same PR get
+// distinct dedupe keys instead of collapsing to the PR number.
 func esearchEventIdentifier(ev esearch.Event) string {
 	if ev.SHA != "" {
 		return ev.SHA
 	}
 	if ev.Metadata != nil {
+		// Per-event identifiers (review, comment) take priority over
+		// the PR/issue number so events on the same PR dedupe independently.
+		if s, ok := ev.Metadata["review_id"].(string); ok && s != "" {
+			return s
+		}
+		if s, ok := ev.Metadata["comment_id"].(string); ok && s != "" {
+			return s
+		}
 		if n, ok := ev.Metadata["number"].(float64); ok && n > 0 {
 			return fmt.Sprintf("%d", int(n))
 		}
@@ -655,96 +656,12 @@ type analysisDoc struct {
 // ── Eligibility filter ─────────────────────────────────────────────
 
 // eligibleForAnalysis decides whether an event is worth a model call.
-// Source-agnostic by design: it checks content shape and author
-// reputation rather than dispatching on type. New collector types
-// automatically pass through the same filter.
+// eligibleForAnalysis gates deep analysis on structural checks only.
+// No semantic filtering — the LLM classifier already decided what
+// matters. We just skip events that are structurally unfit for a
+// model call (empty content, stale timestamps).
 func eligibleForAnalysis(ev AnalyzableEvent) bool {
-	// Only coordination events get deep analysis. Directory scans,
-	// code-index updates, and other ambient workspace state
-	// shouldn't eat the 30-second cooldown slot that a real PR
-	// review is waiting in line for. The ClassifierRelevant allow
-	// list is the single source of truth for "what counts as a
-	// coordination signal" and we reuse it here so the analyzer
-	// and the classifier can't drift out of sync.
-	if !ClassifierRelevant(ev.Type) {
-		return false
-	}
-
-	// Empty title and body → nothing for the LLM to anchor on. The
-	// model would just hallucinate context.
-	if strings.TrimSpace(ev.Title) == "" && strings.TrimSpace(ev.Body) == "" {
-		return false
-	}
-
-	// Stale events aren't actionable — there's no point in spending
-	// a model call on a 3-day-old PR the user has surely already
-	// seen. The cutoff is 24h on cold start; events from before
-	// then get dedupe-marked but never analyzed.
-	if !ev.Timestamp.IsZero() && time.Since(ev.Timestamp) > 24*time.Hour {
-		return false
-	}
-
-	// Bot authors are skipped wholesale. Their volume swamps the
-	// queue and their content is rarely actionable. The list is the
-	// union of common automation accounts seen across github / gitlab
-	// / generic CI. Match is case-insensitive prefix so suffixes like
-	// "[bot]" don't fool the filter.
-	if isBotAuthor(ev.Author) {
-		return false
-	}
-
-	// Trivial commit messages — chore bumps, merge commits, typo
-	// fixes — clutter the activity panel without producing useful
-	// analysis. Filter on the title prefix.
-	if isTrivialTitle(ev.Title) {
-		return false
-	}
-
-	return true
-}
-
-// isBotAuthor returns true when the author looks like an automation
-// account. Match is case-insensitive prefix so common bot suffixes
-// ("[bot]", "-bot", " (bot)") all collapse to the same check.
-func isBotAuthor(author string) bool {
-	a := strings.ToLower(strings.TrimSpace(author))
-	if a == "" {
-		return false
-	}
-	if strings.Contains(a, "bot") {
-		return true
-	}
-	switch a {
-	case "dependabot", "renovate", "github-actions", "github-copilot",
-		"semantic-release", "release-please", "imgbot", "snyk-bot":
-		return true
-	}
-	return false
-}
-
-// isTrivialTitle returns true for commit/issue titles that are
-// almost never worth analyzing — version bumps, merges, typo fixes,
-// release tags. Conservative on purpose: false negatives just mean
-// one wasted model call, but false positives silently hide
-// interesting events.
-func isTrivialTitle(title string) bool {
-	t := strings.ToLower(strings.TrimSpace(title))
-	if t == "" {
-		return false
-	}
-	prefixes := []string{
-		"merge ", "merge pull request",
-		"chore: bump", "chore(deps):",
-		"release v", "release-",
-		"bump version", "bump dependency",
-		"version bump",
-	}
-	for _, p := range prefixes {
-		if strings.HasPrefix(t, p) {
-			return true
-		}
-	}
-	return false
+	return ClassifierRelevant(ev)
 }
 
 // ── Prompt construction ────────────────────────────────────────────
@@ -961,7 +878,7 @@ func analysisModel(cfg *capability.Config) string {
 	if cfg != nil && cfg.Analysis.Model != "" {
 		return cfg.Analysis.Model
 	}
-	return "ollama/qwen2.5-coder:latest"
+	return "ollama/qwen3-coder:30b"
 }
 
 func analysisCooldown(cfg *capability.Config) time.Duration {

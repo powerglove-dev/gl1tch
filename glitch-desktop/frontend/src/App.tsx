@@ -224,15 +224,13 @@ export function App() {
     if (d?.workspace_id) streamError(d.workspace_id, d.message ?? "error");
   });
 
-  // Auto-open the thread side-pane when a research call completes
-  // and produces a thread. Fired by Execute's freeform→research path.
-  useWailsEvent("chat:thread_ready", (data: unknown) => {
-    const d = data as { workspace_id?: string; thread_id?: string; parent_id?: string };
-    if (!d?.workspace_id || !d?.thread_id) return;
-    // Only open if we're still on the workspace that initiated the research.
-    if (d.workspace_id === state.activeWorkspaceId) {
-      setActiveThread({ id: d.thread_id, parentID: d.parent_id ?? "" });
-    }
+  // Thread-ready events are logged but do NOT auto-open the thread
+  // pane. The draft already streams into the main chat via chat:chunk,
+  // so the user sees thinking → reply inline. They can click the 💬
+  // affordance on the message to drill into the thread when ready.
+  useWailsEvent("chat:thread_ready", (_data: unknown) => {
+    // Intentionally a no-op. The thread exists in the backend and
+    // the 💬 affordance on the parent message will open it on click.
   });
 
   // Structured block events from the chain runner's protocol splitter.

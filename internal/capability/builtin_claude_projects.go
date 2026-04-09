@@ -122,6 +122,20 @@ type claudeProjectEntry struct {
 	Timestamp string `json:"timestamp"`
 	SessionID string `json:"sessionId"`
 	Content   string `json:"content"`
+	Message   struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	} `json:"message"`
+}
+
+// claudeEntryContent returns the user-facing text from a session entry.
+// User entries store content in message.content; legacy entries may
+// use the top-level content field.
+func claudeEntryContent(e claudeProjectEntry) string {
+	if e.Message.Content != "" {
+		return e.Message.Content
+	}
+	return e.Content
 }
 
 func (c *ClaudeProjectsCapability) parseSessionFile(path, project string, ch chan<- Event) {
@@ -138,7 +152,14 @@ func (c *ClaudeProjectsCapability) parseSessionFile(path, project string, ch cha
 		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
 			continue
 		}
-		if entry.Content == "" || entry.Type == "" {
+		// Only index user prompts — the intent signals, not full
+		// conversation dumps. Assistant responses, tool calls, and
+		// system messages are noise for the attention classifier.
+		if entry.Type != "user" {
+			continue
+		}
+		content := claudeEntryContent(entry)
+		if content == "" {
 			continue
 		}
 		ts, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
@@ -146,13 +167,13 @@ func (c *ClaudeProjectsCapability) parseSessionFile(path, project string, ch cha
 			ts = time.Now()
 		}
 		ch <- Event{Kind: EventDoc, Doc: map[string]any{
-			"type":         "claude.session." + entry.Type,
+			"type":         "claude.prompt",
 			"source":       "claude",
 			"workspace_id": c.WorkspaceID,
 			"repo":         project,
-			"author":       "claude-code",
-			"message":      truncateString(entry.Content, 500),
-			"body":         entry.Content,
+			"author":       "user",
+			"message":      truncateString(content, 500),
+			"body":         content,
 			"metadata": map[string]any{
 				"session_id": sessionID,
 				"operation":  entry.Operation,

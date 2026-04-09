@@ -72,8 +72,9 @@ func (c *CopilotCapability) poll(ctx context.Context, ch chan<- Event) {
 		c.indexedLogs = make(map[string]bool)
 	}
 
+	// Only index user commands (prompts) — process logs are internal
+	// noise that doesn't need attention classification.
 	c.pollCommands(ctx, dir, ch)
-	c.pollLogs(ctx, dir, ch)
 }
 
 func (c *CopilotCapability) pollCommands(_ context.Context, dir string, ch chan<- Event) {

@@ -308,6 +308,7 @@ func ghListPRCommentsView(ctx context.Context, repo string, prNum int, since tim
 			Body:    truncate(c.Body, 2000),
 			Metadata: map[string]any{
 				"pr_number":   prNum,
+				"comment_id":  fmt.Sprintf("%d:%s:%s", prNum, c.Author.Login, c.CreatedAt),
 				"github_repo": repo,
 			},
 			Timestamp: ts,
@@ -333,6 +334,7 @@ func ghListPRReviews(ctx context.Context, repo string, prNum int, since time.Tim
 			Author      struct{ Login string `json:"login"` } `json:"author"`
 			Body        string                                `json:"body"`
 			State       string                                `json:"state"`
+			ID          string                                `json:"id"`
 			SubmittedAt string                                `json:"submittedAt"`
 		} `json:"reviews"`
 	}
@@ -357,6 +359,7 @@ func ghListPRReviews(ctx context.Context, repo string, prNum int, since time.Tim
 			Metadata: map[string]any{
 				"pr_number":    prNum,
 				"review_state": r.State,
+				"review_id":    r.ID,
 				"github_repo":  repo,
 			},
 			Timestamp: ts,

@@ -20,7 +20,6 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -114,30 +113,19 @@ func parseFromPR(raw string) (owner, repo string, number int, ok bool, err error
 	return owner, repo, number, true, nil
 }
 
-// eventFromPR builds an AnalyzableEvent from a live github PR by
-// shelling out to `gh pr view --json`. This lets smoke tests work
-// without ES or the collector — the user points at any real PR and
-// the rest of the pipeline gets a realistic event to chew on.
+// eventsFromPR builds a slice of AnalyzableEvents from a live github
+// PR by shelling out to `gh pr view --json`. Each review and comment
+// becomes its own event with the correct type and author — matching
+// what the real collector emits. The PR itself is always the first
+// event; reviews and comments follow in chronological order.
 //
-// Fields mapped from the gh response:
-//   - Title       ← "#<n> <title>"
-//   - Body        ← body + the last few review/issue comments
-//   - Author      ← author.login
-//   - Repo        ← "owner/repo"
-//   - URL         ← url
-//   - Identifier  ← number as string
-//   - Timestamp   ← updatedAt (so stale-event filter doesn't bite on old PRs)
-//
-// Returns an error when gh is missing, the PR can't be fetched, or
-// the JSON shape is unexpected.
-func eventFromPR(ctx context.Context, owner, repo string, number int, workspaceID string) (glitchd.AnalyzableEvent, error) {
+// This lets smoke tests exercise the same classifier code paths the
+// production pipeline uses, including the "my own activity" filter.
+func eventsFromPR(ctx context.Context, owner, repo string, number int, workspaceID string) ([]glitchd.AnalyzableEvent, error) {
 	slug := owner + "/" + repo
 	ghCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Pull the fields we need in a single call. Comments/reviews
-	// give the classifier something concrete to latch onto when the
-	// user's research prompt is keyed on "someone reviewed my PR".
 	cmd := exec.CommandContext(ghCtx, "gh", "pr", "view",
 		fmt.Sprintf("%d", number),
 		"--repo", slug,
@@ -145,14 +133,14 @@ func eventFromPR(ctx context.Context, owner, repo string, number int, workspaceI
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return glitchd.AnalyzableEvent{}, fmt.Errorf("gh pr view %s#%d: %w", slug, number, err)
+		return nil, fmt.Errorf("gh pr view %s#%d: %w", slug, number, err)
 	}
 
 	var parsed struct {
-		Number    int    `json:"number"`
-		Title     string `json:"title"`
-		Body      string `json:"body"`
-		Author    struct {
+		Number  int    `json:"number"`
+		Title   string `json:"title"`
+		Body    string `json:"body"`
+		Author  struct {
 			Login string `json:"login"`
 		} `json:"author"`
 		URL       string    `json:"url"`
@@ -169,51 +157,80 @@ func eventFromPR(ctx context.Context, owner, repo string, number int, workspaceI
 			Author struct {
 				Login string `json:"login"`
 			} `json:"author"`
-			Body      string    `json:"body"`
-			State     string    `json:"state"`
+			Body        string    `json:"body"`
+			State       string    `json:"state"`
+			ID          string    `json:"id"`
 			SubmittedAt time.Time `json:"submittedAt"`
 		} `json:"reviews"`
 	}
 	if err := json.Unmarshal(out, &parsed); err != nil {
-		return glitchd.AnalyzableEvent{}, fmt.Errorf("decode gh pr view output: %w", err)
+		return nil, fmt.Errorf("decode gh pr view output: %w", err)
 	}
 
-	// Stitch a body the classifier can reason about: the PR
-	// description followed by the most recent comments and reviews.
-	// Not the whole thread — we cap to keep the prompt bounded.
-	var body bytes.Buffer
-	if strings.TrimSpace(parsed.Body) != "" {
-		body.WriteString("## PR description\n")
-		body.WriteString(parsed.Body)
-		body.WriteString("\n")
-	}
-	const maxThreadItems = 6
-	items := 0
-	for i := len(parsed.Reviews) - 1; i >= 0 && items < maxThreadItems; i-- {
-		r := parsed.Reviews[i]
-		fmt.Fprintf(&body, "\n## Review by @%s (%s)\n%s\n",
-			r.Author.Login, r.State, strings.TrimSpace(r.Body))
-		items++
-	}
-	for i := len(parsed.Comments) - 1; i >= 0 && items < maxThreadItems; i-- {
-		c := parsed.Comments[i]
-		fmt.Fprintf(&body, "\n## Comment by @%s\n%s\n",
-			c.Author.Login, strings.TrimSpace(c.Body))
-		items++
-	}
+	prTitle := fmt.Sprintf("#%d %s", parsed.Number, parsed.Title)
 
-	return glitchd.AnalyzableEvent{
+	var events []glitchd.AnalyzableEvent
+
+	// 1. The PR itself — type github.pr, author is the PR author.
+	events = append(events, glitchd.AnalyzableEvent{
 		Type:        "github.pr",
 		Source:      "github",
 		Repo:        slug,
 		Author:      parsed.Author.Login,
-		Title:       fmt.Sprintf("#%d %s", parsed.Number, parsed.Title),
-		Body:        body.String(),
+		Title:       prTitle,
+		Body:        truncateStr(parsed.Body, 3000),
 		Identifier:  fmt.Sprintf("%d", parsed.Number),
 		URL:         parsed.URL,
 		WorkspaceID: workspaceID,
 		Timestamp:   parsed.UpdatedAt,
-	}, nil
+	})
+
+	// 2. Each review → type github.pr_review, author is the reviewer.
+	for _, r := range parsed.Reviews {
+		id := r.ID
+		if id == "" {
+			id = fmt.Sprintf("%d:review:%s:%s", parsed.Number, r.Author.Login, r.SubmittedAt.Format(time.RFC3339))
+		}
+		events = append(events, glitchd.AnalyzableEvent{
+			Type:        "github.pr_review",
+			Source:      "github",
+			Repo:        slug,
+			Author:      r.Author.Login,
+			Title:       fmt.Sprintf("Review on PR %s: %s", prTitle, r.State),
+			Body:        truncateStr(r.Body, 2000),
+			Identifier:  id,
+			URL:         parsed.URL,
+			WorkspaceID: workspaceID,
+			Timestamp:   r.SubmittedAt,
+		})
+	}
+
+	// 3. Each comment → type github.pr_comment, author is the commenter.
+	for _, c := range parsed.Comments {
+		id := fmt.Sprintf("%d:comment:%s:%s", parsed.Number, c.Author.Login, c.CreatedAt.Format(time.RFC3339))
+		events = append(events, glitchd.AnalyzableEvent{
+			Type:        "github.pr_comment",
+			Source:      "github",
+			Repo:        slug,
+			Author:      c.Author.Login,
+			Title:       fmt.Sprintf("Comment on PR %s", prTitle),
+			Body:        truncateStr(c.Body, 2000),
+			Identifier:  id,
+			URL:         parsed.URL,
+			WorkspaceID: workspaceID,
+			Timestamp:   c.CreatedAt,
+		})
+	}
+
+	return events, nil
+}
+
+// truncateStr caps s at n bytes, appending "…" if truncated.
+func truncateStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-1] + "…"
 }
 
 // eventsFromStdin reads a JSON array of AnalyzableEvent-shaped
