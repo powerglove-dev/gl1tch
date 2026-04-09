@@ -110,7 +110,8 @@ func runAskResearch(
 
 	loop := research.NewLoop(registry, llm).
 		WithScoreOptions(scoreOpts).
-		WithEventSink(research.NewFileEventSink(""))
+		WithEventSink(research.NewFileEventSink("")).
+		WithHintsProvider(research.NewFileEventHintsProvider(""))
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), askResearchMaxWallclock+30*time.Second)
 	defer cancel()

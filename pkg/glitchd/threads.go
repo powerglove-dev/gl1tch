@@ -100,6 +100,7 @@ func (h *ThreadHosts) EnsureHost(workspaceID string) *ThreadHost {
 		opts.SkipSelfConsistency = true
 		loop := research.NewLoop(researchReg, llm).
 			WithEventSink(research.NewFileEventSink("")).
+			WithHintsProvider(research.NewFileEventHintsProvider("")).
 			WithScoreOptions(opts)
 		_ = registry.Register(chatui.ResearchSlashHandler(loop))
 		host := &ThreadHost{store: store, registry: registry, loop: loop, cwd: cwd}

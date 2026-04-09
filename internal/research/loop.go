@@ -35,6 +35,7 @@ type Loop struct {
 	scoreOptions ScoreOptions
 	events       EventSink
 	verifier     Verifier
+	hints        HintsProvider
 }
 
 // NewLoop constructs a Loop. registry must be non-nil and populated; llm must
@@ -48,7 +49,27 @@ func NewLoop(registry *Registry, llm LLMFn) *Loop {
 		logger:       slog.New(slog.NewTextHandler(discardWriter{}, nil)),
 		scoreOptions: DefaultScoreOptions(),
 		events:       nopSink{},
+		hints:        nopHintsProvider{},
 	}
+}
+
+// WithHintsProvider wires a brain-event hint provider the loop calls
+// before every plan stage. The provider's hint string lands in the
+// planner template's {{.Hints}} slot, biasing the picker toward
+// researcher combinations that produced high composite scores on
+// past similar questions. Pass nil to disable.
+//
+// The hint generation is intentionally cheap (one file read + token
+// jaccard) so it adds <100ms to the plan stage. If a provider is
+// slow or errors, the loop's plan call still completes — the hint
+// just collapses to empty.
+func (l *Loop) WithHintsProvider(p HintsProvider) *Loop {
+	if p == nil {
+		l.hints = nopHintsProvider{}
+	} else {
+		l.hints = p
+	}
+	return l
 }
 
 // WithVerifier wires a paid verifier the loop consults when local
@@ -424,11 +445,26 @@ func ungroundedClaims(c Critique) []string {
 }
 
 // plan asks the local model to pick researcher names and validates the
-// result against the registry. Names not in the registry are dropped with a
-// warning; this is the "validate against registry before dispatch" rule from
-// the spec.
+// result against the registry. Names not in the registry are dropped
+// with a warning; this is the "validate against registry before
+// dispatch" rule from the spec.
+//
+// Before calling the model the plan stage asks the configured
+// HintsProvider for a one-paragraph hint summarising what past
+// research calls picked for similar questions. The hint lands in the
+// planner template's {{.Hints}} slot — the brain reads its own log to
+// bias the next pick. When no provider is configured, the hint is
+// empty and the planner template skips the {{if .Hints}} block, so
+// behaviour matches the no-brain default.
 func (l *Loop) plan(ctx context.Context, q ResearchQuery) ([]string, error) {
-	prompt := PlanPrompt(q.Question, l.registry.List())
+	hint := ""
+	if l.hints != nil {
+		hint = l.hints.Hints(ctx, q.Question)
+		if hint != "" {
+			l.logger.Info("research plan: brain hint", "question", q.Question, "hint", hint)
+		}
+	}
+	prompt := PlanPromptWithHints(q.Question, l.registry.List(), hint)
 	raw, err := l.llm(ctx, prompt)
 	if err != nil {
 		return nil, fmt.Errorf("llm: %w", err)

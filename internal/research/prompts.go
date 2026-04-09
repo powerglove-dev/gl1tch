@@ -91,13 +91,29 @@ type promptDataSelfConsistency struct {
 }
 
 // PlanPrompt renders the plan.tmpl template with the supplied question
-// and researcher menu. The exported signature is preserved for callers;
-// the body now goes through PromptStore so the template is editable on
-// disk.
+// and researcher menu. Backward-compatible wrapper around
+// PlanPromptWithHints with an empty hint string — used by call sites
+// that don't have a HintsProvider wired.
 func PlanPrompt(question string, researchers []Researcher) string {
+	return PlanPromptWithHints(question, researchers, "")
+}
+
+// PlanPromptWithHints renders the plan.tmpl template with the question,
+// researcher menu, and an optional hint string sourced from the brain
+// event log via HintsProvider. The hint lands in the template's
+// {{.Hints}} slot and the default plan.tmpl wraps it in `{{if .Hints}}
+// Brain hints (past calls for similar questions): ... {{end}}` so
+// callers without a provider get the original behaviour automatically.
+//
+// This is the function the loop's plan stage calls. The hint is built
+// per call (no caching) so a research call immediately benefits from
+// events the previous research call wrote — the brain reads what it
+// just wrote, no in-memory invalidation, no restart.
+func PlanPromptWithHints(question string, researchers []Researcher, hints string) string {
 	data := promptDataPlan{
 		Question:    strings.TrimSpace(question),
 		Researchers: make([]promptDataResearcher, 0, len(researchers)),
+		Hints:       strings.TrimSpace(hints),
 	}
 	for _, r := range researchers {
 		data.Researchers = append(data.Researchers, promptDataResearcher{
