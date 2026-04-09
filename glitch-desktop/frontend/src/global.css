@@ -206,7 +206,14 @@ div:hover > .glitch-dir-set-primary:hover { opacity: 1 !important; color: var(--
    composite proxy. Main-chat feedback buttons are hover-revealed
    so they don't clutter the scrollback — the thread side pane
    shows them always (since the side pane IS the drill context). */
-.glitch-main-feedback { opacity: 0; transition: opacity 0.15s; }
+.glitch-main-feedback {
+  opacity: 0;
+  transition: opacity 0.15s;
+  position: absolute;
+  top: -6px;
+  right: 22px;
+  z-index: 2;
+}
 .glitch-message-row:hover .glitch-main-feedback { opacity: 1; }
 .threaded-chat-feedback { display: flex; gap: 4px; margin-top: 6px; }
 .threaded-chat-feedback-btn {
@@ -234,9 +241,20 @@ div:hover > .glitch-dir-set-primary:hover { opacity: 1 !important; color: var(--
 .threaded-chat-bundle-item-clickable { cursor: pointer; }
 .threaded-chat-bundle-item-clickable:hover { background: var(--bg-bright); border-color: var(--purple); }
 /* Side pane (Slack-style thread view) */
-.threaded-chat-sidepane { width: 36%; min-width: 320px; max-width: 520px; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--bg); }
-.threaded-chat-sidepane-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--bg-bright); gap: 10px; }
-.threaded-chat-sidepane-titleblock { min-width: 0; flex: 1; }
+/* Thread overlay — takes over the main chat column when active. */
+.threaded-chat-overlay { display: flex; flex-direction: column; flex: 1; min-height: 0; background: var(--bg); }
+.threaded-chat-overlay-header { display: flex; align-items: flex-start; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--bg-bright); gap: 10px; }
+.threaded-chat-back-button { background: transparent; border: 1px solid var(--border); color: var(--fg-dim); font-size: 11px; padding: 4px 10px; border-radius: 3px; cursor: pointer; font-family: inherit; flex-shrink: 0; margin-top: 1px; }
+.threaded-chat-back-button:hover { color: var(--fg); border-color: var(--purple); }
+.threaded-chat-header-context { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.threaded-chat-header-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11px; color: var(--fg-dim); }
+.threaded-chat-header-title { color: var(--fg); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.threaded-chat-header-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.threaded-chat-header-tag { background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 1px 6px; font-size: 10px; color: var(--cyan); white-space: nowrap; }
+.threaded-chat-header-links { display: flex; gap: 6px; flex-wrap: wrap; }
+.threaded-chat-header-link { color: var(--purple); text-decoration: none; font-size: 11px; border-bottom: 1px dotted var(--purple); white-space: nowrap; }
+.threaded-chat-header-link:hover { color: var(--cyan); border-color: var(--cyan); }
+.threaded-chat-overlay-input-slot { border-top: 1px solid var(--border); background: var(--bg); }
 .threaded-chat-sidepane-eyebrow { font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--purple); font-weight: 600; opacity: 0.8; }
 /* Parent message at the head of a thread — rendered with the same
    BlockRenderer the main chat uses, but framed so the user can tell
@@ -255,14 +273,7 @@ div:hover > .glitch-dir-set-primary:hover { opacity: 1 !important; color: var(--
   0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
   40% { opacity: 1; transform: scale(1); }
 }
-.threaded-chat-sidepane-actions { display: flex; gap: 6px; }
-.threaded-chat-sidepane-button { background: transparent; border: 1px solid var(--border); color: var(--fg-dim); font-size: 10px; padding: 3px 8px; border-radius: 3px; cursor: pointer; font-family: inherit; }
-.threaded-chat-sidepane-button:hover { color: var(--fg); border-color: var(--purple); }
-.threaded-chat-sidepane-messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
-.threaded-chat-sidepane-input { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--border); background: var(--bg); }
-.threaded-chat-sidepane-input input { flex: 1; padding: 6px 10px; font-size: 12px; background: var(--bg-bright); border: 1px solid var(--border); color: var(--fg); border-radius: 4px; font-family: inherit; }
-.threaded-chat-sidepane-input button { padding: 6px 14px; font-size: 11px; background: var(--purple); color: var(--bg); border: none; border-radius: 4px; cursor: pointer; }
-.threaded-chat-sidepane-input button:disabled { opacity: 0.5; cursor: not-allowed; }
+.threaded-chat-overlay-messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .threaded-chat-empty { color: var(--fg-dim); font-size: 13px; padding: 24px; text-align: center; }
 .threaded-chat-empty code { background: var(--bg-bright); padding: 1px 6px; border-radius: 3px; font-size: 12px; }
 .threaded-chat-message { display: flex; flex-direction: column; gap: 4px; padding: 8px 12px; border-radius: 6px; background: var(--bg-bright); border: 1px solid var(--border); }
@@ -290,6 +301,16 @@ div:hover > .glitch-dir-set-primary:hover { opacity: 1 !important; color: var(--
 .threaded-chat-chip { padding: 3px 10px; font-size: 11px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 12px; cursor: pointer; }
 .threaded-chat-chip:hover:not(:disabled) { border-color: var(--purple); }
 .threaded-chat-chip:disabled { opacity: 0.5; cursor: not-allowed; }
+.threaded-chat-feed { display: flex; flex-direction: column; gap: 3px; }
+.threaded-chat-feed-empty { font-size: 11px; color: var(--fg-dim); font-style: italic; padding: 4px 8px; }
+.threaded-chat-feed-item { display: flex; flex-direction: column; text-align: left; background: transparent; border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; font-size: 12px; cursor: pointer; color: var(--fg); font-family: inherit; }
+.threaded-chat-feed-item:hover:not(:disabled) { background: var(--bg-bright); border-color: var(--purple); }
+.threaded-chat-feed-item:disabled { cursor: default; }
+.threaded-chat-feed-warn { border-left: 2px solid var(--orange); }
+.threaded-chat-feed-error { border-left: 2px solid var(--red); }
+.threaded-chat-feed-info { border-left: 2px solid var(--cyan); }
+.threaded-chat-feed-title { font-weight: 500; }
+.threaded-chat-feed-snippet { font-size: 11px; color: var(--fg-dim); margin-top: 2px; }
 .threaded-chat-fallback { color: var(--orange); font-size: 11px; font-style: italic; }
 .threaded-chat-thread { margin-top: 8px; padding: 8px; border-left: 2px solid var(--purple); background: var(--bg); border-radius: 4px; }
 .threaded-chat-thread-header { display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }

@@ -52,9 +52,11 @@ type TriageResult struct {
 }
 
 // QueryRecentEvents pulls events newer than sinceMs from glitch-events
-// and returns up to limit of them, newest first. The triage loop
-// calls this on each tick to get the buffer of activity to analyze.
-func QueryRecentEvents(ctx context.Context, sinceMs int64, limit int) ([]TriageEvent, error) {
+// and returns up to limit of them, newest first. When workspaceID is
+// non-empty the query is scoped to that workspace (including the
+// shared tool-pod bucket) so the triage loop only surfaces events the
+// user would expect to see in the active workspace.
+func QueryRecentEvents(ctx context.Context, sinceMs int64, limit int, workspaceID string) ([]TriageEvent, error) {
 	cfg, err := capability.LoadConfig()
 	if err != nil {
 		return nil, err
@@ -67,16 +69,41 @@ func QueryRecentEvents(ctx context.Context, sinceMs int64, limit int) ([]TriageE
 		limit = 50
 	}
 
-	body := fmt.Sprintf(`{
-		"size": %d,
-		"sort": [{ "timestamp": "desc" }],
-		"_source": ["type","source","repo","author","message","timestamp"],
-		"query": {
-			"range": {
-				"timestamp": { "gte": %d, "format": "epoch_millis" }
+	var body string
+	if workspaceID != "" {
+		body = fmt.Sprintf(`{
+			"size": %d,
+			"sort": [{ "timestamp": "desc" }],
+			"_source": ["type","source","repo","author","message","timestamp"],
+			"query": {
+				"bool": {
+					"must": [
+						{ "range": { "timestamp": { "gte": %d, "format": "epoch_millis" } } }
+					],
+					"filter": {
+						"bool": {
+							"should": [
+								{ "term": { "workspace_id": %q } },
+								{ "term": { "workspace_id": %q } }
+							],
+							"minimum_should_match": 1
+						}
+					}
+				}
 			}
-		}
-	}`, limit, sinceMs)
+		}`, limit, sinceMs, workspaceID, capability.WorkspaceIDTools)
+	} else {
+		body = fmt.Sprintf(`{
+			"size": %d,
+			"sort": [{ "timestamp": "desc" }],
+			"_source": ["type","source","repo","author","message","timestamp"],
+			"query": {
+				"range": {
+					"timestamp": { "gte": %d, "format": "epoch_millis" }
+				}
+			}
+		}`, limit, sinceMs)
+	}
 
 	url := fmt.Sprintf("%s/glitch-events/_search", addr)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader([]byte(body)))

@@ -464,6 +464,19 @@ func (s *ThreadStore) RemoveLastMain() {
 	}
 }
 
+// LookupMessage returns the message with the given ID, if it exists in the
+// store. Used by the thread host to extract parent message context for
+// follow-up research queries in a thread.
+func (s *ThreadStore) LookupMessage(id string) (ChatMessage, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	m, ok := s.messages[id]
+	if !ok {
+		return ChatMessage{}, false
+	}
+	return *m, true
+}
+
 // AllThreads returns every thread in the store, ordered by CreatedAt.
 // Useful for the persistence layer (serialise on shutdown) and for the
 // /threads slash command.

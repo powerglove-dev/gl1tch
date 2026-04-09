@@ -99,6 +99,7 @@ export interface Workspace {
   title: string;
   directories: string[] | null;
   repo_names: string[] | null;
+  primary_directory?: string;
   created_at: number;
   updated_at: number;
 }

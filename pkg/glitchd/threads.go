@@ -325,6 +325,67 @@ func (h *ThreadHost) queryContext() map[string]string {
 	return out
 }
 
+// extractParentContext pulls a text summary from the parent ChatMessage so
+// thread follow-ups carry the context that spawned the thread. Handles all
+// payload types the attention feed / chat surface produces: widget_card
+// (attention events), text (user questions), evidence bundles, etc.
+func extractParentContext(msg chatui.ChatMessage) string {
+	var b strings.Builder
+	switch p := msg.Payload.(type) {
+	case chatui.TextPayload:
+		b.WriteString(p.Body)
+	case chatui.WidgetCardPayload:
+		if p.Title != "" {
+			b.WriteString(p.Title)
+		}
+		if p.Subtitle != "" {
+			b.WriteString("\n")
+			b.WriteString(p.Subtitle)
+		}
+		for _, row := range p.Rows {
+			fmt.Fprintf(&b, "\n%s: %s", row.Key, row.Value)
+		}
+	case chatui.EvidenceBundlePayload:
+		for _, item := range p.Items {
+			fmt.Fprintf(&b, "[%s] %s: %s\n", item.Source, item.Title, item.Body)
+		}
+	case map[string]any:
+		// Payloads round-tripped through JSON unmarshal into
+		// map[string]any. Extract what we can.
+		if title, ok := p["title"].(string); ok {
+			b.WriteString(title)
+		}
+		if subtitle, ok := p["subtitle"].(string); ok {
+			b.WriteString("\n")
+			b.WriteString(subtitle)
+		}
+		if body, ok := p["body"].(string); ok {
+			b.WriteString(body)
+		}
+		if rows, ok := p["rows"].([]any); ok {
+			for _, r := range rows {
+				if row, ok := r.(map[string]any); ok {
+					k, _ := row["key"].(string)
+					v, _ := row["value"].(string)
+					if k != "" || v != "" {
+						fmt.Fprintf(&b, "\n%s: %s", k, v)
+					}
+				}
+			}
+		}
+	}
+	// Include metadata keys that carry structured context (repo, event
+	// type, workspace) so the research loop can scope its search.
+	if msg.Metadata != nil {
+		for _, key := range []string{"repo", "event_type", "pr_number", "url"} {
+			if v, ok := msg.Metadata[key]; ok && v != "" {
+				fmt.Fprintf(&b, "\n%s: %s", key, v)
+			}
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
 // runResearchAsParentThread runs the research loop and emits one parent
 // summary widget_card in main + an auto-spawned thread carrying the full
 // detail (draft text, evidence bundle). The Slack-style UX hangs off this
@@ -457,11 +518,32 @@ func (h *ThreadHost) runResearchInExistingThread(threadID, question string) stri
 	// thread instead — DispatchSlash already appended it to the
 	// thread before delegating here, so we don't double-append).
 
+	// Enrich the question with the parent message's context so the
+	// research loop knows what this thread is about. Without this,
+	// a follow-up like "verify?" arrives as a bare question with no
+	// knowledge of the PR, repo, or event that spawned the thread.
+	qCtx := h.queryContext()
+	if thread, ok := h.store.LookupByID(threadID); ok {
+		if parent, ok := h.store.LookupMessage(thread.ParentMessageID); ok {
+			parentText := extractParentContext(parent)
+			if parentText != "" {
+				if qCtx == nil {
+					qCtx = make(map[string]string)
+				}
+				qCtx["thread_parent_context"] = parentText
+				// Prepend the parent context to the question so the
+				// LLM sees the full picture even when the question is
+				// terse ("verify?", "details?", "what changed?").
+				question = "Context from the parent message in this thread:\n" + parentText + "\n\nUser question: " + question
+			}
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	result, err := h.loop.Run(ctx, research.ResearchQuery{
 		Question: question,
-		Context:  h.queryContext(),
+		Context:  qCtx,
 	}, research.DefaultBudget())
 	if err != nil {
 		_, _ = h.store.Append(chatui.ChatMessage{

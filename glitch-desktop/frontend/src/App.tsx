@@ -15,6 +15,7 @@ import { PausePanel } from "./components/PausePanel";
 import { parseAgentOutput } from "./lib/parseAgentOutput";
 import { CollectorConfigModal } from "./components/collectors/CollectorConfigModal";
 import { IndexedDocsModal } from "./components/IndexedDocsModal";
+import { ConfirmModal } from "./components/ConfirmModal";
 import { useToast } from "./components/Toast";
 
 import { useChatStore } from "./lib/store";
@@ -167,6 +168,14 @@ export function App() {
       preselectRefs?: string[];
     } | null
   >(null);
+
+  // Delete confirmation modal — stores the pending destructive action so the
+  // user must explicitly confirm before anything gets removed.
+  const [confirmDelete, setConfirmDelete] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
 
   // Observer default model — what "observer" mode delegates to when a chain
   // step needs an actual executor. Persisted to localStorage so the user's
@@ -573,11 +582,20 @@ export function App() {
   }, [setActiveWorkspace]);
 
   const handleDeleteWorkspace = useCallback((id: string) => {
-    DeleteWorkspace(id);
-    removeWorkspace(id);
-    hydratedRef.current.delete(id);
-    lastSavedRef.current.delete(id);
-  }, [removeWorkspace]);
+    const ws = (state.workspaces ?? []).find((w) => w.id === id);
+    const name = ws?.title ?? "this workspace";
+    setConfirmDelete({
+      title: "Delete workspace?",
+      message: `"${name}" and all its messages will be permanently deleted.`,
+      onConfirm: () => {
+        DeleteWorkspace(id);
+        removeWorkspace(id);
+        hydratedRef.current.delete(id);
+        lastSavedRef.current.delete(id);
+        setConfirmDelete(null);
+      },
+    });
+  }, [state.workspaces, removeWorkspace]);
 
   const handleRenameWorkspace = useCallback((id: string, title: string) => {
     UpdateWorkspaceTitle(id, title);
@@ -678,13 +696,20 @@ export function App() {
   // We optimistically remove from local state on success and surface
   // the path in the toast so the user knows exactly what got deleted.
   const handleDeleteWorkflowFile = useCallback((p: WorkflowFileEntry) => {
-    DeleteWorkflowFile(p.path).then((err) => {
-      if (err) {
-        toast.error("Couldn't delete workflow", { detail: err });
-        return;
-      }
-      setWorkflowFiles((prev) => prev.filter((wf) => wf.path !== p.path));
-      toast.success(`Deleted ${p.name}.workflow.yaml`, { detail: p.path });
+    setConfirmDelete({
+      title: "Delete workflow?",
+      message: `"${p.name}.workflow.yaml" will be permanently deleted from disk.`,
+      onConfirm: () => {
+        DeleteWorkflowFile(p.path).then((err) => {
+          if (err) {
+            toast.error("Couldn't delete workflow", { detail: err });
+            return;
+          }
+          setWorkflowFiles((prev) => prev.filter((wf) => wf.path !== p.path));
+          toast.success(`Deleted ${p.name}.workflow.yaml`, { detail: p.path });
+        });
+        setConfirmDelete(null);
+      },
     });
   }, [toast]);
 
@@ -1096,9 +1121,18 @@ export function App() {
   const handleAction = useCallback(async () => {}, []);
 
   const handleDeletePrompt = useCallback((id: number) => {
-    DeletePrompt(id);
-    setPrompts((prev) => prev.filter((p) => p.ID !== id));
-  }, []);
+    const prompt = prompts.find((p) => p.ID === id);
+    const name = prompt?.Title ?? "this prompt";
+    setConfirmDelete({
+      title: "Delete prompt?",
+      message: `"${name}" will be permanently deleted.`,
+      onConfirm: () => {
+        DeletePrompt(id);
+        setPrompts((prev) => prev.filter((p) => p.ID !== id));
+        setConfirmDelete(null);
+      },
+    });
+  }, [prompts]);
 
   const handleAddDirectory = useCallback(() => {
     if (state.activeWorkspaceId) AddWorkspaceDirectory(state.activeWorkspaceId);
@@ -1189,6 +1223,43 @@ export function App() {
               row carries a 💬 affordance (in MessageList) so the
               user can spawn a thread on any chat message. */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+            {/* When a thread is active it takes over the main chat
+                area. The main message list and input are hidden (not
+                unmounted — we keep them so streaming state isn't lost)
+                and the thread renders in the same column. A back
+                button returns to the main chat. */}
+            {activeThread && state.activeWorkspaceId ? (
+              <ThreadSidePane
+                workspaceID={state.activeWorkspaceId}
+                threadID={activeThread.id}
+                parentMessageID={activeThread.parentID}
+                parentMessage={active.messages.find((m) => m.id === activeThread.parentID)}
+                onAction={handleAction}
+                onClose={() => setActiveThread(null)}
+                onSwitchThread={(id) => setActiveThread({ id, parentID: activeThread.parentID })}
+                renderInput={(dispatchInThread, busy) => (
+                  <ChatInput
+                    disabled={false}
+                    streaming={busy}
+                    providers={providers}
+                    selectedProvider={selectedProvider}
+                    selectedModel={selectedModel}
+                    observerDefaultProvider={observerDefaultProvider}
+                    observerDefaultModel={observerDefaultModel}
+                    chain={chain}
+                    onSelectProvider={handleSelectProvider}
+                    onSetObserverDefault={handleSetObserverDefault}
+                    onUpdateChainStep={handleUpdateChainStep}
+                    onRemoveChainStep={handleRemoveChainStep}
+                    onClearChain={handleClearChain}
+                    onSaveWorkflow={handleSaveWorkflow}
+                    onSend={(text) => void dispatchInThread(text)}
+                    onStop={() => {}}
+                  />
+                )}
+              />
+            ) : (
+              <>
             <MessageList
               messages={active.messages}
               onAction={handleAction}
@@ -1228,48 +1299,9 @@ export function App() {
             onSend={handleSend}
             onStop={handleStop}
           />
+              </>
+            )}
           </div>
-          {/* Slack-style thread side pane. Mounts only when a message
-              has been clicked. Closing returns the layout to a single
-              column. Freezing closes the thread permanently. */}
-          {activeThread && state.activeWorkspaceId && (
-            <ThreadSidePane
-              workspaceID={state.activeWorkspaceId}
-              threadID={activeThread.id}
-              parentMessageID={activeThread.parentID}
-              parentMessage={active.messages.find((m) => m.id === activeThread.parentID)}
-              onAction={handleAction}
-              onClose={() => setActiveThread(null)}
-              onSwitchThread={(id) => setActiveThread({ id, parentID: activeThread.parentID })}
-              renderInput={(dispatchInThread, busy) => (
-                <ChatInput
-                  // Compact + empty chain isolates the thread input
-                  // from the main chat's workflow-builder state, so
-                  // a chain step added in main never bleeds into a
-                  // thread (and vice versa). The thread input is for
-                  // follow-ups, not for composing workflows.
-                  compact
-                  placeholder="ask a follow-up…"
-                  disabled={false}
-                  streaming={busy}
-                  providers={providers}
-                  selectedProvider={selectedProvider}
-                  selectedModel={selectedModel}
-                  observerDefaultProvider={observerDefaultProvider}
-                  observerDefaultModel={observerDefaultModel}
-                  chain={[]}
-                  onSelectProvider={handleSelectProvider}
-                  onSetObserverDefault={handleSetObserverDefault}
-                  onUpdateChainStep={() => {}}
-                  onRemoveChainStep={() => {}}
-                  onClearChain={() => {}}
-                  onSaveWorkflow={() => {}}
-                  onSend={(text) => void dispatchInThread(text)}
-                  onStop={() => {}}
-                />
-              )}
-            />
-          )}
         </div>
 
         {/* Right-side activity sidebar — mirrors the left
@@ -1330,6 +1362,15 @@ export function App() {
           initialPrompt={indexedDocs.initialPrompt}
           preselectRefs={indexedDocs.preselectRefs}
           onClose={() => setIndexedDocs(null)}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmModal
+          title={confirmDelete.title}
+          message={confirmDelete.message}
+          onConfirm={confirmDelete.onConfirm}
+          onCancel={() => setConfirmDelete(null)}
         />
       )}
     </div>

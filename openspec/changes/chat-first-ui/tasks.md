@@ -6,31 +6,31 @@
 
 ## 2. Chat message-type protocol
 
-- [ ] 2.1 Refactor the existing chat `Message` struct to include `Type` (enum) and `Payload` (any)
-- [ ] 2.2 Define payload structs for `text`, `widget_card`, `action_chips`, `evidence_bundle`, `score_card`, `attention_feed`
-- [ ] 2.3 Update chat history serialization to round-trip `Type` + `Payload` as JSON
-- [ ] 2.4 Add a fallback renderer for unknown types ("[unsupported widget]")
-- [ ] 2.5 Add unit tests for serialization round-trip and fallback rendering
+- [x] 2.1 Refactor the existing chat `Message` struct to include `Type` (enum) and `Payload` (any)
+- [x] 2.2 Define payload structs for `text`, `widget_card`, `action_chips`, `evidence_bundle`, `score_card`, `attention_feed`
+- [x] 2.3 Update chat history serialization to round-trip `Type` + `Payload` as JSON
+- [x] 2.4 Add a fallback renderer for unknown types ("[unsupported widget]")
+- [x] 2.5 Add unit tests for serialization round-trip and fallback rendering
 
 ## 3. Renderers for v1 widget types
 
-- [ ] 3.1 Implement `widget_card` renderer (title, subtitle, key/value rows, action buttons)
-- [ ] 3.2 Implement `action_chips` renderer (inline button row)
-- [ ] 3.3 Implement `evidence_bundle` renderer (compact summary + expand affordance for full breakdown)
-- [ ] 3.4 Implement `score_card` renderer (metric name + current value + sparkline)
-- [ ] 3.5 Implement `attention_feed` renderer (ordered item list with per-item action)
+- [x] 3.1 Implement `widget_card` renderer (title, subtitle, key/value rows, action buttons)
+- [x] 3.2 Implement `action_chips` renderer (inline button row)
+- [x] 3.3 Implement `evidence_bundle` renderer (compact summary + expand affordance for full breakdown)
+- [x] 3.4 Implement `score_card` renderer (metric name + current value + sparkline)
+- [x] 3.5 Implement `attention_feed` renderer (ordered item list with per-item action)
 - [ ] 3.6 Snapshot tests for each renderer with representative payloads
 
 ## 4. Slash command dispatcher
 
-- [ ] 4.1 Add a `slash.Registry` in `internal/chatui` with `Register(name, describe, handler)` and `Dispatch(line)`
-- [ ] 4.2 Wire chat input to detect leading `/` and route to the dispatcher instead of the assistant
-- [ ] 4.3 Ensure dispatcher path makes no LLM calls
+- [x] 4.1 Add a `slash.Registry` in `internal/chatui` with `Register(name, describe, handler)` and `Dispatch(line)`
+- [x] 4.2 Wire chat input to detect leading `/` and route to the dispatcher instead of the assistant
+- [x] 4.3 Ensure dispatcher path makes no LLM calls
 - [ ] 4.4 Implement the unknown-command response with closest-match suggestions
 
 ## 5. Required v1 slash commands
 
-- [ ] 5.1 `/help` — dynamically generated from the live registry, returns `widget_card`
+- [x] 5.1 `/help` — dynamically generated from the live registry, returns `widget_card`
 - [ ] 5.2 `/status` — workspace name, brain status, connection health, active session count
 - [ ] 5.3 `/sessions` — recent sessions with reopen action buttons
 - [ ] 5.4 `/brain config` — current config as a `widget_card` with editable action buttons
@@ -49,8 +49,8 @@
 
 ## 7. Widget action protocol
 
-- [ ] 7.1 Define the `synthetic: true` flag on chat input messages
-- [ ] 7.2 Wire button clicks to construct a synthetic chat input message and route it through the existing pipeline
+- [x] 7.1 Define the `synthetic: true` flag on chat input messages
+- [x] 7.2 Wire button clicks to construct a synthetic chat input message and route it through the existing pipeline
 - [ ] 7.3 Add brain audit logging that records widget origin (source widget message ID) for synthetic inputs
 - [ ] 7.4 Implement inert button rendering for messages loaded from history
 - [ ] 7.5 Test: click a chip running a slash command, click a chip running a natural-language prompt, click an inert button (no-op)
@@ -80,19 +80,19 @@ TODO and lands as part of chat-first-ui because the directory list
 moves out of the dying left sidebar into a `/config dirs` widget /
 thread workflow under chat-first-ui's slash-command surface.
 
-- [ ] 10.1 Render a star/badge on the primary row in
+- [x] 10.1 Render a star/badge on the primary row in
   `ListWorkspaceDirectoriesDetailed` output (drives the existing
   Sidebar.tsx directory list while it still exists; same component
   re-used by the `/config dirs` widget when chat-first-ui lands the
   thread workflow)
-- [ ] 10.2 Right-click action ("set as primary") on every non-primary
+- [x] 10.2 Right-click action ("set as primary") on every non-primary
   directory row, calling `App.SetWorkspacePrimaryDirectory` and
   re-rendering on the `workspace:updated` event the backend already
   emits
 - [ ] 10.3 Add a "primary" / "additional" group header to the
   directory list so the user can see at a glance which one anchors
   the research loop's cwd vs which ones are scanned for reference
-- [ ] 10.4 Surface `Workspace.PrimaryDirectory` in the workspace
+- [x] 10.4 Surface `Workspace.PrimaryDirectory` in the workspace
   switcher tooltip so the user can confirm which repo a workspace
   targets without opening the directory list
 - [ ] 10.5 Smoke: in the desktop, add a second directory to a

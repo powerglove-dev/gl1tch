@@ -2226,7 +2226,8 @@ func (a *App) runTriageOnce() {
 	ctx, cancel := context.WithTimeout(a.ctx, 90*time.Second)
 	defer cancel()
 
-	events, err := glitchd.QueryRecentEvents(ctx, since, 50)
+	wsID := a.activeWorkspaceID
+	events, err := glitchd.QueryRecentEvents(ctx, since, 50, wsID)
 	if err != nil {
 		// ES probably down — quiet skip.
 		return
@@ -2284,7 +2285,9 @@ func (a *App) runTriageOnce() {
 		if al.Severity == "info" {
 			kind = "checkin"
 		}
-		a.emitBrainActivity(kind, al.Severity, title, al.Why, al.Source)
+		a.emitBrainActivityExtra(kind, al.Severity, title, al.Why, al.Source, map[string]any{
+			"workspace_id": wsID,
+		})
 	}
 	// "Stored" entries are low-noise FYIs the model wants to remember.
 	// We surface them as info check-ins so the activity panel reflects
@@ -2294,7 +2297,9 @@ func (a *App) runTriageOnce() {
 		if t == "" {
 			continue
 		}
-		a.emitBrainActivity("checkin", "info", t, s.Summary, "")
+		a.emitBrainActivityExtra("checkin", "info", t, s.Summary, "", map[string]any{
+			"workspace_id": wsID,
+		})
 	}
 }
 

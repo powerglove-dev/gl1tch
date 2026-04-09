@@ -262,10 +262,51 @@ export function ThreadSidePane({
                   type="button"
                   disabled={chip.disabled}
                   className="threaded-chat-chip"
+                  onClick={() => {
+                    if (!chip.disabled && chip.command) {
+                      void dispatchInThread(chip.command);
+                    }
+                  }}
                 >
                   {chip.label}
                 </button>
               ),
+            )}
+          </div>
+        );
+      case "attention_feed":
+        return (
+          <div className="threaded-chat-feed">
+            {(msg.payload?.items || []).length === 0 ? (
+              <div className="threaded-chat-feed-empty">No attention items.</div>
+            ) : (
+              (msg.payload?.items || []).map(
+                (
+                  item: {
+                    id: string;
+                    title: string;
+                    snippet?: string;
+                    severity?: string;
+                    action?: string;
+                  },
+                  idx: number,
+                ) => (
+                  <button
+                    key={item.id || idx}
+                    type="button"
+                    className={`threaded-chat-feed-item threaded-chat-feed-${item.severity || "info"}`}
+                    onClick={() => {
+                      if (item.action) void dispatchInThread(item.action);
+                    }}
+                    disabled={!item.action}
+                  >
+                    <span className="threaded-chat-feed-title">{item.title}</span>
+                    {item.snippet && (
+                      <span className="threaded-chat-feed-snippet">{item.snippet}</span>
+                    )}
+                  </button>
+                ),
+              )
             )}
           </div>
         );
@@ -274,20 +315,58 @@ export function ThreadSidePane({
     }
   };
 
+  // Extract contextual metadata from the parent message for the
+  // thread header — repo, title, links, source. These surface as
+  // a compact summary line + clickable link so the user always knows
+  // what this thread is about without scrolling to the parent body.
+  const threadMeta = parentMessage ? extractThreadMeta(parentMessage) : null;
+
   return (
-    <aside className="threaded-chat-sidepane">
-      <header className="threaded-chat-sidepane-header">
-        <div className="threaded-chat-sidepane-eyebrow">thread</div>
+    <div className="threaded-chat-overlay">
+      <header className="threaded-chat-overlay-header">
         <button
           type="button"
           onClick={onClose}
-          className="threaded-chat-sidepane-button"
-          title="Hide pane"
+          className="threaded-chat-back-button"
+          title="Back to chat"
         >
-          ×
+          ← back
         </button>
+        <div className="threaded-chat-header-context">
+          <div className="threaded-chat-sidepane-eyebrow">thread</div>
+          {threadMeta && (
+            <div className="threaded-chat-header-meta">
+              {threadMeta.title && (
+                <span className="threaded-chat-header-title">{threadMeta.title}</span>
+              )}
+              {threadMeta.tags.length > 0 && (
+                <span className="threaded-chat-header-tags">
+                  {threadMeta.tags.map((tag, i) => (
+                    <span key={i} className="threaded-chat-header-tag">{tag}</span>
+                  ))}
+                </span>
+              )}
+              {threadMeta.links.length > 0 && (
+                <span className="threaded-chat-header-links">
+                  {threadMeta.links.map((link, i) => (
+                    <a
+                      key={i}
+                      href={link.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="threaded-chat-header-link"
+                      title={link.title}
+                    >
+                      {link.label}
+                    </a>
+                  ))}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
       </header>
-      <div className="threaded-chat-sidepane-messages">
+      <div className="threaded-chat-overlay-messages">
         {/* Parent: render the chat message that anchors the thread,
             using the same BlockRenderer the main chat uses. This is
             the "head" of the thread — every follow-up below it is
@@ -366,15 +445,83 @@ export function ThreadSidePane({
           </>
         )}
       </div>
-      <div className="threaded-chat-sidepane-input-slot">
+      <div className="threaded-chat-overlay-input-slot">
         {/* Disable input while the spawn round-trip is still in
             flight (threadID empty) so the user doesn't type into
             a void. The pane shows the parent message + a "preparing
             thread…" hint until the real id resolves. */}
         {renderInput(dispatchInThread, busy || !threadID)}
       </div>
-    </aside>
+    </div>
   );
+}
+
+// ── thread header helpers ──────────────────────────────────────────────────
+
+interface ThreadMeta {
+  title: string;
+  tags: string[];
+  links: { url: string; title: string; label: string }[];
+}
+
+// extractThreadMeta pulls contextual info from the parent message so
+// the thread header can show what this thread is about: a short title,
+// tag chips (repo, source, attention level), and clickable links to
+// GitHub or other external resources.
+function extractThreadMeta(msg: Message): ThreadMeta | null {
+  const title = msg.injected?.title || "";
+  const tags: string[] = [];
+  const links: { url: string; title: string; label: string }[] = [];
+
+  // Tags from injected metadata
+  if (msg.injected?.repo) tags.push(msg.injected.repo);
+  if (msg.injected?.source) tags.push(msg.injected.source);
+  if (msg.injected?.attention === "high") tags.push("high attention");
+
+  // Scan blocks for link blocks and gh CLI snippets that contain URLs
+  for (const block of msg.blocks) {
+    if (block.type === "link" && block.url) {
+      links.push({
+        url: block.url,
+        title: block.title || block.url,
+        label: linkLabel(block.url, block.title),
+      });
+    }
+    // Text blocks may contain inline GitHub URLs from gh CLI output
+    // or the attention analyzer. Pull out the first github.com URL.
+    if (block.type === "text" && block.content) {
+      const ghMatch = block.content.match(
+        /https:\/\/github\.com\/[^\s)>\]]+/,
+      );
+      if (ghMatch && !links.some((l) => l.url === ghMatch[0])) {
+        links.push({
+          url: ghMatch[0],
+          title: "Open on GitHub",
+          label: linkLabel(ghMatch[0]),
+        });
+      }
+    }
+  }
+
+  if (!title && tags.length === 0 && links.length === 0) return null;
+  return { title, tags, links };
+}
+
+// linkLabel produces a short display label for a URL. GitHub PR/issue
+// URLs get "owner/repo#123"; everything else gets the hostname.
+function linkLabel(url: string, fallback?: string): string {
+  const ghPr = url.match(
+    /github\.com\/([^/]+\/[^/]+)\/(?:pull|issues)\/(\d+)/,
+  );
+  if (ghPr) return `${ghPr[1]}#${ghPr[2]}`;
+  const ghRepo = url.match(/github\.com\/([^/]+\/[^/]+)/);
+  if (ghRepo) return ghRepo[1];
+  if (fallback) return fallback;
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
 }
 
 // clamp truncates s to n characters and appends an ellipsis when the

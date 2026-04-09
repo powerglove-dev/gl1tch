@@ -239,13 +239,9 @@ function MessageRow({
         </div>
       )}
 
-      {/* 👍/👎 feedback: hover-revealed below assistant messages so
-          brain training data accumulates from the main chat, not just
-          from thread side panes. Uses the message id as the queryID
-          (the main chat doesn't carry chatui metadata — the thread
-          side pane has the stable research_query_id; the main chat's
-          fallback is the message id which is unique enough for the
-          brain to join within the same session). */}
+      {/* Hover-revealed action cluster: 👍/👎 feedback + thread button.
+          Both absolutely positioned at top-right so the thumbs sit
+          immediately to the left of the thread icon. */}
       {!isUser && workspaceID && message.id && !message.streaming && (
         <MainChatFeedback
           workspaceID={workspaceID}
@@ -253,12 +249,6 @@ function MessageRow({
           question={findNearestUserText(message)}
         />
       )}
-
-      {/* Hover-revealed thread button. Every message in the chat is a
-          potential thread anchor — clicking opens a side pane with its
-          own input that runs research-grounded follow-ups against the
-          gl1tch loop. The handler is wired by App so the side pane is
-          a layout-level concern, not a per-row one. */}
       {onOpenThread && message.id && (
         <button
           type="button"
@@ -518,9 +508,7 @@ function MainChatFeedback({
   return (
     <div
       className="glitch-main-feedback"
-      style={{
-        display: "flex", gap: 4, marginTop: 4, clear: "both" as const,
-      }}
+      style={{ display: "flex", gap: 4 }}
     >
       <button
         type="button"

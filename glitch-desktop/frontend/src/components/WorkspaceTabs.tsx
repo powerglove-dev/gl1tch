@@ -53,7 +53,7 @@ function WorkspaceTab({
       onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      title={editing ? undefined : ws.title}
+      title={editing ? undefined : ws.primary_directory ? `${ws.title}\n${ws.primary_directory}` : ws.title}
       style={{
         position: "relative",
         display: "flex",

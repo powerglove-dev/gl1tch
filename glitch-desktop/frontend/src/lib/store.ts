@@ -419,6 +419,15 @@ function reducer(state: ChatState, action: Action): ChatState {
       };
 
     case "ADD_BRAIN_ACTIVITY": {
+      // Drop events that belong to a different workspace. Events with
+      // no workspace_id (legacy / global) are always accepted.
+      if (
+        action.entry.workspace_id &&
+        state.activeWorkspaceId &&
+        action.entry.workspace_id !== state.activeWorkspaceId
+      ) {
+        return state;
+      }
       // Newest first; cap to BRAIN_ACTIVITY_CAP. If we already have an entry
       // with the same id, treat it as an update (drop the dup so the newer
       // copy moves to the top).
