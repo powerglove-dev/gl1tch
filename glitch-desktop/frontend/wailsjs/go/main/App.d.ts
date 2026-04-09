@@ -107,6 +107,8 @@ export function SetActiveWorkspace(arg1:string):Promise<void>;
 
 export function SetWorkspaceDirectoryEnabled(arg1:string,arg2:string,arg3:boolean):Promise<void>;
 
+export function SetWorkspacePrimaryDirectory(arg1:string,arg2:string):Promise<void>;
+
 export function SkillPathForName(arg1:string,arg2:string):Promise<string>;
 
 export function SpawnDrillThreadFromEvidence(arg1:string,arg2:string,arg3:string):Promise<string>;

@@ -683,18 +683,35 @@ func buildDraftSystemPrompt(kind, currentBody, brainContext string) string {
 	return b.String()
 }
 
-// workspaceCWD returns the first directory associated with a workspace,
-// which doubles as the workspace's "primary cwd" for prompt scoping.
-// Returns "" if the workspace has no directories or doesn't exist.
+// workspaceCWD returns the workspace's primary directory — the one
+// git/gh/shell tooling targets when the user runs `glitch ask` or
+// drives a thread from the desktop. This is now an explicit field on
+// the Workspace (set by AddWorkspaceDirectory on first insert,
+// re-elected by SetWorkspacePrimaryDirectory) rather than the
+// implicit "Directories[0] wins" pattern it used to be.
+//
+// Returns "" when the workspace has no directories or doesn't exist;
+// callers fall back to the process cwd in that case.
 func workspaceCWD(ctx context.Context, st *store.Store, workspaceID string) string {
 	if workspaceID == "" {
 		return ""
 	}
 	ws, err := st.GetWorkspace(ctx, workspaceID)
-	if err != nil || len(ws.Directories) == 0 {
+	if err != nil {
 		return ""
 	}
-	return ws.Directories[0]
+	if ws.PrimaryDirectory != "" {
+		return ws.PrimaryDirectory
+	}
+	// Defensive fallback for the (impossible-after-migration) case
+	// where a workspace has rows but none flagged primary. The
+	// migration backfills, AddWorkspaceDirectory enforces it, and
+	// RemoveWorkspaceDirectory re-elects on demotion — but reading
+	// Directories[0] here keeps the call site safe regardless.
+	if len(ws.Directories) > 0 {
+		return ws.Directories[0]
+	}
+	return ""
 }
 
 // tokenChWriter adapts a chan<-string (the refinement popup's live

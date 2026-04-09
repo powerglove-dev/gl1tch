@@ -593,6 +593,39 @@ func (a *App) SetWorkspaceDirectoryEnabled(workspaceID, dir string, enabled bool
 	runtime.EventsEmit(a.ctx, "workspace:updated", string(b))
 }
 
+// SetWorkspacePrimaryDirectory promotes one of a workspace's
+// directories to primary, demoting whatever was primary before. The
+// primary directory is the one git/gh tooling targets when the user
+// asks a research question — additional directories stay scanned by
+// collectors but are reference-only for the prompt path.
+//
+// Restarts the workspace pod so any subsystem that caches the
+// "primary cwd" picks up the change without a workspace switch.
+func (a *App) SetWorkspacePrimaryDirectory(workspaceID, dir string) {
+	if workspaceID == "" || dir == "" {
+		return
+	}
+	st, err := glitchd.OpenStore()
+	if err != nil {
+		return
+	}
+	if err := st.SetWorkspacePrimaryDirectory(a.ctx, workspaceID, dir); err != nil {
+		slog.Error("set primary dir", "err", err)
+		return
+	}
+	if err := glitchd.RestartWorkspacePod(workspaceID); err != nil {
+		slog.Error("restart pod after primary dir change", "err", err)
+	}
+	a.emitBrainActivity("checkin", "info",
+		"primary directory",
+		filepath.Base(dir),
+		dir)
+
+	ws, _ := st.GetWorkspace(a.ctx, workspaceID)
+	b, _ := json.Marshal(ws)
+	runtime.EventsEmit(a.ctx, "workspace:updated", string(b))
+}
+
 // ── Chat ────────────────────────────────────────────────────────────────────
 
 // AskScoped queries the observer scoped to the workspace's directories.

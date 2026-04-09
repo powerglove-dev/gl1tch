@@ -124,9 +124,27 @@ func runAskResearch(
 		MaxLocalTokens: askResearchMaxLocalTok,
 		MaxPaidTokens:  askResearchMaxPaidTok,
 	}
+
+	// Inject the shell's working directory as q.Context["cwd"] so the
+	// canonical pipeline researchers (git-log, git-status, github-prs,
+	// github-issues) execute against whatever repo the user invoked
+	// `glitch ask` inside. This is the same lever the desktop uses to
+	// scope a thread to its workspace cwd — keeping the two in sync
+	// means a smoke test from the CLI exercises exactly the code path
+	// the desktop hits.
+	queryContext := make(map[string]string, len(inputVars)+1)
+	for k, v := range inputVars {
+		queryContext[k] = v
+	}
+	if _, hasCwd := queryContext["cwd"]; !hasCwd {
+		if cwd, err := os.Getwd(); err == nil && cwd != "" {
+			queryContext["cwd"] = cwd
+		}
+	}
+
 	result, err := loop.Run(ctx, research.ResearchQuery{
 		Question: prompt,
-		Context:  inputVars,
+		Context:  queryContext,
 	}, budget)
 	if err != nil {
 		return fmt.Errorf("research loop: %w", err)

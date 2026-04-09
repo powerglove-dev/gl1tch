@@ -125,7 +125,31 @@ func DraftPrompt(question string, bundle EvidenceBundle) string {
 // preface their JSON despite the rule) by scanning for the first '[' and
 // matching brackets. Names that are not strings or that fail validation
 // against the registry are dropped by the loop, not by this parser.
+//
+// Also tolerates the qwen2.5:7b habit of double-escaping the JSON output
+// (e.g. emitting `[\"git-log\"]` instead of `["git-log"]`). When the
+// straightforward parse fails because the bracket scanner runs into an
+// unbalanced string due to escaped quotes, we strip one layer of escaping
+// and retry once.
 func ParsePlan(raw string) ([]string, error) {
+	if names, err := parsePlanRaw(raw); err == nil {
+		return names, nil
+	}
+	// Fallback: strip one layer of backslash escaping (\\" → ") and
+	// retry. This rescues outputs like `[\"git-log\"]` that small
+	// models occasionally produce when their tokeniser injects a
+	// stringification step.
+	if unescaped := strings.ReplaceAll(raw, `\"`, `"`); unescaped != raw {
+		if names, err := parsePlanRaw(unescaped); err == nil {
+			return names, nil
+		}
+	}
+	return parsePlanRaw(raw) // surface the original error
+}
+
+// parsePlanRaw is the bracket-matching JSON-array extractor; see ParsePlan
+// for the public contract and the escape-stripping fallback.
+func parsePlanRaw(raw string) ([]string, error) {
 	start := strings.Index(raw, "[")
 	if start < 0 {
 		return nil, fmt.Errorf("research: planner output has no JSON array: %q", truncate(raw, 200))

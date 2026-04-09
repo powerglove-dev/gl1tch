@@ -106,6 +106,17 @@ const addDraftOutputFormatColumn = `ALTER TABLE drafts ADD COLUMN output_format 
 // clarifications table for databases created before this column existed.
 const addClarificationStepIDColumn = `ALTER TABLE clarifications ADD COLUMN step_id TEXT NOT NULL DEFAULT ''`
 
+// addWorkspaceDirectoriesPrimaryColumn introduces the primary_dir flag
+// the workspace model uses to identify which entry is the workspace's
+// "main" directory (the one git/gh tooling targets) versus an
+// additional reference directory the brain may scan for context. The
+// column is named primary_dir rather than `primary` because primary
+// is a reserved word in SQLite. Default 0 keeps existing rows
+// unflagged; the migration also stamps the first inserted row of each
+// workspace as primary so the previous "first wins" behaviour stays
+// intact for users who never set one explicitly.
+const addWorkspaceDirectoriesPrimaryColumn = `ALTER TABLE workspace_directories ADD COLUMN primary_dir INTEGER NOT NULL DEFAULT 0`
+
 // createClarificationsSchema is the DDL for the clarifications table.
 const createClarificationsSchema = `CREATE TABLE IF NOT EXISTS clarifications (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -207,6 +218,7 @@ CREATE TABLE IF NOT EXISTS workspace_directories (
   path         TEXT NOT NULL,
   repo_name    TEXT NOT NULL,
   enabled      INTEGER NOT NULL DEFAULT 1,
+  primary_dir  INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (workspace_id, path)
 );
 CREATE TABLE IF NOT EXISTS workspace_messages (
@@ -326,6 +338,9 @@ func applySchema(db *sql.DB) error {
 		return err
 	}
 	if err := applyWorkspacesTableMigration(db); err != nil {
+		return err
+	}
+	if err := applyWorkspaceDirectoriesPrimaryColumnMigration(db); err != nil {
 		return err
 	}
 	if err := applyDraftsTableMigration(db); err != nil {
@@ -516,6 +531,35 @@ func applyICEEncountersTableMigration(db *sql.DB) error {
 // does not already exist. CREATE TABLE IF NOT EXISTS is idempotent.
 func applyPersonalBestsTableMigration(db *sql.DB) error {
 	_, err := db.Exec(createPersonalBestsSchema)
+	return err
+}
+
+// applyWorkspaceDirectoriesPrimaryColumnMigration adds the primary_dir
+// column to workspace_directories on existing databases. Also backfills
+// every workspace that has zero primary rows so the new "primary
+// directory" lookup never returns empty for a workspace that was
+// configured before the column existed — the first-inserted row wins,
+// preserving the implicit pre-refactor behaviour.
+func applyWorkspaceDirectoriesPrimaryColumnMigration(db *sql.DB) error {
+	if err := addColumnIfMissing(db, "workspace_directories", "primary_dir", addWorkspaceDirectoriesPrimaryColumn); err != nil {
+		return err
+	}
+	// Backfill: for every workspace with directories but no primary,
+	// stamp the lowest-rowid row as primary. SQLite's implicit rowid
+	// preserves insert order in the absence of an AUTOINCREMENT, so
+	// "lowest rowid" matches the previous Directories[0] semantics.
+	_, err := db.Exec(`
+		UPDATE workspace_directories
+		SET primary_dir = 1
+		WHERE rowid IN (
+			SELECT MIN(rowid)
+			FROM workspace_directories
+			WHERE workspace_id NOT IN (
+				SELECT workspace_id FROM workspace_directories WHERE primary_dir = 1
+			)
+			GROUP BY workspace_id
+		)
+	`)
 	return err
 }
 

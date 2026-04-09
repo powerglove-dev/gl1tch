@@ -11,30 +11,36 @@ import (
 
 // Workspace represents a chat workspace with its own set of monitored directories.
 //
-// Directories / RepoNames only contain the *enabled* directory paths so
-// existing collector code that consumes Workspace.Directories without
-// caring about the toggle state automatically respects the user's
-// per-directory enable/disable choices. Code that needs the full set
-// (including disabled rows for the UI toggle list) calls
-// ListWorkspaceDirectories instead.
+// Directories / RepoNames contain the *enabled* directory paths in
+// canonical order: the primary directory is always element 0, followed
+// by the additional reference directories. PrimaryDirectory holds the
+// same value as Directories[0] (or "" when the workspace has no
+// directories yet) so call sites that just want the cwd don't have to
+// check len(Directories).
+//
+// Code that wants the full set (including disabled rows for the UI
+// toggle list) calls ListWorkspaceDirectories — that returns one
+// WorkspaceDirectory per row with both the Enabled and Primary flags.
 type Workspace struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	Directories []string `json:"directories"` // absolute paths (enabled only)
-	RepoNames   []string `json:"repo_names"`  // filepath.Base of each dir (enabled only)
-	CreatedAt   int64    `json:"created_at"`
-	UpdatedAt   int64    `json:"updated_at"`
+	ID                    string   `json:"id"`
+	Title                 string   `json:"title"`
+	Directories           []string `json:"directories"`            // primary first, then additionals (enabled only)
+	RepoNames             []string `json:"repo_names"`             // parallel to Directories
+	PrimaryDirectory      string   `json:"primary_directory"`      // == Directories[0] when set
+	AdditionalDirectories []string `json:"additional_directories"` // == Directories[1:]
+	CreatedAt             int64    `json:"created_at"`
+	UpdatedAt             int64    `json:"updated_at"`
 }
 
 // WorkspaceDirectory is one row from workspace_directories with its
-// enable flag. Used by the desktop UI to render per-directory toggles
-// alongside the directory list — the legacy Workspace.Directories
-// field hides disabled rows so collectors don't have to know about the
-// flag, but the UI does.
+// enable + primary flags. Used by the desktop UI to render per-
+// directory toggles + a "primary" badge / right-click action alongside
+// the directory list.
 type WorkspaceDirectory struct {
 	Path     string `json:"path"`
 	RepoName string `json:"repo_name"`
 	Enabled  bool   `json:"enabled"`
+	Primary  bool   `json:"primary"`
 }
 
 // WorkspaceMessage is a persisted chat message within a workspace.
@@ -75,6 +81,7 @@ func (s *Store) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 		}
 		// Load directories for this workspace
 		ws.Directories, ws.RepoNames, _ = s.getWorkspaceDirectories(ctx, ws.ID)
+		fillDerivedDirectoryFields(&ws)
 		workspaces = append(workspaces, ws)
 	}
 	return workspaces, rows.Err()
@@ -120,29 +127,118 @@ func (s *Store) TouchWorkspace(ctx context.Context, id string, ts int64) error {
 	return err
 }
 
-// AddWorkspaceDirectory associates a directory with a workspace.
+// AddWorkspaceDirectory associates a directory with a workspace. The
+// first directory added to a workspace is automatically flagged as the
+// primary; subsequent rows land as additional reference directories.
+// Callers can re-pick the primary later via SetWorkspacePrimaryDirectory.
 func (s *Store) AddWorkspaceDirectory(ctx context.Context, workspaceID, path string) error {
 	repoName := filepath.Base(path)
+	// Determine whether this workspace already has a primary so we
+	// know whether to stamp the new row as primary on insert.
+	var existing int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM workspace_directories WHERE workspace_id = ? AND primary_dir = 1`,
+		workspaceID,
+	).Scan(&existing); err != nil {
+		return fmt.Errorf("count primary dirs: %w", err)
+	}
+	primary := 0
+	if existing == 0 {
+		primary = 1
+	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT OR IGNORE INTO workspace_directories (workspace_id, path, repo_name) VALUES (?, ?, ?)`,
-		workspaceID, path, repoName)
+		`INSERT OR IGNORE INTO workspace_directories (workspace_id, path, repo_name, primary_dir) VALUES (?, ?, ?, ?)`,
+		workspaceID, path, repoName, primary)
 	return err
 }
 
-// RemoveWorkspaceDirectory removes a directory association from a workspace.
+// RemoveWorkspaceDirectory removes a directory association from a
+// workspace. If the removed row was the primary directory, the
+// remaining-lowest-rowid row inherits the primary flag so the workspace
+// always has either zero directories or exactly one primary.
 func (s *Store) RemoveWorkspaceDirectory(ctx context.Context, workspaceID, path string) error {
-	_, err := s.db.ExecContext(ctx,
+	// Snapshot the row's primary flag before deletion so we know
+	// whether we need to elect a new primary afterwards.
+	var wasPrimary int
+	_ = s.db.QueryRowContext(ctx,
+		`SELECT primary_dir FROM workspace_directories WHERE workspace_id = ? AND path = ?`,
+		workspaceID, path,
+	).Scan(&wasPrimary)
+
+	if _, err := s.db.ExecContext(ctx,
 		`DELETE FROM workspace_directories WHERE workspace_id = ? AND path = ?`,
-		workspaceID, path)
+		workspaceID, path); err != nil {
+		return err
+	}
+	if wasPrimary == 0 {
+		return nil
+	}
+	// Elect the lowest-rowid surviving directory as the new primary.
+	// rowid order matches insert order which matches the user's
+	// historical "first added" intuition.
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE workspace_directories
+		SET primary_dir = 1
+		WHERE rowid = (
+			SELECT MIN(rowid) FROM workspace_directories WHERE workspace_id = ?
+		)
+	`, workspaceID)
 	return err
+}
+
+// SetWorkspacePrimaryDirectory promotes one of a workspace's
+// directories to primary, demoting whatever was primary before. The
+// path must already exist in workspace_directories — call
+// AddWorkspaceDirectory first if necessary.
+//
+// Runs as a single transaction so the workspace is never momentarily
+// without a primary directory between the demote and the promote.
+func (s *Store) SetWorkspacePrimaryDirectory(ctx context.Context, workspaceID, path string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Ensure the target row exists before we touch the existing
+	// primary, so a typo can't leave the workspace with no primary.
+	var present int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM workspace_directories WHERE workspace_id = ? AND path = ?`,
+		workspaceID, path,
+	).Scan(&present); err != nil {
+		return err
+	}
+	if present == 0 {
+		return fmt.Errorf("workspace %s has no directory at %s", workspaceID, path)
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE workspace_directories SET primary_dir = 0 WHERE workspace_id = ?`,
+		workspaceID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE workspace_directories SET primary_dir = 1 WHERE workspace_id = ? AND path = ?`,
+		workspaceID, path); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // getWorkspaceDirectories returns only the *enabled* directories for a
-// workspace. This is what Workspace.Directories surfaces — collector
-// code doesn't need to know that disabled rows even exist.
+// workspace, with the primary directory always first. Collectors that
+// iterate Workspace.Directories see the primary repo on the first
+// iteration so first-wins shortcuts (workspaceCWD, file scanning
+// shortcuts, etc.) keep working without each call site sorting.
 func (s *Store) getWorkspaceDirectories(ctx context.Context, workspaceID string) ([]string, []string, error) {
+	// ORDER BY: primary rows first, then by path so the order is
+	// deterministic across calls. SQLite sorts boolean ints as 0/1
+	// so DESC puts primary_dir = 1 in front.
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT path, repo_name FROM workspace_directories WHERE workspace_id = ? AND enabled = 1`, workspaceID)
+		`SELECT path, repo_name FROM workspace_directories
+		 WHERE workspace_id = ? AND enabled = 1
+		 ORDER BY primary_dir DESC, path ASC`, workspaceID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -160,13 +256,37 @@ func (s *Store) getWorkspaceDirectories(ctx context.Context, workspaceID string)
 	return dirs, repos, rows.Err()
 }
 
+// fillDerivedDirectoryFields populates Workspace.PrimaryDirectory and
+// Workspace.AdditionalDirectories from the canonically-ordered
+// Directories slice. Call after every getWorkspaceDirectories so the
+// caller-facing struct always has both views in sync.
+func fillDerivedDirectoryFields(ws *Workspace) {
+	if len(ws.Directories) == 0 {
+		ws.PrimaryDirectory = ""
+		ws.AdditionalDirectories = nil
+		return
+	}
+	ws.PrimaryDirectory = ws.Directories[0]
+	if len(ws.Directories) > 1 {
+		ws.AdditionalDirectories = append([]string(nil), ws.Directories[1:]...)
+	} else {
+		ws.AdditionalDirectories = nil
+	}
+}
+
 // ListWorkspaceDirectories returns every directory associated with a
-// workspace, including disabled ones, with their enable flags. The
-// desktop UI uses this to render the per-directory toggle list in the
-// workspace settings popover.
+// workspace, including disabled ones, with their enable + primary
+// flags. The desktop UI uses this to render the per-directory toggle
+// list and the "primary" badge in the workspace settings popover.
+//
+// Ordering: primary directory first, then by path so the row order is
+// stable and the user's eye lands on the primary repo immediately.
 func (s *Store) ListWorkspaceDirectories(ctx context.Context, workspaceID string) ([]WorkspaceDirectory, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT path, repo_name, enabled FROM workspace_directories WHERE workspace_id = ? ORDER BY path`,
+		`SELECT path, repo_name, enabled, primary_dir
+		   FROM workspace_directories
+		  WHERE workspace_id = ?
+		  ORDER BY primary_dir DESC, path ASC`,
 		workspaceID)
 	if err != nil {
 		return nil, err
@@ -176,11 +296,12 @@ func (s *Store) ListWorkspaceDirectories(ctx context.Context, workspaceID string
 	var out []WorkspaceDirectory
 	for rows.Next() {
 		var d WorkspaceDirectory
-		var enabled int
-		if err := rows.Scan(&d.Path, &d.RepoName, &enabled); err != nil {
+		var enabled, primary int
+		if err := rows.Scan(&d.Path, &d.RepoName, &enabled, &primary); err != nil {
 			return nil, err
 		}
 		d.Enabled = enabled != 0
+		d.Primary = primary != 0
 		out = append(out, d)
 	}
 	return out, rows.Err()

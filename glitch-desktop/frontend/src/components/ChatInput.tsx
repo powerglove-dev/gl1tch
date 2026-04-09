@@ -56,6 +56,14 @@ interface Props {
   onSend: (text: string) => void;
   /** Cancel the active workspace's in-flight run. */
   onStop: () => void;
+  /** Compact mode strips the chain-builder strip and tightens the
+   *  outer padding so the input fits in narrow surfaces (the thread
+   *  side pane). The provider picker and the textarea stay in place;
+   *  only the workflow-composition affordances disappear. */
+  compact?: boolean;
+  /** Optional placeholder override. Used by the side pane to show
+   *  "ask a follow-up…" instead of the main chat's verbose copy. */
+  placeholder?: string;
 }
 
 function StepEditor({
@@ -375,19 +383,25 @@ export function ChatInput({
   observerDefaultProvider, observerDefaultModel,
   chain, onSelectProvider, onSetObserverDefault, onUpdateChainStep, onRemoveChainStep,
   onClearChain, onSaveWorkflow, onSend, onStop,
+  compact = false, placeholder,
 }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [savingWorkflow, setSavingWorkflow] = useState(false);
   const [workflowName, setWorkflowName] = useState("");
 
+  // In compact mode the chain-builder UI is hidden; treat the
+  // chain prop as empty so handleSend doesn't gate on chain.length
+  // and the placeholder doesn't reference "the chain".
+  const effectiveChain = compact ? [] : chain;
+
   const handleSend = useCallback(() => {
     if (!ref.current) return;
     const val = ref.current.value.trim();
-    if ((!val && chain.length === 0) || disabled) return;
+    if ((!val && effectiveChain.length === 0) || disabled) return;
     onSend(val);
     ref.current.value = "";
     ref.current.style.height = "";
-  }, [disabled, onSend, chain.length]);
+  }, [disabled, onSend, effectiveChain.length]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -411,10 +425,19 @@ export function ChatInput({
   }
 
   return (
-    <div style={{ borderTop: "1px solid var(--border)", background: "var(--bg-dark)", padding: "10px 20px 14px" }}>
-      <div style={{ maxWidth: 760, margin: "0 auto" }}>
-        {/* Chain builder strip */}
-        {chain.length > 0 && (
+    <div
+      style={{
+        borderTop: "1px solid var(--border)",
+        background: "var(--bg-dark)",
+        padding: compact ? "8px 10px 10px" : "10px 20px 14px",
+      }}
+    >
+      <div style={{ maxWidth: compact ? "100%" : 760, margin: "0 auto" }}>
+        {/* Chain builder strip — main chat only. The thread side
+            pane uses compact mode and skips the workflow-composition
+            affordances entirely (it's there for follow-ups, not for
+            building a multi-step workflow). */}
+        {!compact && chain.length > 0 && (
           <div style={{
             display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap",
             padding: "10px 12px", marginBottom: 10,
@@ -504,11 +527,12 @@ export function ChatInput({
             onKeyDown={handleKeyDown} onInput={handleInput}
             autoFocus
             placeholder={
-              streaming
+              placeholder ??
+              (streaming
                 ? "Compose next message while this one runs..."
-                : chain.length > 0
+                : effectiveChain.length > 0
                 ? "Add context or just send the chain..."
-                : "Ask about your repos, agents, and activity..."
+                : "Ask about your repos, agents, and activity...")
             }
             style={{
               flex: 1, background: "none", border: "none", color: "var(--fg)",

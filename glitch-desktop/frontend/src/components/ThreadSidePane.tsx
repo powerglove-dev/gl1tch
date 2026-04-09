@@ -108,6 +108,10 @@ export function ThreadSidePane({
   const [pending, setPending] = useState<LocalPending>(null);
 
   const refresh = useCallback(async () => {
+    // Empty threadID means the host (App.tsx) opened the pane
+    // optimistically and the SpawnThreadOnMessage round-trip is
+    // still in flight. Skip the fetch — the parent message renders
+    // immediately, and we'll auto-refresh once the real id arrives.
     if (!workspaceID || !threadID) return;
     try {
       const json = await GetThreadMessages(workspaceID, threadID);
@@ -118,8 +122,10 @@ export function ThreadSidePane({
   }, [workspaceID, threadID]);
 
   useEffect(() => {
-    // Drop any stale pending state when we switch threads.
+    // Drop any stale pending state when we switch threads or when
+    // the optimistic placeholder resolves to a real id.
     setPending(null);
+    setMessages([]);
     void refresh();
   }, [refresh]);
 
@@ -127,10 +133,17 @@ export function ThreadSidePane({
   // <ChatInput> calls into via the renderInput prop. It owns the
   // optimistic-update path so the side pane stays responsive
   // regardless of which input component the host wires up.
+  //
+  // No-op while threadID is empty: the optimistic open path means
+  // the user can theoretically type a follow-up before the spawn
+  // round-trip resolves. We could queue the message, but the more
+  // honest thing is to disable the input — handled in the render
+  // prop via the `busy` flag we expose. We early-return here as a
+  // belt-and-braces guard.
   const dispatchInThread = useCallback(
     async (text: string) => {
       const line = text.trim();
-      if (!line) return;
+      if (!line || !threadID) return;
       setPending({ body: line, startedAt: Date.now() });
       setBusy(true);
       try {
@@ -292,6 +305,14 @@ export function ThreadSidePane({
         {messages.length === 0 && !pending && !parentMessage && (
           <div className="threaded-chat-empty">ask a follow-up about this message.</div>
         )}
+        {!threadID && (
+          <div className="threaded-chat-thinking">
+            <span className="threaded-chat-thinking-dot" />
+            <span className="threaded-chat-thinking-dot" />
+            <span className="threaded-chat-thinking-dot" />
+            <span className="threaded-chat-thinking-label">preparing thread…</span>
+          </div>
+        )}
         {messages.map((msg) => (
           <div key={msg.id} className={`threaded-chat-message threaded-chat-${msg.role}`}>
             <div className="threaded-chat-message-meta">{roleLabel(msg.role)}</div>
@@ -317,7 +338,11 @@ export function ThreadSidePane({
         )}
       </div>
       <div className="threaded-chat-sidepane-input-slot">
-        {renderInput(dispatchInThread, busy)}
+        {/* Disable input while the spawn round-trip is still in
+            flight (threadID empty) so the user doesn't type into
+            a void. The pane shows the parent message + a "preparing
+            thread…" hint until the real id resolves. */}
+        {renderInput(dispatchInThread, busy || !threadID)}
       </div>
     </aside>
   );

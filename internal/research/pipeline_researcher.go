@@ -73,6 +73,32 @@ func (r *PipelineResearcher) Gather(ctx context.Context, q ResearchQuery, _ Evid
 		return Evidence{}, fmt.Errorf("load pipeline %q: %w", r.pipelinePath, err)
 	}
 
+	// Inject every var on q.Context as a step-level Var on every step
+	// of the loaded pipeline. The pipeline runner promotes step.Vars to
+	// the executor, which (a) sets `cmd.Dir = vars["cwd"]` for tool-kind
+	// plugins like the shell wrapper and (b) overlays the rest as
+	// GLITCH_<KEY> env vars on the subprocess. This is the lever that
+	// makes a thread anchored on the ensemble workspace actually run
+	// `git -C <ensemble>` instead of `git -C <gl1tch>`.
+	//
+	// We mutate the loaded pipeline (a fresh copy each call from
+	// loadPipelineFile) so the injected vars don't persist across
+	// calls. Existing per-step Vars take precedence — a workflow that
+	// declares its own cwd wins over the loop's default.
+	if len(q.Context) > 0 {
+		for i := range p.Steps {
+			if p.Steps[i].Vars == nil {
+				p.Steps[i].Vars = make(map[string]string, len(q.Context))
+			}
+			for k, v := range q.Context {
+				if _, exists := p.Steps[i].Vars[k]; exists {
+					continue
+				}
+				p.Steps[i].Vars[k] = v
+			}
+		}
+	}
+
 	run := r.runFn
 	if run == nil {
 		run = defaultPipelineRun

@@ -69,3 +69,33 @@
 - [ ] 9.3 Verify no dangling sidebar references in `internal/chatui` or the desktop layout
 - [ ] 9.4 Run `openspec validate chat-first-ui --strict` and fix findings
 - [ ] 9.5 Manual smoke: fresh launch shows top strip + chat panel + welcome message + idle attention feed
+
+## 10. Workspace primary-directory affordance (frontend follow-up)
+
+The store + Wails layer for workspace primary-directory landed in
+commit-after-bf9e71d (`store.SetWorkspacePrimaryDirectory`,
+`App.SetWorkspacePrimaryDirectory`, `WorkspaceDirectory.Primary` flag
+on `ListWorkspaceDirectoriesDetailed`). The frontend half is still
+TODO and lands as part of chat-first-ui because the directory list
+moves out of the dying left sidebar into a `/config dirs` widget /
+thread workflow under chat-first-ui's slash-command surface.
+
+- [ ] 10.1 Render a star/badge on the primary row in
+  `ListWorkspaceDirectoriesDetailed` output (drives the existing
+  Sidebar.tsx directory list while it still exists; same component
+  re-used by the `/config dirs` widget when chat-first-ui lands the
+  thread workflow)
+- [ ] 10.2 Right-click action ("set as primary") on every non-primary
+  directory row, calling `App.SetWorkspacePrimaryDirectory` and
+  re-rendering on the `workspace:updated` event the backend already
+  emits
+- [ ] 10.3 Add a "primary" / "additional" group header to the
+  directory list so the user can see at a glance which one anchors
+  the research loop's cwd vs which ones are scanned for reference
+- [ ] 10.4 Surface `Workspace.PrimaryDirectory` in the workspace
+  switcher tooltip so the user can confirm which repo a workspace
+  targets without opening the directory list
+- [ ] 10.5 Smoke: in the desktop, add a second directory to a
+  workspace, set it as primary, run a thread on a chat row, confirm
+  the research loop's `git -C` lands in the new primary repo
+  (mirrors `glitch threads smoke` from the CLI side)

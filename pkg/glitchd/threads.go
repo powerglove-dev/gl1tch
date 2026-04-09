@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -125,16 +124,11 @@ func (h *ThreadHosts) DispatchSlash(workspaceID, line, scopeRaw string) string {
 		scope = chatui.SlashScopeMain
 	}
 
-	// Set GLITCH_CWD on the process env so the shell subprocesses
-	// the loop spawns (git, gh, etc.) target the workspace's repo
-	// rather than the desktop binary's own cwd. The canonical
-	// workflow files already wrap their commands in
-	// `${GLITCH_CWD:-.}` so they degrade to the binary cwd when
-	// nothing is set. The desktop is single-user; the most-recent
-	// dispatch wins.
-	if host.cwd != "" {
-		_ = os.Setenv("GLITCH_CWD", host.cwd)
-	}
+	// host.cwd flows into every research call below via
+	// queryContext() → ResearchQuery.Context → PipelineResearcher's
+	// step.Vars injection → executor.cli_adapter's `cmd.Dir = vars["cwd"]`.
+	// No process-env mutation, no race; the cwd is per-call and
+	// scoped to the workspace the user is looking at.
 
 	line = strings.TrimSpace(line)
 	if line == "" {

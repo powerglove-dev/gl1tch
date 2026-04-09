@@ -267,6 +267,12 @@ func TestParsePlanTolerantOfPreamble(t *testing.T) {
 		"empty":            {`[]`, []string{}},
 		"deduplicates":     {`["git", "git", "esearch"]`, []string{"git", "esearch"}},
 		"trims whitespace": {`["  git  ", "esearch"]`, []string{"git", "esearch"}},
+		// Real qwen2.5:7b output observed in glitch threads smoke:
+		// the model emits `[\"git-log\"]` (one layer of backslash
+		// escaping) instead of `["git-log"]`. ParsePlan strips the
+		// escape and retries.
+		"escaped quotes":        {`[\"git-log\"]`, []string{"git-log"}},
+		"escaped multi-element": {`[\"git\", \"github-prs\"]`, []string{"git", "github-prs"}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

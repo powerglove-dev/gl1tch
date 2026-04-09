@@ -83,20 +83,33 @@ export function App() {
   // in the right column of the chat layout. The full parent Message
   // is looked up from active.messages by ID at render time so the
   // side pane stays in sync with any in-place updates the parent
-  // receives (streaming chunks, etc.).
+  // receives (streaming chunks, etc.). id="" means the spawn round-
+  // trip hasn't returned yet — the pane renders in a loading state
+  // so the user sees instant feedback on the click instead of
+  // waiting for the backend to construct a research host.
   const [activeThread, setActiveThread] = useState<{ id: string; parentID: string } | null>(null);
 
   // openThreadOnMessage is the click handler MessageList wires to its
-  // 💬 affordance. It calls into the backend to spawn (or fetch the
-  // existing) thread under the supplied message ID, then sets the
-  // side-pane state to render it.
+  // 💬 affordance. It opens the side pane optimistically (the pane
+  // mounts with an empty thread id and renders the parent message
+  // immediately) and resolves the real thread id from the backend in
+  // the background. The user sees the pane appear within one frame
+  // instead of waiting for the research host to finish constructing.
   const openThreadOnMessage = useCallback(async (messageID: string) => {
     if (!state.activeWorkspaceId || !messageID) return;
+    // Optimistic open: empty id signals "spawn in flight" to the
+    // side pane, which then suppresses the GetThreadMessages fetch
+    // until the real id arrives.
+    setActiveThread({ id: "", parentID: messageID });
     try {
       const json = await SpawnThreadOnMessage(state.activeWorkspaceId, messageID);
       const thread = JSON.parse(json);
       if (thread && thread.id) {
-        setActiveThread({ id: thread.id, parentID: messageID });
+        setActiveThread((prev) =>
+          prev && prev.parentID === messageID
+            ? { id: thread.id, parentID: messageID }
+            : prev,
+        );
       }
     } catch (err) {
       console.error("openThreadOnMessage failed", err);
@@ -1229,6 +1242,13 @@ export function App() {
               onSwitchThread={(id) => setActiveThread({ id, parentID: activeThread.parentID })}
               renderInput={(dispatchInThread, busy) => (
                 <ChatInput
+                  // Compact + empty chain isolates the thread input
+                  // from the main chat's workflow-builder state, so
+                  // a chain step added in main never bleeds into a
+                  // thread (and vice versa). The thread input is for
+                  // follow-ups, not for composing workflows.
+                  compact
+                  placeholder="ask a follow-up…"
                   disabled={false}
                   streaming={busy}
                   providers={providers}
@@ -1236,13 +1256,13 @@ export function App() {
                   selectedModel={selectedModel}
                   observerDefaultProvider={observerDefaultProvider}
                   observerDefaultModel={observerDefaultModel}
-                  chain={chain}
+                  chain={[]}
                   onSelectProvider={handleSelectProvider}
                   onSetObserverDefault={handleSetObserverDefault}
-                  onUpdateChainStep={handleUpdateChainStep}
-                  onRemoveChainStep={handleRemoveChainStep}
-                  onClearChain={handleClearChain}
-                  onSaveWorkflow={handleSaveWorkflow}
+                  onUpdateChainStep={() => {}}
+                  onRemoveChainStep={() => {}}
+                  onClearChain={() => {}}
+                  onSaveWorkflow={() => {}}
                   onSend={(text) => void dispatchInThread(text)}
                   onStop={() => {}}
                 />

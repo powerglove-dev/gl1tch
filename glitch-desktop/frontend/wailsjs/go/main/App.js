@@ -214,6 +214,10 @@ export function SetWorkspaceDirectoryEnabled(arg1, arg2, arg3) {
   return window['go']['main']['App']['SetWorkspaceDirectoryEnabled'](arg1, arg2, arg3);
 }
 
+export function SetWorkspacePrimaryDirectory(arg1, arg2) {
+  return window['go']['main']['App']['SetWorkspacePrimaryDirectory'](arg1, arg2);
+}
+
 export function SkillPathForName(arg1, arg2) {
   return window['go']['main']['App']['SkillPathForName'](arg1, arg2);
 }
