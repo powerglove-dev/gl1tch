@@ -79,7 +79,7 @@ type App struct {
 	// runs tracks the cancel func for the in-flight run of each workspace.
 	// Keyed by workspace ID. The frontend's stop button calls StopRun, which
 	// looks up the entry and cancels the per-run context. Each streaming
-	// entry point (AskScoped/AskProvider/RunChain/RunWorkflow/Doctor)
+	// entry point (Execute, runChain, stepThroughStartFromChain, Doctor)
 	// registers itself before kicking off work and unregisters in defer.
 	// Each entry carries a generation token so the release func only
 	// deletes the slot it actually owns — protecting against the (rare)
@@ -631,18 +631,17 @@ func (a *App) SetWorkspacePrimaryDirectory(workspaceID, dir string) {
 // Execute is the unified entry point for every user message. The
 // frontend sends one JSON blob and Execute routes it server-side:
 //
-//   - steps present + step_through  → StepThroughStartFromChain
-//   - steps present                 → RunChain
-//   - freeform text (no steps)      → research loop → thread
-//   - freeform text + provider pick → provider with research context
+//   - steps + step_through → step-through session (pauses between steps)
+//   - steps                → straight chain run
+//   - freeform text        → research loop → thread (provider applies to draft)
+//   - slash command (/)    → flat dispatch (no thread, no research)
 //
-// Provider/model is orthogonal — it applies to the LLM step of
+// Provider/model is orthogonal — it applies to the LLM draft stage of
 // whatever runs. Returns immediately; results stream via chat:chunk,
 // chat:event, chat:done, chat:error, and step-through:event.
 //
-// For step-through, returns a JSON {session_id} synchronously (same
-// as StepThroughStartFromChain). For everything else, returns
-// {ok: true} immediately and results arrive via events.
+// For step-through, returns a JSON {session_id} synchronously. For
+// everything else, returns {ok: true} and results arrive via events.
 func (a *App) Execute(optsJSON string) string {
 	var opts glitchd.ExecuteOpts
 	if err := json.Unmarshal([]byte(optsJSON), &opts); err != nil {
@@ -729,54 +728,6 @@ func okJSONStr(detail string) string {
 	return string(b)
 }
 
-// askScoped queries the observer scoped to the workspace's directories.
-// Internal delegate — callers use Execute.
-func (a *App) askScoped(prompt, workspaceID string) {
-	go func() {
-		runCtx, release := a.registerRun(workspaceID)
-		defer release()
-
-		// Get workspace repos for scoping
-		var repos []string
-		if workspaceID != "" {
-			if st, err := glitchd.OpenStore(); err == nil {
-				if ws, err := st.GetWorkspace(a.ctx, workspaceID); err == nil {
-					repos = ws.RepoNames
-					_ = st.TouchWorkspace(a.ctx, workspaceID, time.Now().UnixMilli())
-				}
-			}
-		}
-
-		tokenCh := make(chan string, 64)
-		go func() {
-			for token := range tokenCh {
-				a.emitChunk(workspaceID, token)
-			}
-		}()
-
-		// Always go through the workspace-aware path so the brain
-		// answer is filtered to this workspace's indexed data, even
-		// when the repos slice is empty (e.g. workspace with no
-		// directories yet but other collectors active).
-		var err error
-		if workspaceID != "" || len(repos) > 0 {
-			err = glitchd.StreamAnswerScopedWorkspace(runCtx, prompt, repos, workspaceID, tokenCh)
-		} else {
-			err = glitchd.StreamAnswer(runCtx, prompt, tokenCh)
-		}
-
-		if err != nil {
-			if runCtx.Err() != nil {
-				a.emitError(workspaceID, "stopped")
-			} else {
-				a.emitError(workspaceID, err.Error())
-			}
-			return
-		}
-
-		a.emitDone(workspaceID)
-	}()
-}
 
 // SaveMessage persists a chat message to the workspace.
 func (a *App) SaveMessage(workspaceID, msgJSON string) {
@@ -833,59 +784,6 @@ func (a *App) ListAgents(workspaceID string) string {
 	return string(b)
 }
 
-// askProvider sends a prompt to a chosen provider/model with full glitch context injected.
-// Internal delegate — callers use Execute.
-func (a *App) askProvider(providerID, model, prompt, workspaceID, agentPath string) {
-	go func() {
-		runCtx, release := a.registerRun(workspaceID)
-		defer release()
-
-		// Build context from workspace
-		var dirs []string
-		if workspaceID != "" {
-			if st, err := glitchd.OpenStore(); err == nil {
-				if ws, err := st.GetWorkspace(a.ctx, workspaceID); err == nil {
-					dirs = ws.Directories
-				}
-			}
-		}
-
-		var cwd string
-		if len(dirs) > 0 {
-			cwd = dirs[0]
-		}
-
-		tokenCh := make(chan string, 64)
-		go func() {
-			for token := range tokenCh {
-				a.emitChunk(workspaceID, token)
-			}
-		}()
-
-		// No SystemCtx — the AI-first redesign removed the hardcoded
-		// glitch manual that used to be prepended here. The model
-		// discovers its context via tool-using capabilities, or via
-		// a persona file the user explicitly loads.
-		err := glitchd.StreamPrompt(runCtx, glitchd.StreamPromptOpts{
-			ProviderID: providerID,
-			Model:      model,
-			Prompt:     prompt,
-			AgentPath:  agentPath,
-			Cwd:        cwd,
-		}, tokenCh)
-
-		if err != nil {
-			if runCtx.Err() != nil {
-				a.emitError(workspaceID, "stopped")
-			} else {
-				a.emitError(workspaceID, err.Error())
-			}
-			return
-		}
-
-		a.emitDone(workspaceID)
-	}()
-}
 
 // ── Prompts ────────────────────────────────────────────────────────────
 
@@ -1517,39 +1415,6 @@ func (a *App) ListWorkflows(workspaceID string) string {
 	}
 	b, _ := json.Marshal(workflows)
 	return string(b)
-}
-
-// runWorkflow executes a workflow and streams output as chat events.
-// Internal delegate — callers use Execute with a pipeline step.
-func (a *App) runWorkflow(workflowPath, input, workspaceID string) {
-	go func() {
-		runCtx, release := a.registerRun(workspaceID)
-		defer release()
-
-		// Start polling for clarification requests during this workflow run.
-		clarifyCtx, clarifyCancel := context.WithCancel(runCtx)
-		go a.pollClarifications(clarifyCtx, workspaceID)
-
-		tokenCh := make(chan string, 64)
-		go func() {
-			for token := range tokenCh {
-				a.emitChunk(workspaceID, token)
-			}
-		}()
-
-		err := glitchd.RunWorkflow(runCtx, workflowPath, input, tokenCh)
-		clarifyCancel()
-
-		if err != nil {
-			if runCtx.Err() != nil {
-				a.emitError(workspaceID, "stopped")
-			} else {
-				a.emitError(workspaceID, err.Error())
-			}
-			return
-		}
-		a.emitDone(workspaceID)
-	}()
 }
 
 // SaveWorkflow saves workflow YAML to a workspace directory.

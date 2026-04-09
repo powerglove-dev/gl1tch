@@ -5,7 +5,7 @@ import { defineConfig, devices } from "@playwright/test";
 // When `wails dev` runs it starts the Vite dev server behind the Wails
 // runtime bridge on http://localhost:34115 by default. Unlike plain
 // `vite`, the bridge exposes the Go backend at `window.go.main.App`,
-// so the frontend's `wailsjs/go/main/App` imports (RunChain, AskScoped,
+// so the frontend's `wailsjs/go/main/App` imports (Execute,
 // ListWorkspaces, ...) resolve to real Go calls. That means any E2E
 // driven through this config exercises the entire stack: browser →
 // Vite → Wails runtime → Go → SQLite/ES/Ollama. The tests do not need
