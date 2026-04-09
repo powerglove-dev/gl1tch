@@ -3,121 +3,147 @@ package research
 import (
 	"fmt"
 	"strings"
+	"sync"
 )
 
-// The prompts in this file are the contract between the loop and the local
-// model. Each is written to address a specific failure mode observed in the
-// pre-loop assistant — most importantly the "hallucinated PRs + suggest-don't-
-// act" pattern captured in the project memory. Changing these prompts is a
-// behavioural change to the loop and should be reviewed with the same care as
-// changing the loop's Go code.
-
-// PlanPrompt builds the planner prompt: given a question and the registry's
-// (Name, Describe) menu, ask the model to emit a JSON array of researcher
-// names whose evidence is needed.
+// The prompts the research loop sends to the model used to live as
+// hard-coded Go strings in this file. They now live as embedded .tmpl
+// files under internal/research/prompts/, loaded through PromptStore.
+// The exported functions in this file (PlanPrompt, DraftPrompt, etc.)
+// are now thin wrappers that render the templates with the right
+// variables — same callers, same return type, but the body is data.
 //
-// Rules baked in:
-//   - The planner SHALL only emit names from the menu. The loop validates
-//     this server-side; the rule in the prompt is belt-and-braces.
-//   - "I would suggest using X" is not a valid plan. Picking X is.
-//   - An empty plan is valid and means "no researcher fits" — the loop
-//     short-circuits to a one-shot draft (which then must say "I don't have
-//     enough evidence" because the bundle is empty).
-func PlanPrompt(question string, researchers []Researcher) string {
-	var b strings.Builder
-	b.WriteString("You are the planning stage of a research loop. Your job is to pick which\n")
-	b.WriteString("researchers should gather evidence for a user's question. You do NOT answer\n")
-	b.WriteString("the question yourself. You do NOT explain how to answer it. You ONLY pick\n")
-	b.WriteString("researcher names from the list below.\n\n")
+// Why this matters: the planner template is the most-tuned surface in
+// the loop. Forcing a Go recompile every time we wanted to test a
+// copy change made iterative tuning impossible. Now `vim
+// ~/.config/glitch/prompts/plan.tmpl` and the next research call
+// picks it up. Brain-learned hints (next commit) feed the same
+// template via the {{.Hints}} variable, so the system improves
+// without anyone touching Go.
 
-	b.WriteString("Question:\n")
-	b.WriteString(strings.TrimSpace(question))
-	b.WriteString("\n\n")
+// defaultPromptStore is the package-level loader the existing
+// exported helpers (PlanPrompt, DraftPrompt, ...) render through.
+// Lazily constructed so importing the package never touches the
+// filesystem — the loader probes ~/.config/glitch/prompts on
+// construction. Tests that want a deterministic in-memory loader
+// can override via SetDefaultPromptStore.
+var (
+	defaultPromptStoreOnce sync.Once
+	defaultPromptStore     *PromptStore
+)
 
-	b.WriteString("Available researchers (you may only pick names from this list):\n")
-	if len(researchers) == 0 {
-		b.WriteString("(none)\n")
-	} else {
-		for _, r := range researchers {
-			fmt.Fprintf(&b, "- %s: %s\n", r.Name(), strings.TrimSpace(r.Describe()))
-		}
-	}
-	b.WriteString("\n")
-
-	b.WriteString("Rules:\n")
-	b.WriteString("1. Output ONLY a JSON array of researcher names. No prose, no markdown, no explanation.\n")
-	b.WriteString("2. Pick only names that appear verbatim in the list above.\n")
-	b.WriteString("3. If a researcher's description matches the question's information needs, pick it.\n")
-	b.WriteString("4. If no researcher fits the question, output [].\n")
-	b.WriteString("5. NEVER invent a researcher name. NEVER suggest commands or tools the user should run.\n")
-	b.WriteString("6. NEVER answer the question here. Picking is your only job.\n\n")
-
-	b.WriteString("Output (JSON array only):\n")
-	return b.String()
+func getDefaultPromptStore() *PromptStore {
+	defaultPromptStoreOnce.Do(func() {
+		defaultPromptStore = NewPromptStore("")
+	})
+	return defaultPromptStore
 }
 
-// DraftPrompt builds the prompt for the draft stage: given the question and
-// the gathered evidence bundle, write an answer that is grounded ONLY in the
-// bundle.
-//
-// Rules baked in:
-//   - Every claim must be supported by an item in the evidence list. Specific
-//     identifiers (PR numbers, file paths, commit SHAs, dates) MUST appear in
-//     the evidence; otherwise the model must say "I don't have enough
-//     evidence to answer that part."
-//   - "You should run X" is forbidden. The model must report what the
-//     evidence shows, not delegate to the user.
-//   - If the bundle is empty, the model must say so explicitly. No summarising
-//     from priors. No "based on my training data" answers.
-func DraftPrompt(question string, bundle EvidenceBundle) string {
-	var b strings.Builder
-	b.WriteString("You are the drafting stage of a research loop. Your job is to answer the\n")
-	b.WriteString("user's question using ONLY the evidence below. You may not invent facts.\n")
-	b.WriteString("You may not use prior knowledge. You may not delegate to the user by saying\n")
-	b.WriteString("'you should run X' — the evidence is what you have to work with.\n\n")
+// SetDefaultPromptStore replaces the package-level loader. Used by
+// the loop to inject a workspace-scoped store (so .glitch/prompts in
+// the active workspace can override per-repo) and by tests that want
+// to point at a stub. Concurrency-safe: the helpers below grab the
+// store under the once-lock.
+func SetDefaultPromptStore(s *PromptStore) {
+	defaultPromptStoreOnce.Do(func() {})
+	defaultPromptStore = s
+}
 
-	b.WriteString("Question:\n")
-	b.WriteString(strings.TrimSpace(question))
-	b.WriteString("\n\n")
+// promptDataPlan is the template variable struct for plan.tmpl.
+// Defined as a named type rather than an anonymous map so the
+// template author can rely on stable field names — and so the brain
+// hints reader (next commit) has a fixed slot to fill.
+type promptDataPlan struct {
+	Question    string
+	Researchers []promptDataResearcher
+	Hints       string // brain-learned routing hints; empty until wired
+}
 
-	b.WriteString("Evidence:\n")
-	if bundle.Len() == 0 {
-		b.WriteString("(no evidence was gathered)\n\n")
-	} else {
-		for i, ev := range bundle.Items {
-			fmt.Fprintf(&b, "[%d] source=%s\n", i+1, ev.Source)
-			if ev.Title != "" {
-				fmt.Fprintf(&b, "    title: %s\n", ev.Title)
-			}
-			if len(ev.Refs) > 0 {
-				fmt.Fprintf(&b, "    refs: %s\n", strings.Join(ev.Refs, ", "))
-			}
-			body := strings.TrimSpace(ev.Body)
-			if body != "" {
-				b.WriteString("    body:\n")
-				for _, line := range strings.Split(body, "\n") {
-					fmt.Fprintf(&b, "      %s\n", line)
-				}
-			}
-			b.WriteString("\n")
-		}
+type promptDataResearcher struct {
+	Name     string
+	Describe string
+}
+
+// promptDataDraftish is shared by draft / critique / judge / verify
+// templates. They all need the question, the bundle, and (for the
+// non-draft slots) the current draft. Pulling them into one struct
+// keeps the template variable surface tight.
+type promptDataDraftish struct {
+	Question    string
+	Draft       string
+	BundleItems []promptDataEvidence
+}
+
+type promptDataEvidence struct {
+	Source string
+	Title  string
+	Body   string
+	Refs   []string
+}
+
+// promptDataSelfConsistency is the variable struct for the
+// self_consistency.tmpl template. It carries the original draft + the
+// alternative drafts to compare against.
+type promptDataSelfConsistency struct {
+	Question     string
+	Draft        string
+	Alternatives []string
+}
+
+// PlanPrompt renders the plan.tmpl template with the supplied question
+// and researcher menu. The exported signature is preserved for callers;
+// the body now goes through PromptStore so the template is editable on
+// disk.
+func PlanPrompt(question string, researchers []Researcher) string {
+	data := promptDataPlan{
+		Question:    strings.TrimSpace(question),
+		Researchers: make([]promptDataResearcher, 0, len(researchers)),
 	}
+	for _, r := range researchers {
+		data.Researchers = append(data.Researchers, promptDataResearcher{
+			Name:     r.Name(),
+			Describe: strings.TrimSpace(r.Describe()),
+		})
+	}
+	out, err := getDefaultPromptStore().Render(PromptNamePlan, data)
+	if err != nil {
+		// Defensive: an embedded template can't fail to render in
+		// production (it's checked at test time), but if a user
+		// override breaks parsing we still return SOMETHING the
+		// loop can call the LLM with rather than crashing.
+		return fmt.Sprintf("plan stage prompt failed to render (%v)\n\nquestion: %s", err, question)
+	}
+	return out
+}
 
-	b.WriteString("Rules:\n")
-	b.WriteString("1. Cite specific identifiers (PR numbers, commit SHAs, file paths, dates, URLs)\n")
-	b.WriteString("   ONLY when they appear verbatim in the evidence above. Never invent them.\n")
-	b.WriteString("2. If — and ONLY if — the evidence contains nothing relevant to the question,\n")
-	b.WriteString("   reply with exactly this single sentence and nothing else:\n")
-	b.WriteString("   \"I don't have enough evidence to answer that.\"\n")
-	b.WriteString("   When the evidence DOES support an answer (even partially), give that answer\n")
-	b.WriteString("   and DO NOT append the no-evidence sentence. Never mix the two.\n")
-	b.WriteString("3. Do not say \"you should run\" or \"I'd recommend running\" any command. Report\n")
-	b.WriteString("   what the evidence shows, not what the user could do to find out themselves.\n")
-	b.WriteString("4. Do not mention training data, prior conversations, or general knowledge.\n")
-	b.WriteString("5. Be concise. Lead with the answer, not preamble.\n\n")
+// DraftPrompt renders the draft.tmpl template with the question and
+// the gathered evidence bundle.
+func DraftPrompt(question string, bundle EvidenceBundle) string {
+	data := promptDataDraftish{
+		Question:    strings.TrimSpace(question),
+		BundleItems: evidenceItemsForPrompt(bundle),
+	}
+	out, err := getDefaultPromptStore().Render(PromptNameDraft, data)
+	if err != nil {
+		return fmt.Sprintf("draft stage prompt failed to render (%v)\n\nquestion: %s", err, question)
+	}
+	return out
+}
 
-	b.WriteString("Answer:\n")
-	return b.String()
+// evidenceItemsForPrompt is the small adapter that lifts a runtime
+// EvidenceBundle into the template-friendly slice promptDataDraftish
+// (and CritiquePrompt / JudgePrompt / VerifyPrompt) consume.
+func evidenceItemsForPrompt(bundle EvidenceBundle) []promptDataEvidence {
+	out := make([]promptDataEvidence, 0, bundle.Len())
+	for _, ev := range bundle.Items {
+		out = append(out, promptDataEvidence{
+			Source: ev.Source,
+			Title:  ev.Title,
+			Body:   strings.TrimSpace(ev.Body),
+			Refs:   append([]string(nil), ev.Refs...),
+		})
+	}
+	return out
 }
 
 // ParsePlan extracts a JSON array of researcher names from a planner output

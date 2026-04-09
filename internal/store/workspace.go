@@ -97,6 +97,7 @@ func (s *Store) GetWorkspace(ctx context.Context, id string) (Workspace, error) 
 		return Workspace{}, fmt.Errorf("get workspace: %w", err)
 	}
 	ws.Directories, ws.RepoNames, _ = s.getWorkspaceDirectories(ctx, ws.ID)
+	fillDerivedDirectoryFields(&ws)
 	return ws, nil
 }
 

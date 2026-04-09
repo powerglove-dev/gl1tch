@@ -81,52 +81,15 @@ type CritiqueClaim struct {
 // array of objects is the only shape that round-trips through ParseCritique
 // with high reliability against qwen2.5:7b.
 func CritiquePrompt(draft string, bundle EvidenceBundle) string {
-	var b strings.Builder
-	b.WriteString("You are the critique stage of a research loop. Your job is to extract\n")
-	b.WriteString("the factual claims from a draft answer and label each one against the\n")
-	b.WriteString("evidence the loop gathered. You do NOT rewrite the draft. You do NOT\n")
-	b.WriteString("answer the original question. You only extract and label.\n\n")
-
-	b.WriteString("Draft:\n")
-	b.WriteString(strings.TrimSpace(draft))
-	b.WriteString("\n\n")
-
-	b.WriteString("Evidence:\n")
-	if bundle.Len() == 0 {
-		b.WriteString("(no evidence was gathered)\n\n")
-	} else {
-		for i, ev := range bundle.Items {
-			fmt.Fprintf(&b, "[%d] source=%s\n", i+1, ev.Source)
-			if ev.Title != "" {
-				fmt.Fprintf(&b, "    title: %s\n", ev.Title)
-			}
-			if len(ev.Refs) > 0 {
-				fmt.Fprintf(&b, "    refs: %s\n", strings.Join(ev.Refs, ", "))
-			}
-			body := strings.TrimSpace(ev.Body)
-			if body != "" {
-				b.WriteString("    body:\n")
-				for _, line := range strings.Split(body, "\n") {
-					fmt.Fprintf(&b, "      %s\n", line)
-				}
-			}
-			b.WriteString("\n")
-		}
+	data := promptDataDraftish{
+		Draft:       strings.TrimSpace(draft),
+		BundleItems: evidenceItemsForPrompt(bundle),
 	}
-
-	b.WriteString("Labels (use exactly one per claim):\n")
-	b.WriteString("- \"grounded\":   every specific identifier in the claim (PR number,\n")
-	b.WriteString("                file path, commit SHA, date, name, URL) appears\n")
-	b.WriteString("                verbatim in the evidence above.\n")
-	b.WriteString("- \"partial\":    some identifiers appear and some do not, OR the\n")
-	b.WriteString("                claim is roughly supported but not exactly.\n")
-	b.WriteString("- \"ungrounded\": the claim contains identifiers that do not appear\n")
-	b.WriteString("                in the evidence, OR the claim has no evidence basis.\n\n")
-
-	b.WriteString("Output ONLY a JSON array of objects with this shape, no prose, no markdown:\n")
-	b.WriteString("[{\"text\": \"...\", \"label\": \"grounded|partial|ungrounded\"}, ...]\n\n")
-	b.WriteString("Output (JSON array only):\n")
-	return b.String()
+	out, err := getDefaultPromptStore().Render(PromptNameCritique, data)
+	if err != nil {
+		return fmt.Sprintf("critique stage prompt failed to render (%v)", err)
+	}
+	return out
 }
 
 // ParseCritique extracts a Critique from a critique-stage LLM output. Like
@@ -271,43 +234,16 @@ func CrossCapabilityAgree(bundle EvidenceBundle) float64 {
 // question using only the evidence. Like the critique prompt it forbids
 // commentary so the parser only has to find one number.
 func JudgePrompt(question, draft string, bundle EvidenceBundle) string {
-	var b strings.Builder
-	b.WriteString("You are the judge stage of a research loop. Read the question, the\n")
-	b.WriteString("draft answer, and the evidence the loop gathered, and return ONE number\n")
-	b.WriteString("between 0.0 and 1.0 representing how well the draft answers the question\n")
-	b.WriteString("using only the evidence. Do NOT explain. Do NOT add prose. Output the\n")
-	b.WriteString("number on a line by itself.\n\n")
-
-	b.WriteString("Rubric:\n")
-	b.WriteString("- 1.0: the draft answers the question completely and every specific claim\n")
-	b.WriteString("       is supported by the evidence.\n")
-	b.WriteString("- 0.7: the draft answers the question, with one or two minor claims that\n")
-	b.WriteString("       are not directly supported.\n")
-	b.WriteString("- 0.4: the draft partially answers the question or contains several\n")
-	b.WriteString("       unsupported claims.\n")
-	b.WriteString("- 0.1: the draft fails to address the question or invents identifiers.\n")
-	b.WriteString("- 0.0: the draft is empty, irrelevant, or refuses to answer.\n\n")
-
-	b.WriteString("Question:\n")
-	b.WriteString(strings.TrimSpace(question))
-	b.WriteString("\n\n")
-
-	b.WriteString("Draft:\n")
-	b.WriteString(strings.TrimSpace(draft))
-	b.WriteString("\n\n")
-
-	b.WriteString("Evidence:\n")
-	if bundle.Len() == 0 {
-		b.WriteString("(no evidence was gathered)\n\n")
-	} else {
-		for i, ev := range bundle.Items {
-			fmt.Fprintf(&b, "[%d] source=%s title=%s\n", i+1, ev.Source, ev.Title)
-		}
-		b.WriteString("\n")
+	data := promptDataDraftish{
+		Question:    strings.TrimSpace(question),
+		Draft:       strings.TrimSpace(draft),
+		BundleItems: evidenceItemsForPrompt(bundle),
 	}
-
-	b.WriteString("Score (single number, 0.0 to 1.0):\n")
-	return b.String()
+	out, err := getDefaultPromptStore().Render(PromptNameJudge, data)
+	if err != nil {
+		return fmt.Sprintf("judge stage prompt failed to render (%v)", err)
+	}
+	return out
 }
 
 // ParseJudgeScore extracts the numeric score from a judge-stage LLM output.
@@ -362,28 +298,20 @@ func JudgePass(ctx context.Context, llm LLMFn, question, draft string, bundle Ev
 // generated by the loop's draft stage and passed in here — this function
 // only owns the comparison prompt.
 func SelfConsistencyPrompt(question, original string, alternatives []string) string {
-	var b strings.Builder
-	b.WriteString("You are the self-consistency stage of a research loop. You will see one\n")
-	b.WriteString("question and several drafts of an answer. Return ONE number between 0.0\n")
-	b.WriteString("and 1.0 representing how much the drafts AGREE on the conclusion.\n")
-	b.WriteString("- 1.0 means every draft draws the same conclusion (wording may differ).\n")
-	b.WriteString("- 0.0 means the drafts contradict each other.\n")
-	b.WriteString("Do NOT explain. Do NOT add prose. Output the number on a line by itself.\n\n")
-
-	b.WriteString("Question:\n")
-	b.WriteString(strings.TrimSpace(question))
-	b.WriteString("\n\n")
-
-	b.WriteString("Original draft:\n")
-	b.WriteString(strings.TrimSpace(original))
-	b.WriteString("\n\n")
-
-	for i, alt := range alternatives {
-		fmt.Fprintf(&b, "Alternative %d:\n%s\n\n", i+1, strings.TrimSpace(alt))
+	cleanAlts := make([]string, 0, len(alternatives))
+	for _, a := range alternatives {
+		cleanAlts = append(cleanAlts, strings.TrimSpace(a))
 	}
-
-	b.WriteString("Agreement score (single number, 0.0 to 1.0):\n")
-	return b.String()
+	data := promptDataSelfConsistency{
+		Question:     strings.TrimSpace(question),
+		Draft:        strings.TrimSpace(original),
+		Alternatives: cleanAlts,
+	}
+	out, err := getDefaultPromptStore().Render(PromptNameSelfConsistency, data)
+	if err != nil {
+		return fmt.Sprintf("self-consistency stage prompt failed to render (%v)", err)
+	}
+	return out
 }
 
 // SelfConsistency re-samples the draft N times via redraft and asks the LLM

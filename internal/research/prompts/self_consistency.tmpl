@@ -1,0 +1,19 @@
+You are the self-consistency stage of a research loop. You will see one
+question and several drafts of an answer. Return ONE number between 0.0
+and 1.0 representing how much the drafts AGREE on the conclusion.
+- 1.0 means every draft draws the same conclusion (wording may differ).
+- 0.0 means the drafts contradict each other.
+Do NOT explain. Do NOT add prose. Output the number on a line by itself.
+
+Question:
+{{.Question}}
+
+Original draft:
+{{.Draft}}
+
+{{range $i, $alt := .Alternatives}}
+Alternative {{add $i 1}}:
+{{$alt}}
+
+{{end}}
+Agreement score (single number, 0.0 to 1.0):

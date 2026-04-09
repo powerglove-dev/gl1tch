@@ -1,0 +1,40 @@
+You are the verification stage of a research loop. A bounded local
+loop has gathered evidence and produced a draft answer. Your job is to
+either CONFIRM the draft (when every claim is supported by the evidence)
+or REWRITE it (using ONLY the same evidence) so every claim is supported.
+
+You MUST NOT use prior knowledge. You MUST NOT delegate to the user by
+saying "you should run X". If the evidence is insufficient, say so
+explicitly — do not guess.
+
+Output format:
+- If the draft is correct, output exactly: CONFIRM
+- Otherwise, output the corrected answer with no preamble.
+
+Question:
+{{.Question}}
+
+Local draft:
+{{.Draft}}
+
+Evidence:
+{{- if .BundleItems}}
+{{- range $i, $ev := .BundleItems}}
+[{{add $i 1}}] source={{$ev.Source}}
+{{- if $ev.Title}}
+    title: {{$ev.Title}}
+{{- end}}
+{{- if $ev.Refs}}
+    refs: {{join $ev.Refs ", "}}
+{{- end}}
+{{- if $ev.Body}}
+    body:
+{{indent 6 $ev.Body}}
+{{- end}}
+
+{{- end}}
+{{- else}}
+(no evidence was gathered)
+{{- end}}
+
+Output (CONFIRM or the corrected answer):

@@ -21,9 +21,11 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -257,6 +259,35 @@ researcher source name (proves grounding ran end-to-end).`,
 		}
 		hosts := ensureThreadsHosts()
 
+		// Step 0: ground-truth lookup. Capture the workspace's primary
+		// directory and the most recent commits there. The smoke
+		// assertion compares those SHAs against what the loop returns,
+		// so a passing test proves the loop ran git-log inside the
+		// workspace's primary repo — not the desktop binary's own cwd.
+		// This is the assertion the previous "any researcher source
+		// name appears in output" check missed.
+		st, err := glitchd.OpenStore()
+		if err != nil {
+			return fmt.Errorf("open store: %w", err)
+		}
+		w, err := st.GetWorkspace(context.Background(), ws)
+		if err != nil {
+			return fmt.Errorf("get workspace: %w", err)
+		}
+		if w.PrimaryDirectory == "" {
+			return fmt.Errorf("smoke: workspace %s has no primary directory", ws)
+		}
+		fmt.Fprintf(os.Stderr, "[0/4] primary=%s\n", w.PrimaryDirectory)
+
+		groundTruthSHAs, err := recentSHAs(w.PrimaryDirectory, 10)
+		if err != nil {
+			return fmt.Errorf("smoke: read primary repo log: %w", err)
+		}
+		if len(groundTruthSHAs) == 0 {
+			return fmt.Errorf("smoke: primary repo %s has no commits", w.PrimaryDirectory)
+		}
+		fmt.Fprintf(os.Stderr, "      ground-truth head=%s\n", groundTruthSHAs[0])
+
 		// Step 1: spawn a top-level thread with a researchable question.
 		fmt.Fprintln(os.Stderr, "[1/4] threads new …")
 		newEnv := hosts.DispatchSlash(ws, "what are the most recent commits?", "main")
@@ -284,11 +315,13 @@ researcher source name (proves grounding ran end-to-end).`,
 			return fmt.Errorf("smoke: list missing thread_id %s: %s", threadID, listRaw)
 		}
 
-		// Step 4: show thread messages, then assert at least one
-		// assistant message references a researcher source name. The
-		// canonical sources are git-log / git-status / github-prs /
-		// github-issues; matching any of them proves the gather stage
-		// produced grounded evidence.
+		// Step 4: show thread messages, then assert (a) the thread
+		// references a registered researcher source name and (b) at
+		// least one of the workspace's actual ground-truth SHAs
+		// appears in the gathered evidence. (b) is the assertion
+		// that proves the cwd injection landed in the right repo;
+		// without it, a regression that runs git-log against the
+		// desktop binary's cwd would still pass step (a) silently.
 		fmt.Fprintln(os.Stderr, "[4/4] threads show …")
 		showRaw := hosts.ThreadMessages(ws, threadID)
 		grounded := false
@@ -301,9 +334,41 @@ researcher source name (proves grounding ran end-to-end).`,
 		if !grounded {
 			return fmt.Errorf("smoke: thread did not reference any researcher source — gather stage may have failed.\nshow=%s", showRaw)
 		}
-		fmt.Fprintln(os.Stderr, "✓ smoke: threaded research path is healthy")
+		matched := ""
+		for _, sha := range groundTruthSHAs {
+			if sha != "" && strings.Contains(showRaw, sha) {
+				matched = sha
+				break
+			}
+		}
+		if matched == "" {
+			return fmt.Errorf("smoke: gathered evidence does not contain ANY of the workspace's recent SHAs — the loop ran git-log against the wrong directory.\nprimary=%s\nground-truth=%v\nshow=%s",
+				w.PrimaryDirectory, groundTruthSHAs, showRaw)
+		}
+		fmt.Fprintf(os.Stderr, "✓ smoke: threaded research path is healthy (matched %s)\n", matched)
 		return nil
 	},
+}
+
+// recentSHAs returns up to n recent short SHAs from the git repo at
+// dir. The smoke command uses this as ground truth: the loop's
+// gathered evidence MUST contain at least one of these SHAs, otherwise
+// the cwd injection regressed and git-log ran in the wrong directory.
+func recentSHAs(dir string, n int) ([]string, error) {
+	out, err := exec.Command("git", "-C", dir, "log",
+		"--pretty=format:%h", fmt.Sprintf("-n%d", n)).Output()
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	clean := make([]string, 0, len(lines))
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			clean = append(clean, l)
+		}
+	}
+	return clean, nil
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────

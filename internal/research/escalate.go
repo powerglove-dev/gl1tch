@@ -79,53 +79,16 @@ type Verdict struct {
 // large one — the question is "is this draft supported by the evidence,"
 // not "is this draft worthy of a smaller model's effort."
 func VerifyPrompt(in VerifyInput) string {
-	var b strings.Builder
-	b.WriteString("You are the verification stage of a research loop. A bounded local\n")
-	b.WriteString("loop has gathered evidence and produced a draft answer. Your job is to\n")
-	b.WriteString("either CONFIRM the draft (when every claim is supported by the evidence)\n")
-	b.WriteString("or REWRITE it (using ONLY the same evidence) so every claim is supported.\n")
-	b.WriteString("\n")
-	b.WriteString("You MUST NOT use prior knowledge. You MUST NOT delegate to the user by\n")
-	b.WriteString("saying \"you should run X\". If the evidence is insufficient, say so\n")
-	b.WriteString("explicitly — do not guess.\n\n")
-
-	b.WriteString("Output format:\n")
-	b.WriteString("- If the draft is correct, output exactly: CONFIRM\n")
-	b.WriteString("- Otherwise, output the corrected answer with no preamble.\n\n")
-
-	b.WriteString("Question:\n")
-	b.WriteString(strings.TrimSpace(in.Question))
-	b.WriteString("\n\n")
-
-	b.WriteString("Local draft:\n")
-	b.WriteString(strings.TrimSpace(in.Draft))
-	b.WriteString("\n\n")
-
-	b.WriteString("Evidence:\n")
-	if in.Bundle.Len() == 0 {
-		b.WriteString("(no evidence was gathered)\n\n")
-	} else {
-		for i, ev := range in.Bundle.Items {
-			fmt.Fprintf(&b, "[%d] source=%s\n", i+1, ev.Source)
-			if ev.Title != "" {
-				fmt.Fprintf(&b, "    title: %s\n", ev.Title)
-			}
-			if len(ev.Refs) > 0 {
-				fmt.Fprintf(&b, "    refs: %s\n", strings.Join(ev.Refs, ", "))
-			}
-			body := strings.TrimSpace(ev.Body)
-			if body != "" {
-				b.WriteString("    body:\n")
-				for _, line := range strings.Split(body, "\n") {
-					fmt.Fprintf(&b, "      %s\n", line)
-				}
-			}
-			b.WriteString("\n")
-		}
+	data := promptDataDraftish{
+		Question:    strings.TrimSpace(in.Question),
+		Draft:       strings.TrimSpace(in.Draft),
+		BundleItems: evidenceItemsForPrompt(in.Bundle),
 	}
-
-	b.WriteString("Output (CONFIRM or the corrected answer):\n")
-	return b.String()
+	out, err := getDefaultPromptStore().Render(PromptNameVerify, data)
+	if err != nil {
+		return fmt.Sprintf("verify stage prompt failed to render (%v)", err)
+	}
+	return out
 }
 
 // ParseVerdict parses a verifier's raw response. A response that starts

@@ -1,0 +1,41 @@
+You are the critique stage of a research loop. Your job is to extract
+the factual claims from a draft answer and label each one against the
+evidence the loop gathered. You do NOT rewrite the draft. You do NOT
+answer the original question. You only extract and label.
+
+Draft:
+{{.Draft}}
+
+Evidence:
+{{- if .BundleItems}}
+{{- range $i, $ev := .BundleItems}}
+[{{add $i 1}}] source={{$ev.Source}}
+{{- if $ev.Title}}
+    title: {{$ev.Title}}
+{{- end}}
+{{- if $ev.Refs}}
+    refs: {{join $ev.Refs ", "}}
+{{- end}}
+{{- if $ev.Body}}
+    body:
+{{indent 6 $ev.Body}}
+{{- end}}
+
+{{- end}}
+{{- else}}
+(no evidence was gathered)
+{{- end}}
+
+Labels (use exactly one per claim):
+- "grounded":   every specific identifier in the claim (PR number,
+                file path, commit SHA, date, name, URL) appears
+                verbatim in the evidence above.
+- "partial":    some identifiers appear and some do not, OR the
+                claim is roughly supported but not exactly.
+- "ungrounded": the claim contains identifiers that do not appear
+                in the evidence, OR the claim has no evidence basis.
+
+Output ONLY a JSON array of objects with this shape, no prose, no markdown:
+[{"text": "...", "label": "grounded|partial|ungrounded"}, ...]
+
+Output (JSON array only):
