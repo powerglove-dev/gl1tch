@@ -9,10 +9,6 @@ export function AnalyzeActivityChunks(arg1:string):Promise<string>;
 
 export function AnswerClarification(arg1:string,arg2:string):Promise<void>;
 
-export function AskProvider(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
-
-export function AskScoped(arg1:string,arg2:string):Promise<void>;
-
 export function BrainDecisions(arg1:string):Promise<string>;
 
 export function CancelActivityAnalysis(arg1:string):Promise<void>;
@@ -97,10 +93,6 @@ export function RemoveWorkspaceDirectory(arg1:string,arg2:string):Promise<void>;
 
 export function ReopenThread(arg1:string,arg2:string):Promise<string>;
 
-export function RunChain(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
-
-export function RunWorkflow(arg1:string,arg2:string,arg3:string):Promise<void>;
-
 export function SaveChatWorkflow(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
 
 export function SaveMessage(arg1:string,arg2:string):Promise<void>;
@@ -130,8 +122,6 @@ export function StepThroughSave(arg1:string,arg2:string):Promise<string>;
 export function StepThroughSnapshot(arg1:string):Promise<string>;
 
 export function StepThroughStart(arg1:string,arg2:string,arg3:string):Promise<string>;
-
-export function StepThroughStartFromChain(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
 
 export function StopDraftRefine(arg1:number):Promise<void>;
 

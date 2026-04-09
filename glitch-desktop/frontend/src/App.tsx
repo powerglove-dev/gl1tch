@@ -37,7 +37,6 @@ import {
   SaveChatWorkflow,
   DeleteWorkflowFile,
   DeletePrompt,
-  RunWorkflow,
   CreateDraft,
   CreateDraftFromTarget,
   StepThroughAccept,
@@ -689,16 +688,33 @@ export function App() {
     });
   }, [state.activeWorkspaceId, chain, refreshSidebarData, selectedProvider, selectedModel, observerDefaultProvider, observerDefaultModel, providers, toast]);
 
-  // Run a workflow file directly (the sidebar's ▶ button). Calls the
-  // backend's existing RunWorkflow path so the YAML gets executed in
-  // the workspace's primary directory.
+  // resolveProvider returns [provider, model] using the priority chain:
+  // explicit picker → observer default → ollama fallback.
+  const resolveProvider = useCallback((): [string, string] => {
+    if (selectedProvider) return [selectedProvider, selectedModel];
+    if (observerDefaultProvider) return [observerDefaultProvider, observerDefaultModel];
+    const ollama = providers.find((p) => p.id === "ollama");
+    const def = ollama?.models.find((m) => m.default) ?? ollama?.models[0];
+    return ["ollama", def?.id ?? ""];
+  }, [selectedProvider, selectedModel, observerDefaultProvider, observerDefaultModel, providers]);
+
+  // Run a workflow file directly (the sidebar's ▶ button). Routes
+  // through Execute with a single pipeline step so the workflow runs
+  // in the workspace's primary directory with the user's provider.
   const handleRunWorkflowFile = useCallback((p: WorkflowFileEntry) => {
     if (!state.activeWorkspaceId) return;
     const wsId = state.activeWorkspaceId;
+    const [provider, model] = resolveProvider();
     addUserMessage(wsId, `▶ ${p.name}`);
     startAssistant(wsId);
-    RunWorkflow(p.path, "", wsId);
-  }, [state.activeWorkspaceId, addUserMessage, startAssistant]);
+    Execute(JSON.stringify({
+      workspace_id: wsId,
+      input: "",
+      steps: [{ type: "pipeline", label: p.name, path: p.path }],
+      provider,
+      model,
+    }));
+  }, [state.activeWorkspaceId, addUserMessage, startAssistant, resolveProvider]);
 
   // Delete a workflow file from disk and refresh the sidebar list.
   // We optimistically remove from local state on success and surface
@@ -844,16 +860,6 @@ export function App() {
   }, []);
 
   // ── Send ──────────────────────────────────────────────────────────────
-
-  // resolveProvider returns [provider, model] using the priority chain:
-  // explicit picker → observer default → ollama fallback.
-  const resolveProvider = useCallback((): [string, string] => {
-    if (selectedProvider) return [selectedProvider, selectedModel];
-    if (observerDefaultProvider) return [observerDefaultProvider, observerDefaultModel];
-    const ollama = providers.find((p) => p.id === "ollama");
-    const def = ollama?.models.find((m) => m.default) ?? ollama?.models[0];
-    return ["ollama", def?.id ?? ""];
-  }, [selectedProvider, selectedModel, observerDefaultProvider, observerDefaultModel, providers]);
 
   // runChainNow is the single execution path for everything the user
   // submits from the chat bar. One call to Execute; routing is server-side.

@@ -36,7 +36,7 @@ import {
   PromoteDraftAs,
   UpdateDraftBody,
   DeleteDraft,
-  RunWorkflow,
+  Execute,
 } from "../../wailsjs/go/main/App";
 
 export type EditorKind = "prompt" | "workflow" | "skill" | "agent" | "collectors";
@@ -376,7 +376,11 @@ export function EditorPopup({
       const json = await GetDraft(draftId);
       const next = JSON.parse(json) as DraftJSON;
       if (next?.target_path) {
-        RunWorkflow(next.target_path, "", workspaceId);
+        Execute(JSON.stringify({
+          workspace_id: workspaceId,
+          input: "",
+          steps: [{ type: "pipeline", label: next.title || "workflow", path: next.target_path }],
+        }));
         onClose();
       }
     } catch {}

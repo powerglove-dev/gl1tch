@@ -657,12 +657,12 @@ func (a *App) Execute(optsJSON string) string {
 	if opts.HasSteps() {
 		provider, model := a.resolveProvider(opts)
 		if opts.StepThrough {
-			return a.StepThroughStartFromChain(
+			return a.stepThroughStartFromChain(
 				string(opts.Steps), opts.Input, opts.WorkspaceID,
 				provider, model,
 			)
 		}
-		a.RunChain(string(opts.Steps), opts.Input, opts.WorkspaceID, provider, model)
+		a.runChain(string(opts.Steps), opts.Input, opts.WorkspaceID, provider, model)
 		return okJSONStr("chain started")
 	}
 
@@ -685,7 +685,7 @@ func (a *App) Execute(optsJSON string) string {
 	// Freeform text with an explicit provider → provider call.
 	// This is the "I picked Claude/GPT and just want to talk" path.
 	if opts.Provider != "" {
-		a.AskProvider(opts.Provider, opts.Model, input, opts.WorkspaceID, opts.AgentPath)
+		a.askProvider(opts.Provider, opts.Model, input, opts.WorkspaceID, opts.AgentPath)
 		return okJSONStr("provider started")
 	}
 
@@ -738,8 +738,9 @@ func okJSONStr(detail string) string {
 	return string(b)
 }
 
-// AskScoped queries the observer scoped to the workspace's directories.
-func (a *App) AskScoped(prompt, workspaceID string) {
+// askScoped queries the observer scoped to the workspace's directories.
+// Internal delegate — callers use Execute.
+func (a *App) askScoped(prompt, workspaceID string) {
 	go func() {
 		runCtx, release := a.registerRun(workspaceID)
 		defer release()
@@ -841,9 +842,9 @@ func (a *App) ListAgents(workspaceID string) string {
 	return string(b)
 }
 
-// AskProvider sends a prompt to a chosen provider/model with full glitch context injected.
-// agentPath is optional — if set, the agent's instructions are prepended.
-func (a *App) AskProvider(providerID, model, prompt, workspaceID, agentPath string) {
+// askProvider sends a prompt to a chosen provider/model with full glitch context injected.
+// Internal delegate — callers use Execute.
+func (a *App) askProvider(providerID, model, prompt, workspaceID, agentPath string) {
 	go func() {
 		runCtx, release := a.registerRun(workspaceID)
 		defer release()
@@ -1062,7 +1063,8 @@ func (a *App) GetWorkflowFileDetails(path string) string {
 // RunChain executes a builder chain (JSON-encoded list of ChainStep) sequentially.
 // Each step's output flows into the next via {{ steps.step-N.value }} refs.
 // userText is appended as a final implicit prompt step if non-empty.
-func (a *App) RunChain(stepsJSON, userText, workspaceID, defaultProvider, defaultModel string) {
+// Internal delegate — callers use Execute.
+func (a *App) runChain(stepsJSON, userText, workspaceID, defaultProvider, defaultModel string) {
 	go func() {
 		runCtx, release := a.registerRun(workspaceID)
 		defer release()
@@ -1173,20 +1175,10 @@ func (a *App) SaveChatWorkflow(workspaceID, name, stepsJSON, defaultProvider, de
 //     ask call — no explicit reindex is required.
 //  5. At any point, StepThroughAbort(sessionID) tears the run down.
 
-// StepThroughStartFromChain is the chat-bar entry point into step-through
-// mode. It parallels RunChain, but instead of running the chain to
-// completion it starts a paused step-through session and forwards per-step
-// pause events to the frontend as "step-through:event" wails events.
-//
-// Per the "step-through isn't a mode" rule (see project_step_through_mode):
-// the frontend routes chain.length >= 2 sends through this path. Single-
-// step sends keep going through RunChain / AskScoped and never pause.
-//
-// Lifecycle: chat:chunk and chat:event stream from the running step the
-// same way RunChain streams them, so the chat surface renders step output
-// in real time. On step_paused, the frontend shows an Accept/Abort
-// affordance; on final the session terminates and chat:done fires.
-func (a *App) StepThroughStartFromChain(
+// stepThroughStartFromChain is the step-through entry point. It parallels
+// runChain, but pauses between steps so the user can inspect and edit.
+// Internal delegate — callers use Execute.
+func (a *App) stepThroughStartFromChain(
 	stepsJSON, userText, workspaceID, defaultProvider, defaultModel string,
 ) string {
 	// Resolve the workspace's primary directory for step cwd. We no
@@ -1536,8 +1528,9 @@ func (a *App) ListWorkflows(workspaceID string) string {
 	return string(b)
 }
 
-// RunWorkflow executes a workflow and streams output as chat events.
-func (a *App) RunWorkflow(workflowPath, input, workspaceID string) {
+// runWorkflow executes a workflow and streams output as chat events.
+// Internal delegate — callers use Execute with a pipeline step.
+func (a *App) runWorkflow(workflowPath, input, workspaceID string) {
 	go func() {
 		runCtx, release := a.registerRun(workspaceID)
 		defer release()

@@ -18,14 +18,6 @@ export function AnswerClarification(arg1, arg2) {
   return window['go']['main']['App']['AnswerClarification'](arg1, arg2);
 }
 
-export function AskProvider(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['main']['App']['AskProvider'](arg1, arg2, arg3, arg4, arg5);
-}
-
-export function AskScoped(arg1, arg2) {
-  return window['go']['main']['App']['AskScoped'](arg1, arg2);
-}
-
 export function BrainDecisions(arg1) {
   return window['go']['main']['App']['BrainDecisions'](arg1);
 }
@@ -194,14 +186,6 @@ export function ReopenThread(arg1, arg2) {
   return window['go']['main']['App']['ReopenThread'](arg1, arg2);
 }
 
-export function RunChain(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['main']['App']['RunChain'](arg1, arg2, arg3, arg4, arg5);
-}
-
-export function RunWorkflow(arg1, arg2, arg3) {
-  return window['go']['main']['App']['RunWorkflow'](arg1, arg2, arg3);
-}
-
 export function SaveChatWorkflow(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['SaveChatWorkflow'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -260,10 +244,6 @@ export function StepThroughSnapshot(arg1) {
 
 export function StepThroughStart(arg1, arg2, arg3) {
   return window['go']['main']['App']['StepThroughStart'](arg1, arg2, arg3);
-}
-
-export function StepThroughStartFromChain(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['main']['App']['StepThroughStartFromChain'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function StopDraftRefine(arg1) {
