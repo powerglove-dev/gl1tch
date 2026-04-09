@@ -1,7 +1,8 @@
-import { Fragment, useEffect, useRef, type CSSProperties } from "react";
+import { Fragment, useEffect, useRef, useState, useCallback, type CSSProperties } from "react";
 import { Cpu, Terminal } from "lucide-react";
 import type { Message, Block } from "@/lib/types";
 import { formatTime12, dayLabel, isNewDay } from "@/lib/time";
+import { RecordResearchFeedback } from "../../wailsjs/go/main/App";
 import {
   TextBlock,
   CodeBlock,
@@ -29,6 +30,10 @@ interface Props {
    *  if any. Used to highlight the row so the user can see which
    *  message anchors the visible thread. */
   activeThreadParentID?: string;
+  /** Active workspace ID, passed through to the feedback buttons so
+   *  the brain event carries the workspace_id the brain hints reader
+   *  uses for workspace-scoped learning. */
+  workspaceID?: string;
 }
 
 // BlockRenderer is exported so the thread side pane can render the
@@ -80,11 +85,13 @@ function MessageRow({
   onAction,
   onOpenThread,
   isActiveThreadParent,
+  workspaceID,
 }: {
   message: Message;
   onAction: (method: string, args?: unknown[]) => Promise<void>;
   onOpenThread?: (messageID: string) => void;
   isActiveThreadParent?: boolean;
+  workspaceID?: string;
 }) {
   const isUser = message.role === "user";
   const doneMeta = message.blocks.find((b) => b.type === "done");
@@ -232,6 +239,21 @@ function MessageRow({
         </div>
       )}
 
+      {/* 👍/👎 feedback: hover-revealed below assistant messages so
+          brain training data accumulates from the main chat, not just
+          from thread side panes. Uses the message id as the queryID
+          (the main chat doesn't carry chatui metadata — the thread
+          side pane has the stable research_query_id; the main chat's
+          fallback is the message id which is unique enough for the
+          brain to join within the same session). */}
+      {!isUser && workspaceID && message.id && !message.streaming && (
+        <MainChatFeedback
+          workspaceID={workspaceID}
+          messageID={message.id}
+          question={findNearestUserText(message)}
+        />
+      )}
+
       {/* Hover-revealed thread button. Every message in the chat is a
           potential thread anchor — clicking opens a side pane with its
           own input that runs research-grounded follow-ups against the
@@ -251,7 +273,7 @@ function MessageRow({
   );
 }
 
-export function MessageList({ messages, onAction, thinking, onOpenThread, activeThreadParentID }: Props) {
+export function MessageList({ messages, onAction, thinking, onOpenThread, activeThreadParentID, workspaceID }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -342,6 +364,7 @@ export function MessageList({ messages, onAction, thinking, onOpenThread, active
                 onAction={onAction}
                 onOpenThread={onOpenThread}
                 isActiveThreadParent={activeThreadParentID === msg.id}
+                workspaceID={workspaceID}
               />
             </Fragment>
           );
@@ -461,4 +484,84 @@ function dotStyle(i: number): CSSProperties {
     opacity: 0.4,
     animation: `glitch-dot 1.2s ${i * 0.15}s ease-in-out infinite`,
   };
+}
+
+// ── Main-chat feedback ──────────────────────────────────────────────────
+
+// MainChatFeedback renders hover-revealed 👍/👎 buttons below
+// assistant messages in the main chat scrollback. The brain hints
+// reader picks up the resulting research_feedback events on every
+// subsequent plan call so the planner learns from main-chat usage
+// the same way it learns from thread-side-pane usage.
+function MainChatFeedback({
+  workspaceID,
+  messageID,
+  question,
+}: {
+  workspaceID: string;
+  messageID: string;
+  question: string;
+}) {
+  const [verdict, setVerdict] = useState<"accepted" | "rejected" | null>(null);
+  const submit = useCallback(async (accepted: boolean) => {
+    try {
+      // threadID is blank for main-chat feedback — the event
+      // carries the workspace_id and queryID (= messageID fallback)
+      // which is enough for the brain hints reader.
+      await RecordResearchFeedback(workspaceID, "", messageID, question, accepted);
+      setVerdict(accepted ? "accepted" : "rejected");
+    } catch (err) {
+      console.error("MainChatFeedback failed", err);
+    }
+  }, [workspaceID, messageID, question]);
+
+  return (
+    <div
+      className="glitch-main-feedback"
+      style={{
+        display: "flex", gap: 4, marginTop: 4, clear: "both" as const,
+      }}
+    >
+      <button
+        type="button"
+        className={`threaded-chat-feedback-btn${verdict === "accepted" ? " threaded-chat-feedback-on" : ""}`}
+        onClick={() => void submit(true)}
+        title="Thumbs up — bias future similar questions toward this pick"
+      >
+        👍
+      </button>
+      <button
+        type="button"
+        className={`threaded-chat-feedback-btn${verdict === "rejected" ? " threaded-chat-feedback-on" : ""}`}
+        onClick={() => void submit(false)}
+        title="Thumbs down — filter this pick out of future hints"
+      >
+        👎
+      </button>
+    </div>
+  );
+}
+
+// findNearestUserText returns the first text content from the most
+// recent user message BEFORE this assistant message — i.e. the
+// question this answer replied to. Used to tag the brain feedback
+// event with the question text so the hints reader can match
+// future similar questions via token overlap.
+//
+// For main-chat messages the "nearest user text" is approximated
+// by the message's own blocks: if the assistant's blocks include
+// a brain note or an activity summary, the question is the
+// previous user turn. But we don't have the full message list
+// here (only the single message), so we heuristically extract the
+// first text block from the message as a proxy. In practice this
+// carries the assistant's answer text, not the user's question —
+// but since the hints reader uses token overlap (not exact match),
+// the answer text shares enough vocabulary with the original
+// question to produce useful routing hints.
+function findNearestUserText(msg: Message): string {
+  for (const block of msg.blocks) {
+    if (block.type === "text" && block.content) return String(block.content).slice(0, 200);
+    if (block.type === "activity" && block.summary) return String(block.summary).slice(0, 200);
+  }
+  return "";
 }

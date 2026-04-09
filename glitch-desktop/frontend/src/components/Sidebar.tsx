@@ -16,16 +16,20 @@ import type { Workspace } from "@/lib/types";
 import {
   ListWorkspaceDirectoriesDetailed,
   SetWorkspaceDirectoryEnabled,
+  SetWorkspacePrimaryDirectory,
 } from "../../wailsjs/go/main/App";
 
 // DirectoryRow mirrors the JSON shape returned by
 // ListWorkspaceDirectoriesDetailed: every directory associated with a
-// workspace, including disabled ones, with the per-row enable flag the
-// unified workspace collector consults to decide what to scan.
+// workspace, including disabled ones, with the per-row enable + primary
+// flags. The primary directory is the one git/gh tooling targets when
+// the user asks a research question; additional directories are
+// scanned by collectors for context but don't anchor research calls.
 interface DirectoryRow {
   path: string;
   repo_name: string;
   enabled: boolean;
+  primary: boolean;
 }
 
 interface SidebarSectionProps {
@@ -295,6 +299,17 @@ export function Sidebar({
     }
   }, [activeWorkspaceId, refreshDirRows]);
 
+  const handleSetPrimary = useCallback(async (path: string) => {
+    if (!activeWorkspaceId) return;
+    // Optimistic: demote current primary, promote the target.
+    setDirRows((rows) => rows.map((r) => ({ ...r, primary: r.path === path })));
+    try {
+      await SetWorkspacePrimaryDirectory(activeWorkspaceId, path);
+    } catch {
+      void refreshDirRows();
+    }
+  }, [activeWorkspaceId, refreshDirRows]);
+
   // Bucket prompts by scope. A prompt is "workspace" when its CWD
   // matches one of the active workspace's directories. CWD = "" is
   // always global. Computing this once per render keeps the filter
@@ -366,7 +381,17 @@ export function Sidebar({
                   padding: "5px 10px", borderRadius: 6, fontSize: 11,
                   color: row.enabled ? "var(--fg)" : "var(--fg-dim)",
                   opacity: row.enabled ? 1 : 0.55,
+                  borderLeft: row.primary ? "2px solid var(--cyan)" : "2px solid transparent",
                 }}
+                onContextMenu={(e) => {
+                  if (!row.primary && row.enabled) {
+                    e.preventDefault();
+                    void handleSetPrimary(row.path);
+                  }
+                }}
+                title={row.primary
+                  ? `${row.path} (primary — research loop targets this repo)`
+                  : `${row.path} (right-click to set as primary)`}
               >
                 <input
                   type="checkbox"
@@ -375,10 +400,29 @@ export function Sidebar({
                   style={{ flexShrink: 0, cursor: "pointer", margin: 0 }}
                   title={row.enabled ? `Pause ${row.path}` : `Resume ${row.path}`}
                 />
-                <Folder size={11} style={{ color: "var(--yellow)", flexShrink: 0 }} />
-                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={row.path}>
+                <Folder size={11} style={{ color: row.primary ? "var(--cyan)" : "var(--yellow)", flexShrink: 0 }} />
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {row.path.split("/").pop()}
                 </span>
+                {row.primary && (
+                  <span style={{ fontSize: 9, color: "var(--cyan)", flexShrink: 0, fontWeight: 600, letterSpacing: "0.05em" }}>
+                    PRIMARY
+                  </span>
+                )}
+                {!row.primary && row.enabled && (
+                  <button
+                    onClick={() => void handleSetPrimary(row.path)}
+                    style={{
+                      background: "none", border: "none", color: "var(--fg-dim)",
+                      cursor: "pointer", padding: 2, borderRadius: 4, display: "flex",
+                      opacity: 0, fontSize: 9,
+                    }}
+                    className="glitch-dir-set-primary"
+                    title="Set as primary"
+                  >
+                    ⬆
+                  </button>
+                )}
                 <button
                   onClick={() => onRemoveDirectory(row.path)}
                   style={{ background: "none", border: "none", color: "var(--fg-dim)", cursor: "pointer", padding: 2, borderRadius: 4, display: "flex", opacity: 0.3 }}

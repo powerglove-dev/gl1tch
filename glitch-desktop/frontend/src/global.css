@@ -154,6 +154,11 @@ html, body, #root {
 .hljs-params { color: var(--orange) !important; }
 .hljs-literal { color: var(--orange) !important; }
 
+/* ── Directory primary-dir affordance ─────────────────────────────────── */
+.glitch-dir-set-primary { transition: opacity 0.15s; }
+div:hover > .glitch-dir-set-primary { opacity: 0.5 !important; }
+div:hover > .glitch-dir-set-primary:hover { opacity: 1 !important; color: var(--cyan) !important; }
+
 /* ── Thread affordance on every chat message ─────────────────────────── */
 .glitch-message-row .glitch-thread-affordance {
   position: absolute;
@@ -195,9 +200,14 @@ html, body, #root {
   border-radius: 4px;
 }
 
-/* Feedback affordance: 👍/👎 below every assistant message in a
-   thread side pane. Clicking writes a research_feedback event the
-   brain hints reader weights above the composite proxy. */
+/* Feedback affordance: 👍/👎 below assistant messages in both
+   the main chat and the thread side pane. Clicking writes a
+   research_feedback event the brain hints reader weights above the
+   composite proxy. Main-chat feedback buttons are hover-revealed
+   so they don't clutter the scrollback — the thread side pane
+   shows them always (since the side pane IS the drill context). */
+.glitch-main-feedback { opacity: 0; transition: opacity 0.15s; }
+.glitch-message-row:hover .glitch-main-feedback { opacity: 1; }
 .threaded-chat-feedback { display: flex; gap: 4px; margin-top: 6px; }
 .threaded-chat-feedback-btn {
   background: transparent;

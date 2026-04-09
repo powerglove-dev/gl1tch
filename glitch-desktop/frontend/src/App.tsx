@@ -1195,6 +1195,7 @@ export function App() {
               thinking={active.streaming ? active.thinking : ""}
               onOpenThread={(id) => void openThreadOnMessage(id)}
               activeThreadParentID={activeThread?.parentID}
+              workspaceID={state.activeWorkspaceId || ""}
             />
           {activePaused && state.activeWorkspaceId && (
             <PausePanel
