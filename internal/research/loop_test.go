@@ -273,6 +273,12 @@ func TestParsePlanTolerantOfPreamble(t *testing.T) {
 		// escape and retries.
 		"escaped quotes":        {`[\"git-log\"]`, []string{"git-log"}},
 		"escaped multi-element": {`[\"git\", \"github-prs\"]`, []string{"git", "github-prs"}},
+		// Bare-identifier form: the model treats researcher names
+		// as barewords without any quoting. ParsePlan's third
+		// tolerance pass lexes them out directly.
+		"bare identifier":       {`[git-log]`, []string{"git-log"}},
+		"bare multi-element":    {`[git-log, github-prs]`, []string{"git-log", "github-prs"}},
+		"bare with prose":       {`Sure, [git-log] is the right pick.`, []string{"git-log"}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -292,11 +298,22 @@ func TestParsePlanTolerantOfPreamble(t *testing.T) {
 	}
 }
 
+// TestParsePlanRejectsMalformed covers the "truly shapeless input"
+// rejection contract. The parser used to reject anything that wasn't
+// strict JSON, but the bareword-tolerance pass now legitimately
+// extracts identifier-looking tokens from `["unclosed"` and
+// `["a", 1]` — those pass through the parser and get dropped at the
+// registry-validation step downstream (where the names don't match
+// any registered researcher). The parser's job is now "find
+// identifier-shaped tokens between brackets if any exist"; the
+// registry is the strict validator.
+//
+// Only inputs with NO bracket at all (or no token-shaped content
+// at all) should still error.
 func TestParsePlanRejectsMalformed(t *testing.T) {
 	cases := []string{
 		"no array here",
-		`["unclosed"`,
-		`["a", 1]`, // not all strings
+		"!!!@@@$$$",
 	}
 	for _, raw := range cases {
 		if _, err := ParsePlan(raw); err == nil {

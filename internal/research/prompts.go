@@ -168,25 +168,96 @@ func evidenceItemsForPrompt(bundle EvidenceBundle) []promptDataEvidence {
 // matching brackets. Names that are not strings or that fail validation
 // against the registry are dropped by the loop, not by this parser.
 //
-// Also tolerates the qwen2.5:7b habit of double-escaping the JSON output
-// (e.g. emitting `[\"git-log\"]` instead of `["git-log"]`). When the
-// straightforward parse fails because the bracket scanner runs into an
-// unbalanced string due to escaped quotes, we strip one layer of escaping
-// and retry once.
+// Three tolerance passes for the qwen2.5:7b output formats observed in
+// the wild:
+//
+//   1. Strict JSON: `["git-log","github-prs"]` — the canonical form.
+//   2. Escaped: `[\"git-log\"]` — the model tokenises its output
+//      through a stringification layer. Strip one layer of \" → " and
+//      retry.
+//   3. Bare identifiers: `[git-log, github-prs]` — the model treats
+//      researcher names as bareword tokens. Lex alphanumeric + hyphen
+//      runs out of the bracketed region directly, no JSON involved.
+//
+// Each pass falls through to the next on failure; the original error
+// is surfaced when all three fail so the caller can see what the model
+// actually emitted.
 func ParsePlan(raw string) ([]string, error) {
 	if names, err := parsePlanRaw(raw); err == nil {
 		return names, nil
 	}
-	// Fallback: strip one layer of backslash escaping (\\" → ") and
-	// retry. This rescues outputs like `[\"git-log\"]` that small
-	// models occasionally produce when their tokeniser injects a
-	// stringification step.
+	// Pass 2: strip one layer of backslash escaping and retry.
 	if unescaped := strings.ReplaceAll(raw, `\"`, `"`); unescaped != raw {
 		if names, err := parsePlanRaw(unescaped); err == nil {
 			return names, nil
 		}
 	}
+	// Pass 3: bare-identifier lex. Find the first '[' and lex
+	// alphanumeric/hyphen runs out of the substring up to the
+	// matching ']' (or end-of-string). Tolerates spaces, commas,
+	// and stray quotes between the identifiers.
+	if names := parsePlanBareIdentifiers(raw); len(names) > 0 {
+		return names, nil
+	}
 	return parsePlanRaw(raw) // surface the original error
+}
+
+// parsePlanBareIdentifiers is the third tolerance pass: rather than
+// try to massage the model's output into valid JSON, lex
+// alphanumeric+hyphen tokens out of the bracketed region directly.
+// This rescues outputs like `[git-log, github-prs]` that some small
+// models produce when they treat researcher names as barewords.
+//
+// Returns the empty slice when no identifiers are found, so the
+// caller can fall through to the original-error path. Tokens are
+// trimmed and de-duplicated to match parsePlanRaw's contract.
+func parsePlanBareIdentifiers(raw string) []string {
+	start := strings.Index(raw, "[")
+	if start < 0 {
+		return nil
+	}
+	end := strings.Index(raw[start:], "]")
+	if end < 0 {
+		end = len(raw)
+	} else {
+		end += start
+	}
+	body := raw[start+1 : end]
+
+	var tokens []string
+	var cur strings.Builder
+	flush := func() {
+		t := strings.TrimSpace(cur.String())
+		cur.Reset()
+		if t == "" {
+			return
+		}
+		tokens = append(tokens, t)
+	}
+	for i := 0; i < len(body); i++ {
+		c := body[i]
+		isToken := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || c == '-' || c == '_'
+		if isToken {
+			cur.WriteByte(c)
+			continue
+		}
+		flush()
+	}
+	flush()
+	if len(tokens) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(tokens))
+	out := make([]string, 0, len(tokens))
+	for _, t := range tokens {
+		if _, dup := seen[t]; dup {
+			continue
+		}
+		seen[t] = struct{}{}
+		out = append(out, t)
+	}
+	return out
 }
 
 // parsePlanRaw is the bracket-matching JSON-array extractor; see ParsePlan

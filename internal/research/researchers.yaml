@@ -1,0 +1,53 @@
+# researchers.yaml — the canonical menu the planner sees on every
+# research call. Each entry is one row in the {{.Researchers}} block
+# of plan.tmpl: name, describe, workflow.
+#
+# Embedded as the first-impression default. To override without a
+# recompile:
+#
+#   1. Drop a copy at ~/.config/glitch/researchers.yaml
+#   2. Edit the descriptions to your taste — the planner re-reads
+#      the file on every research call
+#   3. Run `glitch threads new` (or any research call) — the
+#      tuned descriptions take effect immediately
+#
+# Adding a new researcher: drop a corresponding workflow file in
+# .glitch/workflows/<workflow>.workflow.yaml that emits a valid
+# Evidence JSON, add an entry here, done. No Go code, no recompile.
+# Removing one: delete the entry; the loop's DefaultRegistry
+# silently skips workflows that don't have a paired YAML row.
+#
+# Describe text is the most-tuned surface in the loop. The planner
+# is a small model (qwen2.5:7b by default); leading the description
+# with an ALL-CAPS keyword and listing the question shapes the
+# researcher should be picked for produces the most reliable picks.
+
+researchers:
+  - name: github-prs
+    workflow: github-prs
+    describe: |
+      Lists the currently open pull requests in the current git
+      repository, with PR numbers, titles, authors, states, draft
+      status, and last-updated timestamps.
+
+  - name: github-issues
+    workflow: github-issues
+    describe: |
+      Lists the currently open issues in the current git
+      repository, with issue numbers, titles, authors, labels, and
+      last-updated timestamps.
+
+  - name: git-log
+    workflow: git-log
+    describe: |
+      Lists the most recent commits in the current git repository,
+      with short SHA, author, ISO date, and subject line. Use for
+      any question about what changed recently or who touched what.
+
+  - name: git-status
+    workflow: git-status
+    describe: |
+      Reports the current branch and working-tree state of the
+      current git repository, including any uncommitted or
+      untracked paths. Use for any question about what is locally
+      modified or which branch is checked out.

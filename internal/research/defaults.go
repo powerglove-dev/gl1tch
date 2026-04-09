@@ -1,70 +1,163 @@
 package research
 
 import (
+	_ "embed"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/8op-org/gl1tch/internal/executor"
 )
 
-// DefaultPipelineResearchers is the canonical menu the research loop offers
-// when no caller has assembled its own. Each entry is the (Name, Describe,
-// Workflow) tuple a PipelineResearcher needs; Workflow is the bare workflow
-// name (no path, no extension) so loadPipelineFile resolves it against
-// .glitch/workflows on every workspace.
+//go:embed researchers.yaml
+var embeddedResearchersYAML []byte
+
+// DefaultPipelineResearchers used to be a hand-curated package-level
+// slice. It is now a deprecated alias backed by LoadDefaultPipelineSpecs
+// so any caller that imports the slice still gets the canonical list,
+// but new code should call LoadDefaultPipelineSpecs() to get the live
+// (re-read on every call) view that picks up disk overrides.
 //
-// The Describe text is what the planner LLM sees when picking — it must
-// answer "what kind of question would I pick this for?" without leaking
-// implementation details. Keep them short, action-framed, and free of any
-// command names. The qwen2.5:7b planner is small; the more concrete the
-// description, the more reliable the pick.
+// Adding to the menu is now a YAML edit, not a Go change: drop a
+// workflow in .glitch/workflows, add a row to
+// internal/research/researchers.yaml (or a user override at
+// ~/.config/glitch/researchers.yaml), done.
+var DefaultPipelineResearchers = func() []DefaultPipelineSpec {
+	specs, _ := LoadDefaultPipelineSpecs()
+	return specs
+}()
+
+// researchersDoc is the on-disk YAML shape for the researcher menu.
+// Kept private — callers consume the flat []DefaultPipelineSpec slice
+// LoadDefaultPipelineSpecs returns.
+type researchersDoc struct {
+	Researchers []DefaultPipelineSpec `yaml:"researchers"`
+}
+
+// loadResearchersOnce caches the disk-vs-embedded resolution for the
+// duration of the test suite, but production callers go through the
+// non-cached LoadDefaultPipelineSpecs path so a tweak to the user
+// override file takes effect on the next call without process
+// restart. The cache exists so the deprecated package-level
+// DefaultPipelineResearchers var doesn't re-parse on every import.
+var loadResearchersOnce sync.Once
+
+// LoadDefaultPipelineSpecs returns the canonical researcher menu the
+// loop's DefaultRegistry registers. Resolution order, lowest wins:
 //
-// Adding to this list is the cheapest way to make the loop smarter: a new
-// workflow file in .glitch/workflows that emits an Evidence JSON, plus one
-// entry here, and the planner immediately considers it for every research
-// call.
-var DefaultPipelineResearchers = []DefaultPipelineSpec{
-	{
-		Name: "github-prs",
-		Describe: "Lists the currently open pull requests in the current git " +
-			"repository, with PR numbers, titles, authors, states, draft " +
-			"status, and last-updated timestamps.",
-		Workflow: "github-prs",
-	},
-	{
-		Name: "github-issues",
-		Describe: "Lists the currently open issues in the current git " +
-			"repository, with issue numbers, titles, authors, labels, and " +
-			"last-updated timestamps.",
-		Workflow: "github-issues",
-	},
-	{
-		Name: "git-log",
-		Describe: "Lists the most recent commits in the current git " +
-			"repository, with short SHA, author, ISO date, and subject " +
-			"line. Use for any question about what changed recently or " +
-			"who touched what.",
-		Workflow: "git-log",
-	},
-	{
-		Name: "git-status",
-		Describe: "Reports the current branch and working-tree state of " +
-			"the current git repository, including any uncommitted or " +
-			"untracked paths. Use for any question about what is locally " +
-			"modified or which branch is checked out.",
-		Workflow: "git-status",
-	},
+//   1. ~/.config/glitch/researchers.yaml (user override)
+//   2. internal/research/researchers.yaml (embedded default)
+//
+// Re-reads on every call (no caching) so the tuning loop is
+// `vim ~/.config/glitch/researchers.yaml` → `glitch threads new` →
+// see the planner pick differently. Errors collapse to "fall back
+// to embedded" so a malformed user file never crashes the loop.
+func LoadDefaultPipelineSpecs() ([]DefaultPipelineSpec, error) {
+	if specs, src, err := loadResearchersFromDisk(); err == nil && len(specs) > 0 {
+		_ = src // logged by callers that care
+		return specs, nil
+	}
+	return parseResearchersYAML(embeddedResearchersYAML)
+}
+
+// loadResearchersFromDisk probes the user override path. Returns
+// the parsed specs + the source path, or err when no override exists
+// or the file is malformed.
+func loadResearchersFromDisk() ([]DefaultPipelineSpec, string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil, "", os.ErrNotExist
+	}
+	path := filepath.Join(home, ".config", "glitch", "researchers.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, "", err
+	}
+	specs, err := parseResearchersYAML(data)
+	if err != nil {
+		return nil, path, err
+	}
+	return specs, path, nil
+}
+
+// parseResearchersYAML decodes the embedded or override YAML and
+// trims whitespace off every Describe so the planner sees clean
+// menu rows. The YAML pipe-block (`describe: |`) form preserves
+// newlines for readability in the file but the planner gets a
+// single trimmed paragraph.
+func parseResearchersYAML(data []byte) ([]DefaultPipelineSpec, error) {
+	var doc researchersDoc
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("research: parse researchers yaml: %w", err)
+	}
+	for i, spec := range doc.Researchers {
+		// Collapse Describe whitespace so a YAML pipe-block
+		// describes the planner like a one-paragraph summary.
+		doc.Researchers[i].Describe = collapseWhitespace(spec.Describe)
+	}
+	return doc.Researchers, nil
+}
+
+// collapseWhitespace flattens runs of whitespace (including newlines)
+// into single spaces and trims the ends. The YAML loader keeps the
+// pipe-block formatting in the file for readability; the planner
+// sees the flat form.
+func collapseWhitespace(s string) string {
+	var b []byte
+	prevSpace := true
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			if !prevSpace {
+				b = append(b, ' ')
+				prevSpace = true
+			}
+			continue
+		}
+		b = append(b, c)
+		prevSpace = false
+	}
+	out := string(b)
+	if n := len(out); n > 0 && out[n-1] == ' ' {
+		out = out[:n-1]
+	}
+	return out
+}
+
+// DiskOverridePath returns the absolute path the user override
+// would live at, even if the file does not yet exist. Used by
+// `glitch researchers edit` to figure out where to write the
+// seed copy.
+func DiskOverridePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".config", "glitch", "researchers.yaml")
+}
+
+// EmbeddedResearchersDefault returns the embedded default YAML
+// regardless of any disk override. Used by `glitch researchers edit`
+// (which seeds the user override from this) and `glitch researchers
+// diff` (which compares against this).
+func EmbeddedResearchersDefault() []byte {
+	return append([]byte(nil), embeddedResearchersYAML...)
 }
 
 // DefaultPipelineSpec is the registration tuple for one entry in
-// DefaultPipelineResearchers. It is exported so callers that build their own
-// menu (e.g. tests, future plugin loaders) can compose it from the same type
-// the defaults use.
+// the canonical researcher menu. It is exported so callers that
+// build their own menu (e.g. tests, future plugin loaders) can
+// compose it from the same type the defaults use. The yaml tags
+// match researchers.yaml's field names so a single struct round-
+// trips through both Go callers and disk overrides.
 type DefaultPipelineSpec struct {
-	Name     string
-	Describe string
-	Workflow string
+	Name     string `yaml:"name"`
+	Describe string `yaml:"describe"`
+	Workflow string `yaml:"workflow"`
 }
 
 // DefaultRegistry builds a Registry pre-populated with the canonical
@@ -95,8 +188,21 @@ func DefaultRegistry(mgr *executor.Manager, workflowsDir string) (*Registry, err
 		dir = findAncestorWorkflowsDirFromCwd()
 	}
 
+	// Re-read the canonical researcher menu on every DefaultRegistry
+	// call so a disk override at ~/.config/glitch/researchers.yaml
+	// takes effect on the next research run without a process
+	// restart. The cost is one filesystem stat + a small YAML
+	// parse — trivial against the latency of the LLM call that
+	// follows. Errors collapse to the embedded default; the loop
+	// must always have a usable menu.
+	specs, err := LoadDefaultPipelineSpecs()
+	if err != nil || len(specs) == 0 {
+		slog.Debug("research: falling back to embedded researcher menu", "err", err)
+		specs, _ = parseResearchersYAML(embeddedResearchersYAML)
+	}
+
 	var errs []error
-	for _, spec := range DefaultPipelineResearchers {
+	for _, spec := range specs {
 		path := resolveWorkflowPath(dir, spec.Workflow)
 		if path == "" {
 			slog.Debug("research: default registry skipping researcher (workflow not found)",
