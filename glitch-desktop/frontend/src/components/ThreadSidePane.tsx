@@ -41,6 +41,12 @@ interface ChatMessage {
   type: MessageType;
   payload: any;
   created_at: string;
+  // Stamped by the backend's ResearchResultToMessages on every
+  // assistant message produced by a research call. The side pane's
+  // 👍/👎 affordance reads metadata.research_query_id and passes it
+  // to RecordResearchFeedback so the feedback event joins the loop's
+  // original research_attempt by query_id at hint-build time.
+  metadata?: Record<string, string>;
 }
 
 interface EvidenceBundleItem {
@@ -321,6 +327,12 @@ export function ThreadSidePane({
           // overlap on the question to decide which past hints to
           // surface for the next call.
           const recentQuestion = recentUserQuestion(messages, msg.id);
+          // Prefer the loop's stable QueryID stamped on the message
+          // metadata so feedback joins the actual research call.
+          // Falls back to the message id when an older message
+          // doesn't have the metadata (e.g. on the first run after
+          // an upgrade).
+          const queryID = msg.metadata?.research_query_id || msg.id;
           return (
             <div key={msg.id} className={`threaded-chat-message threaded-chat-${msg.role}`}>
               <div className="threaded-chat-message-meta">{roleLabel(msg.role)}</div>
@@ -329,7 +341,7 @@ export function ThreadSidePane({
                 <FeedbackButtons
                   workspaceID={workspaceID}
                   threadID={threadID}
-                  messageID={msg.id}
+                  queryID={queryID}
                   question={recentQuestion}
                 />
               )}
@@ -386,25 +398,24 @@ function clamp(s: string, n: number): string {
 function FeedbackButtons({
   workspaceID,
   threadID,
-  messageID,
+  queryID,
   question,
 }: {
   workspaceID: string;
   threadID: string;
-  messageID: string;
+  /** The loop's stable research query id, sourced from the assistant
+   *  message's metadata.research_query_id. When the loop's QueryID
+   *  is the join key, every assistant message produced by the same
+   *  research call carries the same id, so a 👍 on the text and a 👎
+   *  on the bundle within the same call resolves to the most recent
+   *  click — exactly what last-write-wins in the hints reader does. */
+  queryID: string;
   question: string;
 }) {
   const [verdict, setVerdict] = useState<"accepted" | "rejected" | null>(null);
   const submit = async (accepted: boolean) => {
     try {
-      // queryID is the assistant message's id — the loop's QueryID
-      // field is per-research-call, but the brain hints reader
-      // joins by query_id, so the safest cross-walk is to send the
-      // assistant message id and let the reader treat it as a
-      // unique key for the verdict. (When the loop's per-call
-      // query_id stabilises in chat, this becomes the message's
-      // metadata.queryID instead.)
-      await RecordResearchFeedback(workspaceID, threadID, messageID, question, accepted);
+      await RecordResearchFeedback(workspaceID, threadID, queryID, question, accepted);
       setVerdict(accepted ? "accepted" : "rejected");
     } catch (err) {
       console.error("RecordResearchFeedback failed", err);

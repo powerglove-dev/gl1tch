@@ -21,8 +21,10 @@ func TestTokenise(t *testing.T) {
 		in   string
 		want []string
 	}{
-		"basic":         {"What PRs are open?", []string{"prs", "open"}},
-		"hyphenated":    {"git-log shows recent commits", []string{"git", "log", "shows", "recent", "commits"}},
+		// "PRs" stems to "pr" via the trailing-s plural collapse,
+		// so "what prs" matches "what pr" against past events.
+		"basic":         {"What PRs are open?", []string{"pr", "open"}},
+		"hyphenated":    {"git-log shows recent commits", []string{"git", "log", "show", "recent", "commit"}},
 		"dedup":         {"PR pr Pr open OPEN", []string{"pr", "open"}},
 		"empty":         {"", nil},
 		"all stopwords": {"is the of and", nil},
@@ -242,6 +244,67 @@ func TestFileEventHintsProvider_FeedbackOverride(t *testing.T) {
 	// C's git-status pick must NOT appear (explicit reject filters it).
 	if strings.Contains(hint, "git-status") {
 		t.Errorf("hint should NOT mention git-status from rejected event, got: %s", hint)
+	}
+}
+
+// TestFileEventHintsProvider_WorkspaceScope verifies the workspace
+// filter: a 👍 in workspace A must NOT bias hints in workspace B,
+// and the global view (workspaceID="") sees both.
+func TestFileEventHintsProvider_WorkspaceScope(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	now := time.Now().Format(time.RFC3339)
+
+	events := []Event{
+		// Workspace A: github-prs at high composite for a PR question.
+		{
+			Type:        EventTypeAttempt,
+			Timestamp:   now,
+			QueryID:     "q-A",
+			WorkspaceID: "ws-A",
+			Question:    "what prs are open",
+			Score:       Score{Composite: 0.9},
+			Bundle:      bundleFromSources("github-prs"),
+		},
+		// Workspace B: git-log at high composite for the SAME-shaped
+		// PR question. (Hypothetical: a different repo where the
+		// user uses git tags instead of GitHub PRs.)
+		{
+			Type:        EventTypeAttempt,
+			Timestamp:   now,
+			QueryID:     "q-B",
+			WorkspaceID: "ws-B",
+			Question:    "what prs are open",
+			Score:       Score{Composite: 0.9},
+			Bundle:      bundleFromSources("git-log"),
+		},
+	}
+	writeEvents(t, path, events)
+
+	provider := NewFileEventHintsProvider(path)
+
+	// Scoped to ws-A: should only see github-prs.
+	hintA := provider.HintsForWorkspace(context.Background(), "is this pr updated", "ws-A")
+	if !strings.Contains(hintA, "github-prs") {
+		t.Errorf("ws-A hint should mention github-prs, got: %s", hintA)
+	}
+	if strings.Contains(hintA, "git-log") {
+		t.Errorf("ws-A hint should NOT leak git-log from ws-B, got: %s", hintA)
+	}
+
+	// Scoped to ws-B: should only see git-log.
+	hintB := provider.HintsForWorkspace(context.Background(), "is this pr updated", "ws-B")
+	if !strings.Contains(hintB, "git-log") {
+		t.Errorf("ws-B hint should mention git-log, got: %s", hintB)
+	}
+	if strings.Contains(hintB, "github-prs") {
+		t.Errorf("ws-B hint should NOT leak github-prs from ws-A, got: %s", hintB)
+	}
+
+	// Global view: should see both groups.
+	hintGlobal := provider.HintsForWorkspace(context.Background(), "is this pr updated", "")
+	if !strings.Contains(hintGlobal, "github-prs") || !strings.Contains(hintGlobal, "git-log") {
+		t.Errorf("global hint should mention both picks, got: %s", hintGlobal)
 	}
 }
 

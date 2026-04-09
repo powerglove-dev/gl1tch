@@ -45,6 +45,25 @@ func ResearchResultToMessages(result research.Result) []ChatMessage {
 	now := time.Now()
 	out := make([]ChatMessage, 0, 3)
 
+	// Stamp every assistant message produced by the research call
+	// with the loop's QueryID so the side pane's 👍/👎 affordance
+	// can join feedback events to the original research_attempt
+	// event by query_id at hint-build time. The workspace_id (when
+	// supplied via Result.Query.Context) rides the same metadata
+	// channel so the brain hints reader can scope by workspace.
+	meta := map[string]string{}
+	if result.Query.ID != "" {
+		meta["research_query_id"] = result.Query.ID
+	}
+	if result.Query.Context != nil {
+		if ws := result.Query.Context["workspace_id"]; ws != "" {
+			meta["workspace_id"] = ws
+		}
+	}
+	if len(meta) == 0 {
+		meta = nil
+	}
+
 	draft := strings.TrimSpace(result.Draft)
 	if draft == "" {
 		draft = "I don't have enough evidence to answer that."
@@ -54,6 +73,7 @@ func ResearchResultToMessages(result research.Result) []ChatMessage {
 		Type:      MessageTypeText,
 		Payload:   TextPayload{Body: draft},
 		CreatedAt: now,
+		Metadata:  cloneMeta(meta),
 	})
 
 	if result.Bundle.Len() > 0 {
@@ -73,6 +93,7 @@ func ResearchResultToMessages(result research.Result) []ChatMessage {
 			Type:      MessageTypeEvidenceBundle,
 			Payload:   bundle,
 			CreatedAt: now,
+			Metadata:  cloneMeta(meta),
 		})
 	}
 
@@ -88,9 +109,24 @@ func ResearchResultToMessages(result research.Result) []ChatMessage {
 				Value:  result.Score.Composite,
 			},
 			CreatedAt: now,
+			Metadata:  cloneMeta(meta),
 		})
 	}
 
+	return out
+}
+
+// cloneMeta returns a fresh copy of m so each ChatMessage's Metadata
+// is independent. Callers append messages individually and a future
+// edit to one message's metadata must not bleed into a sibling.
+func cloneMeta(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
 	return out
 }
 

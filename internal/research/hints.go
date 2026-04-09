@@ -45,6 +45,16 @@ type HintsProvider interface {
 	Hints(ctx context.Context, question string) string
 }
 
+// HintsProviderForWorkspace is the optional extension a provider can
+// implement when it wants to scope hints to a specific workspace.
+// FileEventHintsProvider implements it; the loop calls it (instead
+// of plain Hints) when the ResearchQuery carries a workspace_id in
+// its Context. Workspace-scoped hints prevent a 👍 in the ensemble
+// workspace from polluting picks in the robots workspace.
+type HintsProviderForWorkspace interface {
+	HintsForWorkspace(ctx context.Context, question, workspaceID string) string
+}
+
 // nopHintsProvider is the default the loop uses when no caller has
 // wired one up. Returns empty so the planner template hides its
 // {{.Hints}} block. Defined unexported so callers who want "no
@@ -99,9 +109,17 @@ func NewFileEventHintsProvider(path string) *FileEventHintsProvider {
 }
 
 // Hints scans the event log and returns a hint string for the given
-// question. Errors (file missing, parse failure, etc.) collapse to
-// empty so the loop never fails over a missing brain — the planner
-// just falls back to its default behavior.
+// question. Equivalent to HintsForWorkspace("") — no workspace
+// filter applied, every event is in scope.
+func (f *FileEventHintsProvider) Hints(ctx context.Context, question string) string {
+	return f.HintsForWorkspace(ctx, question, "")
+}
+
+// HintsForWorkspace scans the event log and returns a hint string
+// scoped to one workspace. Events from other workspaces (or events
+// with no workspace stamp at all, when workspaceID is non-empty) are
+// filtered out so a 👍 in workspace A never biases hints in
+// workspace B. Pass "" to get the global view.
 //
 // Two passes over the event log:
 //
@@ -112,9 +130,10 @@ func NewFileEventHintsProvider(path string) *FileEventHintsProvider {
 //   composite proxy.
 //
 //   Pass 2: collect attempt-event samples for similar questions,
-//   apply the feedback index, group by pick combination, rank by
-//   weighted average composite, render the top 2 groups.
-func (f *FileEventHintsProvider) Hints(_ context.Context, question string) string {
+//   apply the workspace filter, apply the feedback index, group by
+//   pick combination, rank by weighted average composite, render
+//   the top 2 groups.
+func (f *FileEventHintsProvider) HintsForWorkspace(_ context.Context, question, workspaceID string) string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -185,6 +204,15 @@ func (f *FileEventHintsProvider) Hints(_ context.Context, question string) strin
 			continue
 		}
 		if ev.Bundle == nil || ev.Bundle.Len() == 0 {
+			continue
+		}
+		// Workspace filter: when a workspace_id is supplied, drop
+		// events from other workspaces AND events with no
+		// workspace stamp (those came from a CLI-only call where
+		// the user wasn't scoped to a workspace, so they're not
+		// representative). When workspaceID is "", every event
+		// is in scope.
+		if workspaceID != "" && ev.WorkspaceID != workspaceID {
 			continue
 		}
 		if !cutoff.IsZero() {
@@ -323,6 +351,12 @@ func (f *FileEventHintsProvider) Hints(_ context.Context, question string) strin
 // then drops a tiny stopword list and any 1-character token. The
 // stopword list is intentionally small — the goal is "let 'pr' and
 // 'commits' carry signal", not to build a search engine.
+//
+// Cheap stemming pass: tokens ≥3 chars ending in 's' lose the
+// trailing s, so "prs"/"pr", "commits"/"commit", "issues"/"issue"
+// all collapse to one form. This is the minimum stemming needed for
+// the domain (short technical plurals); a real stemmer would be
+// overkill and risk false positives on non-plural -s endings.
 func tokenise(s string) []string {
 	var tokens []string
 	var cur strings.Builder
@@ -334,6 +368,12 @@ func tokenise(s string) []string {
 		cur.Reset()
 		if len(tok) <= 1 {
 			return
+		}
+		// Trailing-s plural collapse. Skip when stripping would
+		// leave a 1-char token (e.g. "is" already filtered as
+		// stopword, but defensive).
+		if len(tok) >= 3 && tok[len(tok)-1] == 's' {
+			tok = tok[:len(tok)-1]
 		}
 		if hintStopwords[tok] {
 			return

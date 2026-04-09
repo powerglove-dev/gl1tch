@@ -95,6 +95,18 @@ type ChatMessage struct {
 	// user. The brain audit consumes it (chat-first-ui task 7.3); the
 	// renderer ignores it.
 	SyntheticOrigin string `json:"synthetic_origin,omitempty"`
+	// Metadata is the structured side-channel for cross-system
+	// references the renderer doesn't display directly but the
+	// brain or the feedback signal needs to find. Canonical keys:
+	//   "research_query_id" — the loop's QueryID for this answer,
+	//                          used to join 👍/👎 feedback events
+	//                          to research_attempt events.
+	//   "workspace_id"      — the workspace the research call ran
+	//                          against, so the brain hints reader
+	//                          can scope by workspace.
+	// Empty by default; renderers should treat unknown keys as
+	// opaque.
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 // TextPayload is the payload for MessageTypeText.

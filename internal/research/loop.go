@@ -2,6 +2,7 @@ package research
 
 import (
 	"context"
+	cryptoRand "crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,6 +10,8 @@ import (
 	"sync"
 	"time"
 )
+
+var cryptoRandReader = cryptoRand.Reader
 
 // Loop is the research-loop driver: plan → gather → draft → critique → score.
 // Refinement and escalation are still no-ops in this version (they belong to
@@ -138,6 +141,17 @@ func (l *Loop) Run(ctx context.Context, q ResearchQuery, budget Budget) (Result,
 	}
 	if budget.MaxIterations <= 0 {
 		budget = DefaultBudget()
+	}
+
+	// Mint a stable QueryID if the caller didn't supply one. The
+	// brain hints reader joins research_attempt events to
+	// research_feedback events by query_id, so without a stable id
+	// every research call would be its own row and feedback could
+	// never accumulate. Format is q-<unix-nanos>-<random-hex> —
+	// stable, sortable, and short enough to render in a chat
+	// message footer if needed.
+	if q.ID == "" {
+		q.ID = newQueryID()
 	}
 
 	deadline := time.Now().Add(budget.MaxWallclock)
@@ -459,9 +473,23 @@ func ungroundedClaims(c Critique) []string {
 func (l *Loop) plan(ctx context.Context, q ResearchQuery) ([]string, error) {
 	hint := ""
 	if l.hints != nil {
-		hint = l.hints.Hints(ctx, q.Question)
+		// Prefer the workspace-scoped variant when both the
+		// provider supports it and the query carries a workspace
+		// id. Otherwise fall through to the global hint.
+		wsID := ""
+		if q.Context != nil {
+			wsID = q.Context["workspace_id"]
+		}
+		if wsID != "" {
+			if scoped, ok := l.hints.(HintsProviderForWorkspace); ok {
+				hint = scoped.HintsForWorkspace(ctx, q.Question, wsID)
+			}
+		}
+		if hint == "" {
+			hint = l.hints.Hints(ctx, q.Question)
+		}
 		if hint != "" {
-			l.logger.Info("research plan: brain hint", "question", q.Question, "hint", hint)
+			l.logger.Info("research plan: brain hint", "question", q.Question, "workspace", wsID, "hint", hint)
 		}
 	}
 	prompt := PlanPromptWithHints(q.Question, l.registry.List(), hint)
@@ -551,3 +579,21 @@ func (l *Loop) draft(ctx context.Context, q ResearchQuery, bundle EvidenceBundle
 type discardWriter struct{}
 
 func (discardWriter) Write(p []byte) (int, error) { return len(p), nil }
+
+// newQueryID mints a per-call query identifier. The format is
+// "q-<unix-nanos>-<random-hex>" so IDs are time-sortable for the
+// brain stats engine and unique enough that two parallel calls in
+// the same nanosecond don't collide.
+func newQueryID() string {
+	var buf [6]byte
+	_, _ = cryptoRandRead(buf[:])
+	return fmt.Sprintf("q-%d-%x", time.Now().UnixNano(), buf[:])
+}
+
+// cryptoRandRead is a tiny crypto/rand wrapper kept here so the
+// rest of the loop file doesn't have to import crypto/rand. Pulled
+// out so a test can stub it via a build tag if we ever need
+// deterministic IDs in tests.
+var cryptoRandRead = func(b []byte) (int, error) {
+	return cryptoRandReader.Read(b)
+}

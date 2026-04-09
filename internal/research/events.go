@@ -65,10 +65,16 @@ type Event struct {
 	Timestamp string         `json:"timestamp"`
 	QueryID   string         `json:"query_id,omitempty"`
 	Question  string         `json:"question,omitempty"`
-	Iteration int            `json:"iteration,omitempty"`
-	Reason    Reason         `json:"reason,omitempty"`
-	Score     Score          `json:"score,omitempty"`
-	Bundle    *EvidenceBundle `json:"bundle,omitempty"`
+	// WorkspaceID identifies which workspace the research call ran
+	// against. Sourced from ResearchQuery.Context["workspace_id"].
+	// The brain hints reader filters by it so a 👍 for "what PRs"
+	// in the ensemble workspace doesn't pollute hints in the robots
+	// workspace — every workspace gets its own brain.
+	WorkspaceID string         `json:"workspace_id,omitempty"`
+	Iteration   int            `json:"iteration,omitempty"`
+	Reason      Reason         `json:"reason,omitempty"`
+	Score       Score          `json:"score,omitempty"`
+	Bundle      *EvidenceBundle `json:"bundle,omitempty"`
 	// Escalation-only fields below.
 	PaidModel  string `json:"paid_model,omitempty"`
 	PaidTokens int    `json:"paid_tokens,omitempty"`
@@ -290,7 +296,9 @@ func decideRotation(line []byte, cutoff time.Time) (keep bool, rewritten []byte,
 // EmitFeedback writes one EventTypeFeedback record to the supplied
 // sink. queryID identifies which research call the feedback applies
 // to (so the brain can join feedback events back to the original
-// attempt by query_id at hint-build time). sources is the list of
+// attempt by query_id at hint-build time). workspaceID lets the
+// hints reader filter by workspace so a thumbs-up in one workspace
+// doesn't pollute hints in another. sources is the list of
 // researcher names whose evidence the user was reacting to —
 // supplied so a thumbs-up that was actually meant for the github-prs
 // part of a multi-pick result doesn't accidentally bias git-log too.
@@ -298,7 +306,7 @@ func decideRotation(line []byte, cutoff time.Time) (keep bool, rewritten []byte,
 // Best-effort: a sink failure does NOT propagate to the caller. The
 // feedback path is "fire and forget" — the user clicks 👍 and moves
 // on; we never want a sink hiccup to block the UI.
-func EmitFeedback(sink EventSink, queryID, question string, accepted bool, sources []string) {
+func EmitFeedback(sink EventSink, queryID, workspaceID, question string, accepted bool, sources []string) {
 	if sink == nil {
 		return
 	}
@@ -306,6 +314,7 @@ func EmitFeedback(sink EventSink, queryID, question string, accepted bool, sourc
 		Type:            EventTypeFeedback,
 		Timestamp:       time.Now().Format(time.RFC3339),
 		QueryID:         queryID,
+		WorkspaceID:     workspaceID,
 		Question:        question,
 		Accepted:        accepted,
 		FeedbackSources: append([]string(nil), sources...),
@@ -314,29 +323,39 @@ func EmitFeedback(sink EventSink, queryID, question string, accepted bool, sourc
 
 // emitAttempt emits the per-iteration EventTypeAttempt + EventTypeScore
 // pair. The attempt event carries the bundle (subject to TTL); the score
-// event is bundle-free for cheap brain queries.
+// event is bundle-free for cheap brain queries. WorkspaceID is read
+// from q.Context["workspace_id"] so callers don't have to plumb a
+// new parameter through every layer — the loop already passes the
+// query context for the cwd injection, and workspace id rides the
+// same channel.
 func emitAttempt(sink EventSink, q ResearchQuery, iter int, score Score, bundle EvidenceBundle, reason Reason) {
 	if sink == nil {
 		return
 	}
 	now := time.Now().Format(time.RFC3339)
 	bundleCopy := bundle
+	wsID := ""
+	if q.Context != nil {
+		wsID = q.Context["workspace_id"]
+	}
 	_ = sink.Emit(Event{
-		Type:      EventTypeAttempt,
-		Timestamp: now,
-		QueryID:   q.ID,
-		Question:  q.Question,
-		Iteration: iter,
-		Reason:    reason,
-		Score:     score,
-		Bundle:    &bundleCopy,
+		Type:        EventTypeAttempt,
+		Timestamp:   now,
+		QueryID:     q.ID,
+		Question:    q.Question,
+		WorkspaceID: wsID,
+		Iteration:   iter,
+		Reason:      reason,
+		Score:       score,
+		Bundle:      &bundleCopy,
 	})
 	_ = sink.Emit(Event{
-		Type:      EventTypeScore,
-		Timestamp: now,
-		QueryID:   q.ID,
-		Iteration: iter,
-		Reason:    reason,
-		Score:     score,
+		Type:        EventTypeScore,
+		Timestamp:   now,
+		QueryID:     q.ID,
+		WorkspaceID: wsID,
+		Iteration:   iter,
+		Reason:      reason,
+		Score:       score,
 	})
 }

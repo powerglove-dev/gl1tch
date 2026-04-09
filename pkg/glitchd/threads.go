@@ -44,6 +44,7 @@ type ThreadHost struct {
 	registry     *chatui.SlashRegistry
 	loop         *research.Loop
 	feedbackSink research.EventSink
+	workspaceID  string
 	cwd          string
 }
 
@@ -113,13 +114,14 @@ func (h *ThreadHosts) EnsureHost(workspaceID string) *ThreadHost {
 			registry:     registry,
 			loop:         loop,
 			feedbackSink: sink,
+			workspaceID:  workspaceID,
 			cwd:          cwd,
 		}
 		h.hosts[workspaceID] = host
 		return host
 	}
 
-	host := &ThreadHost{store: store, registry: registry, cwd: cwd}
+	host := &ThreadHost{store: store, registry: registry, workspaceID: workspaceID, cwd: cwd}
 	h.hosts[workspaceID] = host
 	return host
 }
@@ -231,16 +233,31 @@ func (h *ThreadHosts) DispatchSlash(workspaceID, line, scopeRaw string) string {
 }
 
 // queryContext returns the workspace-scoped context map every research
-// call gets, so the loop's shell-backed researchers (git-log,
-// git-status, github-prs, github-issues) execute in the right repo. The
-// canonical key is "cwd" — workflows read it as $GLITCH_CWD via the
-// executor's GLITCH_<KEY> env-var promotion. Other context fields can
-// be added here in the future without touching every researcher.
+// call gets. Carries:
+//
+//   "cwd"          — primary directory for shell-backed researchers
+//                    (git-log, git-status, github-prs, github-issues
+//                    execute inside this directory via GLITCH_CWD)
+//   "workspace_id" — id of the workspace the call belongs to. The
+//                    brain hints reader filters events by it so a
+//                    👍 in one workspace doesn't bias hints in
+//                    another, and emitted events are stamped so the
+//                    history stays workspace-attributable.
+//
+// Both keys may be empty when the workspace has no directories yet
+// or when the host is unscoped (rare; tests).
 func (h *ThreadHost) queryContext() map[string]string {
-	if h.cwd == "" {
+	out := map[string]string{}
+	if h.cwd != "" {
+		out["cwd"] = h.cwd
+	}
+	if h.workspaceID != "" {
+		out["workspace_id"] = h.workspaceID
+	}
+	if len(out) == 0 {
 		return nil
 	}
-	return map[string]string{"cwd": h.cwd}
+	return out
 }
 
 // runResearchAsParentThread runs the research loop and emits one parent
@@ -494,7 +511,11 @@ func (h *ThreadHosts) RecordResearchFeedback(workspaceID, threadID, queryID, que
 		// without a research loop because no workflows exist).
 		return jsonEnvelopeError("no event sink available — research loop not configured")
 	}
-	research.EmitFeedback(host.feedbackSink, queryID, question, accepted, nil)
+	// Stamp the feedback event with workspaceID so the brain hints
+	// reader's workspace filter matches it. queryID is the loop's
+	// research call id (the desktop frontend reads it from the
+	// assistant message metadata stamped by ResearchResultToMessages).
+	research.EmitFeedback(host.feedbackSink, queryID, workspaceID, question, accepted, nil)
 	verdict := "👎"
 	if accepted {
 		verdict = "👍"
