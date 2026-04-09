@@ -628,6 +628,116 @@ func (a *App) SetWorkspacePrimaryDirectory(workspaceID, dir string) {
 
 // ── Chat ────────────────────────────────────────────────────────────────────
 
+// Execute is the unified entry point for every user message. The
+// frontend sends one JSON blob and Execute routes it server-side:
+//
+//   - steps present + step_through  → StepThroughStartFromChain
+//   - steps present                 → RunChain
+//   - freeform text (no steps)      → research loop → thread
+//   - freeform text + provider pick → provider with research context
+//
+// Provider/model is orthogonal — it applies to the LLM step of
+// whatever runs. Returns immediately; results stream via chat:chunk,
+// chat:event, chat:done, chat:error, and step-through:event.
+//
+// For step-through, returns a JSON {session_id} synchronously (same
+// as StepThroughStartFromChain). For everything else, returns
+// {ok: true} immediately and results arrive via events.
+func (a *App) Execute(optsJSON string) string {
+	var opts glitchd.ExecuteOpts
+	if err := json.Unmarshal([]byte(optsJSON), &opts); err != nil {
+		a.emitError(opts.WorkspaceID, "bad execute opts: "+err.Error())
+		return errorJSONStr("bad opts: " + err.Error())
+	}
+	if opts.WorkspaceID == "" {
+		return errorJSONStr("missing workspace_id")
+	}
+
+	// ── Steps present → chain or step-through ──────────────────────
+	if opts.HasSteps() {
+		provider, model := a.resolveProvider(opts)
+		if opts.StepThrough {
+			return a.StepThroughStartFromChain(
+				string(opts.Steps), opts.Input, opts.WorkspaceID,
+				provider, model,
+			)
+		}
+		a.RunChain(string(opts.Steps), opts.Input, opts.WorkspaceID, provider, model)
+		return okJSONStr("chain started")
+	}
+
+	// ── No steps: freeform text ────────────────────────────────────
+	input := opts.Input
+	if input == "" {
+		return errorJSONStr("missing input")
+	}
+
+	// Slash commands stay flat (no thread, no research).
+	if input[0] == '/' {
+		scope := "main"
+		if opts.ThreadID != "" {
+			scope = "thread:" + opts.ThreadID
+		}
+		result := a.ensureThreads().DispatchSlash(opts.WorkspaceID, input, scope)
+		return result
+	}
+
+	// Freeform text with an explicit provider → provider call.
+	// This is the "I picked Claude/GPT and just want to talk" path.
+	if opts.Provider != "" {
+		a.AskProvider(opts.Provider, opts.Model, input, opts.WorkspaceID, opts.AgentPath)
+		return okJSONStr("provider started")
+	}
+
+	// Freeform text, no provider → research loop → thread.
+	// Thread follow-ups carry the existing thread_id so the research
+	// result appends to the same thread instead of spawning a new one.
+	scope := "main"
+	if opts.ThreadID != "" {
+		scope = "thread:" + opts.ThreadID
+	}
+	// DispatchSlash is synchronous (blocks until research completes),
+	// so run it in a goroutine to avoid freezing the Wails call.
+	go func() {
+		result := a.ensureThreads().DispatchSlash(opts.WorkspaceID, input, scope)
+		// Parse the result to check for thread_id and emit an event
+		// so the frontend can auto-open the thread side-pane.
+		var envelope map[string]any
+		if err := json.Unmarshal([]byte(result), &envelope); err == nil {
+			if threadID, ok := envelope["thread_id"].(string); ok && threadID != "" {
+				runtime.EventsEmit(a.ctx, "chat:thread_ready", map[string]any{
+					"workspace_id": opts.WorkspaceID,
+					"thread_id":    threadID,
+					"parent_id":    envelope["parent_id"],
+				})
+			}
+			if errMsg, ok := envelope["error"].(string); ok && errMsg != "" {
+				a.emitError(opts.WorkspaceID, errMsg)
+				return
+			}
+		}
+		a.emitDone(opts.WorkspaceID)
+	}()
+	return okJSONStr("research started")
+}
+
+// resolveProvider returns the provider/model to use for an Execute call.
+// Priority: explicit opts → observer default from workspace → ollama.
+func (a *App) resolveProvider(opts glitchd.ExecuteOpts) (string, string) {
+	if opts.Provider != "" {
+		return opts.Provider, opts.Model
+	}
+	// Fall back to ollama as the default provider. The frontend
+	// resolves its own picker → observer-default → ollama chain
+	// before calling Execute, so this is the belt-and-braces case.
+	return "ollama", ""
+}
+
+func okJSONStr(detail string) string {
+	b, _ := json.Marshal(map[string]any{"ok": true, "detail": detail})
+	return string(b)
+}
+
 // AskScoped queries the observer scoped to the workspace's directories.
 func (a *App) AskScoped(prompt, workspaceID string) {
 	go func() {

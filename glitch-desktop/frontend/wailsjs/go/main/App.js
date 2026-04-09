@@ -82,6 +82,10 @@ export function Doctor(arg1) {
   return window['go']['main']['App']['Doctor'](arg1);
 }
 
+export function Execute(arg1) {
+  return window['go']['main']['App']['Execute'](arg1);
+}
+
 export function GetCollectorsConfigJSON(arg1) {
   return window['go']['main']['App']['GetCollectorsConfigJSON'](arg1);
 }

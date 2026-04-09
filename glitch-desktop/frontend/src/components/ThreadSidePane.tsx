@@ -16,6 +16,7 @@
 import type { ReactElement } from "react";
 import { useEffect, useState, useCallback } from "react";
 import {
+  Execute,
   DispatchSlash,
   GetThreadMessages,
   SpawnDrillThreadFromEvidence,
@@ -154,7 +155,18 @@ export function ThreadSidePane({
       setPending({ body: line, startedAt: Date.now() });
       setBusy(true);
       try {
-        await DispatchSlash(workspaceID, line, `thread:${threadID}`);
+        // Slash commands stay on DispatchSlash (flat, no research).
+        // Freeform text routes through Execute so the research loop
+        // runs with the user's provider choice and thread context.
+        if (line.startsWith("/")) {
+          await DispatchSlash(workspaceID, line, `thread:${threadID}`);
+        } else {
+          await Execute(JSON.stringify({
+            workspace_id: workspaceID,
+            input: line,
+            thread_id: threadID,
+          }));
+        }
       } catch (err) {
         console.error("ThreadSidePane: dispatch failed", err);
       } finally {

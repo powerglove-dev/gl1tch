@@ -23,8 +23,7 @@ import { useWailsEvent } from "./lib/wails";
 import type { Workspace } from "./lib/types";
 import {
   Ready,
-  AskScoped,
-  AskProvider,
+  Execute,
   CreateWorkspace,
   ListWorkspaces,
   DeleteWorkspace,
@@ -41,8 +40,6 @@ import {
   RunWorkflow,
   CreateDraft,
   CreateDraftFromTarget,
-  RunChain,
-  StepThroughStartFromChain,
   StepThroughAccept,
   StepThroughAbort,
   StepThroughEditOutput,
@@ -226,6 +223,17 @@ export function App() {
   useWailsEvent("chat:error", (data: unknown) => {
     const d = data as { workspace_id?: string; message?: string };
     if (d?.workspace_id) streamError(d.workspace_id, d.message ?? "error");
+  });
+
+  // Auto-open the thread side-pane when a research call completes
+  // and produces a thread. Fired by Execute's freeform→research path.
+  useWailsEvent("chat:thread_ready", (data: unknown) => {
+    const d = data as { workspace_id?: string; thread_id?: string; parent_id?: string };
+    if (!d?.workspace_id || !d?.thread_id) return;
+    // Only open if we're still on the workspace that initiated the research.
+    if (d.workspace_id === state.activeWorkspaceId) {
+      setActiveThread({ id: d.thread_id, parentID: d.parent_id ?? "" });
+    }
   });
 
   // Structured block events from the chain runner's protocol splitter.
@@ -837,32 +845,26 @@ export function App() {
 
   // ── Send ──────────────────────────────────────────────────────────────
 
-  // runChainNow is the canonical execution path for a chain + optional text.
-  // Pinned to the workspace that was active at submit time so the run keeps
-  // delivering events into the right slice even if the user switches away.
+  // resolveProvider returns [provider, model] using the priority chain:
+  // explicit picker → observer default → ollama fallback.
+  const resolveProvider = useCallback((): [string, string] => {
+    if (selectedProvider) return [selectedProvider, selectedModel];
+    if (observerDefaultProvider) return [observerDefaultProvider, observerDefaultModel];
+    const ollama = providers.find((p) => p.id === "ollama");
+    const def = ollama?.models.find((m) => m.default) ?? ollama?.models[0];
+    return ["ollama", def?.id ?? ""];
+  }, [selectedProvider, selectedModel, observerDefaultProvider, observerDefaultModel, providers]);
+
+  // runChainNow is the single execution path for everything the user
+  // submits from the chat bar. One call to Execute; routing is server-side.
   const runChainNow = useCallback((chainToRun: ChainStep[], text: string) => {
     if (chainToRun.length === 0 && !text.trim()) return;
     const wsId = state.activeWorkspaceId ?? "";
     if (!wsId) return;
 
-    // Resolve which provider will actually run prompt steps that don't set
-    // their own override. Priority: picker → observer default → ollama.
-    let resolvedDefaultProvider: string;
-    let resolvedDefaultModel: string;
+    const [provider, model] = resolveProvider();
 
-    if (selectedProvider) {
-      resolvedDefaultProvider = selectedProvider;
-      resolvedDefaultModel = selectedModel;
-    } else if (observerDefaultProvider) {
-      resolvedDefaultProvider = observerDefaultProvider;
-      resolvedDefaultModel = observerDefaultModel;
-    } else {
-      resolvedDefaultProvider = "ollama";
-      const ollama = providers.find((p) => p.id === "ollama");
-      const def = ollama?.models.find((m) => m.default) ?? ollama?.models[0];
-      resolvedDefaultModel = def?.id ?? "";
-    }
-
+    // UI: show the user's message / chain immediately.
     if (chainToRun.length > 0) {
       addUserChain(
         wsId,
@@ -871,11 +873,11 @@ export function App() {
           kind: s.type,
           provider:
             s.type === "prompt"
-              ? (s.executorOverride || resolvedDefaultProvider)
+              ? (s.executorOverride || provider)
               : undefined,
           model:
             s.type === "prompt"
-              ? (s.modelOverride || resolvedDefaultModel || undefined)
+              ? (s.modelOverride || model || undefined)
               : undefined,
         })),
         text.trim() || undefined,
@@ -885,71 +887,53 @@ export function App() {
     }
     startAssistant(wsId);
 
+    // /doctor stays its own path (health check, no LLM).
     if (text.trim() === "/doctor" && chainToRun.length === 0) {
       Doctor(wsId);
       return;
     }
 
-    if (chainToRun.length > 0) {
-      // Step-through routing rule (see project_step_through_mode):
-      // step-through isn't a mode, it's a property of the run. A chain
-      // of 2+ steps (or with a trailing user text that makes it ≥2) is
-      // consequential enough to pause between steps. A single step —
-      // whether chain-built or user-typed — runs straight through via
-      // the normal chain path so plain chat never pauses.
-      const effectiveSteps =
-        chainToRun.length + (text.trim() !== "" ? 1 : 0);
-      if (effectiveSteps >= 2) {
-        // Snapshot the chain + resolved provider/model so rewind-by-replay
-        // and save-as can reconstitute the session even after the chat
-        // bar's local chain state has been cleared.
-        const capturedChain = chainToRun;
-        const capturedText = text;
-        const capturedProvider = resolvedDefaultProvider;
-        const capturedModel = resolvedDefaultModel;
-        StepThroughStartFromChain(
-          JSON.stringify(capturedChain),
-          capturedText,
-          wsId,
-          capturedProvider,
-          capturedModel,
-        ).then((result) => {
-          try {
-            const parsed = JSON.parse(result);
-            if (parsed?.error) {
-              streamError(wsId, parsed.error);
-            } else if (parsed?.session_id) {
-              setStepSessions((prev) => ({
-                ...prev,
-                [wsId]: {
-                  sessionId: parsed.session_id,
-                  chain: capturedChain,
-                  userText: capturedText,
-                  provider: capturedProvider,
-                  model: capturedModel,
-                },
-              }));
-            }
-          } catch {
-            streamError(wsId, "step-through: bad response from backend");
-          }
-        });
-      } else {
-        RunChain(
-          JSON.stringify(chainToRun),
-          text,
-          wsId,
-          resolvedDefaultProvider,
-          resolvedDefaultModel,
-        );
+    // Step-through: 2+ effective steps pause between each.
+    const effectiveSteps = chainToRun.length + (text.trim() ? 1 : 0);
+    const stepThrough = chainToRun.length > 0 && effectiveSteps >= 2;
+
+    // Snapshot for step-through session tracking.
+    const capturedChain = chainToRun;
+    const capturedText = text;
+
+    Execute(JSON.stringify({
+      workspace_id: wsId,
+      input: text,
+      steps: chainToRun.length > 0 ? chainToRun : undefined,
+      provider,
+      model,
+      step_through: stepThrough,
+    })).then((result) => {
+      if (!stepThrough) return;
+      // Step-through returns {session_id} synchronously.
+      try {
+        const parsed = JSON.parse(result);
+        if (parsed?.error) {
+          streamError(wsId, parsed.error);
+        } else if (parsed?.session_id) {
+          setStepSessions((prev) => ({
+            ...prev,
+            [wsId]: {
+              sessionId: parsed.session_id,
+              chain: capturedChain,
+              userText: capturedText,
+              provider,
+              model,
+            },
+          }));
+        }
+      } catch {
+        streamError(wsId, "step-through: bad response from backend");
       }
-      setChain([]);
-    } else if (selectedProvider) {
-      AskProvider(selectedProvider, selectedModel, text, wsId, "");
-    } else {
-      AskScoped(text, wsId);
-    }
-  }, [addUserMessage, addUserChain, startAssistant, streamError, selectedProvider, selectedModel, observerDefaultProvider, observerDefaultModel, providers, state.activeWorkspaceId]);
+    });
+
+    if (chainToRun.length > 0) setChain([]);
+  }, [addUserMessage, addUserChain, startAssistant, streamError, resolveProvider, state.activeWorkspaceId]);
 
   // Accept / Abort handlers for the paused-step banner. These fire the
   // backend decision and optimistically clear the paused state — the
@@ -1054,13 +1038,14 @@ export function App() {
         return next;
       });
       startAssistant(wsId);
-      StepThroughStartFromChain(
-        JSON.stringify(nextChain),
-        entry.userText,
-        wsId,
-        entry.provider,
-        entry.model,
-      ).then((result) => {
+      Execute(JSON.stringify({
+        workspace_id: wsId,
+        input: entry.userText,
+        steps: nextChain,
+        provider: entry.provider,
+        model: entry.model,
+        step_through: true,
+      })).then((result) => {
         try {
           const parsed = JSON.parse(result);
           if (parsed?.error) {

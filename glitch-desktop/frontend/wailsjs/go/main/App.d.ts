@@ -41,6 +41,8 @@ export function DispatchSlash(arg1:string,arg2:string,arg3:string):Promise<strin
 
 export function Doctor(arg1:string):Promise<void>;
 
+export function Execute(arg1:string):Promise<string>;
+
 export function GetCollectorsConfigJSON(arg1:string):Promise<string>;
 
 export function GetDraft(arg1:number):Promise<string>;
