@@ -358,36 +358,31 @@ func SelfConsistency(
 }
 
 // Composite folds the per-signal scores in s into a single scalar in [0,1]
-// using equal weights. Missing signals (nil pointers) contribute 0 to the
-// numerator and 0 to the denominator — they are skipped, not penalised, so
-// dropping a signal does not pull the composite down.
+// using the weights resolved from internal/research/weights.yaml
+// (embedded default + ~/.config/glitch/weights.yaml override).
+// Missing signals (nil pointers) contribute 0 to the numerator and 0 to
+// the denominator — they are skipped, not penalised, so dropping a
+// signal does not pull the composite down.
 //
-// This is the v1 weighting per the proposal: the floor (any evidence at all)
-// is what's broken right now, not the ceiling (which signal predicts accept).
-// Learned weights live downstream of the brain event log this code populates.
+// Weights are re-read on every call so a tweak to the disk override
+// takes effect on the next research call without a recompile. Errors
+// loading weights collapse to the embedded equal-weight default; the
+// loop never fails because of a malformed user file.
 func Composite(s Score) float64 {
-	var sum float64
-	var n int
-	if s.SelfConsistency != nil {
-		sum += *s.SelfConsistency
-		n++
+	w, err := LoadWeights()
+	if err != nil {
+		// Defensive fallback: equal weights on the four signals
+		// matches the embedded default exactly, so this branch
+		// only fires when the embedded YAML itself is broken
+		// (caught at test time).
+		w = Weights{
+			CrossCapabilityAgreement: 0.25,
+			EvidenceCoverage:         0.25,
+			JudgeScore:               0.25,
+			SelfConsistency:          0.25,
+		}
 	}
-	if s.EvidenceCoverage != nil {
-		sum += *s.EvidenceCoverage
-		n++
-	}
-	if s.CrossCapabilityAgree != nil {
-		sum += *s.CrossCapabilityAgree
-		n++
-	}
-	if s.JudgeScore != nil {
-		sum += *s.JudgeScore
-		n++
-	}
-	if n == 0 {
-		return 0
-	}
-	return sum / float64(n)
+	return ApplyWeights(s, w)
 }
 
 // ScoreOptions controls which signals the loop computes during the score

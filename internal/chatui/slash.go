@@ -136,9 +136,31 @@ type SlashRegistry struct {
 	handlers map[string]SlashHandler
 }
 
-// NewSlashRegistry constructs an empty registry.
+// NewSlashRegistry constructs an empty registry. User aliases from
+// ~/.config/glitch/slash.yaml are NOT auto-loaded here because the
+// caller might want to register built-ins first (so the built-ins
+// win on name collisions). Use NewSlashRegistryWithAliases for the
+// production path that auto-loads aliases after the caller has
+// registered every built-in handler.
 func NewSlashRegistry() *SlashRegistry {
 	return &SlashRegistry{handlers: make(map[string]SlashHandler)}
+}
+
+// LoadAliases is a convenience that calls RegisterAliases on this
+// registry. Built-in handlers always win on name collisions
+// (RegisterAliases skips alias names that are already registered),
+// so the production wiring is:
+//
+//   reg := chatui.NewSlashRegistry()
+//   reg.Register(chatui.HelpHandler(reg))
+//   reg.Register(chatui.ResearchSlashHandler(loop))
+//   _ = reg.LoadAliases()
+//
+// Errors are returned but never fatal — a missing or malformed
+// slash.yaml just produces zero aliases and the built-ins still
+// work.
+func (r *SlashRegistry) LoadAliases() error {
+	return RegisterAliases(r)
 }
 
 // Register adds a handler. Returns ErrDuplicateCommand if a handler with

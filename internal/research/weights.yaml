@@ -1,0 +1,51 @@
+# weights.yaml — composite confidence weights for the research loop's
+# four scoring signals. Each weight is the relative importance of one
+# signal in the final composite; the loop normalizes them at render
+# time so the values don't have to sum to 1.0.
+#
+# Embedded as the first-impression default. To override without a
+# recompile:
+#
+#   1. Drop a copy at ~/.config/glitch/weights.yaml
+#   2. Tweak the values to your taste — the loop re-reads on every
+#      research call so changes take effect immediately
+#   3. Run any research call to see the new composite math
+#
+# The defaults are equal weights (0.25 each) per the openspec proposal:
+# the floor is "any evidence at all", the ceiling (which signal best
+# predicts accept) is what learned weights would tune. The brain
+# stats engine reads research_score events from the event log to
+# correlate signal values with explicit feedback labels — once enough
+# data accumulates, you can tweak these weights manually based on
+# what brain stats reports OR (eventually) have the engine write
+# learned weights back to this file.
+#
+# Missing signals (signals the loop didn't compute for an iteration)
+# are skipped from BOTH the numerator and denominator, so a weight
+# of 0 means "still average it in if computed" while a missing signal
+# means "skipped entirely". To turn a signal off, set its weight to 0.
+
+weights:
+  # CrossCapabilityAgreement: structural source count. Free to
+  # compute (no LLM call). Default weight matches the others — small
+  # signal but high confidence when it lands.
+  cross_capability_agreement: 0.25
+
+  # EvidenceCoverage: per-claim grounded/partial/ungrounded labels
+  # from the critique pass. One LLM call. The single most useful
+  # signal for catching hallucinations because it scores at the
+  # claim level, not at the answer level.
+  evidence_coverage: 0.25
+
+  # JudgeScore: rubric-based 0..1 from the judge pass. One LLM call.
+  # Tracks "did the draft answer the question" rather than "is the
+  # draft grounded" — complements EvidenceCoverage.
+  judge_score: 0.25
+
+  # SelfConsistency: re-sample the draft N times and score the
+  # agreement. N+1 LLM calls — most expensive signal. The default
+  # equal weight applies when self-consistency was computed at all;
+  # the desktop's SkipSelfConsistency option makes the signal nil
+  # for interactive calls, so this weight only matters for batch
+  # smoke runs that opt into the full signal set.
+  self_consistency: 0.25

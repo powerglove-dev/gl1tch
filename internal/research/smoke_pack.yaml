@@ -1,0 +1,59 @@
+# smoke_pack.yaml — the canonical real-world question pack for the
+# research loop. Embedded with the binary so a fresh `glitch smoke
+# pack` run has something to validate against; user-extensible via
+# ~/.config/glitch/smoke_pack.yaml the same way prompts and weights
+# are.
+#
+# Each fixture is one question + the assertions the smoke runner
+# uses to decide pass/fail. The runner ALWAYS asserts:
+#
+#   1. The loop completed without error
+#   2. At least one of `expected_picks` appears in the gathered
+#      evidence's source list — proves the planner picked one of
+#      the right researchers
+#   3. At least one ground-truth SHA from the target directory's
+#      `git log -n 30` appears in the evidence — proves the cwd
+#      injection landed git-log inside the right repo
+#
+# Optional assertions per fixture:
+#
+#   expected_evidence_substr: a list of substrings the bundle must
+#     contain (e.g. a known PR number, a known author name). Useful
+#     for repo-specific fixtures the smoke pack knows are stable.
+#
+# Adding a fixture: drop a new entry below. The runner reads on
+# every invocation so a tweaked fixture takes effect on the next
+# `glitch smoke pack` call without a recompile. The pack is
+# intentionally kept small (≤8 fixtures) so a full run is under a
+# minute against four repos at default loop budgets.
+
+fixtures:
+  - name: recent-commits
+    question: "what are the most recent commits in this repo?"
+    expected_picks: [git-log]
+
+  - name: working-tree
+    question: "what branch is this on and is the working tree clean?"
+    expected_picks: [git-status]
+
+  - name: open-prs
+    question: "what pull requests are open right now?"
+    expected_picks: [github-prs]
+
+  - name: open-issues
+    question: "what issues are currently open?"
+    expected_picks: [github-issues]
+
+  - name: change-attribution
+    question: "who has been making the most commits recently?"
+    expected_picks: [git-log]
+
+  - name: pr-status
+    # Intentionally uses the same "pull request" phrasing as the
+    # open-prs fixture so the brain hints reader can compute a
+    # lexical overlap and bias the planner. "pr" (the abbrev)
+    # stems to a different token than "pull requests" so the
+    # original wording had zero token overlap with any other
+    # passing fixture and the brain hints couldn't help.
+    question: "have any pull requests been updated recently?"
+    expected_picks: [github-prs]

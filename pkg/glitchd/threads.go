@@ -60,6 +60,66 @@ func NewThreadHosts() *ThreadHosts {
 	return &ThreadHosts{hosts: make(map[string]*ThreadHost)}
 }
 
+// AdoptDirectoryAsWorkspace constructs (or returns) a ThreadHost
+// keyed on a synthetic workspaceID with the supplied directory as
+// its primary cwd. Used by `glitch smoke pack` to drive the loop
+// against any local checkout without requiring a real workspace
+// row in the SQLite store.
+//
+// The ThreadHost is otherwise identical to one constructed via
+// EnsureHost: same research loop, same brain event sink, same
+// hints provider. Idempotent — calling twice for the same
+// workspaceID returns the same host so per-fixture invocations
+// share state.
+func (h *ThreadHosts) AdoptDirectoryAsWorkspace(workspaceID, dir string) *ThreadHost {
+	h.mu.Lock()
+	if existing, ok := h.hosts[workspaceID]; ok {
+		h.mu.Unlock()
+		return existing
+	}
+	h.mu.Unlock()
+
+	store := chatui.NewThreadStore()
+	registry := chatui.NewSlashRegistry()
+	_ = registry.Register(chatui.HelpHandler(registry))
+	_ = registry.LoadAliases()
+
+	mgr := BuildExecutorManager()
+	researchReg, _ := research.DefaultRegistry(mgr, "")
+	if researchReg == nil || len(researchReg.Names()) == 0 {
+		// No researchers — produce a host with just /help so the
+		// smoke runner can still report a clean failure.
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		host := &ThreadHost{store: store, registry: registry, workspaceID: workspaceID, cwd: dir}
+		h.hosts[workspaceID] = host
+		return host
+	}
+
+	llm := research.NewOllamaLLM(mgr, research.DefaultLocalModel)
+	opts := research.DefaultScoreOptions()
+	opts.SkipSelfConsistency = true
+	sink := research.NewFileEventSink("")
+	loop := research.NewLoop(researchReg, llm).
+		WithEventSink(sink).
+		WithHintsProvider(research.NewFileEventHintsProvider("")).
+		WithScoreOptions(opts)
+	_ = registry.Register(chatui.ResearchSlashHandler(loop))
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	host := &ThreadHost{
+		store:        store,
+		registry:     registry,
+		loop:         loop,
+		feedbackSink: sink,
+		workspaceID:  workspaceID,
+		cwd:          dir,
+	}
+	h.hosts[workspaceID] = host
+	return host
+}
+
 // EnsureHost returns the host for workspaceID, constructing it on first
 // access. The constructor wires the canonical slash commands (/help,
 // /research) so a fresh workspace immediately has a useful menu.
@@ -78,6 +138,11 @@ func (h *ThreadHosts) EnsureHost(workspaceID string) *ThreadHost {
 	store := chatui.NewThreadStore()
 	registry := chatui.NewSlashRegistry()
 	_ = registry.Register(chatui.HelpHandler(registry))
+	// Load user aliases after the built-ins so the built-ins win
+	// on name collisions. Errors are non-fatal — a missing or
+	// malformed slash.yaml just leaves the registry with the
+	// built-in handlers.
+	_ = registry.LoadAliases()
 
 	// Look up the workspace's primary directory so the loop's shell
 	// steps run inside the right repo. workspaceCWD returns "" when
