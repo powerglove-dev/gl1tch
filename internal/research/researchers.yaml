@@ -37,6 +37,22 @@ researchers:
       repository, with issue numbers, titles, authors, labels, and
       last-updated timestamps.
 
+  - name: github-actions
+    workflow: github-actions
+    describe: |
+      Lists recent GitHub Actions workflow runs in the current git
+      repository, with run IDs, workflow names, statuses, conclusions,
+      branches, and timestamps. Use for any question about CI status,
+      failing workflows, or recent build activity.
+
+  - name: github-pr-checks
+    workflow: github-pr-checks
+    describe: |
+      Reports the CI/CD check status for open pull requests in the
+      current git repository. Shows which PRs have passing, failing,
+      or pending checks. Use for any question about whether checks
+      are passing, which PRs are blocked by CI, or PR review readiness.
+
   - name: git-log
     workflow: git-log
     describe: |

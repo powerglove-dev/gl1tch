@@ -44,6 +44,14 @@ fixtures:
     question: "what issues are currently open?"
     expected_picks: [github-issues]
 
+  - name: ci-status
+    question: "are any CI workflows failing right now?"
+    expected_picks: [github-actions]
+
+  - name: pr-checks
+    question: "which open pull requests have passing checks?"
+    expected_picks: [github-pr-checks]
+
   - name: change-attribution
     question: "who has been making the most commits recently?"
     expected_picks: [git-log]

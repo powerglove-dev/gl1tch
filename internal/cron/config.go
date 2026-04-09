@@ -39,9 +39,10 @@ type Entry struct {
 	Name string `yaml:"name"`
 	// Schedule is a standard 5-field cron expression (minute hour dom month dow).
 	Schedule string `yaml:"schedule"`
-	// Kind is either "pipeline" or "agent".
+	// Kind is "pipeline", "agent", or "command".
 	Kind string `yaml:"kind"`
-	// Target is a file path (for pipeline) or agent name (for agent).
+	// Target is a file path (for pipeline), agent name (for agent),
+	// or space-separated subcommand args (for command, e.g. "smoke pack --accept").
 	Target string `yaml:"target"`
 	// Args are optional key-value arguments passed to the target.
 	Args map[string]any `yaml:"args"`

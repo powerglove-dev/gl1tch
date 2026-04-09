@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -159,6 +160,15 @@ func (s *Scheduler) runEntry(entry Entry) {
 		if entry.Input != "" {
 			args = append(args, "--input", "input="+entry.Input)
 		}
+	case "command":
+		// Split target as space-separated subcommand args.
+		// e.g. target: "smoke pack --accept" → glitch smoke pack --accept
+		parts := strings.Fields(entry.Target)
+		if len(parts) == 0 {
+			s.logError("cron: command kind with empty target", "name", entry.Name)
+			return
+		}
+		args = parts
 	default:
 		s.logError("cron: unknown entry kind", "name", entry.Name, "kind", entry.Kind)
 		return

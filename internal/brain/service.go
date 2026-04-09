@@ -20,6 +20,7 @@ import (
 	"github.com/8op-org/gl1tch/internal/capability"
 	"github.com/8op-org/gl1tch/internal/esearch"
 	"github.com/8op-org/gl1tch/internal/observer"
+	"github.com/8op-org/gl1tch/internal/research"
 	"github.com/8op-org/gl1tch/internal/store"
 	"github.com/8op-org/gl1tch/internal/telemetry"
 )
@@ -155,6 +156,16 @@ func (s *Service) cycle(ctx context.Context, cfg *capability.Config) {
 	// Phase 3: Learn from directory scans — what capabilities are available?
 	publishStatus(StatusImproving, "mapping capabilities", 0)
 	if n, err := s.learnFromDirectoryScans(ctx, es, qe, st); err == nil {
+		learned += n
+	}
+
+	// Phase 4: Derive composite weights from accumulated feedback.
+	// Reads research_events.jsonl, correlates feedback labels with
+	// per-signal scores, and writes learned weights to
+	// ~/.config/glitch/weights.yaml. The next Composite() call
+	// picks them up automatically (LoadWeights re-reads every call).
+	publishStatus(StatusImproving, "deriving scoring weights", 0)
+	if n, err := s.learnWeights(ctx); err == nil {
 		learned += n
 	}
 
@@ -351,6 +362,41 @@ func (s *Service) learnFromDirectoryScans(ctx context.Context, es *esearch.Clien
 		Body:      summary,
 	}
 	return 1, st.UpsertCapabilityNote(ctx, note)
+}
+
+// learnWeights derives composite scoring weights from accumulated
+// research feedback and writes them to ~/.config/glitch/weights.yaml.
+// Returns 1 when weights were updated, 0 when skipped (too few
+// samples). Errors from LearnWeights are non-fatal — the brain
+// simply retries on the next cycle.
+func (s *Service) learnWeights(_ context.Context) (int, error) {
+	w, n, err := research.LearnWeights("", 10)
+	if err != nil {
+		if err == research.ErrTooFewSamples {
+			slog.Debug("brain: weights skipped — need more feedback", "labelled", n)
+			return 0, nil
+		}
+		slog.Warn("brain: learn weights failed", "err", err)
+		return 0, err
+	}
+	// Compare against current weights to avoid redundant writes.
+	current, _ := research.LoadWeights()
+	if current == w {
+		slog.Debug("brain: weights unchanged", "labelled", n)
+		return 0, nil
+	}
+	if err := research.WriteWeights(w); err != nil {
+		slog.Warn("brain: write weights failed", "err", err)
+		return 0, err
+	}
+	slog.Info("brain: weights updated from feedback",
+		"labelled", n,
+		"ca", w.CrossCapabilityAgreement,
+		"ec", w.EvidenceCoverage,
+		"js", w.JudgeScore,
+		"sc", w.SelfConsistency,
+	)
+	return 1, nil
 }
 
 func publishStatus(status, detail string, learned int) {

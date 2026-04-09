@@ -1,0 +1,89 @@
+name: github-actions
+version: "1"
+description: |
+  Lists recent GitHub Actions workflow runs in the current git repository,
+  with run IDs, workflow names, statuses, conclusions, branches, and
+  timestamps. Emits an Evidence JSON object the research loop can ingest.
+
+  This workflow is the canonical github-actions researcher used by the
+  research loop. It is also runnable standalone for debugging:
+
+      glitch pipeline run github-actions ""
+
+  Prerequisites:
+    - gh CLI installed and authenticated (`gh auth status`)
+    - python3 in PATH (used to format the Evidence JSON)
+    - Run from inside a git repository that has a configured GitHub remote
+
+trigger_phrases:
+  - "what are the recent CI runs"
+  - "are any workflows failing"
+  - "what is the CI status"
+  - "show github actions"
+
+steps:
+  # 1. Fetch recent workflow runs as JSON.
+  - id: fetch
+    executor: shell
+    vars:
+      cmd: >-
+        cd "${GLITCH_CWD:-.}" && gh run list
+        --limit 20
+        --json databaseId,displayTitle,name,status,conclusion,headBranch,event,createdAt,url
+
+  # 2. Wrap the gh output in the Evidence schema (version 1).
+  - id: wrap
+    executor: shell
+    needs: [fetch]
+    vars:
+      raw: '{{get "step.fetch.data.value" .}}'
+      cmd: |
+        python3 - <<'PY'
+        import json, os, sys
+        raw = os.environ.get("GLITCH_RAW", "").strip()
+        try:
+            runs = json.loads(raw) if raw else []
+        except json.JSONDecodeError as e:
+            sys.stderr.write(f"github-actions: failed to parse gh output: {e}\n")
+            runs = []
+
+        lines, refs = [], []
+        for run in runs:
+            run_id = run.get("databaseId", "?")
+            title = run.get("displayTitle", "").strip()
+            wf_name = run.get("name", "")
+            status = run.get("status", "")
+            conclusion = run.get("conclusion", "")
+            branch = run.get("headBranch", "")
+            event = run.get("event", "")
+            created = run.get("createdAt", "")
+            result = conclusion if conclusion else status
+            lines.append(
+                f"#{run_id} {wf_name}: {title} [{result}] on {branch} ({event}) {created}"
+            )
+            url = run.get("url")
+            if url:
+                refs.append(url)
+
+        if not lines:
+            body = "No recent workflow runs in this repository."
+        else:
+            body = "\n".join(lines)
+
+        # Count by conclusion for the title summary.
+        conclusions = {}
+        for run in runs:
+            c = run.get("conclusion") or run.get("status") or "unknown"
+            conclusions[c] = conclusions.get(c, 0) + 1
+        summary = ", ".join(f"{v} {k}" for k, v in sorted(conclusions.items()))
+
+        evidence = {
+            "schema_version": 1,
+            "source": "github-actions",
+            "title": f"{len(runs)} recent workflow run(s): {summary}",
+            "body": body,
+            "refs": refs,
+            "tags": ["github", "actions", "ci"],
+        }
+        print(json.dumps(evidence))
+        PY

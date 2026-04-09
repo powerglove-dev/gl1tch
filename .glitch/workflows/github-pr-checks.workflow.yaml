@@ -1,0 +1,94 @@
+name: github-pr-checks
+version: "1"
+description: |
+  Lists the CI/CD check status for open pull requests in the current git
+  repository. For each open PR, reports the overall status checks
+  (passing, failing, pending) and emits an Evidence JSON object the
+  research loop can ingest.
+
+  This workflow is the canonical github-pr-checks researcher used by the
+  research loop. It is also runnable standalone for debugging:
+
+      glitch pipeline run github-pr-checks ""
+
+  Prerequisites:
+    - gh CLI installed and authenticated (`gh auth status`)
+    - python3 in PATH (used to format the Evidence JSON)
+    - Run from inside a git repository that has a configured GitHub remote
+
+trigger_phrases:
+  - "are the checks passing"
+  - "what is the CI status of open prs"
+  - "which prs have failing checks"
+  - "pr check status"
+
+steps:
+  # 1. Fetch open PRs with their status check rollup.
+  - id: fetch
+    executor: shell
+    vars:
+      cmd: >-
+        cd "${GLITCH_CWD:-.}" && gh pr list
+        --state open
+        --limit 15
+        --json number,title,author,url,statusCheckRollup,headRefName
+
+  # 2. Wrap the gh output in the Evidence schema (version 1).
+  - id: wrap
+    executor: shell
+    needs: [fetch]
+    vars:
+      raw: '{{get "step.fetch.data.value" .}}'
+      cmd: |
+        python3 - <<'PY'
+        import json, os, sys
+        raw = os.environ.get("GLITCH_RAW", "").strip()
+        try:
+            prs = json.loads(raw) if raw else []
+        except json.JSONDecodeError as e:
+            sys.stderr.write(f"github-pr-checks: failed to parse gh output: {e}\n")
+            prs = []
+
+        lines, refs = [], []
+        for pr in prs:
+            number = pr.get("number")
+            title = pr.get("title", "").strip()
+            author = (pr.get("author") or {}).get("login", "?")
+            branch = pr.get("headRefName", "")
+            checks = pr.get("statusCheckRollup") or []
+
+            # Tally check states.
+            states = {}
+            for check in checks:
+                # statusCheckRollup items have __typename, status, conclusion, name
+                conclusion = check.get("conclusion") or check.get("status") or check.get("state") or "unknown"
+                conclusion = conclusion.upper()
+                states[conclusion] = states.get(conclusion, 0) + 1
+
+            if states:
+                check_summary = ", ".join(f"{v} {k.lower()}" for k, v in sorted(states.items()))
+            else:
+                check_summary = "no checks"
+
+            lines.append(
+                f"#{number} {title} by @{author} ({branch}) — checks: {check_summary}"
+            )
+            url = pr.get("url")
+            if url:
+                refs.append(url)
+
+        if not lines:
+            body = "No open pull requests with checks in this repository."
+        else:
+            body = "\n".join(lines)
+
+        evidence = {
+            "schema_version": 1,
+            "source": "github-pr-checks",
+            "title": f"CI check status for {len(prs)} open PR(s)",
+            "body": body,
+            "refs": refs,
+            "tags": ["github", "prs", "checks", "ci"],
+        }
+        print(json.dumps(evidence))
+        PY

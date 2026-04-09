@@ -108,6 +108,29 @@ func EmbeddedWeightsDefault() []byte {
 	return append([]byte(nil), embeddedWeightsYAML...)
 }
 
+// WriteWeights serialises the given Weights to the user override path
+// (~/.config/glitch/weights.yaml). Creates parent directories if they
+// don't exist. The next Composite() call will pick up the new values
+// because LoadWeights re-reads on every invocation.
+func WriteWeights(w Weights) error {
+	path := WeightsOverridePath()
+	if path == "" {
+		return fmt.Errorf("research: cannot resolve weights override path (HOME unset?)")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("research: mkdir for weights: %w", err)
+	}
+	doc := weightsDoc{Weights: w}
+	data, err := yaml.Marshal(&doc)
+	if err != nil {
+		return fmt.Errorf("research: marshal weights: %w", err)
+	}
+	header := []byte("# weights.yaml — learned by brain stats engine from research feedback.\n" +
+		"# Edit freely; the loop re-reads on every call. Run `glitch weights reset`\n" +
+		"# to revert to the embedded equal-weight default.\n\n")
+	return os.WriteFile(path, append(header, data...), 0o644)
+}
+
 // ApplyWeights folds the per-signal Score values into a composite
 // using the supplied weights. Missing signals (nil pointers) are
 // skipped entirely — they contribute neither to the numerator nor
